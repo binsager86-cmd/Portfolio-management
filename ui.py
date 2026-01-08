@@ -1086,9 +1086,14 @@ def init_db():
         """
         CREATE TABLE IF NOT EXISTS stocks (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
+            user_id INTEGER DEFAULT 1,
             symbol TEXT NOT NULL,
             name TEXT,
+            current_price REAL DEFAULT 0,
+            portfolio TEXT DEFAULT 'KFH',
+            currency TEXT DEFAULT 'KWD',
+            tradingview_symbol TEXT,
+            tradingview_exchange TEXT,
             UNIQUE(symbol, user_id)
         )
         """
