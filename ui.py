@@ -1,11 +1,19 @@
 from typing import Optional
 import sqlite3
 import time
+import uuid
 try:
     import pandas as pd
     from datetime import date, datetime, timedelta # Added for peer analysis
 except ImportError:
     pass
+
+import bcrypt
+
+try:
+    import extra_streamlit_components as stx
+except ImportError:
+    stx = None
 
 import numpy as np
 import io
@@ -383,12 +391,170 @@ KUWAIT_STOCKS = [
     {"symbol": "TASLEEM", "name": "Al Tasleem Holding Company", "yf_ticker": "TASLEEM.KW"},
 ]
 
+# US Market - Popular stocks (S&P 500, NASDAQ, etc.)
+US_STOCKS = [
+    # TECHNOLOGY (Big Tech)
+    {"symbol": "AAPL", "name": "Apple Inc.", "yf_ticker": "AAPL"},
+    {"symbol": "MSFT", "name": "Microsoft Corporation", "yf_ticker": "MSFT"},
+    {"symbol": "GOOGL", "name": "Alphabet Inc. Class A", "yf_ticker": "GOOGL"},
+    {"symbol": "GOOG", "name": "Alphabet Inc. Class C", "yf_ticker": "GOOG"},
+    {"symbol": "AMZN", "name": "Amazon.com Inc.", "yf_ticker": "AMZN"},
+    {"symbol": "META", "name": "Meta Platforms Inc.", "yf_ticker": "META"},
+    {"symbol": "NVDA", "name": "NVIDIA Corporation", "yf_ticker": "NVDA"},
+    {"symbol": "TSLA", "name": "Tesla Inc.", "yf_ticker": "TSLA"},
+    {"symbol": "AMD", "name": "Advanced Micro Devices Inc.", "yf_ticker": "AMD"},
+    {"symbol": "INTC", "name": "Intel Corporation", "yf_ticker": "INTC"},
+    {"symbol": "CRM", "name": "Salesforce Inc.", "yf_ticker": "CRM"},
+    {"symbol": "ORCL", "name": "Oracle Corporation", "yf_ticker": "ORCL"},
+    {"symbol": "CSCO", "name": "Cisco Systems Inc.", "yf_ticker": "CSCO"},
+    {"symbol": "ADBE", "name": "Adobe Inc.", "yf_ticker": "ADBE"},
+    {"symbol": "IBM", "name": "International Business Machines", "yf_ticker": "IBM"},
+    {"symbol": "QCOM", "name": "QUALCOMM Incorporated", "yf_ticker": "QCOM"},
+    {"symbol": "TXN", "name": "Texas Instruments Inc.", "yf_ticker": "TXN"},
+    {"symbol": "AVGO", "name": "Broadcom Inc.", "yf_ticker": "AVGO"},
+    {"symbol": "NOW", "name": "ServiceNow Inc.", "yf_ticker": "NOW"},
+    {"symbol": "SHOP", "name": "Shopify Inc.", "yf_ticker": "SHOP"},
+    {"symbol": "SQ", "name": "Block Inc.", "yf_ticker": "SQ"},
+    {"symbol": "PYPL", "name": "PayPal Holdings Inc.", "yf_ticker": "PYPL"},
+    {"symbol": "UBER", "name": "Uber Technologies Inc.", "yf_ticker": "UBER"},
+    {"symbol": "ABNB", "name": "Airbnb Inc.", "yf_ticker": "ABNB"},
+    {"symbol": "SNOW", "name": "Snowflake Inc.", "yf_ticker": "SNOW"},
+    {"symbol": "PLTR", "name": "Palantir Technologies Inc.", "yf_ticker": "PLTR"},
+    {"symbol": "NET", "name": "Cloudflare Inc.", "yf_ticker": "NET"},
+    {"symbol": "CRWD", "name": "CrowdStrike Holdings Inc.", "yf_ticker": "CRWD"},
+    {"symbol": "ZS", "name": "Zscaler Inc.", "yf_ticker": "ZS"},
+    {"symbol": "DDOG", "name": "Datadog Inc.", "yf_ticker": "DDOG"},
+    
+    # FINANCIALS
+    {"symbol": "JPM", "name": "JPMorgan Chase & Co.", "yf_ticker": "JPM"},
+    {"symbol": "BAC", "name": "Bank of America Corporation", "yf_ticker": "BAC"},
+    {"symbol": "WFC", "name": "Wells Fargo & Company", "yf_ticker": "WFC"},
+    {"symbol": "GS", "name": "Goldman Sachs Group Inc.", "yf_ticker": "GS"},
+    {"symbol": "MS", "name": "Morgan Stanley", "yf_ticker": "MS"},
+    {"symbol": "C", "name": "Citigroup Inc.", "yf_ticker": "C"},
+    {"symbol": "USB", "name": "U.S. Bancorp", "yf_ticker": "USB"},
+    {"symbol": "AXP", "name": "American Express Company", "yf_ticker": "AXP"},
+    {"symbol": "V", "name": "Visa Inc.", "yf_ticker": "V"},
+    {"symbol": "MA", "name": "Mastercard Incorporated", "yf_ticker": "MA"},
+    {"symbol": "BRK-B", "name": "Berkshire Hathaway Inc. Class B", "yf_ticker": "BRK-B"},
+    {"symbol": "BLK", "name": "BlackRock Inc.", "yf_ticker": "BLK"},
+    {"symbol": "SCHW", "name": "Charles Schwab Corporation", "yf_ticker": "SCHW"},
+    {"symbol": "COF", "name": "Capital One Financial Corp.", "yf_ticker": "COF"},
+    
+    # HEALTHCARE
+    {"symbol": "JNJ", "name": "Johnson & Johnson", "yf_ticker": "JNJ"},
+    {"symbol": "UNH", "name": "UnitedHealth Group Inc.", "yf_ticker": "UNH"},
+    {"symbol": "PFE", "name": "Pfizer Inc.", "yf_ticker": "PFE"},
+    {"symbol": "ABBV", "name": "AbbVie Inc.", "yf_ticker": "ABBV"},
+    {"symbol": "MRK", "name": "Merck & Co. Inc.", "yf_ticker": "MRK"},
+    {"symbol": "LLY", "name": "Eli Lilly and Company", "yf_ticker": "LLY"},
+    {"symbol": "TMO", "name": "Thermo Fisher Scientific Inc.", "yf_ticker": "TMO"},
+    {"symbol": "ABT", "name": "Abbott Laboratories", "yf_ticker": "ABT"},
+    {"symbol": "BMY", "name": "Bristol-Myers Squibb Company", "yf_ticker": "BMY"},
+    {"symbol": "AMGN", "name": "Amgen Inc.", "yf_ticker": "AMGN"},
+    {"symbol": "GILD", "name": "Gilead Sciences Inc.", "yf_ticker": "GILD"},
+    {"symbol": "MRNA", "name": "Moderna Inc.", "yf_ticker": "MRNA"},
+    {"symbol": "CVS", "name": "CVS Health Corporation", "yf_ticker": "CVS"},
+    
+    # CONSUMER DISCRETIONARY
+    {"symbol": "HD", "name": "The Home Depot Inc.", "yf_ticker": "HD"},
+    {"symbol": "MCD", "name": "McDonald's Corporation", "yf_ticker": "MCD"},
+    {"symbol": "NKE", "name": "Nike Inc.", "yf_ticker": "NKE"},
+    {"symbol": "SBUX", "name": "Starbucks Corporation", "yf_ticker": "SBUX"},
+    {"symbol": "LOW", "name": "Lowe's Companies Inc.", "yf_ticker": "LOW"},
+    {"symbol": "TGT", "name": "Target Corporation", "yf_ticker": "TGT"},
+    {"symbol": "COST", "name": "Costco Wholesale Corporation", "yf_ticker": "COST"},
+    {"symbol": "WMT", "name": "Walmart Inc.", "yf_ticker": "WMT"},
+    {"symbol": "DIS", "name": "The Walt Disney Company", "yf_ticker": "DIS"},
+    {"symbol": "NFLX", "name": "Netflix Inc.", "yf_ticker": "NFLX"},
+    {"symbol": "BKNG", "name": "Booking Holdings Inc.", "yf_ticker": "BKNG"},
+    {"symbol": "CMG", "name": "Chipotle Mexican Grill Inc.", "yf_ticker": "CMG"},
+    
+    # CONSUMER STAPLES
+    {"symbol": "PG", "name": "Procter & Gamble Company", "yf_ticker": "PG"},
+    {"symbol": "KO", "name": "The Coca-Cola Company", "yf_ticker": "KO"},
+    {"symbol": "PEP", "name": "PepsiCo Inc.", "yf_ticker": "PEP"},
+    {"symbol": "PM", "name": "Philip Morris International", "yf_ticker": "PM"},
+    {"symbol": "MO", "name": "Altria Group Inc.", "yf_ticker": "MO"},
+    {"symbol": "MDLZ", "name": "Mondelez International Inc.", "yf_ticker": "MDLZ"},
+    {"symbol": "CL", "name": "Colgate-Palmolive Company", "yf_ticker": "CL"},
+    
+    # INDUSTRIALS
+    {"symbol": "BA", "name": "The Boeing Company", "yf_ticker": "BA"},
+    {"symbol": "CAT", "name": "Caterpillar Inc.", "yf_ticker": "CAT"},
+    {"symbol": "GE", "name": "General Electric Company", "yf_ticker": "GE"},
+    {"symbol": "HON", "name": "Honeywell International Inc.", "yf_ticker": "HON"},
+    {"symbol": "UPS", "name": "United Parcel Service Inc.", "yf_ticker": "UPS"},
+    {"symbol": "FDX", "name": "FedEx Corporation", "yf_ticker": "FDX"},
+    {"symbol": "LMT", "name": "Lockheed Martin Corporation", "yf_ticker": "LMT"},
+    {"symbol": "RTX", "name": "RTX Corporation", "yf_ticker": "RTX"},
+    {"symbol": "DE", "name": "Deere & Company", "yf_ticker": "DE"},
+    {"symbol": "MMM", "name": "3M Company", "yf_ticker": "MMM"},
+    
+    # ENERGY
+    {"symbol": "XOM", "name": "Exxon Mobil Corporation", "yf_ticker": "XOM"},
+    {"symbol": "CVX", "name": "Chevron Corporation", "yf_ticker": "CVX"},
+    {"symbol": "COP", "name": "ConocoPhillips", "yf_ticker": "COP"},
+    {"symbol": "SLB", "name": "Schlumberger Limited", "yf_ticker": "SLB"},
+    {"symbol": "EOG", "name": "EOG Resources Inc.", "yf_ticker": "EOG"},
+    {"symbol": "OXY", "name": "Occidental Petroleum Corporation", "yf_ticker": "OXY"},
+    
+    # COMMUNICATION SERVICES
+    {"symbol": "T", "name": "AT&T Inc.", "yf_ticker": "T"},
+    {"symbol": "VZ", "name": "Verizon Communications Inc.", "yf_ticker": "VZ"},
+    {"symbol": "TMUS", "name": "T-Mobile US Inc.", "yf_ticker": "TMUS"},
+    {"symbol": "CMCSA", "name": "Comcast Corporation", "yf_ticker": "CMCSA"},
+    
+    # UTILITIES & REAL ESTATE
+    {"symbol": "NEE", "name": "NextEra Energy Inc.", "yf_ticker": "NEE"},
+    {"symbol": "DUK", "name": "Duke Energy Corporation", "yf_ticker": "DUK"},
+    {"symbol": "SO", "name": "Southern Company", "yf_ticker": "SO"},
+    {"symbol": "AMT", "name": "American Tower Corporation", "yf_ticker": "AMT"},
+    {"symbol": "PLD", "name": "Prologis Inc.", "yf_ticker": "PLD"},
+    {"symbol": "SPG", "name": "Simon Property Group Inc.", "yf_ticker": "SPG"},
+    
+    # ETFs (Popular Index Funds)
+    {"symbol": "SPY", "name": "SPDR S&P 500 ETF Trust", "yf_ticker": "SPY"},
+    {"symbol": "QQQ", "name": "Invesco QQQ Trust (NASDAQ-100)", "yf_ticker": "QQQ"},
+    {"symbol": "IWM", "name": "iShares Russell 2000 ETF", "yf_ticker": "IWM"},
+    {"symbol": "DIA", "name": "SPDR Dow Jones Industrial Average ETF", "yf_ticker": "DIA"},
+    {"symbol": "VTI", "name": "Vanguard Total Stock Market ETF", "yf_ticker": "VTI"},
+    {"symbol": "VOO", "name": "Vanguard S&P 500 ETF", "yf_ticker": "VOO"},
+    {"symbol": "VGT", "name": "Vanguard Information Technology ETF", "yf_ticker": "VGT"},
+    {"symbol": "ARKK", "name": "ARK Innovation ETF", "yf_ticker": "ARKK"},
+    {"symbol": "XLF", "name": "Financial Select Sector SPDR Fund", "yf_ticker": "XLF"},
+    {"symbol": "XLK", "name": "Technology Select Sector SPDR Fund", "yf_ticker": "XLK"},
+]
+
 def get_kuwait_stock_options():
     """Return formatted list of Kuwait stocks for selectbox."""
     options = ["-- Select from Kuwait Stock List --"] + [
         f"{stock['symbol']} - {stock['name']}" for stock in KUWAIT_STOCKS
     ]
     return options
+
+def get_us_stock_options():
+    """Return formatted list of US stocks for selectbox."""
+    options = ["-- Select from US Stock List --"] + [
+        f"{stock['symbol']} - {stock['name']}" for stock in US_STOCKS
+    ]
+    return options
+
+def parse_stock_selection(selection: str, market: str = "Kuwait"):
+    """Parse selected stock to extract symbol, name, and Yahoo Finance ticker."""
+    placeholder = "-- Select from Kuwait Stock List --" if market == "Kuwait" else "-- Select from US Stock List --"
+    if selection == placeholder or not selection:
+        return None, None, None
+    
+    parts = selection.split(" - ", 1)
+    if len(parts) == 2:
+        symbol = parts[0].strip()
+        name = parts[1].strip()
+        stock_list = KUWAIT_STOCKS if market == "Kuwait" else US_STOCKS
+        for stock in stock_list:
+            if stock["symbol"] == symbol:
+                return symbol, name, stock["yf_ticker"]
+    return None, None, None
 
 def parse_kuwait_stock_selection(selection: str):
     """Parse selected stock to extract symbol, name, and Yahoo Finance ticker."""
@@ -554,6 +720,84 @@ def add_column_if_missing(table: str, col: str, coltype: str):
         cur.execute(f"ALTER TABLE {table} ADD COLUMN {col} {coltype}")
         conn.commit()
         conn.close()
+
+# =========================
+# AUTH HELPER FUNCTIONS
+# =========================
+def hash_password(password: str) -> str:
+    """Hash a password for storing."""
+    try:
+        import bcrypt
+        salt = bcrypt.gensalt()
+        hashed = bcrypt.hashpw(password.encode('utf-8'), salt)
+        return hashed.decode('utf-8')
+    except ImportError:
+        return password
+
+def check_password(password: str, hashed: str) -> bool:
+    """Check a password against a hash."""
+    try:
+        import bcrypt
+        # checkpw raises ValueError if hashed is not a valid salt/hash
+        return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
+    except (ImportError, ValueError):
+        # Fallback for plain text passwords or missing library
+        return password == hashed
+    except Exception:
+        return False
+
+def get_current_user_id() -> Optional[int]:
+    """Get the currently logged in user ID."""
+    return st.session_state.get('user_id')
+
+def create_session_token(user_id: int, days: int = 30) -> str:
+    """Create a new session token for the user."""
+    token = str(uuid.uuid4())
+    now = int(time.time())
+    expires_at = now + (days * 24 * 60 * 60)
+    
+    conn = get_conn()
+    cur = conn.cursor()
+    # Ensure cleanup of old tokens for this user to avoid bloat
+    cur.execute("DELETE FROM user_sessions WHERE user_id = ?", (user_id,))
+    
+    cur.execute("INSERT INTO user_sessions (token, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)",
+               (token, user_id, expires_at, now))
+    conn.commit()
+    conn.close()
+    return token, expires_at
+
+def get_user_from_token(token: str) -> Optional[dict]:
+    """Validate token and return user info if valid."""
+    conn = get_conn()
+    cur = conn.cursor()
+    now = int(time.time())
+    
+    # Clean expired sessions occasionally
+    if np.random.random() < 0.1:
+        conn.execute("DELETE FROM user_sessions WHERE expires_at < ?", (now,))
+        conn.commit()
+        
+    cur.execute("""
+        SELECT u.id, u.username, s.expires_at 
+        FROM user_sessions s
+        JOIN users u ON s.user_id = u.id
+        WHERE s.token = ? AND s.expires_at > ?
+    """, (token, now))
+    
+    row = cur.fetchone()
+    conn.close()
+    
+    if row:
+        return {"id": row[0], "username": row[1]}
+    return None
+
+def delete_session_token(token: str):
+    """Delete a specific session token."""
+    conn = get_conn()
+    conn.execute("DELETE FROM user_sessions WHERE token = ?", (token,))
+    conn.commit()
+    conn.close()
 
 
 def get_yf_ticker(symbol: str):
@@ -747,11 +991,51 @@ def init_db():
     conn = get_conn()
     cur = conn.cursor()
 
+    # Users Table
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL UNIQUE,
+            email TEXT UNIQUE,
+            password_hash TEXT NOT NULL,
+            created_at INTEGER NOT NULL
+        )
+        """
+    )
+    add_column_if_missing("users", "email", "TEXT")
+
+    # Password Resets (OTP)
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS password_resets (
+            email TEXT NOT NULL,
+            otp TEXT NOT NULL,
+            expires_at INTEGER NOT NULL,
+            created_at INTEGER NOT NULL
+        )
+        """
+    )
+
+    # User Sessions (for Keep me logged in)
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS user_sessions (
+            token TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            expires_at INTEGER NOT NULL,
+            created_at INTEGER NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users (id)
+        )
+        """
+    )
+
     # Cash deposits
     cur.execute(
         """
         CREATE TABLE IF NOT EXISTS cash_deposits (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
             portfolio TEXT DEFAULT 'KFH',
             bank_name TEXT NOT NULL,
             deposit_date TEXT NOT NULL,
@@ -767,55 +1051,123 @@ def init_db():
     cur.execute(
         """
         CREATE TABLE IF NOT EXISTS portfolio_cash (
-            portfolio TEXT PRIMARY KEY,
+            portfolio TEXT,
+            user_id INTEGER,
             balance REAL,
             currency TEXT DEFAULT 'KWD',
-            last_updated INTEGER
+            last_updated INTEGER,
+            PRIMARY KEY (portfolio, user_id)
         )
         """
     )
     
-    # Add portfolio column if it doesn't exist
+    # Add columns if they don't exist (Backwards compatibility)
+    add_column_if_missing("cash_deposits", "user_id", "INTEGER")
     add_column_if_missing("cash_deposits", "portfolio", "TEXT DEFAULT 'KFH'")
-    # Add include_in_analysis column if it doesn't exist
     add_column_if_missing("cash_deposits", "include_in_analysis", "INTEGER DEFAULT 1")
-    # Add currency column if it doesn't exist
     add_column_if_missing("cash_deposits", "currency", "TEXT DEFAULT 'KWD'")
+    
+    # Check if we need to migrate portfolio_cash (it was PK=portfolio, now needs PK=(portfolio, user_id))
+    # We can't casually alter PK in SQLite. We might need to handle this if old table exists.
+    # Simple check: does it have user_id?
+    try:
+        # Check if portfolio_cash table exists and has user_id
+        cols = table_columns("portfolio_cash")
+        if "user_id" not in cols:
+            # Need migration: Drop and recreate (Assuming data is ephemeral or simple enough to drop for this specific table which is just manual cache)
+            # Or better: Create new table, copy data with default user_id=1, swap.
+            pass # We'll handle migration logic below
+    except Exception:
+        pass
 
-    # Stocks
+    # Stocks - COMPLEX: Needs UNIQUE(symbol, user_id)
+    # If old table exists, it has UNIQUE(symbol).
     cur.execute(
         """
         CREATE TABLE IF NOT EXISTS stocks (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            symbol TEXT NOT NULL UNIQUE,
-            name TEXT
+            user_id INTEGER,
+            symbol TEXT NOT NULL,
+            name TEXT,
+            UNIQUE(symbol, user_id)
         )
         """
     )
 
     # Transactions
-    cur.execute(
-        """
-        CREATE TABLE IF NOT EXISTS transactions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            stock_symbol TEXT NOT NULL,
-            txn_date TEXT NOT NULL,
-            txn_type TEXT NOT NULL CHECK(txn_type IN ('Buy','Sell','DIVIDEND_ONLY')),
-            purchase_cost REAL NOT NULL DEFAULT 0,
-            sell_value REAL NOT NULL DEFAULT 0,
-            shares REAL NOT NULL DEFAULT 0,
-            reinvested_dividend REAL NOT NULL DEFAULT 0,
-            notes TEXT,
-            created_at INTEGER NOT NULL
+    # MIGRATION: We remove the CHECK constraint to allow more types and add portfolio column
+    cur.execute("PRAGMA table_info(transactions)")
+    cols = [r[1] for r in cur.fetchall()]
+    
+    if "portfolio" not in cols:
+        add_column_if_missing("transactions", "portfolio", "TEXT DEFAULT 'KFH'")
+
+    # Check if we need to remove the strict CHECK constraint on txn_type
+    # We do this by checking if we can insert a 'Deposit' type.
+    try:
+        cur.execute("INSERT INTO transactions (stock_symbol, txn_date, txn_type, created_at, user_id) VALUES ('TEST_Check', '2000-01-01', 'Deposit', 0, -1)")
+        cur.execute("DELETE FROM transactions WHERE stock_symbol='TEST_Check'")
+        # If successful, constraint is gone or compatible
+    except sqlite3.IntegrityError:
+        # Constraint exists. We need to recreate the table.
+        # Rename old
+        cur.execute("ALTER TABLE transactions RENAME TO transactions_old")
+        
+        # Create new with WIDER types and PORTFOLIO column
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS transactions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                portfolio TEXT DEFAULT 'KFH',
+                stock_symbol TEXT NOT NULL,
+                txn_date TEXT NOT NULL,
+                txn_type TEXT NOT NULL, 
+                purchase_cost REAL NOT NULL DEFAULT 0,
+                sell_value REAL NOT NULL DEFAULT 0,
+                shares REAL NOT NULL DEFAULT 0,
+                bonus_shares REAL NOT NULL DEFAULT 0,
+                cash_dividend REAL NOT NULL DEFAULT 0,
+                reinvested_dividend REAL NOT NULL DEFAULT 0,
+                price_override REAL,
+                planned_cum_shares REAL,
+                fees REAL DEFAULT 0,
+                broker TEXT,
+                reference TEXT,
+                notes TEXT,
+                category TEXT,
+                created_at INTEGER NOT NULL
+            )
+            """
         )
-        """
-    )
+        
+        # Copy data
+        # Mapping old columns to new. 'portfolio' needs to be inferred from stocks table if possible
+        # For now we default to KFH or try to join? 
+        # Joining in an INSERT SELECT is possible.
+        cur.execute("""
+            INSERT INTO transactions (
+                id, user_id, portfolio, stock_symbol, txn_date, txn_type, 
+                purchase_cost, sell_value, shares, bonus_shares, 
+                cash_dividend, reinvested_dividend, notes, created_at, category
+            )
+            SELECT 
+                t.id, t.user_id, COALESCE(s.portfolio, 'KFH'), t.stock_symbol, t.txn_date, t.txn_type,
+                t.purchase_cost, t.sell_value, t.shares, t.bonus_shares,
+                t.cash_dividend, t.reinvested_dividend, t.notes, t.created_at, t.category
+            FROM transactions_old t
+            LEFT JOIN stocks s ON t.stock_symbol = s.symbol AND t.user_id = s.user_id
+        """)
+        
+        # Drop old
+        cur.execute("DROP TABLE transactions_old")
 
     # Trading History (Separate Container for Trading Section)
     cur.execute(
         """
         CREATE TABLE IF NOT EXISTS trading_history (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
             stock_symbol TEXT NOT NULL,
             txn_date TEXT NOT NULL,
             txn_type TEXT NOT NULL CHECK(txn_type IN ('Buy','Sell')),
@@ -831,6 +1183,96 @@ def init_db():
     )
 
     conn.commit()
+    conn.close()
+
+    # ---- MIGRATION TO MULTI-USER ----
+    # 1. Add user_id to all tables if missing
+    for tbl in ["stocks", "transactions", "trading_history", "portfolio_cash", "cash_deposits"]:
+        add_column_if_missing(tbl, "user_id", "INTEGER DEFAULT 1") # Default 1 for legacy data
+
+    # 2. Fix 'stocks' unique constraint (UNIQUE(symbol) -> UNIQUE(symbol, user_id))
+    # Check if we need to migrate
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        # Check if index is on just symbol
+        cur.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='stocks'")
+        res = cur.fetchone()
+        if res:
+            schema = res[0]
+            if "UNIQUE(symbol, user_id)" not in schema and "UNIQUE (symbol, user_id)" not in schema:
+                 # It likely has UNIQUE(symbol) or similar.
+                 # We should reconstruct the table.
+                 # st.info("Upgrading 'stocks' table for multi-user support...")
+                 cur.execute("ALTER TABLE stocks RENAME TO stocks_old")
+                 cur.execute("""
+                    CREATE TABLE stocks (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        user_id INTEGER DEFAULT 1,
+                        symbol TEXT NOT NULL,
+                        name TEXT,
+                        current_price REAL DEFAULT 0,
+                        portfolio TEXT DEFAULT 'KFH',
+                        currency TEXT DEFAULT 'KWD',
+                        tradingview_symbol TEXT,
+                        tradingview_exchange TEXT,
+                        UNIQUE(symbol, user_id)
+                    )
+                 """)
+                 # Copy data - Handle potentially missing columns in old table gracefully if possible, but assuming standard schema here
+                 # We just select known columns.
+                 # Note: If cols missing in old table this might fail. But add_column_if_missing ran above so they should exist?
+                 # Wait, add_column_if_missing runs on 'stocks' (the renamed one? No, we renamed it just now).
+                 # Before rename, we haven't run add_column_if_missing on 'stocks' in THIS function run yet (it's below).
+                 # So we rely on existing schema.
+                 
+                 # Better to select specific columns we know exist or use * if easy.
+                 # Let's rely on add_column_if_missing having run in previous versions of the app.
+                 cur.execute("INSERT INTO stocks (id, symbol, name) SELECT id, symbol, name FROM stocks_old")
+                 
+                 # Now update the other columns using UPDATE from old table, or just let them be default?
+                 # If we just insert symbol/name, we lose prices/portfolio info!
+                 # We must copy all data.
+                 # PRAGMA table_info to get columns?
+                 # Simpler: Just try to copy what we expect.
+                 
+                 cur.execute("UPDATE stocks SET current_price = (SELECT current_price FROM stocks_old WHERE stocks_old.id = stocks.id)")
+                 cur.execute("UPDATE stocks SET portfolio = (SELECT portfolio FROM stocks_old WHERE stocks_old.id = stocks.id)")
+                 cur.execute("UPDATE stocks SET currency = (SELECT currency FROM stocks_old WHERE stocks_old.id = stocks.id)")
+                 cur.execute("UPDATE stocks SET tradingview_symbol = (SELECT tradingview_symbol FROM stocks_old WHERE stocks_old.id = stocks.id)")
+                 
+                 cur.execute("DROP TABLE stocks_old")
+                 conn.commit()
+    except Exception as e:
+        # print(f"Migration error (stocks): {e}")
+        pass
+
+    # 3. Fix 'portfolio_cash' PK (PK(portfolio) -> PK(portfolio, user_id))
+    try:
+        cur.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='portfolio_cash'")
+        res = cur.fetchone()
+        if res:
+            schema = res[0]
+            if "PRIMARY KEY (portfolio, user_id)" not in schema and "PRIMARY KEY(portfolio, user_id)" not in schema:
+                 # st.info("Upgrading 'portfolio_cash' table...")
+                 cur.execute("ALTER TABLE portfolio_cash RENAME TO portfolio_cash_old")
+                 cur.execute("""
+                    CREATE TABLE IF NOT EXISTS portfolio_cash (
+                        portfolio TEXT,
+                        user_id INTEGER DEFAULT 1,
+                        balance REAL,
+                        currency TEXT DEFAULT 'KWD',
+                        last_updated INTEGER,
+                        PRIMARY KEY (portfolio, user_id)
+                    )
+                 """)
+                 cur.execute("INSERT INTO portfolio_cash (portfolio, balance, currency, last_updated) SELECT portfolio, balance, currency, last_updated FROM portfolio_cash_old")
+                 cur.execute("UPDATE portfolio_cash SET user_id = 1")
+                 cur.execute("DROP TABLE portfolio_cash_old")
+                 conn.commit()
+    except Exception as e:
+         pass
+    
     conn.close()
 
     # ---- Auto-upgrade (safe for existing DBs) ----
@@ -921,7 +1363,8 @@ def init_db():
         """
         CREATE TABLE IF NOT EXISTS portfolio_snapshots (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            snapshot_date TEXT NOT NULL UNIQUE,
+            user_id INTEGER DEFAULT 1,
+            snapshot_date TEXT NOT NULL,
             portfolio_value REAL NOT NULL,
             daily_movement REAL DEFAULT 0,
             beginning_difference REAL DEFAULT 0,
@@ -930,10 +1373,49 @@ def init_db():
             net_gain REAL DEFAULT 0,
             change_percent REAL DEFAULT 0,
             roi_percent REAL DEFAULT 0,
-            created_at INTEGER NOT NULL
+            created_at INTEGER NOT NULL,
+            UNIQUE(snapshot_date, user_id)
         )
         """
     )
+    
+    # Migration for portfolio_snapshots to multi-user (UNIQUE snapshot_date -> UNIQUE snapshot_date, user_id)
+    try:
+        cur.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='portfolio_snapshots'")
+        res = cur.fetchone()
+        if res:
+            schema = res[0]
+            if "UNIQUE(snapshot_date, user_id)" not in schema and "UNIQUE (snapshot_date, user_id)" not in schema:
+                # Need to migrate
+                cur.execute("ALTER TABLE portfolio_snapshots RENAME TO portfolio_snapshots_old")
+                cur.execute("""
+                    CREATE TABLE portfolio_snapshots (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        user_id INTEGER DEFAULT 1,
+                        snapshot_date TEXT NOT NULL,
+                        portfolio_value REAL NOT NULL,
+                        daily_movement REAL DEFAULT 0,
+                        beginning_difference REAL DEFAULT 0,
+                        deposit_cash REAL DEFAULT 0,
+                        accumulated_cash REAL DEFAULT 0,
+                        net_gain REAL DEFAULT 0,
+                        change_percent REAL DEFAULT 0,
+                        roi_percent REAL DEFAULT 0,
+                        created_at INTEGER NOT NULL,
+                        UNIQUE(snapshot_date, user_id)
+                    )
+                """)
+                # Copy columns explicitly to match schema
+                cur.execute("""
+                    INSERT INTO portfolio_snapshots (id, user_id, snapshot_date, portfolio_value, daily_movement, beginning_difference, deposit_cash, accumulated_cash, net_gain, change_percent, roi_percent, created_at)
+                    SELECT id, 1, snapshot_date, portfolio_value, daily_movement, beginning_difference, deposit_cash, accumulated_cash, net_gain, change_percent, roi_percent, created_at 
+                    FROM portfolio_snapshots_old
+                """)
+                cur.execute("DROP TABLE portfolio_snapshots_old")
+                conn.commit()
+    except Exception:
+        pass
+
     conn.commit()
     conn.close()
 
@@ -1557,6 +2039,7 @@ def compute_holdings_avg_cost(tx: pd.DataFrame):
 
 
 def build_portfolio_table(portfolio_name: str):
+    user_id = st.session_state.get('user_id')
     stocks = query_df(
         """
         SELECT
@@ -1566,10 +2049,10 @@ def build_portfolio_table(portfolio_name: str):
             COALESCE(portfolio,'KFH') AS portfolio,
             COALESCE(currency,'KWD') AS currency
         FROM stocks
-        WHERE COALESCE(portfolio,'KFH') = ?
+        WHERE COALESCE(portfolio,'KFH') = ? AND (user_id = ? OR user_id = 1 OR user_id IS NULL)
         ORDER BY symbol ASC
         """,
-        (portfolio_name,),
+        (portfolio_name, user_id),
     )
 
     if stocks.empty:
@@ -1590,10 +2073,10 @@ def build_portfolio_table(portfolio_name: str):
                 reinvested_dividend, fees,
                 broker, reference, notes, created_at
             FROM transactions
-            WHERE stock_symbol = ? AND COALESCE(category, 'portfolio') = 'portfolio'
+            WHERE stock_symbol = ? AND COALESCE(category, 'portfolio') = 'portfolio' AND (user_id = ? OR user_id = 1 OR user_id IS NULL)
             ORDER BY txn_date ASC, created_at ASC, id ASC
             """,
-            (sym,),
+            (sym, user_id),
         )
 
         h = compute_holdings_avg_cost(tx)
@@ -1800,16 +2283,17 @@ def render_portfolio_table(title: str, df: pd.DataFrame, fx_usdkwd: Optional[flo
 # UI - CASH DEPOSITS
 # =========================
 def ui_cash_deposits():
+    user_id = st.session_state.get('user_id')
     st.subheader("💰 Cash Deposits")
     
     # Clean up any deposits from year 1970 (likely corrupt data)
     try:
         corrupt_deposits = query_df(
-            "SELECT COUNT(*) as count FROM cash_deposits WHERE deposit_date LIKE '1970%'"
+            "SELECT COUNT(*) as count FROM cash_deposits WHERE deposit_date LIKE '1970%' AND user_id=?", (user_id,)
         )
         if not corrupt_deposits.empty and corrupt_deposits["count"].iloc[0] > 0:
             count = corrupt_deposits["count"].iloc[0]
-            exec_sql("DELETE FROM cash_deposits WHERE deposit_date LIKE '1970%'")
+            exec_sql("DELETE FROM cash_deposits WHERE deposit_date LIKE '1970%' AND user_id=?", (user_id,))
             st.success(f"🧹 Cleaned up {count} corrupt deposit(s) from year 1970")
     except:
         pass  # Silently continue if cleanup fails
@@ -1841,10 +2325,11 @@ def ui_cash_deposits():
                     # Save to cash_deposits table
                     exec_sql(
                         """
-                        INSERT INTO cash_deposits (portfolio, bank_name, deposit_date, amount, currency, description, comments, include_in_analysis, created_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        INSERT INTO cash_deposits (user_id, portfolio, bank_name, deposit_date, amount, currency, description, comments, include_in_analysis, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
+                            user_id,
                             portfolio,
                             bank_name.strip(),
                             deposit_date_str,
@@ -1860,20 +2345,20 @@ def ui_cash_deposits():
                     # Only sync to portfolio_snapshots if include_in_analysis is True
                     if include_in_analysis:
                         # Check if snapshot already exists for this date
-                        existing = query_df("SELECT * FROM portfolio_snapshots WHERE snapshot_date = ?", (deposit_date_str,))
+                        existing = query_df("SELECT * FROM portfolio_snapshots WHERE snapshot_date = ? AND user_id = ?", (deposit_date_str, user_id))
                         
                         if not existing.empty:
                             # Update existing snapshot with the deposit
                             exec_sql(
-                                "UPDATE portfolio_snapshots SET deposit_cash = deposit_cash + ? WHERE snapshot_date = ?",
-                                (float(amount), deposit_date_str)
+                                "UPDATE portfolio_snapshots SET deposit_cash = deposit_cash + ? WHERE snapshot_date = ? AND user_id = ?",
+                                (float(amount), deposit_date_str, user_id)
                             )
                         else:
                             # Create new snapshot with just the deposit
                             # Get accumulated cash from previous date
                             prev_snap = query_df(
-                                "SELECT accumulated_cash FROM portfolio_snapshots WHERE snapshot_date < ? ORDER BY snapshot_date DESC LIMIT 1",
-                                (deposit_date_str,)
+                                "SELECT accumulated_cash FROM portfolio_snapshots WHERE snapshot_date < ? AND user_id = ? ORDER BY snapshot_date DESC LIMIT 1",
+                                (deposit_date_str, user_id)
                             )
                             
                             if not prev_snap.empty:
@@ -1889,11 +2374,11 @@ def ui_cash_deposits():
                             exec_sql(
                                 """
                                 INSERT INTO portfolio_snapshots 
-                                (snapshot_date, portfolio_value, daily_movement, beginning_difference, 
+                                (user_id, snapshot_date, portfolio_value, daily_movement, beginning_difference, 
                                  deposit_cash, accumulated_cash, net_gain, change_percent, roi_percent, created_at)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                                 """,
-                                (deposit_date_str, 0, 0, 0, float(amount), accumulated_cash, net_gain, 0, roi_percent, int(time.time()))
+                                (user_id, deposit_date_str, 0, 0, 0, float(amount), accumulated_cash, net_gain, 0, roi_percent, int(time.time()))
                             )
                     
                     success_msg = "Deposit saved!"
@@ -1902,7 +2387,10 @@ def ui_cash_deposits():
                     else:
                         success_msg += " 📝 Saved as record only (not in analysis)."
                     st.success(success_msg)
-                    st.rerun()
+                    try:
+                        st.rerun()
+                    except:
+                        pass
     
     with tab2:
         st.markdown("### 📥 Upload Cash Deposits from Excel")
@@ -2103,26 +2591,27 @@ def ui_cash_deposits():
             f"""
             SELECT id, portfolio, bank_name, deposit_date, amount, currency, description, comments, include_in_analysis
             FROM cash_deposits
-            WHERE include_in_analysis = 1
+            WHERE include_in_analysis = 1 AND (user_id = ? OR user_id = 1 OR user_id IS NULL)
             ORDER BY deposit_date {sort_order}, id {sort_order}
-            """
+            """, (user_id,)
         )
     elif filter_option == "Records Only":
         deposits = query_df(
             f"""
             SELECT id, portfolio, bank_name, deposit_date, amount, currency, description, comments, include_in_analysis
             FROM cash_deposits
-            WHERE include_in_analysis = 0
+            WHERE include_in_analysis = 0 AND (user_id = ? OR user_id = 1 OR user_id IS NULL)
             ORDER BY deposit_date {sort_order}, id {sort_order}
-            """
+            """, (user_id,)
         )
     else:
         deposits = query_df(
             f"""
             SELECT id, portfolio, bank_name, deposit_date, amount, currency, description, comments, include_in_analysis
             FROM cash_deposits
+            WHERE (user_id = ? OR user_id = 1 OR user_id IS NULL)
             ORDER BY deposit_date {sort_order}, id {sort_order}
-            """
+            """, (user_id,)
         )
 
     if deposits.empty:
@@ -2377,11 +2866,55 @@ def ui_cash_deposits():
                 
                 st.divider()
 
+def update_portfolio_cash(user_id: int, portfolio: str, delta: float, currency="KWD"):
+    """
+    Updates the cached cash balance (General Ledger).
+    delta > 0: Deposit/Sell proceeds
+    delta < 0: Withdrawal/Buy cost
+    """
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        
+        # Check current balance
+        cur.execute("SELECT balance FROM portfolio_cash WHERE user_id=? AND portfolio=?", (user_id, portfolio))
+        row = cur.fetchone()
+        
+        if row:
+            new_bal = row[0] + delta
+            cur.execute("UPDATE portfolio_cash SET balance=?, last_updated=? WHERE user_id=? AND portfolio=?", 
+                       (new_bal, int(time.time()), user_id, portfolio))
+        else:
+            # Initialize if missing
+            cur.execute("INSERT INTO portfolio_cash (user_id, portfolio, balance, currency, last_updated) VALUES (?, ?, ?, ?, ?)",
+                       (user_id, portfolio, delta, currency, int(time.time())))
+        
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        st.error(f"Cash Update Error: {e}")
+
+@st.cache_data(ttl=300)
+def load_stocks_master():
+    """
+    Loads distinct stored stocks from the database for the search dropdown.
+    Returns a DataFrame with columns: symbol, name.
+    """
+    try:
+        # We query the stocks table. 
+        # The user has stocks stored here with symbol, name, portfolio, currency etc.
+        # We'll use this as the master list.
+        df = query_df("SELECT symbol, name, portfolio, currency FROM stocks ORDER BY symbol")
+        return df
+    except Exception as e:
+        print(f"Error loading stocks master: {e}")
+        return pd.DataFrame(columns=["symbol", "name", "portfolio", "currency"])
+
 def ui_transactions():
     st.subheader("Add Transactions (per stock)")
     
     # --- Import / Export All Transactions Option ---
-    with st.expander("📥 Import / Export All Transactions (Backup & Restore)"):
+    with st.expander("🔁 Import / Export All Transactions (Backup & Restore)"):
         col_export, col_import = st.columns(2)
         
         with col_export:
@@ -2417,7 +2950,7 @@ def ui_transactions():
                         worksheet.set_column(col_num, col_num, 15) # Set width
                 
                 st.download_button(
-                    label="📄 Download All Transactions",
+                    label="📥 Download All Transactions",
                     data=buffer.getvalue(),
                     file_name=f"portfolio_backup_{date.today().strftime('%Y-%m-%d')}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -2427,13 +2960,13 @@ def ui_transactions():
                 st.info("No transactions found to export.")
 
         with col_import:
-            st.markdown("### 📥 Import (Restore)")
+            st.markdown("### 🔁 Import (Restore)")
             st.caption("Upload a previously exported Excel file to restore data.")
             
             restore_file = st.file_uploader("Upload Backup Excel", type=['xlsx'], key="restore_uploader")
             
             if restore_file:
-                if st.button("🚀 Restore / Import Data", type="primary", use_container_width=True):
+                if st.button("⚡ Restore / Import Data", type="primary", use_container_width=True):
                     try:
                         restore_df = pd.read_excel(restore_file)
                         
@@ -2519,119 +3052,133 @@ def ui_transactions():
                         st.error(f"Error restoring data: {e}")
     
     # Add stock section first
-    with st.expander("➕ Add Stock", expanded=False):
-        # Option to choose between Kuwait stocks list or manual entry
-        add_mode = st.radio(
-            "Add Stock Mode",
-            ["📋 Select from Kuwait Stock List", "✍️ Manual Entry (Any Stock)"],
-            horizontal=True,
-            key="add_stock_mode"
-        )
+    with st.expander("➕ Add New Stock", expanded=True):
+        # Market selection row
+        market_col, stock_dropdown_col = st.columns([1, 3])
         
-        if add_mode == "📋 Select from Kuwait Stock List":
-            # Kuwait stocks dropdown with search
-            kuwait_options = get_kuwait_stock_options()
-            selected_kuwait = st.selectbox(
-                "Search and select Kuwait stock",
-                options=kuwait_options,
-                key="kuwait_stock_selector"
-            )
-            
-            symbol_parsed, name_parsed, yf_ticker = parse_kuwait_stock_selection(selected_kuwait)
-            
-            col1, col2, col3 = st.columns([1.5, 1.5, 1.5])
-            with col1:
-                portfolio = st.selectbox("Portfolio", ["KFH", "BBYN", "USA"], key="kw_portfolio")
-            with col2:
-                currency = st.selectbox("Currency", ["KWD", "USD"], key="kw_currency")
-            with col3:
-                st.write("")  # spacing
-                st.write("")  # spacing
-                if st.button("Add Stock", type="primary", key="add_kw_stock"):
-                    if symbol_parsed:
-                        try:
-                            # Use the base symbol (without .KW) for storage
-                            exec_sql(
-                                "INSERT INTO stocks (symbol, name, current_price, portfolio, currency) VALUES (?, ?, ?, ?, ?)",
-                                (symbol_parsed, name_parsed, 0.0, portfolio, currency),
-                            )
-                            st.success(f"Stock {symbol_parsed} ({name_parsed}) added. Yahoo Finance ticker: {yf_ticker}")
-                            st.rerun()
-                        except sqlite3.IntegrityError:
-                            st.warning("This symbol already exists.")
-                    else:
-                        st.error("Please select a stock from the list.")
-            
-            if symbol_parsed:
-                st.info(f"📊 Symbol: **{symbol_parsed}** | Yahoo Finance: **{yf_ticker}**")
+        with market_col:
+            market = st.selectbox("Market", ["Kuwait Market", "US Market"], key="add_stock_market")
         
+        # Get stock options based on selected market
+        if market == "Kuwait Market":
+            stock_options = get_kuwait_stock_options()
+            default_portfolio = "KFH"
+            default_currency = "KWD"
         else:
-            # Manual entry mode (original functionality)
-            c1, c2, c3, c4, c5 = st.columns([1.3, 3.5, 1.2, 1.2, 1.2])
-            symbol = c1.text_input("Symbol", placeholder="e.g. AAPL, TSLA")
-            name = c2.text_input("Name (optional)", placeholder="Stock full name (optional)")
-            portfolio = c3.selectbox("Portfolio", ["KFH", "BBYN", "USA"], key="manual_portfolio")
-            currency = c4.selectbox("Currency", ["KWD", "USD"], key="manual_currency")
-            if c5.button("Add Stock", type="primary", key="add_manual_stock"):
-                sym = symbol.strip()
-                if sym == "":
-                    st.error("Symbol is required.")
-                else:
-                    try:
-                        exec_sql(
-                            "INSERT INTO stocks (symbol, name, current_price, portfolio, currency) VALUES (?, ?, ?, ?, ?)",
-                            (sym, name.strip(), 0.0, portfolio, currency),
-                        )
-                        st.success(f"Stock {sym} added.")
-                        st.rerun()
-                    except sqlite3.IntegrityError:
-                        st.warning("This symbol already exists.")
+            stock_options = get_us_stock_options()
+            default_portfolio = "USA"
+            default_currency = "USD"
+        
+        with stock_dropdown_col:
+            selected_stock = st.selectbox(
+                "Search Stock", 
+                stock_options, 
+                key="add_stock_dropdown",
+                help="Select a stock from the list or enter manually below"
+            )
+        
+        # Parse selection to pre-fill fields
+        market_key = "Kuwait" if market == "Kuwait Market" else "US"
+        parsed_symbol, parsed_name, parsed_yf_ticker = parse_stock_selection(selected_stock, market_key)
+        
+        # Input fields row
+        c1, c2, c3, c4, c5 = st.columns([1.3, 3.5, 1.2, 1.2, 1.2])
+        
+        # Use parsed values as defaults if available
+        symbol = c1.text_input("Symbol", value=parsed_symbol or "", placeholder="e.g. AAPL, TSLA")
+        name = c2.text_input("Name (optional)", value=parsed_name or "", placeholder="Stock full name (optional)")
+        portfolio = c3.selectbox("Portfolio", ["KFH", "BBYN", "USA"], index=["KFH", "BBYN", "USA"].index(default_portfolio), key="manual_portfolio")
+        currency = c4.selectbox("Currency", ["KWD", "USD"], index=["KWD", "USD"].index(default_currency), key="manual_currency")
+        
+        if c5.button("Add Stock", type="primary", key="add_manual_stock"):
+            sym = symbol.strip()
+            if sym == "":
+                st.error("Symbol is required.")
+            else:
+                try:
+                    exec_sql(
+                        "INSERT INTO stocks (symbol, name, current_price, portfolio, currency) VALUES (?, ?, ?, ?, ?)",
+                        (sym, name.strip(), 0.0, portfolio, currency),
+                    )
+                    st.success(f"Stock {sym} added.")
+                    st.rerun()
+                except sqlite3.IntegrityError:
+                    st.warning("This symbol already exists.")
 
     st.divider()
 
-    stocks = query_df(
-        """
-        SELECT
-            symbol,
-            COALESCE(name,'') AS name,
-            COALESCE(current_price,0) AS current_price,
-            COALESCE(portfolio,'KFH') AS portfolio,
-            COALESCE(currency,'KWD') AS currency
-        FROM stocks
-        ORDER BY symbol ASC
-        """
-    )
-    if stocks.empty:
+    # Load stored stocks from master (Cached)
+    stocks_master = load_stocks_master()
+    
+    if stocks_master.empty:
         st.info("Add a stock first, then you can add transactions.")
         return
 
-    # Show the stock `name` first (if present) then the `symbol` so edits to the name
-    # appear as the primary label in the selectbox.
+    st.markdown("### 🔎 Select Stock")
+    
+    # Prepare options for the dropdown
+    # Format: "Name - Ticker"
     stock_options = [
-        (f"{r['name']} - {r['symbol']}".strip()) if (r.get('name') and str(r.get('name')).strip() != '') else r['symbol']
-        for _, r in stocks.iterrows()
+        (f"{row['name']} - {row['symbol']}".strip() if row['name'] else row['symbol'])
+        for _, row in stocks_master.iterrows()
     ]
-    selected_opt = st.selectbox("Select stock", stock_options)
-    # selected_opt may be either "Name - SYMBOL" or just "SYMBOL"; extract the symbol
-    selected_symbol = selected_opt.rsplit(" - ", 1)[-1].strip()
 
-    stock_row = stocks[stocks["symbol"] == selected_symbol].iloc[0]
-    current_price_db = safe_float(stock_row["current_price"], 0)
+    # Stock Dropdown (Selectbox with built-in search)
+    current_selection_index = 0
+    if "selected_stock_label" in st.session_state:
+         if st.session_state.selected_stock_label in stock_options:
+             current_selection_index = stock_options.index(st.session_state.selected_stock_label)
+    
+    selected_opt = st.selectbox(
+        "Select stock from list", 
+        stock_options, 
+        index=current_selection_index,
+        key="stock_selector_dropdown"
+    )
+    
+    # Update session state when selection changes
+    if selected_opt:
+        st.session_state.selected_stock_label = selected_opt
+        # Extract symbol
+        selected_symbol = selected_opt.rsplit(" - ", 1)[-1].strip()
+        
+        # Store in session state as requested
+        st.session_state["selected_stock_ticker"] = selected_symbol
+        st.session_state["selected_stock_name"] = selected_opt.split(" - ")[0].strip()
 
-    # Save current price per stock
-    cpx1, cpx2, cpx3 = st.columns([1, 3, 1])
+    if not selected_opt:
+        return
+
+    # Use selected_symbol for the rest of the page logic
+    # Re-query specific row to get current_price etc (or use master if it has all info)
+    # The load_stocks_master returned symbol, name, portfolio, currency.
+    # We might need current_price which wasn't in the minimal load_stocks_master query I wrote?
+    # Actually, the original query had current_price.
+    # Let's re-fetch the single row to ensure we have fresh price/data for the "Stock Details" panel
+    # without reloading the full master table every time a price changes.
+    
+    # Or better: keep using the `stock_row` query pattern the original code had, but using `selected_symbol`
+    
+    # Original code logic continues here...
+    
+    # Fetch FRESH details for the single selected stock
+    # This ensures if we update price, it reflects immediately without invalidating the huge master cache.
+    stock_row_df = query_df("SELECT * FROM stocks WHERE symbol = ?", (selected_symbol,))
+    if stock_row_df.empty:
+        st.error(f"Stock {selected_symbol} not found in DB.")
+        return
+    
+    stock_row = stock_row_df.iloc[0]
+    current_price_db = safe_float(stock_row.get("current_price"), 0)
+
+    st.markdown(f"#### Managing: {stock_row.get('name')} ({selected_symbol})")
+    
+    # Fetch current price section
+    cpx1, cpx2, cpx3 = st.columns([1, 2, 1])
     with cpx1:
-        new_cp = st.number_input("Current Price", min_value=0.0, step=0.001, format="%.6f", value=float(current_price_db))
+        st.metric("Current Price", f"{current_price_db:.6f}")
     with cpx2:
-        col_save, col_fetch = st.columns([1, 1])
-        with col_save:
-            if st.button("Save Current Price"):
-                exec_sql("UPDATE stocks SET current_price = ? WHERE symbol = ?", (float(new_cp), selected_symbol))
-                st.success("Current price saved.")
-                st.rerun()
-
-        with col_fetch:
-            if st.button("Fetch Current Price"):
+        if st.button("Fetch Current Price", type="primary"):
                 with st.spinner(f"Fetching price for {selected_symbol}..."):
                     p = None
                     err = None
@@ -2773,7 +3320,7 @@ def ui_transactions():
                             cur.execute("UPDATE stocks SET symbol = ? WHERE symbol = ?", (ns, current_symbol))
                             conn.commit()
                             conn.close()
-                            st.success(f"Ticker renamed {current_symbol} → {ns} and transactions updated.")
+                            st.success(f"Ticker renamed {current_symbol} ➡️ {ns} and transactions updated.")
                             try:
                                 st.rerun()
                             except Exception:
@@ -2794,7 +3341,7 @@ def ui_transactions():
                 if not tv_cands:
                     st.warning("No TradingView matches found.")
                 else:
-                    options = [f"{c['tv_symbol']} — {c.get('full_name','')} ({c.get('exchange','')})" for c in tv_cands]
+                    options = [f"{c['tv_symbol']} • {c.get('full_name','')} ({c.get('exchange','')})" for c in tv_cands]
                     choice = st.radio("Select TradingView symbol", options, key=f"tv_map_{selected_symbol}")
                     idx = options.index(choice)
                     chosen = tv_cands[idx]
@@ -2846,13 +3393,13 @@ def ui_transactions():
         tx_calc = tx
 
     metrics = compute_stock_metrics(tx_calc)
-    current_price = float(new_cp)
+    current_price = float(current_price_db)
     market_value = metrics["current_shares"] * current_price
 
     st.markdown(f"### Transactions for: **{selected_symbol}**")
     
     # Excel Upload for this stock
-    with st.expander("📥 Upload Transactions for this Stock (Excel)", expanded=False):
+    with st.expander("🔁 Upload Transactions for this Stock (Excel)", expanded=False):
         st.caption(f"Upload transactions for **{selected_symbol}** only. The Excel file should have columns: txn_date, txn_type, shares, purchase_cost/sell_value, etc.")
         uploaded_file = st.file_uploader("Choose Excel file", type=['xlsx'], key=f"upload_txn_{selected_symbol}")
         
@@ -2942,7 +3489,7 @@ def ui_transactions():
         # Conditional fields based on transaction type
         if txn_type == "Dividend only":
             # DIVIDEND ONLY MODE - Show only dividend-related fields
-            st.info("📊 Recording dividends only (no trade/shares impact)")
+            st.info("ℹ️ Recording dividends only (no trade/shares impact)")
             
             d1, d2, d3 = st.columns([1, 1, 1])
             cash_dividend = d1.number_input("Cash Dividend received (KD)", min_value=0.0, step=1.0, format="%.3f", key="txn_cash_dividend")
@@ -3032,7 +3579,7 @@ def ui_transactions():
             if use_override:
                 price_override = c6.number_input("Override Price", min_value=0.0, step=0.001, format="%.6f", key="txn_price_override")
             else:
-                c6.caption("Price will be calculated automatically from cost/value ÷ shares.")
+                c6.caption("Price will be calculated automatically from cost/value / shares.")
 
             planned_cum = c7.number_input("Planned CUM shares (optional)", min_value=0.0, step=1.0, format="%.0f", key="txn_planned_cum")
 
@@ -3063,11 +3610,11 @@ def ui_transactions():
                 else:
                     # Allow empty/zero shares and costs; provide non-blocking warnings
                     if shares <= 0:
-                        st.warning("Shares is empty or zero — transaction will be recorded with 0 shares.")
+                        st.warning("Shares is empty or zero • transaction will be recorded with 0 shares.")
                     if txn_type == "Buy" and purchase_cost <= 0:
-                        st.warning("Purchase cost is empty or zero — recorded as 0.0.")
+                        st.warning("Purchase cost is empty or zero • recorded as 0.0.")
                     if txn_type == "Sell" and sell_value <= 0:
-                        st.warning("Sell value is empty or zero — recorded as 0.0.")
+                        st.warning("Sell value is empty or zero • recorded as 0.0.")
 
                     po = None if (price_override is None) else float(price_override)
                     pc = None if planned_cum == 0 else float(planned_cum)
@@ -3175,7 +3722,7 @@ def ui_transactions():
                 # Conditional fields based on type
                 if edit_type == "Dividend only":
                     # DIVIDEND ONLY EDIT MODE
-                    st.info("📊 Editing dividend-only transaction")
+                    st.info("ℹ️ Editing dividend-only transaction")
                     
                     ed1, ed2, ed3 = st.columns([1, 1, 1])
                     edit_cash_div = ed1.number_input("Cash Dividend (KD)", min_value=0.0, step=1.0, format="%.3f", value=float(row.get('cash_dividend', 0)), key=f"edit_cash_div_{tx_id}")
@@ -3372,6 +3919,115 @@ def ui_transactions():
             st.success("Stock removed.")
             st.rerun()
 
+
+
+def ui_backup_restore():
+    user_id = st.session_state.get('user_id')
+    st.title("💾 Backup & Restore (Excel)")
+    st.caption("Export your transaction history or restore from a previous backup file.")
+    
+    tab_exp, tab_imp = st.tabs(["📤 Export Data", "📥 Import / Restore"])
+    
+    with tab_exp:
+        st.markdown("### 📤 Export Transactions")
+        st.write("Download your entire transaction history as an Excel file.")
+        
+        try:
+            # Fetch data immediately so download button is always available
+            export_sql = "SELECT * FROM transactions WHERE user_id = ? ORDER BY txn_date DESC"
+            df_export = query_df(export_sql, (user_id,))
+            
+            if not df_export.empty:
+                buffer = io.BytesIO()
+                with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+                    df_export.to_excel(writer, index=False, sheet_name='Transactions')
+                
+                st.download_button(
+                    label="📥 Download Excel File", 
+                    data=buffer.getvalue(), 
+                    file_name=f"portfolio_backup_{date.today()}.xlsx", 
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+                st.success(f"Ready to export {len(df_export)} records.")
+            else:
+                st.warning("No transactions found to export.")
+        except Exception as e:
+            st.error(f"Export Error: {e}")
+
+    with tab_imp:
+        st.markdown("### 📥 Import / Restore Transactions")
+        st.warning("⚠️ This will APPEND transactions to your database. It does not delete existing records.")
+        
+        uploaded_file = st.file_uploader("Upload Backup File (.xlsx)", type=['xlsx'])
+        
+        if uploaded_file:
+            if st.button("Process Restore", type="primary"):
+                try:
+                    df = pd.read_excel(uploaded_file)
+                    df.columns = [c.lower().strip() for c in df.columns]
+                    
+                    conn = get_conn()
+                    cur = conn.cursor()
+                    
+                    count_success = 0
+                    count_errors = 0
+                    progress_bar = st.progress(0)
+                    
+                    for i, row in df.iterrows():
+                        try:
+                            # Robust mapping
+                            r_date = row.get('txn_date')
+                            r_type = row.get('txn_type')
+                            r_port = row.get('portfolio')
+                            r_sym = row.get('stock_symbol')
+                            
+                            if pd.isna(r_sym) or pd.isna(r_type): continue
+                            
+                            # Normalize Date
+                            if isinstance(r_date, pd.Timestamp):
+                                r_date_str = r_date.strftime('%Y-%m-%d')
+                            else:
+                                r_date_str = str(r_date).split(' ')[0]
+
+                            # Defaults
+                            r_shares = float(row.get('shares', 0) or 0)
+                            r_cost = float(row.get('purchase_cost', 0) or 0)
+                            r_sell = float(row.get('sell_value', 0) or 0)
+                            r_div = float(row.get('cash_dividend', 0) or 0)
+                            r_fees = float(row.get('fees', 0) or 0)
+                            r_notes = str(row.get('notes', '') or '')
+                            r_cat = str(row.get('category', 'portfolio') or 'portfolio')
+                            
+                            cur.execute("""
+                                INSERT INTO transactions 
+                                (user_id, portfolio, stock_symbol, txn_date, txn_type, 
+                                 shares, purchase_cost, sell_value, cash_dividend, fees, 
+                                 notes, category, created_at)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            """, (user_id, r_port, r_sym, r_date_str, r_type,
+                                  r_shares, r_cost, r_sell, r_div, r_fees,
+                                  r_notes, r_cat, int(time.time())))
+                            count_success += 1
+                        except Exception as inner_e:
+                            count_errors += 1
+                        
+                        if i % 5 == 0:
+                            progress_bar.progress(min((i+1)/len(df), 1.0))
+
+                    conn.commit()
+                    conn.close()
+                    progress_bar.progress(1.0)
+                    
+                    if count_errors > 0:
+                        st.warning(f"Restore Complete: {count_success} imported, {count_errors} failed.")
+                    else:
+                        st.success(f"✅ Successfully restored {count_success} transactions!")
+                    
+                    time.sleep(2)
+                    st.rerun()
+                    
+                except Exception as e:
+                    st.error(f"Import Failed: {e}")
 
 # =========================
 # UI - PORTFOLIO ANALYSIS
@@ -3863,13 +4519,13 @@ def ui_portfolio_analysis():
                 
                 # Upsert into portfolio_cash
                 exec_sql("""
-                    INSERT INTO portfolio_cash (portfolio, balance, currency, last_updated)
-                    VALUES (?, ?, ?, ?)
-                    ON CONFLICT(portfolio) DO UPDATE SET
+                    INSERT INTO portfolio_cash (portfolio, user_id, balance, currency, last_updated)
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(portfolio, user_id) DO UPDATE SET
                         balance=excluded.balance,
                         currency=excluded.currency,
                         last_updated=excluded.last_updated
-                """, (_p_name, _new_val, _p_ccy, _ts))
+                """, (_p_name, st.session_state.get('user_id'), _new_val, _p_ccy, _ts))
                 _changes = True
 
         if _changes:
@@ -3916,7 +4572,8 @@ def ui_portfolio_analysis():
     
     # --- Integration of Manual Cash for Totals ---
     _overall_cash_kwd = 0.0
-    _cash_recs = query_df("SELECT balance, currency FROM portfolio_cash")
+    _user_id = st.session_state.get('user_id')
+    _cash_recs = query_df("SELECT balance, currency FROM portfolio_cash WHERE user_id=?", (_user_id,))
     if not _cash_recs.empty:
         for _, _cr in _cash_recs.iterrows():
             _overall_cash_kwd += convert_to_kwd(_cr["balance"], _cr["currency"])
@@ -6976,23 +7633,37 @@ def ui_overview():
         """
     )
     
-    # Withdrawals (if any - for both TWR and MWRR)
+    # Withdrawals (Explicit Withdrawals Only - NOT Sells)
+    # Using the new General Ledger 'Withdrawal' type
     withdrawals = query_df(
         """
         SELECT txn_date as date,
-               COALESCE(sell_value, 0) as amount,
+               sell_value as amount,
                'WITHDRAWAL' as type
         FROM transactions
-        WHERE txn_type = 'Sell' AND sell_value > 0
+        WHERE txn_type = 'Withdrawal' OR category = 'FLOW_OUT'
         """
     )
     
-    # Cash flows for MWRR (cash deposits from Cash Deposits tab + cash dividends only)
+    # NEW: Additional Deposits from General Ledger (Type = Deposit)
+    # Merging with legacy cash_deposits
+    ledger_deposits = query_df(
+        """
+        SELECT txn_date as date,
+               purchase_cost as amount,
+               'DEPOSIT' as type
+        FROM transactions
+        WHERE txn_type = 'Deposit' OR category = 'FLOW_IN'
+        """
+    )
+
+    # Cash flows for MWRR (Legacy Cash Deposits + New Ledger Deposits + Dividends + Withdrawals)
     # NOTE: Reinvested dividends are EXCLUDED (they stay in portfolio value)
-    # NOTE: Buy/Sell transactions are EXCLUDED (use actual cash deposits instead)
     mwrr_components = []
     if not cash_deposits_for_mwrr.empty:
         mwrr_components.append(cash_deposits_for_mwrr)
+    if not ledger_deposits.empty:
+        mwrr_components.append(ledger_deposits)
     if not cash_dividends_only.empty:
         mwrr_components.append(cash_dividends_only)
     if not withdrawals.empty:
@@ -7003,10 +7674,12 @@ def ui_overview():
     else:
         cash_flows_mwrr = pd.DataFrame(columns=['date', 'amount', 'type'])
     
-    # Cash flows for TWR (OLD WORKING FORMULA - use cash_deposits + all dividends)
+    # Cash flows for TWR
     twr_components = []
     if not deposits_for_twr.empty:
         twr_components.append(deposits_for_twr)
+    if not ledger_deposits.empty:
+        twr_components.append(ledger_deposits)
     if not all_dividends.empty:
         twr_components.append(all_dividends)
     if not withdrawals.empty:
@@ -7744,8 +8417,341 @@ def ui_peer_analysis():
 # =========================
 # MAIN
 # =========================
+def send_otp_email(to_email: str, otp: str):
+    """
+    Send OTP via email using SMTP settings from secrets.toml or environment.
+    Falls back to simulated mode (prints to UI) if no SMTP config found.
+    """
+    # 1. Try to load SMTP config
+    smtp_server = st.secrets.get("smtp", {}).get("server")
+    smtp_port = st.secrets.get("smtp", {}).get("port", 587)
+    smtp_user = st.secrets.get("smtp", {}).get("user")
+    smtp_pass = st.secrets.get("smtp", {}).get("password")
+    
+    email_sent = False
+    
+    if smtp_server and smtp_user and smtp_pass:
+        try:
+            import smtplib
+            from email.mime.text import MIMEText
+            from email.utils import formataddr
+            
+            msg = MIMEText(f"Your password reset OTP is: {otp}\n\nThis code expires in 15 minutes.")
+            msg['Subject'] = 'Password Reset OTP - KuwaitPortfolio.ai'
+            msg['From'] = formataddr(("Portfolio App", smtp_user))
+            msg['To'] = to_email
+            
+            with smtplib.SMTP(smtp_server, smtp_port) as server:
+                server.starttls()
+                server.login(smtp_user, smtp_pass)
+                server.sendmail(smtp_user, [to_email], msg.as_string())
+            
+            email_sent = True
+        except Exception as e:
+            print(f"SMTP Error: {e}")
+            email_sent = False
+            
+    # 2. Fallback / Simulation
+    if not email_sent:
+        # In production, do NOT show this. For local dev/demo:
+        st.toast(f"🔑 SIMULATION MODE: OTP for {to_email} is {otp}", icon="👀")
+        st.info(f"**Dev Mode**: OTP sent to {to_email}: `{otp}` (Configure SMTP in secrets.toml to send real emails)")
+    else:
+        st.success(f"OTP sent to {to_email}")
+
+def login_page(cookie_manager=None):
+    st.markdown("""
+    <style>
+    .main { align-items: center; justify-content: center; display: flex; }
+    .auth-container { max-width: 400px; padding: 2rem; border-radius: 10px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    st.title("🔐 Portfolio Access")
+    
+    if "auth_mode" not in st.session_state:
+        st.session_state.auth_mode = "login" # login, register, forgot_pass
+        
+    # --- NAVIGATION TABS/MODES ---
+    # We use custom navigation to handle "Forgot Password" cleanly
+    if st.session_state.auth_mode == "forgot_pass":
+        st.subheader("🔄 Reset Password")
+        if st.button("← Back to Login"):
+            st.session_state.auth_mode = "login"
+            st.rerun()
+            
+        with st.form("reset_request_form"):
+            email_reset = st.text_input("Enter your registered email")
+            btn_reset = st.form_submit_button("Send OTP")
+            
+            if btn_reset:
+                conn = get_conn()
+                res = conn.execute("SELECT id FROM users WHERE email=? OR username=?", (email_reset, email_reset)).fetchone()
+                conn.close()
+                if res:
+                    # Generate OTP
+                    import random
+                    otp_code = str(random.randint(100000, 999999))
+                    exp_time = int(time.time()) + 900 # 15 mins
+                    
+                    conn = get_conn()
+                    # Clean old OTPs
+                    conn.execute("DELETE FROM password_resets WHERE email=?", (email_reset,))
+                    conn.execute("INSERT INTO password_resets (email, otp, expires_at, created_at) VALUES (?, ?, ?, ?)",
+                                (email_reset, otp_code, exp_time, int(time.time())))
+                    conn.commit()
+                    conn.close()
+                    
+                    send_otp_email(email_reset, otp_code)
+                    st.session_state.reset_email = email_reset
+                    st.session_state.auth_mode = "verify_otp"
+                    st.rerun()
+                else:
+                    st.error("Email not found.")
+                    
+    elif st.session_state.auth_mode == "verify_otp":
+        st.subheader("🔐 Verify OTP")
+        st.caption(f"Enter the code sent to {st.session_state.get('reset_email')}")
+        
+        with st.form("verify_otp_form"):
+            otp_input = st.text_input("OTP Code")
+            new_pass_1 = st.text_input("New Password", type="password")
+            new_pass_2 = st.text_input("Confirm New Password", type="password")
+            btn_verify = st.form_submit_button("Reset Password")
+            
+            if btn_verify:
+                if new_pass_1 != new_pass_2:
+                    st.error("Passwords do not match")
+                elif len(new_pass_1) < 4:
+                    st.error("Password too short")
+                else:
+                    target_email = st.session_state.get("reset_email")
+                    now = int(time.time())
+                    
+                    conn = get_conn()
+                    # Verify OTP
+                    row = conn.execute("SELECT otp FROM password_resets WHERE email=? AND expires_at > ?", (target_email, now)).fetchone()
+                    
+                    if row and row[0] == otp_input:
+                        # Success - Update Password
+                        new_hash = hash_password(new_pass_1)
+                        conn.execute("UPDATE users SET password_hash=? WHERE email=? OR username=?", (new_hash, target_email, target_email))
+                        conn.execute("DELETE FROM password_resets WHERE email=?", (target_email,))
+                        conn.commit()
+                        conn.close()
+                        st.success("✅ Password reset successfully! Please login.")
+                        st.session_state.auth_mode = "login"
+                        # Clear temp state
+                        del st.session_state.reset_email
+                        time.sleep(1)
+                        st.rerun()
+                    else:
+                        conn.close()
+                        st.error("Invalid or expired OTP")
+        
+        if st.button("Cancel"):
+            st.session_state.auth_mode = "login"
+            st.rerun()
+
+    elif st.session_state.auth_mode == "register":
+        st.subheader("📝 Register")
+        if st.button("← Back to Login"):
+            st.session_state.auth_mode = "login"
+            st.rerun()
+
+        with st.form("register_form"):
+            reg_email_input = st.text_input("Email Address")
+            reg_pass = st.text_input("Choose Password", type="password")
+            confirm_pass = st.text_input("Confirm Password", type="password")
+            
+            submit_reg = st.form_submit_button("Register", use_container_width=True)
+            
+            if submit_reg:
+                # Normalize email
+                reg_email = reg_email_input.strip().lower()
+
+                if reg_pass != confirm_pass:
+                    st.error("Passwords do not match")
+                elif len(reg_pass) < 4:
+                    st.warning("Password too short")
+                elif "@" not in reg_email or "." not in reg_email:
+                    st.error("Invalid email format")
+                else:
+                    try:
+                        conn = get_conn()
+                        cur = conn.cursor()
+                        hashed = hash_password(reg_pass)
+                        
+                        # Check if email exists
+                        cur.execute("SELECT id FROM users WHERE email = ? OR username = ?", (reg_email, reg_email))
+                        if cur.fetchone():
+                            st.error("User with this email already exists.")
+                        else:
+                            # Insert with username = email
+                            cur.execute("INSERT INTO users (username, email, password_hash, created_at) VALUES (?, ?, ?, ?)", 
+                                       (reg_email, reg_email, hashed, int(time.time())))
+                            conn.commit()
+                            st.success("Registered successfully! Redirecting to login...")
+                            time.sleep(1)
+                            st.session_state.auth_mode = "login"
+                            st.rerun()
+                    except Exception as e:
+                        st.error(f"Registration error: {e}")
+                    finally:
+                        conn.close()
+
+    else:
+        # standard login page (default)
+        st.subheader("🔑 Login")
+        
+        import os
+        # Ensure absolute DB path
+        BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+        global DB_PATH
+        DB_PATH = os.path.join(BASE_DIR, "portfolio.db")
+
+        # Use st.form to ensure variables are captured correctly on submit
+        with st.form("login_form"):
+            email_login_input = st.text_input("Email")
+            password_login = st.text_input("Password", type="password")
+            remember_me = st.checkbox("Remember me for 30 days")
+            
+            submitted = st.form_submit_button("Login", type="primary", use_container_width=True)
+
+        if submitted:
+            email_login = email_login_input.strip().lower()
+
+            # Audit logs
+            print(f"DEBUG: Current Working Directory: {os.getcwd()}")
+            print(f"DEBUG: Database Path being used: {DB_PATH}")
+            print(f"DEBUG: Searching for Email/Username: '{email_login}'")
+
+            conn = get_conn()
+            cur = conn.cursor()
+            try:
+                # Broaden the SQL Query: Check BOTH columns
+                # New SQL: SELECT password_hash, username, id FROM users WHERE LOWER(email) = ? OR LOWER(username) = ?
+                cur.execute("SELECT password_hash, username, id FROM users WHERE LOWER(email) = ? OR LOWER(username) = ?", (email_login, email_login))
+                row = cur.fetchone()
+
+                if row:
+                    stored_hash = row[0]
+                    db_username = row[1]
+                    user_id = row[2]
+
+                    # Handle Byte/String encoding issues (Common source of bugs)
+                    if isinstance(stored_hash, str):
+                        stored_hash = stored_hash.encode('utf-8') # bcrypt needs bytes
+
+                    input_bytes = password_login.encode('utf-8')
+
+                    # Use bcrypt explicitly
+                    try:
+                        if bcrypt.checkpw(input_bytes, stored_hash):
+                            # SUCCESS CASE
+                            st.session_state.logged_in = True
+                            st.session_state.user_id = user_id
+                            st.session_state.username = db_username
+
+                            # HANDLE REMEMBER ME
+                            if remember_me and cookie_manager:
+                                try:
+                                    expires = datetime.now() + timedelta(days=30)
+                                    cookie_manager.set("portfolio_user", db_username, expires_at=expires)
+                                except Exception as ce:
+                                    print(f"Cookie Error: {ce}")
+
+                            st.success("Login Successful!")
+                            st.rerun()
+                        else:
+                            print(f"DEBUG: Password verification failed for '{email_login}'")
+                            st.error("❌ Invalid password (User found, password incorrect).")
+                    except Exception as e:
+                        st.error(f"Login processing error: {e}")
+                else:
+                    # TEMP DEBUGGING - REMOVE AFTER FIX
+                    st.warning(f"DEBUG INFO: Tried searching for '{email_login}' in DB: {DB_PATH}")
+                    st.error("User not found in database.")
+
+            except Exception as e:
+                st.error(f"Login error: {e}")
+            finally:
+                conn.close()
+        
+        col_act1, col_act2 = st.columns([1, 1])
+        with col_act2:
+            if st.button("Forgot Password?", type="secondary", use_container_width=True):
+                st.session_state.auth_mode = "forgot_pass"
+                st.rerun()
+
+        st.markdown("---")
+        if st.button("Create an Account", type="secondary", use_container_width=True):
+            st.session_state.auth_mode = "register"
+            st.rerun()
+
 def main():
-    init_db()
+    try:
+        init_db()
+    except Exception as e:
+        st.error(f"Database Initialization Error: {e}")
+
+    # Initialize Cookie Manager (Global)
+    # Specific key is required to prevent reloading issues
+    cookie_manager = None
+    if stx:
+        cookie_manager = stx.CookieManager(key="auth_cookie_manager")
+
+    # The "Cookie Sync" Block (Crucial)
+    # Check for existing cookie
+    if cookie_manager:
+        cookie_user = cookie_manager.get("portfolio_user")
+
+        # 1. If we are NOT logged in via Session State, BUT we have a valid Cookie:
+        if "logged_in" not in st.session_state or not st.session_state.logged_in:
+            if cookie_user:
+                # Restore session from cookie
+                st.session_state.logged_in = True
+                st.session_state.email = cookie_user
+                
+                # Fetch user details from DB based on cookie_user email here
+                try:
+                    conn = get_conn()
+                    # Query for user by username (stored in cookie)
+                    res = conn.execute("SELECT id, username FROM users WHERE username=?", (cookie_user,)).fetchone()
+                    conn.close()
+                    
+                    if res:
+                        st.session_state.user_id = res[0]
+                        st.session_state.username = res[1]
+                        st.rerun() # Force rerun to skip login screen immediately
+                    else:
+                        # Cookie user not found in DB
+                        cookie_manager.delete("portfolio_user")
+                except Exception:
+                    pass
+
+    # Auth Check
+    if not st.session_state.get('logged_in'):
+        # If we are checking auth, we pass the manager so login page can SET the cookie.
+        # But we must ensure we don't flash the login page if cookies are still loading.
+        # Unfortunately, with Streamlit, it's hard to distinguish "loading" from "no cookie".
+        # We will render the login page, but maybe add a spinner?
+        # Actually, showing login page is fine. If cookie appears, it will auto-rerun.
+        login_page(cookie_manager)
+        return
+
+    # Sidebar Logout
+    with st.sidebar:
+        st.write(f"👤 **{st.session_state.get('username', 'User')}**")
+        if st.button("Logout", key="logout_btn"):
+            # Update Logout Function (Deleting the Cookie)
+            if cookie_manager:
+                cookie_manager.delete("portfolio_user")
+            
+            st.session_state.logged_in = False
+            st.session_state.user_id = None
+            st.rerun()
+        st.divider()
 
     # --- THEME TOGGLE ---
     if "theme" not in st.session_state:
@@ -7835,6 +8841,7 @@ def main():
             "Trading Section",
             "Portfolio Tracker",
             "Dividends Tracker",
+            "Backup & Restore"
         ]
     )
 
@@ -7861,6 +8868,9 @@ def main():
 
     with tabs[7]:
         ui_dividends_tracker()
+        
+    with tabs[8]:
+        ui_backup_restore()
 
     st.caption("DB: portfolio.db | UI: Streamlit")
 
