@@ -5109,29 +5109,33 @@ def ui_portfolio_tracker():
         save_snapshot_btn = st.button("💾 Save Today's Snapshot (Live Data)", type="primary", use_container_width=True)
     
     with col_delete:
-        with st.popover("🗑️ Delete All", use_container_width=True):
-            st.warning("⚠️ **This will permanently delete ALL portfolio tracker snapshots!**")
-            st.caption("This action cannot be undone.")
-            
-            confirm_text = st.text_input("Type 'DELETE' to confirm:", key="delete_tracker_confirm")
-            
-            if st.button("🗑️ Confirm Delete All Snapshots", type="primary", use_container_width=True):
-                if confirm_text == "DELETE":
-                    try:
-                        user_id = st.session_state.get('user_id', 1)
-                        conn = get_conn()
-                        cur = conn.cursor()
-                        cur.execute("DELETE FROM portfolio_snapshots WHERE user_id = ? OR user_id IS NULL", (user_id,))
-                        deleted_count = cur.rowcount
-                        conn.commit()
-                        conn.close()
-                        st.success(f"✅ Deleted {deleted_count} snapshots.")
-                        time.sleep(1)
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Error deleting snapshots: {e}")
-                else:
-                    st.error("Please type 'DELETE' to confirm.")
+        if st.button("🗑️ Delete All", use_container_width=True):
+            st.session_state.confirm_delete_snapshots = True
+    
+    # Confirmation dialog
+    if st.session_state.get('confirm_delete_snapshots', False):
+        st.warning("⚠️ Are you sure you want to delete ALL snapshots?")
+        col_yes, col_no = st.columns(2)
+        with col_yes:
+            if st.button("✅ Yes, Delete All", type="primary", use_container_width=True):
+                try:
+                    user_id = st.session_state.get('user_id', 1)
+                    conn = get_conn()
+                    cur = conn.cursor()
+                    cur.execute("DELETE FROM portfolio_snapshots WHERE user_id = ? OR user_id IS NULL", (user_id,))
+                    deleted_count = cur.rowcount
+                    conn.commit()
+                    conn.close()
+                    st.session_state.confirm_delete_snapshots = False
+                    st.success(f"✅ Deleted {deleted_count} snapshots.")
+                    time.sleep(1)
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error: {e}")
+        with col_no:
+            if st.button("❌ Cancel", use_container_width=True):
+                st.session_state.confirm_delete_snapshots = False
+                st.rerun()
     
     # === SAVE TODAY'S SNAPSHOT ===
     if save_snapshot_btn:
