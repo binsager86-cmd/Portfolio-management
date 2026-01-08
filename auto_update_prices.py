@@ -4,13 +4,6 @@ from datetime import date
 
 DB_NAME = "portfolio.db"
 
-def upsert_fx(conn, rate_date: str, from_ccy: str, to_ccy: str, rate: float, source: str):
-    cur = conn.cursor()
-    cur.execute("""
-        INSERT OR REPLACE INTO fx_rates (rate_date, from_ccy, to_ccy, rate, source)
-        VALUES (?, ?, ?, ?, ?)
-    """, (rate_date, from_ccy, to_ccy, rate, source))
-
 def upsert_price(conn, asset_id: int, price_date: str, close_price: float, source: str):
     cur = conn.cursor()
     cur.execute("""
@@ -23,16 +16,6 @@ def get_base_currency(conn) -> str:
     cur.execute("SELECT value FROM settings WHERE key='base_currency'")
     row = cur.fetchone()
     return row[0] if row else "KWD"
-
-def fetch_usdkwd_demo():
-    """
-    Temporary: a simple FX fetch using a public endpoint.
-    We'll replace this with CBK automation next.
-    Returns: float rate for 1 USD -> KWD
-    """
-    # Frankfurter doesn't include KWD; this is a placeholder.
-    # We'll keep the pipeline working and swap to CBK next.
-    raise NotImplementedError("CBK FX fetch will be added next step.")
 
 def fetch_crypto_prices_usd(coin_ids):
     """

@@ -1,8 +1,12 @@
 from typing import Optional
 import sqlite3
 import time
-from datetime import date
-import pandas as pd
+try:
+    import pandas as pd
+    from datetime import date, datetime, timedelta # Added for peer analysis
+except ImportError:
+    pass
+
 import numpy as np
 import io
 import sys
@@ -46,9 +50,93 @@ try:
 except Exception:
     requests = None
 
+try:
+    from openai import OpenAI
+except ImportError:
+    OpenAI = None
+
 # Check yfinance availability WITH DIAGNOSTICS
 YFINANCE_AVAILABLE = False
 YFINANCE_ERROR = None
+
+# =========================
+# CONFIGURATION
+# =========================
+
+# Configuration for the 8 Tables in Peer Analysis
+PEER_METRICS = {
+    "Total Return": {
+        "1 Month": "calc_ret_1mo",
+        "3 Month": "calc_ret_3mo",
+        "6 Month": "calc_ret_6mo",
+        "9 Month": "calc_ret_9mo",
+        "YTD": "calc_ret_ytd",
+        "1 Year": "calc_ret_1y",
+        "3 Year": "calc_ret_3y",
+        "5 Year": "calc_ret_5y",
+        "10 Year": "calc_ret_10y"
+    },
+    "Dividends": {
+        "Dividend Yield (TTM)": "info_dividendYield",
+        "Payout Ratio": "info_payoutRatio",
+        "5 Year Avg Yield": "info_fiveYearAvgDividendYield",
+        "Dividend Rate (TTM)": "info_dividendRate",
+        "Ex-Dividend Date": "info_exDividendDate"
+    },
+    "Valuation": {
+        "P/E (TTM)": "info_trailingPE",
+        "Forward P/E": "info_forwardPE",
+        "PEG Ratio": "info_pegRatio",
+        "Price/Sales (TTM)": "info_priceToSalesTrailing12Months",
+        "Price/Book (TTM)": "info_priceToBook",
+        "EV/Revenue": "info_enterpriseToRevenue",
+        "EV/EBITDA": "info_enterpriseToEbitda",
+        "Price/Cash Flow": "info_operatingCashflow" # Note: Usually calc needed, strictly info here per request
+    },
+    "Growth": {
+        "Revenue Growth (YoY)": "info_revenueGrowth",
+        "Earnings Growth (YoY)": "info_earningsGrowth",
+        "Revenue 3Y CAGR": "calc_cagr_revenue_3y",
+        "Net Income 3Y CAGR": "calc_cagr_netincome_3y",
+        "EPS Diluted 3Y CAGR": "calc_cagr_eps_3y"
+    },
+    "Profitability": {
+        "Gross Margin": "info_grossMargins",
+        "EBITDA Margin": "info_ebitdaMargins",
+        "Operating Margin": "info_operatingMargins",
+        "Net Profit Margin": "info_profitMargins",
+        "Return on Equity (ROE)": "info_returnOnEquity",
+        "Return on Assets (ROA)": "info_returnOnAssets"
+    },
+    "Performance": {
+        "1 Year Price Perf": "calc_ret_1y",
+        "52 Week High": "info_fiftyTwoWeekHigh",
+        "52 Week Low": "info_fiftyTwoWeekLow",
+        "Beta": "info_beta"
+    },
+    "Income Statement (TTM/MRQ)": {
+        "Total Revenue": "info_totalRevenue",
+        "Gross Profit": "sheet_Gross Profit",
+        "EBITDA": "info_ebitda",
+        "Operating Income": "sheet_Operating Income",
+        "Net Income": "sheet_Net Income",
+        "EPS Diluted": "info_trailingEps"
+    },
+    "Balance Sheet (MRQ)": {
+        "Total Cash": "info_totalCash",
+        "Total Debt": "info_totalDebt",
+        "Net Debt": "calc_net_debt", 
+        "Total Debt/Equity": "info_debtToEquity",
+        "Current Ratio": "info_currentRatio",
+        "Quick Ratio": "info_quickRatio",
+        "Book Value Per Share": "info_bookValue"
+    },
+    "Cash Flow": {
+        "Operating Cash Flow": "info_operatingCashflow",
+        "Free Cash Flow": "info_freeCashflow",
+        "CapEx": "calc_capex" 
+    }
+}
 
 # Currency Configuration (Single Source of Truth)
 BASE_CCY = "KWD"  # Overall portfolio must be in KWD
@@ -143,6 +231,7 @@ KUWAIT_STOCKS = [
     # BANKS (Banking Sector)
     {"symbol": "ABK", "name": "Al Ahli Bank of Kuwait", "yf_ticker": "ABK.KW"},
     {"symbol": "BOUBYAN", "name": "Boubyan Bank", "yf_ticker": "BOUBYAN.KW"},
+    {"symbol": "BPCC", "name": "Boubyan Petrochemical Company", "yf_ticker": "BPCC.KW"},
     {"symbol": "BURGAN", "name": "Burgan Bank", "yf_ticker": "BURGAN.KW"},
     {"symbol": "CBK", "name": "Commercial Bank of Kuwait", "yf_ticker": "CBK.KW"},
     {"symbol": "GULF", "name": "Gulf Bank", "yf_ticker": "GULF.KW"},
@@ -430,6 +519,16 @@ def query_df(sql, params=()):
     return df
 
 
+def query_val(sql, params=()):
+    """Helper to fetch a single scalar value from DB."""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(sql, params)
+    res = cur.fetchone()
+    conn.close()
+    return res[0] if res else None
+
+
 def exec_sql(sql, params=()):
     conn = get_conn()
     cur = conn.cursor()
@@ -664,6 +763,18 @@ def init_db():
         """
     )
     
+    # Portfolio Cash (Manual Overrides)
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS portfolio_cash (
+            portfolio TEXT PRIMARY KEY,
+            balance REAL,
+            currency TEXT DEFAULT 'KWD',
+            last_updated INTEGER
+        )
+        """
+    )
+    
     # Add portfolio column if it doesn't exist
     add_column_if_missing("cash_deposits", "portfolio", "TEXT DEFAULT 'KFH'")
     # Add include_in_analysis column if it doesn't exist
@@ -694,6 +805,25 @@ def init_db():
             sell_value REAL NOT NULL DEFAULT 0,
             shares REAL NOT NULL DEFAULT 0,
             reinvested_dividend REAL NOT NULL DEFAULT 0,
+            notes TEXT,
+            created_at INTEGER NOT NULL
+        )
+        """
+    )
+
+    # Trading History (Separate Container for Trading Section)
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS trading_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            stock_symbol TEXT NOT NULL,
+            txn_date TEXT NOT NULL,
+            txn_type TEXT NOT NULL CHECK(txn_type IN ('Buy','Sell')),
+            purchase_cost REAL NOT NULL DEFAULT 0,
+            sell_value REAL NOT NULL DEFAULT 0,
+            shares REAL NOT NULL DEFAULT 0,
+            cash_dividend REAL NOT NULL DEFAULT 0,
+            bonus_shares REAL NOT NULL DEFAULT 0,
             notes TEXT,
             created_at INTEGER NOT NULL
         )
@@ -833,6 +963,8 @@ def convert_to_kwd(amount: float, ccy: str) -> float:
 
 def fmt_money(amount: float, ccy: str) -> str:
     """Format money with appropriate decimals for currency."""
+    if st.session_state.get("privacy_mode", False):
+        return "*****"
     if amount is None:
         amount = 0.0
     if ccy == "KWD":
@@ -845,6 +977,8 @@ def fmt_money(amount: float, ccy: str) -> str:
 
 def fmt_money_plain(x, d=3):
     """Format money without currency prefix (legacy support)."""
+    if st.session_state.get("privacy_mode", False):
+        return "*****"
     try:
         return f"{float(x):,.{d}f}"
     except Exception:
@@ -1192,6 +1326,8 @@ class PortfolioCalculator:
 
 
 def fmt_price(x, d=6):
+    if st.session_state.get("privacy_mode", False):
+        return "*****"
     try:
         return f"{float(x):.{d}f}"
     except Exception:
@@ -1617,23 +1753,33 @@ def render_portfolio_table(title: str, df: pd.DataFrame, fx_usdkwd: Optional[flo
         return 'color: var(--text-color); opacity: 0.6;'
 
     # Formatters
+    is_privacy = st.session_state.get("privacy_mode", False)
+    
+    def fmt_val(x, fmt_str):
+        if is_privacy:
+            return "*****"
+        try:
+            return fmt_str.format(x)
+        except:
+            return str(x)
+
     format_dict = {
-        "Quantity": "{:,.0f}",
-        "Avg. Cost Per Share": "{:,.3f}",
-        "Total cost": "{:,.3f}",
-        "Market price": "{:,.3f}",
+        "Quantity": lambda x: fmt_val(x, "{:,.0f}"),
+        "Avg. Cost Per Share": lambda x: fmt_val(x, "{:,.3f}"),
+        "Total cost": lambda x: fmt_val(x, "{:,.3f}"),
+        "Market price": lambda x: fmt_val(x, "{:,.3f}"),
         "P/E Ratio": "{:.2f}",
-        "Market value": "{:,.3f}",
-        "Appreciation income": "{:,.3f}",
-        "Cash dividends": "{:,.3f}",
-        "amount reinvested from dividends": "{:,.3f}",
-        "Bonus dividend shares": "{:,.0f}",
-        "Bonus share value": "{:,.3f}",
+        "Market value": lambda x: fmt_val(x, "{:,.3f}"),
+        "Appreciation income": lambda x: fmt_val(x, "{:,.3f}"),
+        "Cash dividends": lambda x: fmt_val(x, "{:,.3f}"),
+        "amount reinvested from dividends": lambda x: fmt_val(x, "{:,.3f}"),
+        "Bonus dividend shares": lambda x: fmt_val(x, "{:,.0f}"),
+        "Bonus share value": lambda x: fmt_val(x, "{:,.3f}"),
         "weight by Cost": "{:.2%}",
         "Yield": "{:.2%}",
-        "Yield Amount": "{:,.3f}",
+        "Yield Amount": lambda x: fmt_val(x, "{:,.3f}"),
         "Weighted yield": "{:.2%}",
-        "Current Profit / Loss": "{:,.3f}",
+        "Current Profit / Loss": lambda x: fmt_val(x, "{:,.3f}"),
         "%": "{:.2%}"
     }
 
@@ -2231,387 +2377,146 @@ def ui_cash_deposits():
                 
                 st.divider()
 
-def ui_upload_transactions_excel():
-    st.subheader("📥 Upload Transactions (Excel)")
-
-    st.caption(
-        "Upload an .xlsx file with a sheet named 'Transactions' (recommended). "
-        "Required columns: company, txn_date, txn_type, shares. "
-        "For Buy: purchase_cost. For Sell: sell_value. "
-        "Optional: bonus_shares, cash_dividend, reinvested_dividend, fees, broker, reference, notes, price_override, planned_cum_shares."
-    )
-
-    # Provide a downloadable sample Excel template to guide users
-    try:
-        sample_df = pd.DataFrame([
-            {
-                "company": "KIB",
-                "txn_date": date.today().isoformat(),
-                "txn_type": "Buy",
-                "shares": 100,
-                "purchase_cost": 100.0,
-                "sell_value": "",
-                "bonus_shares": 0,
-                "cash_dividend": 0.0,
-                "reinvested_dividend": 0.0,
-                "fees": 0.0,
-                "broker": "KFH",
-                "reference": "REF123",
-                "notes": "Example row",
-                "price_override": "",
-                "planned_cum_shares": "",
-            }
-        ])
-
-        buf = io.BytesIO()
-        with pd.ExcelWriter(buf, engine="openpyxl") as writer:
-            sample_df.to_excel(writer, sheet_name="Transactions", index=False)
-        buf.seek(0)
-
-        st.download_button(
-            label="Download sample Excel template",
-            data=buf,
-            file_name="transactions_template.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
-
-        with st.expander("Template & Tips", expanded=False):
-            st.markdown("- Required columns: **company**, **txn_date** (YYYY-MM-DD), **txn_type** (Buy/Sell), **shares**")
-            st.markdown("- For `Buy` rows: include **purchase_cost**. For `Sell` rows: include **sell_value**.")
-            st.markdown("- Optional columns: `bonus_shares`, `cash_dividend`, `reinvested_dividend`, `fees`, `broker`, `reference`, `notes`, `price_override`, `planned_cum_shares`.")
-            st.markdown("- Column names are normalized (spaces, dashes converted). The uploader will try common alternatives (e.g. `symbol`, `ticker` for `company`).")
-            st.markdown("- Use the `Transactions` sheet name if possible; otherwise the first sheet will be used.")
-            st.markdown("- See `.github/copilot-instructions.md` for more repository-specific guidance.")
-    except Exception:
-        # If writing the template fails (missing dependency), fall back silently and still show uploader
-        pass
-
-    file = st.file_uploader("Upload Excel (.xlsx)", type=["xlsx"], key="txn_excel_uploader")
-    if not file:
-        return
-
-    try:
-        xl = pd.ExcelFile(file)
-        sheet = "Transactions" if "Transactions" in xl.sheet_names else xl.sheet_names[0]
-        raw = xl.parse(sheet_name=sheet)
-    except Exception as e:
-        st.error(f"Could not read the Excel file: {e}")
-        return
-
-    if raw.empty:
-        st.warning("Excel sheet is empty.")
-        return
-
-    # Normalize columns
-    df = raw.copy()
-    df.columns = [_norm_col(c) for c in df.columns]
-
-    company_col = _pick_col(df, ["company", "symbol", "ticker", "stock", "stock_symbol", "asset"])
-    date_col = _pick_col(df, ["txn_date", "date", "trade_date"])
-    type_col = _pick_col(df, ["txn_type", "type", "side"])
-    shares_col = _pick_col(df, ["shares", "quantity", "qty"])
-
-    buy_cost_col = _pick_col(df, ["purchase_cost", "buy_cost", "total_cost", "cost"])
-    sell_val_col = _pick_col(df, ["sell_value", "sell_val", "proceeds", "value"])
-
-    bonus_col = _pick_col(df, ["bonus_shares", "bonus_dividend_shares", "stock_dividend", "stock_dividend_shares"])
-    cash_div_col = _pick_col(df, ["cash_dividend", "cash_dividends", "dividend_cash", "cash_div"])
-    reinv_col = _pick_col(df, ["reinvested_dividend", "reinvested_dividends", "reinv", "reinvested"])
-    fees_col = _pick_col(df, ["fees", "fee", "commission"])
-    broker_col = _pick_col(df, ["broker", "platform"])
-    ref_col = _pick_col(df, ["reference", "order_id", "ref"])
-    notes_col = _pick_col(df, ["notes", "comment", "comments", "description"])
-
-    override_col = _pick_col(df, ["price_override", "override_price", "override"])
-    planned_col = _pick_col(df, ["planned_cum_shares", "planned_cum", "planned", "planned_cum_qty"])
-
-    required_missing = []
-    if not company_col:
-        required_missing.append("company")
-    if not date_col:
-        required_missing.append("txn_date")
-    if not type_col:
-        required_missing.append("txn_type")
-    if not shares_col:
-        required_missing.append("shares")
-
-    if required_missing:
-        st.error(f"Missing required columns: {', '.join(required_missing)}")
-        st.info("Expected columns (minimum): company, txn_date, txn_type, shares")
-        st.write("Detected columns:", list(df.columns))
-        return
-
-    preview_cols = [company_col, date_col, type_col, shares_col]
-    for c in [buy_cost_col, sell_val_col, bonus_col, cash_div_col, reinv_col, fees_col, broker_col, ref_col, notes_col]:
-        if c and c not in preview_cols:
-            preview_cols.append(c)
-
-    st.markdown("### Preview (first 50 rows)")
-    st.dataframe(df[preview_cols].head(50), use_container_width=True)
-
-    errors = []
-    warnings_list = []
-    inserts = []
-
-    tx_cols = table_columns("transactions")
-
-    for col, coltype in [
-        ("bonus_shares", "REAL DEFAULT 0"),
-        ("cash_dividend", "REAL DEFAULT 0"),
-        ("price_override", "REAL DEFAULT NULL"),
-        ("planned_cum_shares", "REAL DEFAULT NULL"),
-        ("fees", "REAL DEFAULT 0"),
-        ("broker", "TEXT"),
-        ("reference", "TEXT"),
-    ]:
-        if col not in tx_cols:
-            add_column_if_missing("transactions", col, coltype)
-
-    for idx, r in df.iterrows():
-        company = _safe_str(r.get(company_col)).upper()
-        iso_date = _to_iso_date(r.get(date_col))
-        ttype = _safe_str(r.get(type_col)).title()
-        shares = _safe_num(r.get(shares_col), 0)
-
-        if company == "":
-            errors.append(f"Row {idx+2}: company is empty")
-            continue
-        if iso_date == "":
-            errors.append(f"Row {idx+2}: invalid txn_date")
-            continue
-        if ttype not in ("Buy", "Sell"):
-            errors.append(f"Row {idx+2}: txn_type must be Buy or Sell")
-            continue
-
-        # Accept empty/zero shares and costs. Record as 0.0 but surface warnings.
-        purchase_cost = _safe_num(r.get(buy_cost_col), 0.0) if buy_cost_col else 0.0
-        sell_value = _safe_num(r.get(sell_val_col), 0.0) if sell_val_col else 0.0
-
-        if shares <= 0:
-            warnings_list.append(f"Row {idx+2}: shares empty or <= 0 — recorded as 0.0")
-
-        if ttype == "Buy" and purchase_cost <= 0:
-            warnings_list.append(f"Row {idx+2}: purchase_cost empty or <= 0 for Buy — recorded as 0.0")
-
-        if ttype == "Sell" and sell_value <= 0:
-            warnings_list.append(f"Row {idx+2}: sell_value empty or <= 0 for Sell — recorded as 0.0")
-
-        bonus_shares = _safe_num(r.get(bonus_col), 0.0) if bonus_col else 0.0
-        cash_dividend = _safe_num(r.get(cash_div_col), 0.0) if cash_div_col else 0.0
-        reinvested_dividend = _safe_num(r.get(reinv_col), 0.0) if reinv_col else 0.0
-        fees = _safe_num(r.get(fees_col), 0.0) if fees_col else 0.0
-
-        broker = _safe_str(r.get(broker_col)) if broker_col else ""
-        reference = _safe_str(r.get(ref_col)) if ref_col else ""
-        notes = _safe_str(r.get(notes_col)) if notes_col else ""
-
-        price_override = None
-        if override_col:
-            ov = r.get(override_col)
-            if not (ov is None or (isinstance(ov, float) and pd.isna(ov)) or (isinstance(ov, str) and str(ov).strip() == "")):
-                price_override = _safe_num(ov, 0.0)
-
-        planned_cum_shares = None
-        if planned_col:
-            pv = r.get(planned_col)
-            if not (pv is None or (isinstance(pv, float) and pd.isna(pv)) or (isinstance(pv, str) and str(pv).strip() == "")):
-                planned_cum_shares = _safe_num(pv, 0.0)
-
-        existing = query_df("SELECT symbol FROM stocks WHERE symbol = ?", (company,))
-        if existing.empty:
-            try:
-                exec_sql("INSERT INTO stocks (symbol, name, current_price) VALUES (?, ?, ?)", (company, "", 0.0))
-            except Exception:
-                exec_sql("INSERT INTO stocks (symbol, name) VALUES (?, ?)", (company, ""))
-
-        inserts.append(
-            (
-                company,
-                iso_date,
-                ttype,
-                float(purchase_cost),
-                float(sell_value),
-                float(shares),
-                float(bonus_shares),
-                float(cash_dividend),
-                price_override,
-                planned_cum_shares,
-                float(reinvested_dividend),
-                float(fees),
-                broker.strip(),
-                reference.strip(),
-                notes.strip(),
-                int(time.time()),
-            )
-        )
-
-    if errors:
-        st.error("Validation failed. Fix these rows in Excel and re-upload:")
-        st.write(errors[:50])
-        return
-
-    # Show non-blocking warnings (if any) but allow import
-    if warnings_list:
-        st.warning("Warnings detected in file (non-blocking). See first 50:")
-        st.write(warnings_list[:50])
-
-    st.success(f"✅ File validated. Rows ready to import: {len(inserts):,}")
-
-    if st.button("Import to Database", type="primary"):
-        conn = get_conn()
-        cur = conn.cursor()
-
-        inserted = 0
-        skipped = 0
-        skipped_rows = []
-
-        for row in inserts:
-            (
-                company,
-                iso_date,
-                ttype,
-                purchase_cost,
-                sell_value,
-                shares_val,
-                bonus_shares,
-                cash_dividend,
-                price_override_val,
-                planned_cum_shares_val,
-                reinvested_dividend_val,
-                fees_val,
-                broker_val,
-                reference_val,
-                notes_val,
-                created_at_val,
-            ) = row
-
-            # Duplicate detection: same stock_symbol, txn_date, txn_type, shares,
-            # same cost field (purchase_cost for Buy, sell_value for Sell), and same category.
-            # Also check dividends to distinguish dividend-only transactions with zero shares.
-            if ttype == "Buy":
-                cur.execute(
-                    """
-                    SELECT id FROM transactions
-                    WHERE stock_symbol = ? AND txn_date = ? AND txn_type = ? AND category = ?
-                      AND shares = ? AND purchase_cost = ?
-                      AND COALESCE(cash_dividend, 0) = ? AND COALESCE(bonus_shares, 0) = ?
-                    """,
-                    (company, iso_date, ttype, 'portfolio', float(shares_val), float(purchase_cost),
-                     float(cash_dividend), float(bonus_shares)),
-                )
-            else:
-                cur.execute(
-                    """
-                    SELECT id FROM transactions
-                    WHERE stock_symbol = ? AND txn_date = ? AND txn_type = ? AND category = ?
-                      AND shares = ? AND sell_value = ?
-                      AND COALESCE(cash_dividend, 0) = ? AND COALESCE(bonus_shares, 0) = ?
-                    """,
-                    (company, iso_date, ttype, 'portfolio', float(shares_val), float(sell_value),
-                     float(cash_dividend), float(bonus_shares)),
-                )
-
-            if cur.fetchone():
-                skipped += 1
-                skipped_rows.append(f"{company} {iso_date} {ttype} shares={shares_val} cost={purchase_cost if ttype=='Buy' else sell_value}")
-                continue
-
-            # Insert if not duplicate
-            cur.execute(
-                """
-                INSERT INTO transactions
-                (stock_symbol, txn_date, txn_type, purchase_cost, sell_value, shares,
-                 bonus_shares, cash_dividend,
-                 price_override, planned_cum_shares, reinvested_dividend, fees,
-                 broker, reference, notes, category, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                row + ('portfolio',),
-            )
-            inserted += 1
-
-        conn.commit()
-        conn.close()
-
-        # Show confirmation modal (fall back to inline messages if modal not available)
-        # Show confirmation modal with icon. Fall back to inline messages if modal unavailable.
-        try:
-            with st.modal("Import Result"):
-                st.markdown("# ✅ Upload Successful")
-                st.write(f"Imported: **{inserted}**")
-                st.write(f"Skipped duplicates: **{skipped}**")
-                
-                # Show which stocks were imported
-                if inserted > 0:
-                    imported_stocks = list(set([row[0] for row in inserts]))
-                    st.write(f"**Stocks imported:** {', '.join(imported_stocks)}")
-                    st.info("💡 Go to 'Add Transactions' tab and select the stock from the dropdown to view the transactions.")
-                
-                if skipped > 0:
-                    with st.expander("View skipped rows (first 50)"):
-                        st.write(skipped_rows[:50])
-                st.write("")
-                st.button("Close")
-        except Exception:
-            st.success(f"✅ Imported: {inserted}")
-            if skipped > 0:
-                st.warning(f"Skipped duplicates: {skipped}")
-                st.write(skipped_rows[:50])
-            
-            # Show which stocks were imported
-            if inserted > 0:
-                imported_stocks = list(set([row[0] for row in inserts]))
-                st.info(f"**Stocks imported:** {', '.join(imported_stocks)}")
-                st.info("💡 Go to 'Add Transactions' tab and select the stock from the dropdown to view the transactions.")
-
-        st.rerun()
-
-# =========================
-# UI - TRANSACTIONS
-# =========================
 def ui_transactions():
     st.subheader("Add Transactions (per stock)")
     
-    # --- Export All Transactions Option ---
-    with st.expander("📥 Export All Transactions (Excel)"):
-        st.caption("Download a complete list of all transactions for all stocks.")
+    # --- Import / Export All Transactions Option ---
+    with st.expander("📥 Import / Export All Transactions (Backup & Restore)"):
+        col_export, col_import = st.columns(2)
         
-        # Fetch data
-        export_sql = """
-            SELECT 
-                t.id, t.stock_symbol, s.name as stock_name, s.portfolio, s.currency,
-                t.txn_date, t.txn_type, t.category,
-                t.shares, t.purchase_cost, t.sell_value, 
-                t.cash_dividend, t.reinvested_dividend, t.bonus_shares,
-                t.fees, t.broker, t.reference, t.notes, t.created_at
-            FROM transactions t
-            LEFT JOIN stocks s ON t.stock_symbol = s.symbol
-            ORDER BY t.txn_date DESC
-        """
-        df_export = query_df(export_sql)
-        
-        if not df_export.empty:
-            # Convert to Excel buffer
-            buffer = io.BytesIO()
-            with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
-                df_export.to_excel(writer, index=False, sheet_name='Transactions')
-                
-                # Format columns
-                workbook = writer.book
-                worksheet = writer.sheets['Transactions']
-                header_fmt = workbook.add_format({'bold': True, 'bg_color': '#D9EAD3', 'border': 1})
-                for col_num, value in enumerate(df_export.columns.values):
-                    worksheet.write(0, col_num, value, header_fmt)
-                    worksheet.set_column(col_num, col_num, 15) # Set width
+        with col_export:
+            st.markdown("### 📤 Export (Backup)")
+            st.caption("Download a complete list of all transactions.")
             
-            st.download_button(
-                label="📄 Download Excel File",
-                data=buffer.getvalue(),
-                file_name=f"all_transactions_{date.today().strftime('%Y-%m-%d')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-        else:
-            st.info("No transactions found.")
+            # Fetch data
+            export_sql = """
+                SELECT 
+                    t.id, t.stock_symbol, s.name as stock_name, s.portfolio, s.currency,
+                    t.txn_date, t.txn_type, t.category,
+                    t.shares, t.purchase_cost, t.sell_value, 
+                    t.cash_dividend, t.reinvested_dividend, t.bonus_shares,
+                    t.fees, t.broker, t.reference, t.notes, t.created_at
+                FROM transactions t
+                LEFT JOIN stocks s ON t.stock_symbol = s.symbol
+                ORDER BY t.txn_date DESC
+            """
+            df_export = query_df(export_sql)
+            
+            if not df_export.empty:
+                # Convert to Excel buffer
+                buffer = io.BytesIO()
+                with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+                    df_export.to_excel(writer, index=False, sheet_name='Transactions')
+                    
+                    # Format columns
+                    workbook = writer.book
+                    worksheet = writer.sheets['Transactions']
+                    header_fmt = workbook.add_format({'bold': True, 'bg_color': '#D9EAD3', 'border': 1})
+                    for col_num, value in enumerate(df_export.columns.values):
+                        worksheet.write(0, col_num, value, header_fmt)
+                        worksheet.set_column(col_num, col_num, 15) # Set width
+                
+                st.download_button(
+                    label="📄 Download All Transactions",
+                    data=buffer.getvalue(),
+                    file_name=f"portfolio_backup_{date.today().strftime('%Y-%m-%d')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True
+                )
+            else:
+                st.info("No transactions found to export.")
+
+        with col_import:
+            st.markdown("### 📥 Import (Restore)")
+            st.caption("Upload a previously exported Excel file to restore data.")
+            
+            restore_file = st.file_uploader("Upload Backup Excel", type=['xlsx'], key="restore_uploader")
+            
+            if restore_file:
+                if st.button("🚀 Restore / Import Data", type="primary", use_container_width=True):
+                    try:
+                        restore_df = pd.read_excel(restore_file)
+                        
+                        # Basic validation
+                        required = ['stock_symbol', 'txn_date', 'txn_type']
+                        if not all(col in restore_df.columns for col in required):
+                            st.error(f"❌ Invalid file format. Required columns: {required}")
+                        else:
+                            conn = get_conn()
+                            cur = conn.cursor()
+                            restored_count = 0
+                            skipped_count = 0
+                            new_stocks = 0
+                            
+                            progress_bar = st.progress(0, text="Restoring data...")
+                            
+                            total_rows = len(restore_df)
+                            for idx, row in restore_df.iterrows():
+                                # Progress update
+                                if idx % 10 == 0:
+                                    progress_bar.progress((idx + 1) / total_rows, text=f"Processing row {idx+1}/{total_rows}")
+
+                                symbol = str(row['stock_symbol']).strip().upper()
+                                # 1. Ensure Stock Exists
+                                cur.execute("SELECT id FROM stocks WHERE symbol = ?", (symbol,))
+                                if not cur.fetchone():
+                                    # Create stock if missing (use backup data if available)
+                                    s_name = row.get('stock_name', symbol)
+                                    s_port = row.get('portfolio', 'KFH')
+                                    s_curr = row.get('currency', 'KWD')
+                                    cur.execute("INSERT INTO stocks (symbol, name, portfolio, currency) VALUES (?, ?, ?, ?)", 
+                                                (symbol, s_name, s_port, s_curr))
+                                    new_stocks += 1
+                                
+                                # 2. Extract Data
+                                t_date = pd.to_datetime(row['txn_date']).strftime('%Y-%m-%d')
+                                t_type = row['txn_type']
+                                t_cat = row.get('category', 'portfolio')
+                                t_shares = float(row.get('shares', 0) or 0)
+                                t_cost = float(row.get('purchase_cost', 0) or 0)
+                                t_sell = float(row.get('sell_value', 0) or 0)
+                                t_div = float(row.get('cash_dividend', 0) or 0)
+                                t_reinv = float(row.get('reinvested_dividend', 0) or 0)
+                                t_bonus = float(row.get('bonus_shares', 0) or 0)
+                                t_fees = float(row.get('fees', 0) or 0)
+                                t_broker = str(row.get('broker', '') or '')
+                                t_ref = str(row.get('reference', '') or '')
+                                t_notes = str(row.get('notes', '') or '')
+                                t_created = int(row.get('created_at', time.time()) or time.time())
+                                
+                                # 3. Check Duplicate (Strict content match, ignoring ID)
+                                cur.execute("""
+                                    SELECT id FROM transactions 
+                                    WHERE stock_symbol=? AND txn_date=? AND txn_type=? 
+                                    AND shares=? AND purchase_cost=? AND sell_value=?
+                                """, (symbol, t_date, t_type, t_shares, t_cost, t_sell))
+                                
+                                if cur.fetchone():
+                                    skipped_count += 1
+                                else:
+                                    cur.execute("""
+                                        INSERT INTO transactions 
+                                        (stock_symbol, txn_date, txn_type, category, shares, purchase_cost, 
+                                         sell_value, cash_dividend, reinvested_dividend, bonus_shares, 
+                                         fees, broker, reference, notes, created_at)
+                                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                    """, (symbol, t_date, t_type, t_cat, t_shares, t_cost, t_sell, 
+                                          t_div, t_reinv, t_bonus, t_fees, t_broker, t_ref, t_notes, t_created))
+                                    restored_count += 1
+                            
+                            conn.commit()
+                            conn.close()
+                            progress_bar.empty()
+                            
+                            st.success(f"✅ Restoration Complete: {restored_count} imported, {skipped_count} skipped (duplicates).")
+                            if new_stocks > 0:
+                                st.info(f"🆕 Created {new_stocks} missing stock entries.")
+                            
+                            time.sleep(2)
+                            st.rerun()
+                            
+                    except Exception as e:
+                        st.error(f"Error restoring data: {e}")
     
     # Add stock section first
     with st.expander("➕ Add Stock", expanded=False):
@@ -2923,15 +2828,24 @@ def ui_transactions():
             broker,
             reference,
             notes,
+            category,
             created_at
         FROM transactions
-        WHERE stock_symbol = ? AND COALESCE(category, 'portfolio') = 'portfolio'
+        WHERE stock_symbol = ?
         ORDER BY txn_date ASC, created_at ASC, id ASC
         """,
         (selected_symbol,),
     )
+    
+    # Separate subset for metrics calculation (only 'portfolio' category)
+    # Handle NULL category as 'portfolio'
+    if not tx.empty:
+        tx['category'] = tx['category'].fillna('portfolio')
+        tx_calc = tx[tx['category'] == 'portfolio']
+    else:
+        tx_calc = tx
 
-    metrics = compute_stock_metrics(tx)
+    metrics = compute_stock_metrics(tx_calc)
     current_price = float(new_cp)
     market_value = metrics["current_shares"] * current_price
 
@@ -3013,7 +2927,7 @@ def ui_transactions():
     s1.metric("Total Purchase", fmt_money_plain(metrics["total_buy_cost"]))
     s2.metric("Total Shares Purchased", fmt_int(metrics["total_buy_shares"]))
     s3.metric("Total Shares (Current)", fmt_int(metrics["current_shares"]))
-    s4.metric("Average Cost", f"{metrics['avg_cost']:.6f}")
+    s4.metric("Average Cost", fmt_price(metrics['avg_cost'], 6))
     s5.metric("Current Price", f"{current_price:.6f}")
     s6.metric("Market Value", fmt_money_plain(market_value))
 
@@ -3200,8 +3114,22 @@ def ui_transactions():
         st.info("No transactions yet.")
         return
 
-    view = compute_transactions_view(tx)
+
+    # Filter controls
+    f_col1, f_col2 = st.columns([1, 4])
+    show_all_records = f_col1.checkbox("Show 'Record Only' items", value=True, help="Include items not in portfolio analysis")
     
+    view = compute_transactions_view(tx)
+    if not show_all_records and not tx.empty:
+        # Filter out 'record' items from view if unchecked
+        # Note: compute_transactions_view preserves all rows, so we filter by index or ID match if needed,
+        # but simpler is to use the 'category' column if it was preserved.
+        # compute_transactions_view creates a copy, so we need to ensure 'category' is in it.
+        # Just map ID back to category
+        id_to_cat = dict(zip(tx['id'], tx['category']))
+        view['category'] = view['id'].map(id_to_cat)
+        view = view[view['category'] == 'portfolio']
+
     # Column headers
     header_cols = st.columns([0.4, 0.8, 0.6, 0.6, 1, 1, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 1, 0.5])
     header_cols[0].markdown("**#**")
@@ -3418,7 +3346,17 @@ def ui_transactions():
                 cols[9].write(fmt_int(row.get('bonus_shares', 0)))
                 cols[10].write(fmt_kwd(row.get('cash_dividend', 0)))
                 cols[11].write(fmt_kwd(row.get('reinvested_dividend', 0)))
-                cols[12].write(str(row.get('notes', ''))[:20] + "..." if len(str(row.get('notes', ''))) > 20 else str(row.get('notes', '')))
+                
+                # Visual indicator for Record Only
+                cat_val = row.get('category')
+                # If category is missing in 'view', try to map it from tx
+                if pd.isna(cat_val) and not tx.empty:
+                     cat_val = tx.loc[tx['id'] == tx_id, 'category'].iloc[0] if not tx[tx['id'] == tx_id].empty else 'portfolio'
+                
+                if cat_val == 'record':
+                    cols[12].markdown("📝 **(Record Only)** " + (str(row.get('notes', ''))[:15] + "..." if len(str(row.get('notes', ''))) > 15 else str(row.get('notes', ''))))
+                else:
+                    cols[12].write(str(row.get('notes', ''))[:20] + "..." if len(str(row.get('notes', ''))) > 20 else str(row.get('notes', '')))
                 
                 if cols[13].button("✏️", key=f"edit_btn_{tx_id}"):
                     st.session_state.editing_tx_id = tx_id
@@ -3765,7 +3703,7 @@ def ui_portfolio_analysis():
         """, unsafe_allow_html=True)
     
     with col2:
-        from datetime import datetime
+        # datetime is already imported globally
         st.markdown(f"""
         <div class="app-status">
             ⏱ Last update<br>
@@ -3800,7 +3738,6 @@ def ui_portfolio_analysis():
                     progress_bar = st.progress(0)
                     status_text = st.empty()
                     
-                    import time
                     start_time = time.time()
                     
                     for idx, sym in enumerate(symbols):
@@ -3845,6 +3782,103 @@ def ui_portfolio_analysis():
 
     st.divider()
 
+    # ----------------------------------------------------
+    # CASH MANAGEMENT (Inline Editor)
+    # ----------------------------------------------------
+    st.subheader("💵 Cash Management")
+    st.caption("Manually update your available cash balance per portfolio. 'Total Capital' is calculated from deposits.")
+
+    # 1. Fetch Summary Data
+    cash_data = []
+    _cash_portfolios = ["KFH", "BBYN", "USA"]
+    
+    for p in _cash_portfolios:
+        # A. Total Deposited (Read-only Reference)
+        _total_dep = query_val("SELECT SUM(amount) FROM cash_deposits WHERE portfolio=?", (p,)) 
+        if _total_dep is None: _total_dep = 0.0
+        
+        # B. Manual Cash Balance (Source of Truth for Buying Power)
+        _manual_bal_df = query_df("SELECT balance FROM portfolio_cash WHERE portfolio=?", (p,))
+        _manual_balance = float(_manual_bal_df.iloc[0]['balance']) if not _manual_bal_df.empty else 0.0
+        
+        _currency = PORTFOLIO_CCY.get(p, "KWD")
+        
+        cash_data.append({
+            "Portfolio": p,
+            "Currency": _currency,
+            "Total Capital": float(_total_dep),
+            "Available Cash": float(_manual_balance)
+        })
+        
+    cash_df_display = pd.DataFrame(cash_data)
+    
+    # Render Editor
+    _c1, _c2 = st.columns([3, 1])
+    with _c1:
+        edited_cash = st.data_editor(
+            cash_df_display,
+            column_config={
+                "Portfolio": st.column_config.TextColumn("Portfolio", disabled=True),
+                "Currency": st.column_config.TextColumn("CCY", disabled=True, width="small"),
+                "Total Capital": st.column_config.NumberColumn(
+                    "Total Capital (Deposited)",
+                    disabled=True, 
+                    format="%.3f",
+                    help="Sum of all deposits in 'Cash/Deposits' table."
+                ),
+                "Available Cash": st.column_config.NumberColumn(
+                    "Available Cash (Manual)",
+                    min_value=0, step=100.0, format="%.3f",
+                    help="Enter your actual current cash balance in the portfolio."
+                )
+            },
+            hide_index=True,
+            use_container_width=True,
+            key="cash_editor_widget"
+        )
+        
+    with _c2:
+        # Mini Total
+        _total_cash_kwd = 0.0
+        _rate = st.session_state.get("usd_to_kwd", 0.307)
+        for _, r in cash_df_display.iterrows():
+            if r["Currency"] == "USD":
+                _total_cash_kwd += r["Available Cash"] * _rate
+            else:
+                _total_cash_kwd += r["Available Cash"]
+        st.metric("Total Free Cash", fmt_money(_total_cash_kwd, "KWD"))
+    
+    # Handle Edits
+    if not cash_df_display.equals(edited_cash):
+        _changes = False
+        for _i, _row in edited_cash.iterrows():
+            _old_val = cash_df_display.loc[_i, "Available Cash"]
+            _new_val = _row["Available Cash"]
+            
+            # If value changed
+            if abs(_new_val - _old_val) > 0.001:
+                _p_name = _row["Portfolio"]
+                _p_ccy = _row["Currency"]
+                _ts = int(time.time())
+                
+                # Upsert into portfolio_cash
+                exec_sql("""
+                    INSERT INTO portfolio_cash (portfolio, balance, currency, last_updated)
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT(portfolio) DO UPDATE SET
+                        balance=excluded.balance,
+                        currency=excluded.currency,
+                        last_updated=excluded.last_updated
+                """, (_p_name, _new_val, _p_ccy, _ts))
+                _changes = True
+
+        if _changes:
+            st.toast("✅ Cash Balances Updated")
+            time.sleep(1)
+            st.rerun()
+
+    st.divider()
+
     # Fetch USD/KWD rate automatically
     fx_usdkwd = fetch_usd_kwd_rate()
 
@@ -3880,11 +3914,21 @@ def ui_portfolio_analysis():
             overall_total_cash_div += convert_to_kwd(port_cash_div, ccy)
             overall_total_pnl += convert_to_kwd(port_pnl, ccy)
     
+    # --- Integration of Manual Cash for Totals ---
+    _overall_cash_kwd = 0.0
+    _cash_recs = query_df("SELECT balance, currency FROM portfolio_cash")
+    if not _cash_recs.empty:
+        for _, _cr in _cash_recs.iterrows():
+            _overall_cash_kwd += convert_to_kwd(_cr["balance"], _cr["currency"])
+            
+    overall_total_value = overall_total_mv + _overall_cash_kwd
+    # ---------------------------------------------
+
     if overall_total_cost > 0:
         overall_total_pnl_pct = overall_total_pnl / overall_total_cost
         overall_dividend_yield = overall_total_cash_div / overall_total_cost
         
-        # Calculate performance metrics
+        # Calculate performance metrics (Equity Only)
         mv_change_pct = ((overall_total_mv - overall_total_cost) / overall_total_cost * 100)
         unreal_change_pct = (overall_total_unreal / overall_total_cost * 100)
         
@@ -3892,7 +3936,8 @@ def ui_portfolio_analysis():
         with col1:
             kpi_card("Total Cost", fmt_money(overall_total_cost, "KWD"))
         with col2:
-            kpi_card("Market Value", fmt_money(overall_total_mv, "KWD"), f"▲ {mv_change_pct:.2f}%")
+            # Modified to show Total Value (Equity + Cash)
+            kpi_card("Total Value", fmt_money(overall_total_value, "KWD"), f"Cash: {fmt_money(_overall_cash_kwd, 'KWD')}")
         with col3:
             kpi_card("Unrealized P/L", fmt_money(overall_total_unreal, "KWD"), f"▲ {unreal_change_pct:.2f}%")
         with col4:
@@ -4097,6 +4142,143 @@ def ui_portfolio_tracker():
         st.error("🚨 Critical: Plotly is not loaded! Charts will not display.")
         st.info("Try: `pip install plotly` in your terminal")
     
+    # === SAVE TODAY'S SNAPSHOT BUTTON ===
+    if st.button("💾 Save Today's Snapshot (Live Data)", type="primary", use_container_width=True):
+        with st.spinner("Calculating live portfolio value..."):
+            # 1. Calculate LIVE portfolio value
+            live_portfolio_value = 0.0
+            for port_name in PORTFOLIO_CCY.keys():
+                df_port = build_portfolio_table(port_name)
+                if not df_port.empty:
+                    for _, row in df_port.iterrows():
+                        live_portfolio_value += convert_to_kwd(row['Market Value'], row['Currency'])
+            
+            # 2. Calculate Accumulated Cash (Total Deposits)
+            all_deposits = query_df("SELECT amount, currency, include_in_analysis, deposit_date FROM cash_deposits")
+            today_str = date.today().strftime("%Y-%m-%d")
+            
+            total_deposits_kwd = 0.0
+            today_deposits_kwd = 0.0
+            
+            if not all_deposits.empty:
+                # Convert all to KWD first
+                all_deposits["amount_in_kwd"] = all_deposits.apply(
+                    lambda row: convert_to_kwd(row["amount"], row.get("currency", "KWD")),
+                    axis=1
+                )
+                # Filter for analysis
+                analysis_deposits = all_deposits[all_deposits["include_in_analysis"] == 1]
+                
+                # Total accumulated up to today (inclusive)
+                # Note: We assume all deposits in DB are valid. If we want strictly <= today:
+                # analysis_deposits = analysis_deposits[analysis_deposits["deposit_date"] <= today_str]
+                total_deposits_kwd = analysis_deposits["amount_in_kwd"].sum()
+                
+                # Deposits specifically for today
+                today_deposits_kwd = analysis_deposits[analysis_deposits["deposit_date"] == today_str]["amount_in_kwd"].sum()
+            
+            # 3. Get Previous Snapshot for Deltas
+            prev_snap = query_df(
+                "SELECT * FROM portfolio_snapshots WHERE snapshot_date < ? ORDER BY snapshot_date DESC LIMIT 1",
+                (today_str,)
+            )
+            
+            prev_value = 0.0
+            prev_accumulated = 0.0
+            
+            if not prev_snap.empty:
+                prev_value = float(prev_snap["portfolio_value"].iloc[0])
+                prev_accumulated = float(prev_snap["accumulated_cash"].iloc[0]) if pd.notna(prev_snap["accumulated_cash"].iloc[0]) else 0.0
+                prev_date = prev_snap["snapshot_date"].iloc[0]
+            else:
+                prev_date = "1970-01-01" # Start of time
+            
+            # Calculate accumulated cash incrementally to respect manual edits in history
+            # Accumulated = Previous Accumulated + Deposits since previous snapshot (up to today)
+            
+            new_deposits_kwd = 0.0
+            if not all_deposits.empty:
+                # Filter deposits strictly > prev_date and <= today
+                # Note: We use analysis_deposits which is already filtered by include_in_analysis=1
+                new_deposits_df = analysis_deposits[
+                    (analysis_deposits["deposit_date"] > prev_date) & 
+                    (analysis_deposits["deposit_date"] <= today_str)
+                ]
+                new_deposits_kwd = new_deposits_df["amount_in_kwd"].sum()
+            
+            # If no previous snapshot exists, we fall back to total sum of all deposits up to today
+            # UPDATE: User requested to take value from Overview page (Total Cash Deposits)
+            # We prioritize the calculated total_deposits_kwd from cash_deposits table
+            if total_deposits_kwd > 0:
+                accumulated_cash = total_deposits_kwd
+            elif prev_snap.empty:
+                accumulated_cash = total_deposits_kwd
+            else:
+                accumulated_cash = prev_accumulated + new_deposits_kwd
+            
+            # 4. Calculate Metrics
+            daily_movement = live_portfolio_value - prev_value if prev_value > 0 else 0.0
+            # If we want daily movement to exclude today's deposit:
+            # daily_movement = (live_portfolio_value - today_deposits_kwd) - prev_value
+            
+            # Calculate Beginning Diff: Current Value - First Value (Baseline)
+            # Get the baseline value (value of the earliest snapshot)
+            first_snap = query_df("SELECT portfolio_value, snapshot_date FROM portfolio_snapshots ORDER BY snapshot_date ASC LIMIT 1")
+            
+            if first_snap.empty:
+                # This is the first snapshot ever
+                beginning_diff = 0.0
+            else:
+                first_date = first_snap["snapshot_date"].iloc[0]
+                # If today is strictly after the first date, use first snapshot as baseline
+                if today_str > first_date:
+                    baseline_value = float(first_snap["portfolio_value"].iloc[0])
+                    beginning_diff = live_portfolio_value - baseline_value
+                # If today is the first date (or before), diff is 0
+                else:
+                    beginning_diff = 0.0
+            
+            # Net Gain = Beginning Diff - Accumulated Cash (Corrected Formula)
+            net_gain = beginning_diff - accumulated_cash
+            
+            roi_percent = (net_gain / accumulated_cash * 100) if accumulated_cash > 0 else 0.0
+            change_percent = ((live_portfolio_value - prev_value) / prev_value * 100) if prev_value > 0 else 0.0
+            
+            # 5. Insert or Update
+            # Check if exists
+            existing = query_df("SELECT * FROM portfolio_snapshots WHERE snapshot_date = ?", (today_str,))
+            
+            if not existing.empty:
+                exec_sql(
+                    """
+                    UPDATE portfolio_snapshots
+                    SET portfolio_value = ?, daily_movement = ?, beginning_difference = ?,
+                        deposit_cash = ?, accumulated_cash = ?, net_gain = ?, 
+                        change_percent = ?, roi_percent = ?, created_at = ?
+                    WHERE snapshot_date = ?
+                    """,
+                    (live_portfolio_value, daily_movement, beginning_diff,
+                     today_deposits_kwd, accumulated_cash, net_gain,
+                     change_percent, roi_percent, int(time.time()),
+                     today_str)
+                )
+                st.success(f"✅ Updated snapshot for {today_str}")
+            else:
+                exec_sql(
+                    """
+                    INSERT INTO portfolio_snapshots 
+                    (snapshot_date, portfolio_value, daily_movement, beginning_difference, 
+                     deposit_cash, accumulated_cash, net_gain, change_percent, roi_percent, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (today_str, live_portfolio_value, daily_movement, beginning_diff,
+                     today_deposits_kwd, accumulated_cash, net_gain, change_percent, roi_percent, int(time.time()))
+                )
+                st.success(f"✅ Saved new snapshot for {today_str}")
+            
+            time.sleep(1)
+            st.rerun()
+
     # Excel upload and download
     col1, col2 = st.columns(2)
     with col1:
@@ -4208,7 +4390,7 @@ def ui_portfolio_tracker():
                                     accumulated_cash += deposit_cash
                                 # else: carry forward previous value (no change to accumulated_cash)
                             
-                            # Net gain from stocks = Beginning Difference - Accumulated Cash
+                            # Net gain from stocks = Beginning Difference - Accumulated Cash (Corrected Formula)
                             net_gain = beginning_diff - accumulated_cash if accumulated_cash else beginning_diff
                             # ROI % = Net Gain / Accumulated Cash
                             roi_percent = (net_gain / accumulated_cash * 100) if accumulated_cash and accumulated_cash > 0 else 0
@@ -4250,64 +4432,62 @@ def ui_portfolio_tracker():
     
     st.divider()
     
-    # Add new snapshot
-    with st.expander("➕ Add Daily Snapshot", expanded=False):
+    # Add manual snapshot
+    with st.expander("➕ Add Manual Snapshot (Transaction)", expanded=False):
+        st.caption("Manually add a historical portfolio snapshot. Metrics will be auto-calculated if left as 0.")
         col1, col2 = st.columns(2)
         with col1:
-            snap_date = st.date_input("Date", value=date.today(), key="snap_date")
-            portfolio_value = st.number_input("Portfolio Value", min_value=0.0, step=0.001, format="%.3f", key="snap_value")
-            deposit_cash = st.number_input("Deposit Cash (if any)", min_value=0.0, step=0.001, format="%.3f", key="snap_deposit")
+            snap_date = st.date_input("Date", value=date.today(), key="manual_snap_date")
+            portfolio_value = st.number_input("Portfolio Value", min_value=0.0, step=0.001, format="%.3f", key="manual_snap_value")
+            deposit_cash = st.number_input("Deposit Cash (if any)", min_value=0.0, step=0.001, format="%.3f", key="manual_snap_deposit")
         with col2:
-            daily_movement = st.number_input("Daily Movement", step=0.001, format="%.3f", key="snap_movement")
-            beginning_diff = st.number_input("Beginning Difference", step=0.001, format="%.3f", key="snap_diff")
+            daily_movement = st.number_input("Daily Movement (Optional)", step=0.001, format="%.3f", key="manual_snap_movement")
+            beginning_diff = st.number_input("Beginning Difference (Optional)", step=0.001, format="%.3f", key="manual_snap_diff")
         
-        if st.button("Save Snapshot"):
+        if st.button("Save Manual Snapshot"):
             snap_date_str = snap_date.strftime("%Y-%m-%d")
             
             # Check if snapshot already exists
             existing = query_df("SELECT * FROM portfolio_snapshots WHERE snapshot_date = ?", (snap_date_str,))
             if not existing.empty:
-                st.error(f"Snapshot for {snap_date_str} already exists. Delete it first to update.")
+                st.error(f"Snapshot for {snap_date_str} already exists. Please edit it in the table below instead.")
             else:
-                # Get previous snapshot for calculations
+                # Get previous snapshot relative to this date
                 prev_snap = query_df(
-                    "SELECT * FROM portfolio_snapshots ORDER BY snapshot_date DESC LIMIT 1"
+                    "SELECT * FROM portfolio_snapshots WHERE snapshot_date < ? ORDER BY snapshot_date DESC LIMIT 1",
+                    (snap_date_str,)
                 )
                 
-                # Calculate accumulated cash using correct logic
-                if prev_snap.empty:
-                    # First snapshot ever
-                    if deposit_cash > 0:
-                        accumulated_cash = deposit_cash
-                    else:
-                        accumulated_cash = None
-                    prev_value = 0
-                else:
-                    prev_acc = prev_snap["accumulated_cash"].iloc[0]
-                    prev_value = float(prev_snap["portfolio_value"].iloc[0])
-                    
-                    # If no previous accumulated value (None/NULL)
-                    if pd.isna(prev_acc):
-                        if deposit_cash > 0:
-                            accumulated_cash = deposit_cash
-                        else:
-                            accumulated_cash = None
-                    else:
-                        # Has previous accumulated value
-                        prev_acc = float(prev_acc)
-                        if deposit_cash > 0:
-                            # Add new deposit to previous accumulated
-                            accumulated_cash = prev_acc + deposit_cash
-                        else:
-                            # No new deposit, carry forward previous value
-                            accumulated_cash = prev_acc
+                prev_value = 0.0
+                prev_accumulated = 0.0
                 
-                # Net gain from stocks = Beginning Difference - Accumulated Cash
-                net_gain = beginning_diff - accumulated_cash if accumulated_cash else beginning_diff
-                # ROI % = Net Gain / Accumulated Cash
-                roi_percent = (net_gain / accumulated_cash * 100) if accumulated_cash and accumulated_cash > 0 else 0
-                # Change % = change from previous day
-                change_percent = ((portfolio_value - prev_value) / prev_value * 100) if prev_value > 0 else 0
+                if not prev_snap.empty:
+                    prev_value = float(prev_snap["portfolio_value"].iloc[0])
+                    prev_accumulated = float(prev_snap["accumulated_cash"].iloc[0]) if pd.notna(prev_snap["accumulated_cash"].iloc[0]) else 0.0
+                
+                # Calculate Accumulated Cash
+                accumulated_cash = prev_accumulated + deposit_cash
+                
+                # Auto-calculate metrics if 0
+                if daily_movement == 0:
+                    daily_movement = portfolio_value - prev_value if prev_value > 0 else 0.0
+                
+                if beginning_diff == 0:
+                    # Calculate Beginning Diff: Current Value - First Value (Baseline)
+                    first_snap = query_df("SELECT portfolio_value, snapshot_date FROM portfolio_snapshots ORDER BY snapshot_date ASC LIMIT 1")
+                    if first_snap.empty:
+                        beginning_diff = 0.0
+                    else:
+                        first_date = first_snap["snapshot_date"].iloc[0]
+                        if snap_date_str > first_date:
+                            baseline_value = float(first_snap["portfolio_value"].iloc[0])
+                            beginning_diff = portfolio_value - baseline_value
+                        else:
+                            beginning_diff = 0.0
+                
+                net_gain = beginning_diff - accumulated_cash
+                roi_percent = (net_gain / accumulated_cash * 100) if accumulated_cash > 0 else 0.0
+                change_percent = ((portfolio_value - prev_value) / prev_value * 100) if prev_value > 0 else 0.0
                 
                 exec_sql(
                     """
@@ -4319,7 +4499,8 @@ def ui_portfolio_tracker():
                     (snap_date_str, portfolio_value, daily_movement, beginning_diff,
                      deposit_cash, accumulated_cash, net_gain, change_percent, roi_percent, int(time.time()))
                 )
-                st.success("Snapshot saved!")
+                st.success(f"✅ Saved snapshot for {snap_date_str}")
+                time.sleep(1)
                 st.rerun()
     
     st.divider()
@@ -4333,283 +4514,366 @@ def ui_portfolio_tracker():
         st.info("No portfolio snapshots yet. Add your first snapshot above.")
         return
     
-    # === MODERN INTERACTIVE LINE CHART (FULL-WIDTH) ===
-    st.markdown("### 📈 Portfolio Value Over Time")
+    # === MODERN DASHBOARD ===
     
-    chart_data = snapshots[["snapshot_date", "portfolio_value"]].copy()
-    chart_data = chart_data.sort_values("snapshot_date")
-    chart_data["snapshot_date"] = pd.to_datetime(chart_data["snapshot_date"])
-
-    if go is not None:
-        # Get theme colors from session state
-        if st.session_state.theme == "dark":
-            bg_color = '#0F172A'
-            card_color = '#1E293B'
-            text_color = '#F3F4F6'
-            line_color = '#34D399'  # Neon Mint
-            fill_color = 'rgba(52, 211, 153, 0.1)'
-            grid_color = '#334155'
-            hover_bg = '#F8FAFC'
-            hover_text = '#0F172A'
-        else:
-            bg_color = '#FFFFFF'
-            card_color = '#FFFFFF'
-            text_color = '#111827'
-            line_color = '#10B981'  # Emerald
-            fill_color = 'rgba(16, 185, 129, 0.1)'
-            grid_color = '#E5E7EB'
-            hover_bg = '#111827'
-            hover_text = '#FFFFFF'
-
-        # Calculate data range for better y-axis scaling
-        min_value = chart_data["portfolio_value"].min()
-        max_value = chart_data["portfolio_value"].max()
-        value_range = max_value - min_value
-        # Add 5% padding to top and bottom for better visualization
-        y_min = min_value - (value_range * 0.05)
-        y_max = max_value + (value_range * 0.05)
-
-        fig = go.Figure()
-
-        # Add the Line (Spline with smooth curve)
-        fig.add_trace(go.Scatter(
-            x=chart_data["snapshot_date"],
-            y=chart_data["portfolio_value"],
-            mode='lines',
-            line=dict(
-                color=line_color,
-                width=3,
-                shape='spline',  # Smooth/curvy line
-                smoothing=1.3
-            ),
-            fill='tonexty',  # Fill to next y (instead of zero)
-            fillcolor=fill_color,
-            hoverinfo='x+y',
-            hovertemplate='<b>%{y:,.3f} KWD</b><extra></extra>'  # Custom tooltip format
-        ))
-
-        # Customizing Layout for Modern Design
-        fig.update_layout(
-            paper_bgcolor=bg_color,
-            plot_bgcolor=bg_color,
-            margin=dict(l=0, r=60, t=30, b=0),
-            height=350,
-            hovermode="x unified",  # The scrubbing line effect
-            font=dict(family="Inter, system-ui, sans-serif"),
-            xaxis=dict(
-                showgrid=False,
-                showline=False,
-                showticklabels=False,  # Minimalist: hide dates on X
-                zeroline=False
-            ),
-            yaxis=dict(
-                showgrid=True,
-                gridcolor=grid_color,
-                gridwidth=1,
-                griddash='dash',  # Dashed grid lines
-                showline=False,
-                showticklabels=True,
-                tickfont=dict(color=text_color, size=10),
-                tickformat=",.0f",
-                zeroline=False,
-                side='right',  # Put labels on right side
-                range=[y_min, y_max]  # Auto-scale based on data with padding
-            )
-        )
-
-        # Customizing the Hover Label (Tooltip)
-        fig.update_layout(
-            hoverlabel=dict(
-                bgcolor=hover_bg,
-                bordercolor=line_color,
-                font=dict(color=hover_text, family="Inter", size=14)
-            )
-        )
-
-        st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
-
-        # === NEW CHART: Net Gain from Stocks ===
-        st.markdown("### 📉 Net Gain from Stocks")
+    # 1. Prepare Data
+    df = snapshots.sort_values("snapshot_date").copy()
+    df["snapshot_date"] = pd.to_datetime(df["snapshot_date"])
+    
+    # Calculate metrics for the cards
+    if not df.empty:
+        latest = df.iloc[-1]
+        total_revenue = latest["portfolio_value"]
         
-        # Get historical net gain directly
-        net_gain_data = snapshots[["snapshot_date", "net_gain"]].copy()
-        net_gain_data = net_gain_data.sort_values("snapshot_date")
-        net_gain_data["snapshot_date"] = pd.to_datetime(net_gain_data["snapshot_date"])
+        # User request: Get Net Gain strictly from the "Net Gain" column of the latest snapshot
+        # This ensures it matches exactly what is shown in the table below
+        # DO NOT RECALCULATE. Source of truth is the database row.
+        total_profit = latest["net_gain"] 
         
-        # Use different color for Net Gain (Blue)
-        if st.session_state.theme == "dark":
-            ng_line_color = '#60A5FA'  # Blue
-            ng_fill_color = 'rgba(96, 165, 250, 0.1)'
-        else:
-            ng_line_color = '#3B82F6'  # Blue
-            ng_fill_color = 'rgba(59, 130, 246, 0.1)'
-
-        # Calculate range
-        min_ng = net_gain_data["net_gain"].min()
-        max_ng = net_gain_data["net_gain"].max()
-        ng_range = max_ng - min_ng
-        # Add 5% padding
-        ng_y_min = min_ng - (ng_range * 0.05) if ng_range != 0 else min_ng * 0.95
-        ng_y_max = max_ng + (ng_range * 0.05) if ng_range != 0 else max_ng * 1.05
-
-        fig_ng = go.Figure()
-
-        fig_ng.add_trace(go.Scatter(
-            x=net_gain_data["snapshot_date"],
-            y=net_gain_data["net_gain"],
-            mode='lines',
-            line=dict(
-                color=ng_line_color,
-                width=3,
-                shape='spline',
-                smoothing=1.3
-            ),
-            fill='tonexty',
-            fillcolor=ng_fill_color,
-            hoverinfo='x+y',
-            hovertemplate='<b>%{y:,.3f} KWD</b><extra></extra>'
-        ))
-
-        fig_ng.update_layout(
-            paper_bgcolor=bg_color,
-            plot_bgcolor=bg_color,
-            margin=dict(l=0, r=60, t=30, b=0),
-            height=350,
-            hovermode="x unified",
-            font=dict(family="Inter, system-ui, sans-serif"),
-            xaxis=dict(
-                showgrid=False, showline=False, showticklabels=False, zeroline=False
-            ),
-            yaxis=dict(
-                showgrid=True,
-                gridcolor=grid_color,
-                gridwidth=1,
-                griddash='dash',
-                showline=False,
-                showticklabels=True,
-                tickfont=dict(color=text_color, size=10),
-                tickformat=",.0f",
-                zeroline=True,
-                zerolinecolor=grid_color,
-                side='right',
-                range=[ng_y_min, ng_y_max]
-            )
-        )
-        
-        fig_ng.update_layout(
-            hoverlabel=dict(
-                bgcolor=hover_bg,
-                bordercolor=ng_line_color,
-                font=dict(color=hover_text, family="Inter", size=14)
-            )
-        )
-
-        st.plotly_chart(fig_ng, use_container_width=True, config={'displayModeBar': False})
-
+        profit_margin = latest["roi_percent"] if "roi_percent" in latest else 0.0
     else:
-        st.error("⚠️ Plotly not available. Install with: `pip install plotly`")
-        st.info("Plotly is required for the modern interactive charts.")
+        total_revenue = 0
+        total_profit = 0
+        profit_margin = 0
+
+    # 2. Define Theme Colors (Synced with Global Theme)
+    is_dark = st.session_state.get("theme", "light") == "dark"
     
+    theme = {
+        "app_bg": "linear-gradient(to bottom right, #111827, #1f2937, #000000)" if is_dark else "linear-gradient(to bottom right, #f9fafb, #ffffff, #f3f4f6)",
+        "text_main": "#ffffff" if is_dark else "#111827",
+        "text_sub": "#9ca3af" if is_dark else "#4b5563",
+        "card_bg": "rgba(31, 41, 55, 0.5)" if is_dark else "rgba(255, 255, 255, 0.8)",
+        "card_border": "rgba(55, 65, 81, 0.5)" if is_dark else "rgba(229, 231, 235, 0.5)",
+        "shadow": "0 25px 50px -12px rgba(0, 0, 0, 0.25)" if is_dark else "0 10px 15px -3px rgba(0, 0, 0, 0.1)",
+        
+        # Chart Colors
+        "rev_line": "#06b6d4" if is_dark else "#1D4ED8",
+        "rev_glow": "rgba(6, 182, 212, 0.3)" if is_dark else "rgba(29, 78, 216, 0.25)",
+        "prof_line": "#10b981" if is_dark else "#047857",
+        "prof_glow": "rgba(16, 185, 129, 0.3)" if is_dark else "rgba(4, 120, 87, 0.25)",
+        
+        # Grid/Axes
+        "grid": "rgba(125, 211, 252, 0.1)" if is_dark else "rgba(229, 231, 235, 0.5)",
+        "tick_text": "rgba(209, 213, 219, 0.6)" if is_dark else "rgba(55, 65, 81, 0.7)",
+        
+        # Tooltip
+        "tooltip_bg": "rgba(17, 24, 39, 0.9)" if is_dark else "rgba(255, 255, 255, 0.9)",
+        "tooltip_text": "#22d3ee" if is_dark else "#2563eb",
+        "tooltip_border": "rgba(6, 182, 212, 0.3)" if is_dark else "rgba(147, 197, 253, 0.3)",
+        
+        # Stats Cards Gradients
+        "stat_rev_bg": "linear-gradient(to right, rgba(6, 182, 212, 0.1), rgba(8, 145, 178, 0.1))" if is_dark else "linear-gradient(to right, rgba(239, 246, 255, 0.5), rgba(219, 234, 254, 0.5))",
+        "stat_rev_border": "rgba(6, 182, 212, 0.2)" if is_dark else "rgba(191, 219, 254, 0.5)",
+        "stat_rev_text": "#67e8f9" if is_dark else "#1d4ed8",
+        
+        "stat_prof_bg": "linear-gradient(to right, rgba(16, 185, 129, 0.1), rgba(5, 150, 105, 0.1))" if is_dark else "linear-gradient(to right, rgba(240, 253, 244, 0.5), rgba(220, 252, 231, 0.5))",
+        "stat_prof_border": "rgba(16, 185, 129, 0.2)" if is_dark else "rgba(187, 247, 208, 0.5)",
+        "stat_prof_text": "#6ee7b7" if is_dark else "#15803d",
+        
+        "stat_marg_bg": "linear-gradient(to right, rgba(168, 85, 247, 0.1), rgba(147, 51, 234, 0.1))" if is_dark else "linear-gradient(to right, rgba(250, 245, 255, 0.5), rgba(243, 232, 255, 0.5))",
+        "stat_marg_border": "rgba(168, 85, 247, 0.2)" if is_dark else "rgba(233, 213, 255, 0.5)",
+        "stat_marg_text": "#d8b4fe" if is_dark else "#7e22ce",
+    }
+
+    # 3. CSS Styling (Dynamic)
+    st.markdown(f"""
+    <style>
+        /* Main Container Background */
+        .stApp {{
+            background: {theme['app_bg']};
+            color: {theme['text_main']};
+        }}
+        
+        /* Header Text Gradient */
+        .header-gradient {{
+            background: linear-gradient(to right, #22d3ee, #60a5fa, #34d399);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            font-weight: 800;
+            font-size: 2.5rem;
+            margin-bottom: 0.5rem;
+        }}
+        
+        /* Card Styles */
+        .dashboard-card {{
+            background-color: {theme['card_bg']};
+            backdrop-filter: blur(8px);
+            border: 1px solid {theme['card_border']};
+            border-radius: 1rem;
+            padding: 2rem;
+            box-shadow: {theme['shadow']};
+            margin-bottom: 2rem;
+        }}
+        
+        /* Stat Cards */
+        .stat-card {{
+            border-radius: 0.75rem;
+            padding: 1.5rem;
+            height: 100%;
+            transition: all 0.3s ease;
+        }}
+        
+        .stat-card-cyan {{
+            background: {theme['stat_rev_bg']};
+            border: 1px solid {theme['stat_rev_border']};
+        }}
+        .stat-card-cyan h3 {{ color: {theme['stat_rev_text']}; }}
+        
+        .stat-card-emerald {{
+            background: {theme['stat_prof_bg']};
+            border: 1px solid {theme['stat_prof_border']};
+        }}
+        .stat-card-emerald h3 {{ color: {theme['stat_prof_text']}; }}
+        
+        .stat-card-purple {{
+            background: {theme['stat_marg_bg']};
+            border: 1px solid {theme['stat_marg_border']};
+        }}
+        .stat-card-purple h3 {{ color: {theme['stat_marg_text']}; }}
+        
+        /* Legend Dots */
+        .legend-dot {{
+            width: 0.75rem;
+            height: 0.75rem;
+            border-radius: 9999px;
+            margin-right: 0.5rem;
+            display: inline-block;
+        }}
+        
+        .glow-cyan {{ box-shadow: 0 0 15px {theme['rev_glow']}; background-color: {theme['rev_line']}; }}
+        .glow-emerald {{ box-shadow: 0 0 15px {theme['prof_glow']}; background-color: {theme['prof_line']}; }}
+        
+    </style>
+    """, unsafe_allow_html=True)
+
+    # 4. Header Section
+    st.markdown('<div style="text-align: center; margin-bottom: 3rem;">', unsafe_allow_html=True)
+    st.markdown('<h1 class="header-gradient">Financial Performance Dashboard</h1>', unsafe_allow_html=True)
+    st.markdown(f'<p style="color: {theme["text_sub"]}; font-size: 1.125rem;">Real-time insights into your financial metrics</p>', unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    # 5. Main Chart Cards (Separated)
+    
+    if go:
+        # === CHART 1: REVENUE (Portfolio Value) ===
+        st.markdown('<div class="dashboard-card">', unsafe_allow_html=True)
+        
+        # Header
+        col_rev_title, col_rev_legend = st.columns([3, 1])
+        with col_rev_title:
+            st.markdown(f'<h2 style="color: {theme["text_main"]}; font-weight: 700; font-size: 1.5rem; margin-bottom: 0.5rem;">Total Portfolio Value Over Time</h2>', unsafe_allow_html=True)
+            st.markdown(f'<p style="color: {theme["text_sub"]}; font-size: 0.875rem;">Historical Performance</p>', unsafe_allow_html=True)
+        with col_rev_legend:
+            st.markdown(f"""
+            <div style="display: flex; justify-content: flex-end; margin-top: 1rem;">
+                <div style="display: flex; align-items: center;">
+                    <div class="legend-dot glow-cyan"></div>
+                    <span style="color: {theme["text_sub"]}; font-size: 0.875rem;">Revenue</span>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        # Chart
+        fig_rev = go.Figure()
+        fig_rev.add_trace(go.Scatter(
+            x=df["snapshot_date"],
+            y=df["portfolio_value"],
+            mode='lines+markers',
+            name='Revenue',
+            line=dict(color=theme['rev_line'], width=3, shape='spline'),
+            marker=dict(size=6, color='#022c22' if is_dark else '#ffffff', line=dict(color=theme['rev_line'], width=2)),
+            hovertemplate='<b>Revenue</b>: %{y:,.0f} KWD<extra></extra>'
+        ))
+        
+        fig_rev.update_layout(
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            margin=dict(l=0, r=0, t=20, b=0),
+            height=350,
+            showlegend=False,
+            hovermode="x unified",
+            xaxis=dict(showgrid=True, gridcolor=theme['grid'], gridwidth=1, showline=False, tickfont=dict(color=theme['tick_text'], size=12)),
+            yaxis=dict(showgrid=True, gridcolor=theme['grid'], gridwidth=1, showline=False, tickfont=dict(color=theme['tick_text'], size=12), tickformat=",.0f"),
+            hoverlabel=dict(bgcolor=theme['tooltip_bg'], bordercolor=theme['tooltip_border'], font=dict(color=theme['tooltip_text'], family="Inter, sans-serif"))
+        )
+        st.plotly_chart(fig_rev, use_container_width=True, config={'displayModeBar': False})
+        st.markdown('</div>', unsafe_allow_html=True)
+
+
+        # === CHART 2: PROFIT (Net Gain) ===
+        st.markdown('<div class="dashboard-card">', unsafe_allow_html=True)
+        
+        # Header
+        col_prof_title, col_prof_legend = st.columns([3, 1])
+        with col_prof_title:
+            st.markdown(f'<h2 style="color: {theme["text_main"]}; font-weight: 700; font-size: 1.5rem; margin-bottom: 0.5rem;">Net Gain from Stocks Over Time</h2>', unsafe_allow_html=True)
+            st.markdown(f'<p style="color: {theme["text_sub"]}; font-size: 0.875rem;">Historical Performance</p>', unsafe_allow_html=True)
+        with col_prof_legend:
+            st.markdown(f"""
+            <div style="display: flex; justify-content: flex-end; margin-top: 1rem;">
+                <div style="display: flex; align-items: center;">
+                    <div class="legend-dot glow-emerald"></div>
+                    <span style="color: {theme["text_sub"]}; font-size: 0.875rem;">Profit</span>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        # Chart
+        fig_prof = go.Figure()
+        fig_prof.add_trace(go.Scatter(
+            x=df["snapshot_date"],
+            y=df["net_gain"],
+            mode='lines+markers',
+            name='Profit',
+            line=dict(color=theme['prof_line'], width=3, shape='spline'),
+            marker=dict(size=6, color='#022c22' if is_dark else '#ffffff', line=dict(color=theme['prof_line'], width=2)),
+            hovertemplate='<b>Profit</b>: %{y:,.0f} KWD<extra></extra>'
+        ))
+        
+        fig_prof.update_layout(
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            margin=dict(l=0, r=0, t=20, b=0),
+            height=350,
+            showlegend=False,
+            hovermode="x unified",
+            xaxis=dict(showgrid=True, gridcolor=theme['grid'], gridwidth=1, showline=False, tickfont=dict(color=theme['tick_text'], size=12)),
+            yaxis=dict(showgrid=True, gridcolor=theme['grid'], gridwidth=1, showline=False, tickfont=dict(color=theme['tick_text'], size=12), tickformat=",.0f"),
+            hoverlabel=dict(bgcolor=theme['tooltip_bg'], bordercolor=theme['prof_line'], font=dict(color=theme['prof_line'], family="Inter, sans-serif"))
+        )
+        st.plotly_chart(fig_prof, use_container_width=True, config={'displayModeBar': False})
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        # 6. Stats Summary Cards (New)
+        col_stat1, col_stat2, col_stat3 = st.columns(3)
+        
+        with col_stat1:
+            st.markdown(f"""
+            <div class="stat-card stat-card-cyan">
+                <h3 style="font-weight: 600; margin-bottom: 0.5rem;">Total Portfolio Value</h3>
+                <p style="font-size: 1.5rem; font-weight: 700; color: {theme['text_main']};">{total_revenue:,.0f} KWD</p>
+                <p style="font-size: 0.875rem; color: {theme['stat_rev_text']}; display: flex; align-items: center;">
+                    <span style="margin-right: 0.25rem;">↑</span> Current Value
+                </p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+        with col_stat2:
+            st.markdown(f"""
+            <div class="stat-card stat-card-emerald">
+                <h3 style="font-weight: 600; margin-bottom: 0.5rem;">Net Gain From Stocks</h3>
+                <p style="font-size: 1.5rem; font-weight: 700; color: {theme['text_main']};">{total_profit:,.0f} KWD</p>
+                <p style="font-size: 0.875rem; color: {theme['stat_prof_text']}; display: flex; align-items: center;">
+                    <span style="margin-right: 0.25rem;">↑</span> Net Gain
+                </p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+        with col_stat3:
+            st.markdown(f"""
+            <div class="stat-card stat-card-purple">
+                <h3 style="font-weight: 600; margin-bottom: 0.5rem;">Profit Margin</h3>
+                <p style="font-size: 1.5rem; font-weight: 700; color: {theme['text_main']};">{profit_margin:.1f}%</p>
+                <p style="font-size: 0.875rem; color: {theme['stat_marg_text']}; display: flex; align-items: center;">
+                    <span style="margin-right: 0.25rem;">↑</span> ROI
+                </p>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        st.markdown('<div style="text-align: center; margin-top: 3rem; margin-bottom: 2rem;">', unsafe_allow_html=True)
+        st.markdown(f'<p style="color: {theme["text_sub"]}; font-size: 0.875rem;">Data refreshed • Last updated: {pd.Timestamp.now().strftime("%B %d, %Y")}</p>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    # Footer
     st.divider()
     
     # Format and display table
-    st.markdown("### 📊 Portfolio Snapshots")
+    st.markdown("### 📊 Portfolio Snapshots (Editable)")
+    st.caption("Double-click any cell to edit. Click 'Save Changes' to update the database and graphs.")
     
-    display_df = snapshots.copy()
+    # Prepare dataframe for editor (raw values)
+    edit_df = snapshots.copy()
+    # Ensure date is string for consistency or date object
+    # st.data_editor handles date columns well if they are datetime objects
+    edit_df["snapshot_date"] = pd.to_datetime(edit_df["snapshot_date"]).dt.date
     
-    # Format with colors
-    def fmt_with_color_brackets(val):
-        if pd.isna(val):
-            return ""
-        val = float(val)
-        if val < 0:
-            return f"({abs(val):,.3f})"
-        else:
-            return f"{val:,.3f}"
+    # Columns to edit
+    cols_config = {
+        "snapshot_date": st.column_config.DateColumn("Date", format="YYYY-MM-DD", required=True),
+        "portfolio_value": st.column_config.NumberColumn("Value", format="%.3f", required=True),
+        "daily_movement": st.column_config.NumberColumn("Daily Movement", format="%.3f"),
+        "beginning_difference": st.column_config.NumberColumn("Beginning Diff", format="%.3f"),
+        "deposit_cash": st.column_config.NumberColumn("Deposit Cash", format="%.3f"),
+        "accumulated_cash": st.column_config.NumberColumn("Accumulated Cash", format="%.3f"),
+        "net_gain": st.column_config.NumberColumn("Net Gain", format="%.3f"),
+        "change_percent": st.column_config.NumberColumn("Change %", format="%.2f%%"),
+        "roi_percent": st.column_config.NumberColumn("ROI %", format="%.2f%%"),
+        "created_at": st.column_config.NumberColumn("Created At", disabled=True)
+    }
     
-    def fmt_pct_with_brackets(val):
-        if pd.isna(val):
-            return ""
-        val = float(val)
-        if val < 0:
-            return f"({abs(val):.2f}%)"
-        else:
-            return f"{val:.2f}%"
-    
-    # Store raw values for coloring
-    raw_daily = display_df["daily_movement"].copy()
-    raw_net = display_df["net_gain"].copy()
-    raw_change = display_df["change_percent"].copy()
-    raw_roi = display_df["roi_percent"].copy()
-    
-    display_df["snapshot_date"] = pd.to_datetime(display_df["snapshot_date"]).dt.strftime("%d-%b-%y")
-    display_df["portfolio_value"] = display_df["portfolio_value"].apply(lambda x: f"{x:,.3f}" if pd.notna(x) else "")
-    display_df["daily_movement"] = display_df["daily_movement"].apply(fmt_with_color_brackets)
-    display_df["beginning_difference"] = display_df["beginning_difference"].apply(fmt_with_color_brackets)
-    display_df["deposit_cash"] = display_df["deposit_cash"].apply(lambda x: f"{x:,.3f}" if pd.notna(x) and x > 0 else "")
-    display_df["accumulated_cash"] = display_df["accumulated_cash"].apply(lambda x: f"{x:,.3f}" if pd.notna(x) else "")
-    display_df["net_gain"] = display_df["net_gain"].apply(fmt_with_color_brackets)
-    display_df["change_percent"] = display_df["change_percent"].apply(fmt_pct_with_brackets)
-    display_df["roi_percent"] = display_df["roi_percent"].apply(fmt_pct_with_brackets)
-    
-    # Apply color styling
-    def color_value(val):
-        if isinstance(val, str):
-            if val.startswith('(') and val.endswith(')'):
-                return 'color: red'
-            elif any(char.isdigit() for char in val) and '%' in val:
-                try:
-                    clean_val = val.replace('%', '').replace(',', '')
-                    if float(clean_val) > 0:
-                        return 'color: green'
-                except:
-                    pass
-            elif any(char.isdigit() for char in val) and not val.startswith('('):
-                try:
-                    clean_val = val.replace(',', '')
-                    if float(clean_val) > 0:
-                        return 'color: green'
-                except:
-                    pass
-        return ''
-    
-    cols_to_show = [
-        "snapshot_date", "portfolio_value", "daily_movement", "beginning_difference",
-        "deposit_cash", "accumulated_cash", "net_gain", "change_percent", "roi_percent"
-    ]
-    
-    styled_df = display_df[cols_to_show].style.map(
-        color_value,
-        subset=["daily_movement", "beginning_difference", "net_gain", "change_percent", "roi_percent"]
+    # Show editor
+    edited_data = st.data_editor(
+        edit_df,
+        column_config=cols_config,
+        use_container_width=True,
+        num_rows="dynamic", # Allow adding/deleting rows
+        key="snapshot_editor",
+        hide_index=True,
+        column_order=[
+            "snapshot_date", "portfolio_value", "daily_movement", "beginning_difference",
+            "deposit_cash", "accumulated_cash", "net_gain", "change_percent", "roi_percent"
+        ]
     )
     
-    # Rename columns for display
-    styled_df = styled_df.set_table_styles([
-        {'selector': 'th', 'props': [('text-align', 'center')]},
-        {'selector': 'td', 'props': [('text-align', 'right')]}
-    ])
-    
-    display_df_renamed = display_df[cols_to_show].rename(columns={
-        "snapshot_date": "Date",
-        "portfolio_value": "Value",
-        "daily_movement": "Daily Movement",
-        "beginning_difference": "Beginning Diff",
-        "deposit_cash": "Deposit Cash",
-        "accumulated_cash": "Accumulated Cash Deposit",
-        "net_gain": "Net Gain from Stock",
-        "change_percent": "Change %",
-        "roi_percent": "ROI %"
-    })
-    
-    styled_df = display_df_renamed.style.map(
-        color_value,
-        subset=["Daily Movement", "Beginning Diff", "Net Gain from Stock", "Change %", "ROI %"]
-    )
-    
-    st.dataframe(styled_df, use_container_width=True, hide_index=True)
-    
-    # Delete snapshot
-    with st.expander("🗑️ Delete Snapshot"):
+    if st.button("💾 Save Changes", type="primary"):
+        try:
+            # 1. Delete all existing snapshots (simplest way to handle edits/deletes/renames)
+            # Note: In a high-concurrency app this is risky, but for single-user local app it's fine.
+            conn = get_conn()
+            cur = conn.cursor()
+            cur.execute("DELETE FROM portfolio_snapshots")
+            
+            # 2. Insert all rows from edited_data
+            records = []
+            for _, row in edited_data.iterrows():
+                # Convert date back to string YYYY-MM-DD
+                s_date = row["snapshot_date"].strftime("%Y-%m-%d") if isinstance(row["snapshot_date"], date) else str(row["snapshot_date"])
+                
+                records.append((
+                    s_date,
+                    float(row["portfolio_value"]),
+                    float(row["daily_movement"]),
+                    float(row["beginning_difference"]),
+                    float(row["deposit_cash"]),
+                    float(row["accumulated_cash"]),
+                    float(row["net_gain"]),
+                    float(row["change_percent"]),
+                    float(row["roi_percent"]),
+                    int(time.time()) # Update created_at or keep original? Let's update to show it was modified
+                ))
+            
+            cur.executemany(
+                """
+                INSERT INTO portfolio_snapshots 
+                (snapshot_date, portfolio_value, daily_movement, beginning_difference, 
+                 deposit_cash, accumulated_cash, net_gain, change_percent, roi_percent, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                records
+            )
+            conn.commit()
+            conn.close()
+            
+            st.success("✅ Changes saved successfully!")
+            time.sleep(1)
+            st.rerun()
+            
+        except Exception as e:
+            st.error(f"Error saving changes: {e}")
+
+    # Delete snapshot (Legacy - can be removed since editor handles deletes, but keeping for safety)
+    with st.expander("🗑️ Delete Snapshot (Alternative Method)"):
         del_date = st.date_input("Select date to delete", value=date.today(), key="del_snap_date")
         if st.button("Delete Snapshot", key="del_snap"):
             del_date_str = del_date.strftime("%Y-%m-%d")
@@ -4687,11 +4951,11 @@ def ui_dividends_tracker():
     
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        st.metric("💵 Total Cash Dividends", f"{total_cash_div:,.3f} KWD")
+        st.metric("💵 Total Cash Dividends", fmt_money(total_cash_div, "KWD"))
     with col2:
         st.metric("🎁 Total Bonus Shares", f"{total_bonus_shares:,.0f}")
     with col3:
-        st.metric("🔄 Total Reinvested", f"{total_reinvested:,.3f} KWD")
+        st.metric("🔄 Total Reinvested", fmt_money(total_reinvested, "KWD"))
     with col4:
         st.metric("📊 Dividend-Paying Stocks", f"{unique_stocks}")
     
@@ -4716,9 +4980,9 @@ def ui_dividends_tracker():
         display_df = display_df[['Stock', 'Date', 'Cash Dividend (KWD)', 'Bonus Shares', 'Reinvested (KWD)']]
         
         # Format numbers
-        display_df['Cash Dividend (KWD)'] = display_df['Cash Dividend (KWD)'].apply(lambda x: f"{x:,.3f}")
+        display_df['Cash Dividend (KWD)'] = display_df['Cash Dividend (KWD)'].apply(lambda x: fmt_money_plain(x, 3))
         display_df['Bonus Shares'] = display_df['Bonus Shares'].apply(lambda x: f"{x:,.0f}" if x > 0 else "-")
-        display_df['Reinvested (KWD)'] = display_df['Reinvested (KWD)'].apply(lambda x: f"{x:,.3f}" if x > 0 else "-")
+        display_df['Reinvested (KWD)'] = display_df['Reinvested (KWD)'].apply(lambda x: fmt_money_plain(x, 3) if x > 0 else "-")
         
         st.dataframe(display_df, use_container_width=True, hide_index=True)
         
@@ -4822,6 +5086,125 @@ def ui_dividends_tracker():
             )
 
 
+
+def render_trading_styled_table(df):
+    """
+    Renders the Trading Table using the same UI as Peer Analysis.
+    """
+    is_dark = st.session_state.get("theme", "light") == "dark"
+    
+    # --- Theme Colors (Matches Peer Analysis) ---
+    if is_dark:
+        c_bg_card = "rgba(17, 24, 39, 0.6)"
+        c_border = "#1f2937"
+        c_header_bg = "rgba(31, 41, 55, 0.5)"
+        c_text_p = "#ffffff"
+        c_hover = "rgba(31, 41, 55, 0.3)"
+        c_accent = "#22d3ee"
+        c_pos = "#34d399"
+        c_neg = "#fb7185"
+    else:
+        c_bg_card = "rgba(255, 255, 255, 0.8)"
+        c_border = "#e5e7eb"
+        c_header_bg = "#f9fafb"
+        c_text_p = "#111827"
+        c_hover = "rgba(243, 244, 246, 0.8)"
+        c_accent = "#2563eb"
+        c_pos = "#16a34a"
+        c_neg = "#dc2626"
+
+    css = f"""
+    <style>
+    .st-styled-table-wrap {{
+        background-color: {c_bg_card};
+        border: 1px solid {c_border};
+        border-radius: 1rem;
+        backdrop-filter: blur(4px);
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        overflow: hidden;
+        margin-bottom: 1rem;
+        font-family: ui-sans-serif, system-ui, sans-serif;
+    }}
+    .st-styled-table-scroll {{ overflow-x: auto; }}
+    .st-styled-table {{ width: 100%; border-collapse: collapse; font-size: 0.85rem; }}
+    .st-styled-table th {{
+        padding: 0.75rem 1rem;
+        text-align: left;
+        font-weight: 600;
+        color: {c_text_p};
+        background-color: {c_header_bg};
+        border-bottom: 1px solid {c_border};
+        white-space: nowrap;
+    }}
+    .st-styled-table td {{
+        padding: 0.6rem 1rem;
+        color: {c_text_p};
+        border-bottom: 1px solid {c_border};
+        white-space: nowrap;
+    }}
+    .st-styled-table tr:hover td {{ background-color: {c_hover}; }}
+    
+    .st-text-pos {{ color: {c_pos}; font-weight: 600; }}
+    .st-text-neg {{ color: {c_neg}; font-weight: 600; }}
+    .st-text-accent {{ color: {c_accent}; font-weight: 500; }}
+    .st-text-muted {{ opacity: 0.6; }}
+    </style>
+    """
+    
+    display_cols = [c for c in df.columns if not c.startswith('_')]
+    
+    html = f"""
+    <div class="st-styled-table-wrap">
+        <div class="st-styled-table-scroll">
+            <table class="st-styled-table">
+                <thead>
+                    <tr>
+    """
+    for col in display_cols:
+        html += f"<th>{col}</th>"
+    html += "</tr></thead><tbody>"
+    
+    for _, row in df.iterrows():
+        html += "<tr>"
+        for col in display_cols:
+            val = row[col]
+            display_val = str(val)
+            class_name = ""
+            
+            # Formatting
+            if pd.isna(val) or val is None or val == "":
+                display_val = "-"
+                class_name = "st-text-muted"
+            elif isinstance(val, (int, float)):
+                if "Date" in col:
+                     pass # Assuming already formatted or captured by string conversion
+                elif "Quantity" in col or "Bonus" in col:
+                     display_val = f"{val:,.0f}"
+                elif "Profit %" in col:
+                     display_val = f"{val:.2f}%"
+                     if val > 0: class_name = "st-text-pos"
+                     elif val < 0: class_name = "st-text-neg"
+                elif "Profit" in col:  # Profit Amount
+                     display_val = f"{val:,.3f}"
+                     if val > 0: class_name = "st-text-pos"
+                     elif val < 0: class_name = "st-text-neg"
+                else: # Prices, Values
+                     display_val = f"{val:,.3f}"
+            
+            # Specific Column Styling
+            if col == "Status":
+                if str(val) == "Realized": class_name = "st-text-muted"
+                else: class_name = "st-text-accent"
+            if col == "Stock":
+                class_name = "st-text-accent" # Bold/Blue for ticker
+                
+            html += f'<td class="{class_name}">{display_val}</td>'
+        html += "</tr>"
+        
+    html += "</tbody></table></div></div>"
+    st.markdown(css + html, unsafe_allow_html=True)
+
+
 def ui_trading_section():
     """Trading Section - Short-term trades with date filtering"""
     st.subheader("📈 Trading Section - Short Term Trades")
@@ -4885,20 +5268,20 @@ def ui_trading_section():
                         
                         # Insert Buy
                         cur.execute("""
-                            INSERT INTO transactions 
+                            INSERT INTO trading_history 
                             (stock_symbol, txn_date, txn_type, purchase_cost, sell_value, shares, 
-                             cash_dividend, bonus_shares, category, created_at)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """, (stock_symbol, purchase_date.strftime("%Y-%m-%d"), 'Buy', total_purchase_cost, 0, quantity, 0, 0, 'trading', int(time.time())))
+                             cash_dividend, bonus_shares, created_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """, (stock_symbol, purchase_date.strftime("%Y-%m-%d"), 'Buy', total_purchase_cost, 0, quantity, 0, 0, int(time.time())))
                         
                         # Insert Sell if applicable
                         if is_closed:
                             cur.execute("""
-                                INSERT INTO transactions 
+                                INSERT INTO trading_history 
                                 (stock_symbol, txn_date, txn_type, purchase_cost, sell_value, shares, 
-                                 cash_dividend, bonus_shares, category, created_at)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                            """, (stock_symbol, sale_date.strftime("%Y-%m-%d"), 'Sell', 0, total_sell_value, quantity, cash_div, bonus_shares, 'trading', int(time.time())))
+                                 cash_dividend, bonus_shares, created_at)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            """, (stock_symbol, sale_date.strftime("%Y-%m-%d"), 'Sell', 0, total_sell_value, quantity, cash_div, bonus_shares, int(time.time())))
                             st.success(f"✅ Added closed trade for {stock_symbol} (Buy + Sell)")
                         else:
                             st.success(f"✅ Added open position for {stock_symbol} (Buy only)")
@@ -4930,30 +5313,30 @@ def ui_trading_section():
         # Remove Duplicates Button
         col_dup1, col_dup2 = st.columns([1, 3])
         with col_dup1:
-            if st.button("🧹 Remove Existing Duplicates", help="Removes duplicate transactions from database"):
+            if st.button("🧹 Remove Existing Duplicates", help="Removes duplicate transactions from Trading History"):
                 try:
                     conn = get_conn()
                     cur = conn.cursor()
                     
-                    # Find and remove duplicate Buy transactions (trading category only)
+                    # Find and remove duplicate Buy transactions
                     cur.execute("""
-                        DELETE FROM transactions 
-                        WHERE category = 'trading' AND id NOT IN (
+                        DELETE FROM trading_history 
+                        WHERE id NOT IN (
                             SELECT MIN(id) 
-                            FROM transactions 
-                            WHERE txn_type = 'Buy' AND category = 'trading'
+                            FROM trading_history 
+                            WHERE txn_type = 'Buy' 
                             GROUP BY stock_symbol, txn_date, shares, purchase_cost
                         ) AND txn_type = 'Buy'
                     """)
                     buy_dupes = cur.rowcount
                     
-                    # Find and remove duplicate Sell transactions (trading category only)
+                    # Find and remove duplicate Sell transactions
                     cur.execute("""
-                        DELETE FROM transactions 
-                        WHERE category = 'trading' AND id NOT IN (
+                        DELETE FROM trading_history 
+                        WHERE id NOT IN (
                             SELECT MIN(id) 
-                            FROM transactions 
-                            WHERE txn_type = 'Sell' AND category = 'trading'
+                            FROM trading_history 
+                            WHERE txn_type = 'Sell' 
                             GROUP BY stock_symbol, txn_date, shares, sell_value
                         ) AND txn_type = 'Sell'
                     """)
@@ -4991,10 +5374,7 @@ def ui_trading_section():
             'Bonus shares': [0, 4545],
             'Profit%': [-19.62, 37.68],
             'Period in days': [138, 101],
-            'Months': [5, 3.4],
-            'Target sale': [0, 0.310],
-            'Profit': [1631, 7318.19],
-            'Profit %': [-19.62, 50.07]
+            'Months': [5, 3.4]
         }
         sample_df = pd.DataFrame(sample_data)
         
@@ -5226,7 +5606,7 @@ def ui_trading_section():
                     # Get count before import
                     conn = get_conn()
                     cur = conn.cursor()
-                    cur.execute("SELECT COUNT(*) FROM transactions")
+                    cur.execute("SELECT COUNT(*) FROM trading_history")
                     transactions_before = cur.fetchone()[0]
                     
                     st.info(f"📊 Current database: {transactions_before} transactions | Starting import...")
@@ -5406,7 +5786,7 @@ def ui_trading_section():
                                 
                                 # Check for duplicates with STRICT matching (stock, date, quantity, cost)
                                 cur.execute("""
-                                    SELECT id FROM transactions 
+                                    SELECT id FROM trading_history 
                                     WHERE stock_symbol = ? AND txn_date = ? AND txn_type = 'Buy' 
                                     AND shares = ? AND purchase_cost = ?
                                 """, (stock, purchase_date, quantity, purchase_cost))
@@ -5419,7 +5799,7 @@ def ui_trading_section():
                                 existing_sell = None
                                 if has_sale:
                                     cur.execute("""
-                                        SELECT id FROM transactions 
+                                        SELECT id FROM trading_history 
                                         WHERE stock_symbol = ? AND txn_date = ? AND txn_type = 'Sell' 
                                         AND shares = ? AND sell_value = ?
                                     """, (stock, sale_date, quantity, sell_value))
@@ -5439,11 +5819,11 @@ def ui_trading_section():
                                 elif buy_exists and has_sale and not sell_exists:
                                     # Buy exists but sell doesn't - just add the sell transaction
                                     cur.execute("""
-                                        INSERT INTO transactions 
+                                        INSERT INTO trading_history 
                                         (stock_symbol, txn_date, txn_type, purchase_cost, sell_value, shares, 
-                                         cash_dividend, bonus_shares, category, created_at)
-                                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                    """, (stock, sale_date, 'Sell', 0, sell_value, quantity, cash_div, bonus_shares, 'trading', int(time.time())))
+                                         cash_dividend, bonus_shares, created_at)
+                                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                    """, (stock, sale_date, 'Sell', 0, sell_value, quantity, cash_div, bonus_shares, int(time.time())))
                                     
                                     imported += 1
                                     success_rows.append(f"Row {row_num}: {stock} - Added sell transaction only (buy already exists)")
@@ -5458,23 +5838,23 @@ def ui_trading_section():
                                         (stock, stock, "KFH", "KWD")
                                     )
                                 
-                                # Insert Buy transaction (always) with category='trading'
+                                # Insert Buy transaction (always)
                                 cur.execute("""
-                                    INSERT INTO transactions 
+                                    INSERT INTO trading_history 
                                     (stock_symbol, txn_date, txn_type, purchase_cost, sell_value, shares, 
-                                     cash_dividend, bonus_shares, category, created_at)
-                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                """, (stock, purchase_date, 'Buy', purchase_cost, 0, quantity, 0, 0, 'trading', int(time.time())))
+                                     cash_dividend, bonus_shares, created_at)
+                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                """, (stock, purchase_date, 'Buy', purchase_cost, 0, quantity, 0, 0, int(time.time())))
                                 buy_count += 1
                                 
                                 # Insert Sell transaction only if sale date exists
                                 if has_sale:
                                     cur.execute("""
-                                        INSERT INTO transactions 
+                                        INSERT INTO trading_history 
                                         (stock_symbol, txn_date, txn_type, purchase_cost, sell_value, shares, 
-                                         cash_dividend, bonus_shares, category, created_at)
-                                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                    """, (stock, sale_date, 'Sell', 0, sell_value, quantity, cash_div, bonus_shares, 'trading', int(time.time())))
+                                         cash_dividend, bonus_shares, created_at)
+                                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                    """, (stock, sale_date, 'Sell', 0, sell_value, quantity, cash_div, bonus_shares, int(time.time())))
                                     sell_count += 1
                                 
                                 imported += 1
@@ -5490,7 +5870,7 @@ def ui_trading_section():
                         # Get count after import
                         conn2 = get_conn()
                         cur2 = conn2.cursor()
-                        cur2.execute("SELECT COUNT(*) FROM transactions")
+                        cur2.execute("SELECT COUNT(*) FROM trading_history")
                         transactions_after = cur2.fetchone()[0]
                         conn2.close()
                         
@@ -5635,7 +6015,7 @@ def ui_trading_section():
     
     # First, check total trading transactions in database for debugging
     cur = conn.cursor()
-    cur.execute("SELECT COUNT(*) FROM transactions WHERE category = 'trading'")
+    cur.execute("SELECT COUNT(*) FROM trading_history")
     total_txns = cur.fetchone()[0]
     
     if total_txns == 0:
@@ -5665,10 +6045,9 @@ def ui_trading_section():
                 t.sell_value as "Sale price",
                 t.cash_dividend as "cash Div",
                 t.bonus_shares as "Bonus shares",
-                t.fees,
                 t.notes
-            FROM transactions t
-            WHERE t.category = 'trading' AND t.txn_date BETWEEN ? AND ?
+            FROM trading_history t
+            WHERE t.txn_date BETWEEN ? AND ?
             ORDER BY t.txn_date, t.stock_symbol, t.txn_type
         """
         df = pd.read_sql_query(
@@ -5688,10 +6067,8 @@ def ui_trading_section():
                 t.sell_value as "Sale price",
                 t.cash_dividend as "cash Div",
                 t.bonus_shares as "Bonus shares",
-                t.fees,
                 t.notes
-            FROM transactions t
-            WHERE t.category = 'trading'
+            FROM trading_history t
             ORDER BY t.txn_date, t.stock_symbol, t.txn_type
         """
         df = pd.read_sql_query(query, conn)
@@ -5707,7 +6084,7 @@ def ui_trading_section():
         
         # Show date range of existing trading transactions
         conn2 = get_conn()
-        date_range_query = "SELECT MIN(txn_date) as min_date, MAX(txn_date) as max_date FROM transactions WHERE category = 'trading'"
+        date_range_query = "SELECT MIN(txn_date) as min_date, MAX(txn_date) as max_date FROM trading_history"
         date_df = pd.read_sql_query(date_range_query, conn2)
         conn2.close()
         
@@ -5716,27 +6093,28 @@ def ui_trading_section():
         
         return
     
-    # Group by stock and match Buy/Sell pairs and identify open positions
+    # --- 1. RECONSTRUCT TRADES (Pair Buys & Sells) ---
     realized_trades = []  # Completed trades with sell
     unrealized_positions = []  # Open positions without sell
+    all_tickers_for_fetch = set()
     
+    # Process by Stock to pair transactions
     for stock in df['Stock'].unique():
         stock_df = df[df['Stock'] == stock].sort_values('txn_date').reset_index(drop=True)
         
         buys = stock_df[stock_df['txn_type'] == 'Buy'].copy()
         sells = stock_df[stock_df['txn_type'] == 'Sell'].copy()
         
-        # Track which buys have been matched
+        # Track matches
         matched_buy_ids = set()
         matched_sell_ids = set()
         
-        # Match each sell with corresponding buy - REALIZED TRADES
-        # Strategy: Match by quantity and closest dates
+        # Match Sells to Buys (FIFO/Best Match)
         for _, sell in sells.iterrows():
             if sell['id'] in matched_sell_ids:
                 continue
                 
-            # Find buy with same quantity that hasn't been matched yet
+            # Find closest buy with same quantity
             matching_buys = buys[
                 (buys['Quantity'] == sell['Quantity']) & 
                 (~buys['id'].isin(matched_buy_ids)) &
@@ -5744,603 +6122,423 @@ def ui_trading_section():
             ]
             
             if not matching_buys.empty:
-                # Get the most recent buy with matching quantity
-                buy = matching_buys.iloc[-1]
+                buy = matching_buys.iloc[-1] # Use most recent buy before sell
                 matched_buy_ids.add(buy['id'])
                 matched_sell_ids.add(sell['id'])
                 
-                # Calculate metrics
-                purchase_date = pd.to_datetime(buy['txn_date'])
-                sale_date = pd.to_datetime(sell['txn_date'])
-                quantity = sell['Quantity']
-                
-                # Price calculations
-                price_cost = buy['Price cost'] / buy['Quantity'] if buy['Quantity'] > 0 else 0
-                cost_value = price_cost * quantity
-                
-                sale_price = sell['Sale price'] / sell['Quantity'] if sell['Quantity'] > 0 else 0
-                value_price = sale_price * quantity
-                
-                # Profit calculations
-                trading_profit = value_price - cost_value
-                cash_div = sell['cash Div'] if pd.notna(sell['cash Div']) else 0
-                bonus_shares = sell['Bonus shares'] if pd.notna(sell['Bonus shares']) else 0
-                
-                profit_percent = (trading_profit / cost_value * 100) if cost_value > 0 else 0
-                
-                # Period calculation
-                period_days = (sale_date - purchase_date).days
-                months = period_days / 30.0
-                
-                # Total profit including dividends
-                total_profit = trading_profit + cash_div
-                total_profit_percent = (total_profit / cost_value * 100) if cost_value > 0 else 0
+                # Metric Data
+                q = sell['Quantity']
+                buy_price = buy['Price cost'] / q if q > 0 else 0
+                sell_price = sell['Sale price'] / q if q > 0 else 0
                 
                 realized_trades.append({
-                    'Status': 'Realized',
-                    'Purchase date': purchase_date.strftime('%d-%b-%y'),
-                    'Stock': stock,
-                    'Quantity': quantity,
-                    'Price cost': price_cost,
-                    'Cost value': cost_value,
-                    'Sale Date': sale_date.strftime('%d-%b-%y'),
-                    'Sale price': sale_price,
-                    'Value price': value_price,
-                    'trading Profit': trading_profit,
-                    'cash Div': cash_div,
-                    'Bonus shares': bonus_shares,
-                    'Profit%': profit_percent,
-                    'Period in days': period_days,
-                    'Months': months,
-                    'Profit': total_profit,
-                    'Profit %': total_profit_percent,
                     '_buy_id': buy['id'],
                     '_sell_id': sell['id'],
-                    '_editable': True
+                    'Status': 'Realized',
+                    'Stock': stock,
+                    'Purchase Date': pd.to_datetime(buy['txn_date']).date(),
+                    'Quantity': q,
+                    'Price Cost': buy_price,
+                    # Realized Fields
+                    'Sale Date': pd.to_datetime(sell['txn_date']).date(),
+                    'Sale Price': sell_price,
+                    # Extras
+                    'Dividends': sell['cash Div'] or 0,
+                    'Bonus': sell['Bonus shares'] or 0,
+                    'Notes': sell['notes'],
+                    # Placeholders (Calculated later)
+                    'Current Price': None, 
                 })
-        
-        # Find unmatched buys - UNREALIZED POSITIONS
+
+        # Process Unmatched Buys (Unrealized)
         for _, buy in buys.iterrows():
             if buy['id'] not in matched_buy_ids:
-                purchase_date = pd.to_datetime(buy['txn_date'])
-                quantity = buy['Quantity']
-                price_cost = buy['Price cost'] / buy['Quantity'] if buy['Quantity'] > 0 else 0
-                cost_value = buy['Price cost']
-                
-                # Get current price from stocks table
-                conn_temp = get_conn()
-                cur_temp = conn_temp.cursor()
-                cur_temp.execute("SELECT current_price FROM stocks WHERE symbol = ?", (stock,))
-                result = cur_temp.fetchone()
-                conn_temp.close()
-                
-                current_price = result[0] if result and result[0] else 0
-                current_value = current_price * quantity
-                
-                # Unrealized profit
-                unrealized_profit = current_value - cost_value
-                unrealized_profit_percent = (unrealized_profit / cost_value * 100) if cost_value > 0 else 0
-                
-                # Period calculation
-                period_days = (date.today() - purchase_date.date()).days
-                months = period_days / 30.0
+                q = buy['Quantity']
+                buy_price = buy['Price cost'] / q if q > 0 else 0
                 
                 unrealized_positions.append({
-                    'Status': 'Unrealized',
-                    'Purchase date': purchase_date.strftime('%d-%b-%y'),
-                    'Stock': stock,
-                    'Quantity': quantity,
-                    'Price cost': price_cost,
-                    'Cost value': cost_value,
-                    'Sale Date': '-',
-                    'Current price': current_price,
-                    'Current value': current_value,
-                    'Unrealized Profit': unrealized_profit,
-                    'cash Div': 0,
-                    'Bonus shares': 0,
-                    'Profit%': unrealized_profit_percent,
-                    'Period in days': period_days,
-                    'Months': months,
-                    'Profit': unrealized_profit,
-                    'Profit %': unrealized_profit_percent,
                     '_buy_id': buy['id'],
                     '_sell_id': None,
-                    '_editable': True
+                    'Status': 'Unrealized',
+                    'Stock': stock,
+                    'Purchase Date': pd.to_datetime(buy['txn_date']).date(),
+                    'Quantity': q,
+                    'Price Cost': buy_price,
+                    # Realized Fields (Empty)
+                    'Sale Date': None,
+                    'Sale Price': 0,
+                    # Extras
+                    'Dividends': buy['cash Div'] or 0,
+                    'Bonus': buy['Bonus shares'] or 0,
+                    'Notes': buy['notes'],
+                    # For Batch Fetch
+                    'Current Price': 0
                 })
-    
-    # Combine both lists
-    all_trades = realized_trades + unrealized_positions
-    
-    if not all_trades:
-        st.info("No trades found in the selected date range.")
+                all_tickers_for_fetch.add(stock)
+
+    # --- 2. BATCH FETCH PRICES (Unrealized Only) ---
+    live_prices = {}
+    if all_tickers_for_fetch and YFINANCE_AVAILABLE:
+        tickers_list = list(all_tickers_for_fetch)
+        # Filter for valid tickers only (simple heuristic)
+        valid_tickers = [t for t in tickers_list if "." in t or t.isupper()]
+        
+        if valid_tickers:
+            with st.spinner(f"Fetching prices for {len(valid_tickers)} stocks..."):
+                try:
+                    # Use Tickers for batch
+                    # yf.download is efficient for multiple tickers
+                    data = yf.download(valid_tickers, period="1d", progress=False)['Close']
+                    
+                    if not data.empty:
+                        # Handle single vs multiple result structure
+                        if len(valid_tickers) == 1:
+                            # data is Series or DataFrame with 1 col
+                            val = data.iloc[-1]
+                            if isinstance(val, pd.Series): val = val.iloc[0]
+                            # Apply /1000 Logic for Kuwait stocks (assuming .KW suffix)
+                            raw_val = float(val)
+                            t = valid_tickers[0]
+                            if t.endswith('.KW') and raw_val > 50: # Simple heuristic: if price > 50 likely in fils not KWD
+                                raw_val = raw_val / 1000.0
+                            live_prices[t] = raw_val
+                        else:
+                            # data is DataFrame, columns are tickers
+                            last_row = data.iloc[-1]
+                            for t in valid_tickers:
+                                if t in last_row.index:
+                                    val = last_row[t]
+                                    if pd.notna(val):
+                                        raw_val = float(val)
+                                        # Apply /1000 Logic for Kuwait stocks
+                                        if t.endswith('.KW') and raw_val > 50:
+                                             raw_val = raw_val / 1000.0
+                                        live_prices[t] = raw_val
+                except Exception as e:
+                    # Fallback or silent fail
+                    print(f"Batch fetch error: {e}")
+
+    # --- 3. BUILD DATAFRAME & CALCULATE METRICS ---
+    combined_data = realized_trades + unrealized_positions
+    if not combined_data:
+        st.info("No trades to display.")
         return
+
+    trade_df = pd.DataFrame(combined_data)
     
-    # Create DataFrames
-    all_df = pd.DataFrame(all_trades)
-    realized_df = pd.DataFrame(realized_trades) if realized_trades else pd.DataFrame()
-    unrealized_df = pd.DataFrame(unrealized_positions) if unrealized_positions else pd.DataFrame()
+    # Helper: Safe Float
+    def _safe_float(x):
+        try: return float(x)
+        except: return 0.0
+
+    # Enrich with Calculations
+    enriched_rows = []
+    
+    total_realized_profit = 0.0
+    total_unrealized_profit = 0.0
+    
+    for idx, row in trade_df.iterrows():
+        status = row['Status'] # Initial status
+        
+        # Logic: Status is derived from Sale Date existence
+        if pd.notna(row['Sale Date']):
+            status = 'Realized'
+            current_price = 0 # Not relevant for realized
+        else:
+            status = 'Unrealized'
+            current_price = live_prices.get(row['Stock'], 0.0)
+            
+        qty = _safe_float(row['Quantity'])
+        buy_price = _safe_float(row['Price Cost'])
+        sale_price = _safe_float(row['Sale Price']) if status == 'Realized' else 0
+        
+        cost_value = qty * buy_price
+        
+        # Profit Logic
+        profit = 0.0
+        profit_pct = 0.0
+        
+        if status == 'Realized':
+            sale_value = qty * sale_price
+            profit = sale_value - cost_value
+            value_price = sale_value
+        else:
+            # Unrealized
+            value_price = qty * current_price
+            profit = value_price - cost_value
+            
+        if cost_value > 0:
+            profit_pct = (profit / cost_value) * 100
+            
+        # Add to totals
+        if status == 'Realized':
+            total_realized_profit += profit
+        else:
+            total_unrealized_profit += profit
+
+        row['Status'] = status
+        row['Current Price'] = current_price if status == 'Unrealized' else None
+        row['Cost Value'] = cost_value
+        row['Value Price'] = value_price
+        row['Profit'] = profit
+        row['Profit %'] = profit_pct
+        
+        enriched_rows.append(row)
+        
+    final_df = pd.DataFrame(enriched_rows)
+    # Sort: Realized (by Sale Date desc), then Unrealized (by Buy Date desc)
+    final_df.sort_values('Purchase Date', ascending=False, inplace=True)
     
     # Display summary metrics
     st.divider()
     
-    # Calculate totals - CORRECT FINANCIAL CALCULATIONS
-    realized_cost = realized_df['Cost value'].sum() if not realized_df.empty else 0
-    realized_value = realized_df['Value price'].sum() if not realized_df.empty else 0
-    
-    # Realized profit = Sale Value - Cost (pure capital gain from trading)
-    realized_trading_profit = realized_value - realized_cost
-    
-    # Total cash dividends and bonus value
-    realized_cash_div = realized_df['cash Div'].sum() if not realized_df.empty else 0
-    
-    # Total realized profit including dividends
-    realized_profit_total = realized_trading_profit + realized_cash_div
-    
-    unrealized_cost = unrealized_df['Cost value'].sum() if not unrealized_df.empty else 0
-    unrealized_value = unrealized_df['Current value'].sum() if not unrealized_df.empty else 0
-    
-    # Unrealized profit = Current Value - Cost (unrealized capital gain/loss)
-    unrealized_profit = unrealized_value - unrealized_cost
-    
-    total_investment = realized_cost + unrealized_cost
-    total_current_value = realized_value + unrealized_value
-    total_profit = realized_trading_profit + unrealized_profit + realized_cash_div
-    
-    # First row: Realized vs Unrealized
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric("💰 Realized Profit", f"{realized_trading_profit:,.2f} KWD", 
-                 delta=f"{(realized_trading_profit/realized_cost*100) if realized_cost > 0 else 0:.2f}%",
-                 delta_color="normal")
-        if realized_cash_div > 0:
-            st.caption(f"+ {realized_cash_div:,.2f} KWD in dividends")
-    with col2:
-        st.metric("📊 Unrealized Profit", f"{unrealized_profit:,.2f} KWD", 
-                 delta=f"{(unrealized_profit/unrealized_cost*100) if unrealized_cost > 0 else 0:.2f}%",
-                 delta_color="off")
-    with col3:
-        st.metric("🎯 Total Profit", f"{total_profit:,.2f} KWD",
-                 delta=f"{(total_profit/total_investment*100) if total_investment > 0 else 0:.2f}%")
-    
-    # Second row: Investment details
+    # --- 4. KPI CARDS ---
     st.divider()
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("Realized Investment", f"{realized_cost:,.2f} KWD")
-    with col2:
-        st.metric("Realized Sale Value", f"{realized_value:,.2f} KWD")
-    with col3:
-        st.metric("Unrealized Investment", f"{unrealized_cost:,.2f} KWD")
-    with col4:
-        st.metric("Unrealized Current Value", f"{unrealized_value:,.2f} KWD")
-    
+    k1, k2, k3 = st.columns(3)
+    k1.metric("💰 Realized Profit", fmt_money_plain(total_realized_profit), 
+              delta=f"{total_realized_profit:.2f}", delta_color="normal")
+    k2.metric("📊 Unrealized Profit", fmt_money_plain(total_unrealized_profit), 
+              delta=f"{total_unrealized_profit:.2f}", delta_color="off")
+    k3.metric("📈 Total P&L", fmt_money_plain(total_realized_profit + total_unrealized_profit))
     st.divider()
     
-    # Prepare editable DataFrame - Keep raw numeric values for editing
-    edit_df = all_df.copy()
+    # --- 5. EDITABLE TABLE (Inline Editing) ---
+    col_mode, col_act = st.columns([2, 1])
+    with col_mode:
+        view_mode = st.radio(" ", ["📊 Read View", "✏️ Edit Mode"], horizontal=True, label_visibility="collapsed")
+    with col_act:
+        if st.button("🔄 Update Prices"):
+             with st.spinner("Fetching..."):
+                 time.sleep(1)
+                 st.rerun()
+
+    if view_mode == "📊 Read View":
+        render_trading_styled_table(final_df)
+        st.caption("ℹ️ Switch to **Edit Mode** to add, modify, or delete trades.")
+        st.divider()
+    else:
+        col_info, col_btn = st.columns([5, 1])
+        with col_info:
+            st.caption("📝 **Editor Mode:** Edit trades directly below. Set 'Sale Date' to mark as Realized. Clear it to revert to Unrealized.")
+            st.caption("💡 **Tip:** Kuwait stocks should end with `.KW` (e.g., `KFH.KW`).")
+        with col_btn:
+            if st.button("🔄 Update Prices", help="Fetch latest prices from Yahoo Finance"):
+                st.rerun()
     
-    # Ensure numeric columns are proper dtypes
-    numeric_columns = ['Quantity', 'Price cost', 'Cost value', 'Sale price', 'Value price', 
-                      'Current price', 'Current value', 'trading Profit', 'Unrealized Profit',
-                      'cash Div', 'Bonus shares', 'Profit%', 'Months']
-    
-    for col in numeric_columns:
-        if col in edit_df.columns:
-            edit_df[col] = pd.to_numeric(edit_df[col], errors='coerce')
-    
-    # Store original values for comparison
-    if 'original_trades_df' not in st.session_state:
-        st.session_state['original_trades_df'] = edit_df.copy()
-    
-    # Add Delete checkbox column at the beginning
-    edit_df.insert(0, 'Delete', False)
-    
-    # Add row numbers as the first column (after Delete)
-    edit_df.insert(1, '#', range(1, len(edit_df) + 1))
-    
-    # Hide specified columns from display
-    columns_to_hide = ['Period in days', 'Profit', 'Profit %', '_buy_id', '_sell_id', '_editable']
-    display_columns = [col for col in edit_df.columns if col not in columns_to_hide]
-    
-    # Configure column editing - ALL columns editable with proper types
-    column_config = {
-        'Delete': st.column_config.CheckboxColumn('Delete', help='Check to delete this transaction', width='small'),
-        '#': st.column_config.NumberColumn('#', help='Transaction number', width='small', disabled=True),
-        'Status': st.column_config.TextColumn('Status', width='small'),
-        'Purchase date': st.column_config.TextColumn('Purchase date', width='small'),
-        'Stock': st.column_config.TextColumn(
-            'Stock', 
-            help='Enter any Yahoo Finance ticker (e.g., KRE, AAPL, TSLA)',
-            width='medium',
-            required=True
-        ),
-        'Quantity': st.column_config.NumberColumn('Quantity', format='%.0f'),
-        'Price cost': st.column_config.NumberColumn('Price cost', format='%.3f', step=0.001),
-        'Cost value': st.column_config.NumberColumn('Cost value', format='%.2f'),
-        'Sale Date': st.column_config.TextColumn('Sale Date', width='small'),
-        'Sale price': st.column_config.NumberColumn('Sale price', format='%.3f', step=0.001),
-        'Value price': st.column_config.NumberColumn('Value price', format='%.2f'),
-        'Current price': st.column_config.NumberColumn('Current price', format='%.3f', step=0.001),
-        'Current value': st.column_config.NumberColumn('Current value', format='%.2f'),
-        'trading Profit': st.column_config.NumberColumn('trading Profit', format='%.2f'),
-        'Unrealized Profit': st.column_config.NumberColumn('Unrealized Profit', format='%.2f'),
-        'cash Div': st.column_config.NumberColumn('cash Div', format='%.2f'),
-        'Bonus shares': st.column_config.NumberColumn('Bonus shares', format='%.0f'),
-        'Profit%': st.column_config.NumberColumn('Profit%', format='%.2f'),
-        'Months': st.column_config.NumberColumn('Months', format='%.1f'),
-    }
-    
-    st.warning("⚠️ **IMPORTANT:** Kuwait stocks must use `.KW` suffix (e.g., NIH → **NIH.KW**, KRE → **KRE.KW**). US stocks use standard tickers (AAPL, TSLA). Double-click Stock cell to edit, then click 💾 Save.")
-    
-    st.divider()
-    
-    # Kuwait Stock Selector for updating ticker names
-    st.subheader("🔍 Update Stock Ticker from Kuwait Stock List")
-    
-    col_sel1, col_sel2, col_sel3 = st.columns([1, 2, 1])
-    
-    with col_sel1:
-        # Select row number to update
-        row_to_update = st.number_input(
-            "Select Row # to Update",
-            min_value=1,
-            max_value=len(edit_df),
-            value=1,
-            step=1,
-            key="trading_row_selector",
-            help="Enter the row number from the table below"
-        )
-    
-    with col_sel2:
-        # Kuwait stock selector dropdown
-        kuwait_stock_options = ["-- Select from Kuwait Stock List --"] + [
-            f"{stock['symbol']} - {stock['name']}" for stock in KUWAIT_STOCKS
+        # Reorder DataFrame Columns - Move Current Price after Buy Price
+        desired_cols = [
+            "Status", "Stock", "Purchase Date", "Quantity", "Price Cost", 
+            "Current Price", "Cost Value", 
+            "Sale Date", "Sale Price", 
+            "Value Price", "Profit", "Profit %", 
+            "Dividends", "Bonus", "Notes", 
+            "_buy_id", "_sell_id"
         ]
+        # Filter to existing columns and reorder
+        final_df = final_df[[c for c in desired_cols if c in final_df.columns] + [c for c in final_df.columns if c not in desired_cols]]
+    
+        # Config for Editor
+        # Build Stock List from KUWAIT_STOCKS (Use YFinance Tickers)
+        known_tickers = [s.get('yf_ticker', s['symbol']) for s in KUWAIT_STOCKS]
+        stock_options = sorted(list(set(known_tickers + list(final_df['Stock'].unique()))))
+    
+        column_config = {
+            "_buy_id": None, 
+            "_sell_id": None,
+            "Status": st.column_config.TextColumn("Status", disabled=True, width="small"),
+            "Stock": st.column_config.SelectboxColumn(
+                "Stock", 
+                options=stock_options,
+                required=True,
+                width="medium",
+                help="Select valid ticker (e.g. KFH.KW)"
+            ),
+            "Purchase Date": st.column_config.DateColumn("Purchase Date", format="YYYY-MM-DD", required=True),
+            "Quantity": st.column_config.NumberColumn("Quantity", min_value=1, format="%.0f", required=True),
+            "Price Cost": st.column_config.NumberColumn("Buy Price", min_value=0, format="%.3f", required=True),
+            "Sale Date": st.column_config.DateColumn("Sale Date", format="YYYY-MM-DD", help="Set date to mark as Realized"),
+            "Sale Price": st.column_config.NumberColumn("Sale Price", min_value=0, format="%.3f"),
+            
+            # Calculated / Read-only
+            "Current Price": st.column_config.NumberColumn("Current Price", format="%.3f", disabled=True),
+            "Cost Value": st.column_config.NumberColumn("Cost Value", format="%.1f", disabled=True),
+            "Value Price": st.column_config.NumberColumn("Mkt Value", format="%.1f", disabled=True),
+            "Profit": st.column_config.NumberColumn("Profit (KD)", format="%.1f", disabled=True),
+            "Profit %": st.column_config.NumberColumn("Profit %", format="%.1f%%", disabled=True),
+            "Dividends": st.column_config.NumberColumn("Divs", format="%.1f"),
+            "Bonus": st.column_config.NumberColumn("Bonus", format="%.0f"),
+            "Notes": st.column_config.TextColumn("Notes")
+        }
         
-        selected_kuwait = st.selectbox(
-            "Search and select Kuwait stock",
-            options=kuwait_stock_options,
-            key="trading_kuwait_stock_selector",
-            help="Select the correct Kuwait stock ticker"
-        )
+        st.warning("⚠️ **IMPORTANT:** Kuwait stocks must use `.KW` suffix (e.g., NIH → **NIH.KW**, KRE → **KRE.KW**). US stocks use standard tickers (AAPL, TSLA). Double-click Stock cell to edit, then click 💾 Save.")
+        
+        st.divider()
+        
+            # Display editable table inside a form to prevent auto-refresh on edit
+        with st.form("trading_table_form", clear_on_submit=False):
+            edited_df = st.data_editor(
+                final_df,
+                column_config=column_config,
+                use_container_width=True,
+                hide_index=True,
+                num_rows="dynamic",
+                key="trading_editor_v2"
+            )
     
-    with col_sel3:
-        # Apply button
-        if st.button("✅ Apply to Row", type="primary", use_container_width=True, disabled=(selected_kuwait == kuwait_stock_options[0])):
-            if selected_kuwait != kuwait_stock_options[0]:
-                try:
-                    # Extract ticker from selection
-                    new_ticker = selected_kuwait.split(" - ")[0].strip()
-                    
-                    # Find the correct Yahoo Finance ticker
-                    yf_ticker = None
-                    for stock in KUWAIT_STOCKS:
-                        if stock['symbol'] == new_ticker:
-                            yf_ticker = stock.get('yf_ticker', f"{new_ticker}.KW")
-                            break
-                    
-                    if not yf_ticker:
-                        yf_ticker = f"{new_ticker}.KW"
-                    
-                    # Get the row data
-                    row_idx = row_to_update - 1
-                    if 0 <= row_idx < len(edit_df):
-                        row = edit_df.iloc[row_idx]
-                        buy_id = row.get('_buy_id')
-                        sell_id = row.get('_sell_id')
-                        old_ticker = row.get('Stock')
-                        
-                        if pd.notna(buy_id):
-                            conn = get_conn()
-                            cur = conn.cursor()
-                            
-                            # Update buy transaction
-                            cur.execute("""
-                                UPDATE transactions 
-                                SET stock_symbol = ?
-                                WHERE id = ?
-                            """, (yf_ticker, int(buy_id)))
-                            
-                            # Update sell transaction if exists
-                            if pd.notna(sell_id):
-                                cur.execute("""
-                                    UPDATE transactions 
-                                    SET stock_symbol = ?
-                                    WHERE id = ?
-                                """, (yf_ticker, int(sell_id)))
-                            
-                            # Update or create stock in stocks table
-                            cur.execute("SELECT id FROM stocks WHERE symbol = ?", (yf_ticker,))
-                            if not cur.fetchone():
-                                cur.execute("""
-                                    INSERT INTO stocks (symbol, name, portfolio, currency)
-                                    VALUES (?, ?, ?, ?)
-                                """, (yf_ticker, new_ticker, "KFH", "KWD"))
-                            
-                            # Fetch price for unrealized positions
-                            if row.get('Status') == 'Unrealized':
-                                price_result = fetch_price_yfinance(yf_ticker)
-                                new_price = price_result[0] if isinstance(price_result, tuple) else price_result
-                                
-                                if new_price and new_price > 0:
-                                    cur.execute("""
-                                        UPDATE stocks 
-                                        SET current_price = ?, last_updated = ?
-                                        WHERE symbol = ?
-                                    """, (new_price, int(time.time()), yf_ticker))
-                                    st.success(f"✅ Row {row_to_update}: Updated '{old_ticker}' → '{yf_ticker}' | Price: {new_price:.3f} KWD")
-                                else:
-                                    st.warning(f"⚠️ Row {row_to_update}: Updated ticker to '{yf_ticker}' but couldn't fetch price")
-                            else:
-                                st.success(f"✅ Row {row_to_update}: Updated '{old_ticker}' → '{yf_ticker}'")
-                            
-                            conn.commit()
-                            conn.close()
-                            
-                            # Clear session and rerun
-                            if 'original_trades_df' in st.session_state:
-                                del st.session_state['original_trades_df']
-                            time.sleep(1)
-                            st.rerun()
-                        else:
-                            st.error("Invalid row selected")
-                    else:
-                        st.error(f"Row {row_to_update} does not exist")
-                        
-                except Exception as e:
-                    st.error(f"Error updating ticker: {e}")
+            st.caption("ℹ️ **Usage:** Click `+` to add rows. Set 'Sale Date' to mark as Sold. Clear it to set as Holding. Select rows and press Delete to remove.")
+            st.write("") # Spacer
+            submitted = st.form_submit_button("💾 Save Changes", type="primary", use_container_width=True)
     
-    st.divider()
-    
-    # Display editable table
-    edited_df = st.data_editor(
-        edit_df[display_columns],
-        column_config=column_config,
-        use_container_width=True,
-        height=500,
-        hide_index=True,
-        num_rows="dynamic",
-        key="trades_editor"
-    )
-    
-    # Action Buttons
-    col1, col2, col3, col4 = st.columns([1, 1, 1, 3])
-    with col1:
-        if st.button("💾 Save Changes", type="primary", use_container_width=True):
+        if submitted:
             try:
-                changes_made = 0
-                warnings = []
                 conn = get_conn()
                 cur = conn.cursor()
+                changes_count = 0
+    
+                # 1. Identify Deletions using DataFrame Index
+                # (Robust against hidden columns)
+                original_indexes = set(final_df.index)
+                current_indexes = set(edited_df.index)
+                indexes_to_delete = original_indexes - current_indexes
                 
-                # Compare edited_df with original
-                for idx in range(len(edited_df)):
-                    original_row = st.session_state['original_trades_df'].iloc[idx]
-                    edited_row = edited_df.iloc[idx]
-                    
-                    # Check if Stock symbol changed (for unrealized positions, auto-update price)
-                    stock_changed = str(edited_row.get('Stock', '')) != str(original_row.get('Stock', ''))
-                    
-                    if stock_changed:
-                        buy_id = original_row['_buy_id']
-                        new_stock_symbol = str(edited_row.get('Stock', '')).strip().upper()
+                for idx in indexes_to_delete:
+                    row_orig = final_df.loc[idx]
+                    b_id = row_orig['_buy_id']
+                    if pd.notna(b_id):
+                        # Delete Buy
+                        cur.execute("DELETE FROM trading_history WHERE id = ?", (int(b_id),))
                         
-                        # Auto-suggest correct format for Kuwait stocks
-                        if new_stock_symbol and not '.' in new_stock_symbol and len(new_stock_symbol) <= 4:
-                            # Likely a Kuwait stock without .KW suffix
-                            suggested = f"{new_stock_symbol}.KW"
-                            warnings.append(f"⚠️ '{new_stock_symbol}' → Suggested: '{suggested}' for Kuwait stocks")
+                        # Delete Sell
+                        s_id = row_orig.get('_sell_id')
+                        if pd.notna(s_id):
+                            cur.execute("DELETE FROM trading_history WHERE id = ?", (int(s_id),))
                         
-                        if new_stock_symbol and pd.notna(buy_id):
-                            # Update stock symbol in buy transaction
-                            cur.execute("""
-                                UPDATE transactions 
-                                SET stock_symbol = ?
-                                WHERE id = ?
-                            """, (new_stock_symbol, int(buy_id)))
-                            
-                            # If this is an unrealized position, fetch and update price
-                            if edited_row.get('Status') == 'Unrealized':
-                                try:
-                                    # First check if price exists in stocks table
-                                    cur.execute("SELECT current_price FROM stocks WHERE symbol = ?", (new_stock_symbol,))
-                                    result = cur.fetchone()
-                                    
-                                    if result and result[0] and result[0] > 0:
-                                        new_price = result[0]
-                                        st.info(f"✅ Used existing price for {new_stock_symbol}: {new_price:.3f} KWD")
-                                    else:
-                                        # Fetch new price from Yahoo Finance
-                                        price_result = fetch_price_yfinance(new_stock_symbol)
-                                        new_price = price_result[0] if isinstance(price_result, tuple) else price_result
-                                        
-                                        if new_price and new_price > 0:
-                                            # Update stocks table
-                                            cur.execute("""
-                                                UPDATE stocks 
-                                                SET current_price = ?, last_updated = ?
-                                                WHERE symbol = ?
-                                            """, (new_price, int(time.time()), new_stock_symbol))
-                                            st.success(f"✅ Fetched new price for {new_stock_symbol}: {new_price:.3f} KWD")
-                                        else:
-                                            st.warning(f"⚠️ Could not fetch price for {new_stock_symbol}")
-                                except Exception as e:
-                                    st.warning(f"⚠️ Error fetching price for {new_stock_symbol}: {e}")
-                            
-                            changes_made += 1
+                        changes_count += 1
+    
+                # 2. Handle Insertions and Updates
+                for index, row in edited_df.iterrows():
+                    # Determine Identity
+                    buy_id = None
+                    sell_id = None
                     
-                    # Check if Sale Date or Sale price changed
-                    sale_date_changed = str(edited_row.get('Sale Date', '')) != str(original_row.get('Sale Date', ''))
-                    sale_price_changed = edited_row.get('Sale price') != original_row.get('Sale price')
+                    if index in final_df.index:
+                        # Existing Record: Retrieve IDs reliably from source info
+                        # (Even if hidden in editor)
+                        buy_id = final_df.loc[index, '_buy_id']
+                        sell_id = final_df.loc[index, '_sell_id']
                     
-                    if sale_date_changed or sale_price_changed:
-                        buy_id = original_row['_buy_id']
-                        sell_id = original_row['_sell_id']
-                        quantity = original_row['Quantity']
-                        stock = edited_row.get('Stock')  # Use the (possibly updated) stock symbol
-                        
-                        # Parse new sale date
-                        new_sale_date_str = str(edited_row.get('Sale Date', '')).strip()
-                        if new_sale_date_str and new_sale_date_str != '-':
+                    # Extract values
+                    symbol = str(row['Stock']).strip()
+                    # Correction
+                    if len(symbol) <= 4 and symbol.isalpha():
+                         symbol = f"{symbol}.KW"
+                    
+                    # Date Parsing
+                    try:
+                        p_date_raw = row['Purchase Date']
+                        if pd.isna(p_date_raw) or str(p_date_raw).strip() == '':
+                            p_date = time.strftime('%Y-%m-%d')
+                        else:
                             try:
-                                new_sale_date = pd.to_datetime(new_sale_date_str, format='%d-%b-%y').strftime('%Y-%m-%d')
+                                p_date = pd.to_datetime(p_date_raw).strftime('%Y-%m-%d')
+                                # Handle NaT
+                                if p_date == 'NaT': p_date = time.strftime('%Y-%m-%d')
                             except:
-                                new_sale_date = pd.to_datetime(new_sale_date_str).strftime('%Y-%m-%d')
-                            
-                            new_sale_price = float(edited_row.get('Sale price', 0))
-                            new_sell_value = new_sale_price * quantity
-                            
-                            if pd.notna(sell_id) and sell_id is not None:
-                                # Update existing sell transaction
+                                p_date = str(p_date_raw)
+                    except:
+                        p_date = time.strftime('%Y-%m-%d')
+    
+                    qty = float(row['Quantity']) if pd.notna(row['Quantity']) else 0.0
+                    # Use 'Price Cost' (internal name) not 'Buy Price' (display label)
+                    p_price = float(row['Price Cost']) if pd.notna(row.get('Price Cost')) else 0.0
+                    p_cost = p_price * qty
+                    
+                    # Check for Sale
+                    s_date_raw = row['Sale Date']
+                    is_realized = False
+                    s_date = None
+                    s_price = 0.0
+                    
+                    # Logic: If Sale Date is set, it's Realized
+                    if pd.notna(s_date_raw) and str(s_date_raw).strip() != '' and str(s_date_raw).strip().lower() != 'none':
+                         try:
+                             # Check strict NaT
+                             dt = pd.to_datetime(s_date_raw)
+                             if pd.notna(dt):
+                                 s_date = dt.strftime('%Y-%m-%d')
+                                 is_realized = True
+                                 s_price = float(row['Sale Price']) if pd.notna(row['Sale Price']) else 0.0
+                         except:
+                             pass
+    
+                    
+                    # -- EXISTING RECORD (UPDATE) --
+                    if pd.notna(buy_id):
+                        buy_id = int(buy_id)
+                        # Update Buy
+                        cur.execute("""
+                            UPDATE trading_history
+                            SET stock_symbol = ?, txn_date = ?, shares = ?, purchase_cost = ?
+                            WHERE id = ?
+                        """, (symbol, p_date, qty, p_cost, buy_id))
+                        
+                        if is_realized:
+                            sell_val = s_price * qty
+                            if pd.notna(sell_id):
+                                # Update existing Sell
                                 cur.execute("""
-                                    UPDATE transactions 
-                                    SET txn_date = ?, sell_value = ?, stock_symbol = ?
+                                    UPDATE trading_history
+                                    SET stock_symbol = ?, txn_date = ?, shares = ?, sell_value = ?
                                     WHERE id = ?
-                                """, (new_sale_date, new_sell_value, stock, int(sell_id)))
+                                """, (symbol, s_date, qty, sell_val, int(sell_id)))
                             else:
-                                # Create new sell transaction with category='trading'
+                                # Insert NEW Sell (Transition to Realized)
                                 cur.execute("""
-                                    INSERT INTO transactions 
-                                    (stock_symbol, txn_date, txn_type, purchase_cost, sell_value, shares, 
-                                     cash_dividend, bonus_shares, category, created_at)
-                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                """, (stock, new_sale_date, 'Sell', 0, new_sell_value, quantity, 0, 0, 'trading', int(time.time())))
-                            
-                            changes_made += 1
+                                    INSERT INTO trading_history (stock_symbol, txn_date, txn_type, shares, sell_value, created_at)
+                                    VALUES (?, ?, 'Sell', ?, ?, ?)
+                                """, (symbol, s_date, qty, sell_val, int(time.time())))
+                        else:
+                            # Transferred to Unrealized: Delete potential sell record
+                            if pd.notna(sell_id):
+                                cur.execute("DELETE FROM trading_history WHERE id = ?", (int(sell_id),))
+                        
+                        changes_count += 0.5 # Track updates lightly
+                    
+                    # -- NEW RECORD (INSERT) --
+                    else:
+                        # Insert Buy
+                        cur.execute("""
+                            INSERT INTO trading_history (stock_symbol, txn_date, txn_type, shares, purchase_cost, created_at)
+                            VALUES (?, ?, 'Buy', ?, ?, ?)
+                        """, (symbol, p_date, qty, p_cost, int(time.time())))
+                        
+                        # If Realized, Insert Sell
+                        if is_realized:
+                            sell_val = s_price * qty
+                            cur.execute("""
+                                INSERT INTO trading_history (stock_symbol, txn_date, txn_type, shares, sell_value, created_at)
+                                VALUES (?, ?, 'Sell', ?, ?, ?)
+                            """, (symbol, s_date, qty, sell_val, int(time.time())))
+                        
+                        changes_count += 1
                 
                 conn.commit()
                 conn.close()
-                
-                # Show warnings about ticker format
-                if warnings:
-                    for warning in warnings:
-                        st.warning(warning)
-                
-                if changes_made > 0:
-                    st.success(f"✅ {changes_made} transaction(s) updated successfully!")
-                    # Clear session state
-                    if 'original_trades_df' in st.session_state:
-                        del st.session_state['original_trades_df']
-                    time.sleep(1)
-                    st.rerun()
-                else:
-                    st.info("No changes detected.")
-                    
-            except Exception as e:
-                st.error(f"Error saving changes: {e}")
-    
-    with col2:
-        if st.button("�️ Delete Selected", type="secondary", use_container_width=True):
-            # Get rows marked for deletion
-            rows_to_delete = edited_df[edited_df['Delete'] == True]
-            
-            if len(rows_to_delete) == 0:
-                st.warning("⚠️ No transactions selected for deletion.")
-            else:
-                try:
-                    conn = get_conn()
-                    cur = conn.cursor()
-                    deleted_count = 0
-                    
-                    for idx in rows_to_delete.index:
-                        row = edited_df.iloc[idx]
-                        buy_id = row.get('_buy_id')
-                        sell_id = row.get('_sell_id')
-                        
-                        # Delete buy transaction
-                        if pd.notna(buy_id) and buy_id is not None:
-                            cur.execute("DELETE FROM transactions WHERE id = ?", (int(buy_id),))
-                            deleted_count += 1
-                        
-                        # Delete sell transaction if exists
-                        if pd.notna(sell_id) and sell_id is not None:
-                            cur.execute("DELETE FROM transactions WHERE id = ?", (int(sell_id),))
-                            deleted_count += 1
-                    
-                    conn.commit()
-                    conn.close()
-                    
-                    st.success(f"✅ {deleted_count} transaction(s) deleted successfully!")
-                    if 'original_trades_df' in st.session_state:
-                        del st.session_state['original_trades_df']
-                    time.sleep(1)
-                    st.rerun()
-                    
-                except Exception as e:
-                    st.error(f"Error deleting transactions: {e}")
-    
-    with col3:
-        if st.button("🔄 Refresh", use_container_width=True):
-            if 'original_trades_df' in st.session_state:
-                del st.session_state['original_trades_df']
-            st.rerun()
-    
-    with col4:
-        # Delete All Transactions button with confirmation
-        if st.button("⚠️ Delete All Transactions", type="secondary", use_container_width=True):
-            st.session_state['confirm_delete_all'] = True
-    
-    # Confirmation dialog for Delete All
-    if st.session_state.get('confirm_delete_all', False):
-        st.warning("⚠️ **WARNING:** This will permanently delete ALL buy and sell transactions in the selected date range!")
-        col_conf1, col_conf2, col_conf3 = st.columns([1, 1, 4])
-        with col_conf1:
-            if st.button("✅ Yes, Delete All", type="primary"):
-                try:
-                    conn = get_conn()
-                    cur = conn.cursor()
-                    deleted_count = 0
-                    all_ids = []
-                    
-                    # Get all transaction IDs from the current view (use original edit_df, not edited_df)
-                    for idx in range(len(edit_df)):
-                        row = edit_df.iloc[idx]
-                        buy_id = row.get('_buy_id')
-                        sell_id = row.get('_sell_id')
-                        
-                        # Delete buy transaction
-                        if pd.notna(buy_id) and buy_id is not None:
-                            buy_id_int = int(buy_id)
-                            cur.execute("DELETE FROM transactions WHERE id = ?", (buy_id_int,))
-                            if cur.rowcount > 0:
-                                deleted_count += 1
-                                all_ids.append(buy_id_int)
-                        
-                        # Delete sell transaction if exists
-                        if pd.notna(sell_id) and sell_id is not None:
-                            sell_id_int = int(sell_id)
-                            cur.execute("DELETE FROM transactions WHERE id = ?", (sell_id_int,))
-                            if cur.rowcount > 0:
-                                deleted_count += 1
-                                all_ids.append(sell_id_int)
-                    
-                    conn.commit()
-                    conn.close()
-                    
-                    if deleted_count > 0:
-                        st.success(f"✅ Successfully deleted ALL {deleted_count} transactions (IDs: {len(all_ids)})")
-                    else:
-                        st.warning("⚠️ No transactions found to delete.")
-                    
-                    # Clear state and refresh
-                    st.session_state['confirm_delete_all'] = False
-                    if 'original_trades_df' in st.session_state:
-                        del st.session_state['original_trades_df']
-                    st.rerun()
-                    
-                except Exception as e:
-                    st.error(f"Error deleting all transactions: {e}")
-                    import traceback
-                    st.code(traceback.format_exc())
-                    st.session_state['confirm_delete_all'] = False
-        
-        with col_conf2:
-            if st.button("❌ Cancel"):
-                st.session_state['confirm_delete_all'] = False
+                st.toast(f"✅ Changes saved!", icon="🎉")
+                time.sleep(1)
                 st.rerun()
     
-    st.divider()
+            except Exception as e:
+                st.error(f"Error saving changes: {e}")
+                # st.write(e) # Debug
     
+        st.divider()
+    
+    # Prepare DataFrames for Export
+    all_df = final_df
+    realized_df = final_df[final_df['Status'] == 'Realized']
+    unrealized_df = final_df[final_df['Status'] == 'Unrealized']
+
     # Download as Excel
     st.divider()
     
@@ -6480,9 +6678,15 @@ def ui_overview():
     
     # Calculate LIVE portfolio value from current prices and holdings
     live_portfolio_value = 0.0
+    num_stocks = 0
+    
     for port_name in PORTFOLIO_CCY.keys():
         df_port = build_portfolio_table(port_name)
         if not df_port.empty:
+            # Count actual holdings (Shares > 0)
+            active_holdings = df_port[df_port['Shares Qty'] > 0.001]
+            num_stocks += len(active_holdings)
+            
             for _, row in df_port.iterrows():
                 live_portfolio_value += convert_to_kwd(row['Market Value'], row['Currency'])
 
@@ -6516,9 +6720,6 @@ def ui_overview():
         )
         total_dividends_kwd = all_dividends["amount_in_kwd"].sum()
     
-    # Get total number of stocks
-    total_stocks = query_df("SELECT COUNT(DISTINCT stock_symbol) as count FROM transactions")
-    num_stocks = total_stocks["count"].iloc[0] if not total_stocks.empty else 0
     
     # Get total transactions
     total_txns = query_df("SELECT COUNT(*) as count FROM transactions")
@@ -6716,6 +6917,7 @@ def ui_overview():
                 <div class="ov-sub">Need more data</div>
             </div>
             """, unsafe_allow_html=True)
+
 
     st.divider()
     
@@ -7008,6 +7210,538 @@ def ui_overview():
 
 
 # =========================
+# PEER ANALYSIS HELPERS
+# =========================
+
+@st.cache_data(ttl=3600*12)  # Cache for 12 hours
+def fetch_single_peer_data(ticker):
+    """Fetch extensive data for a single ticker to optimize performance."""
+    if not YFINANCE_AVAILABLE:
+        return {"error": "yfinance not loaded"}
+        
+    try:
+        t = yf.Ticker(ticker)
+        info = t.info
+        
+        # Fetch history for total return calcs (10y to be safe)
+        # Use 'max' or '10y'
+        hist = t.history(period="10y")
+        
+        data = {
+            "info": info,
+            "history": hist,
+            "financials": t.financials,
+            "balance_sheet": t.balance_sheet
+        }
+        return data
+    except Exception as e:
+        return {"error": str(e)}
+
+def calculate_peer_metrics(hist, info, financials):
+    """
+    Calculate advanced metrics:
+    - calc_ret_*: Time-period returns (1Mo, 3Mo, 1Y...)
+    - calc_cagr_*: Revenue/NetIncome/EPS CAGRs (3Y)
+    - calc_net_debt, calc_capex
+    """
+    metrics = {}
+    
+    # --- 1. Historical Returns ---
+    if not hist.empty:
+        current_price = info.get("regularMarketPrice") or info.get("currentPrice")
+        if not current_price:
+            current_price = hist["Close"].iloc[-1]
+            
+        def get_ret(days_ago):
+            target_date = pd.Timestamp.now(tz=hist.index.tz) - pd.Timedelta(days=days_ago)
+            # Find closest date before target
+            try:
+                idx = hist.index.get_indexer([target_date], method='nearest')[0]
+                if idx < 0 or idx >= len(hist):
+                    # If target is too far back (beyond start of data), and we asked for < 5 years, invalid.
+                    # If > 5 years, maybe use start price. 
+                    if days_ago > 365*5 and len(hist) > 0:
+                         past_price = hist["Close"].iloc[0] 
+                    else:
+                        return None
+                else:
+                    past_price = hist["Close"].iloc[idx]
+                
+                if past_price and past_price > 0:
+                    return (current_price - past_price) / past_price
+            except Exception:
+                return None
+            return None
+
+        # YTD
+        try:
+            current_year = pd.Timestamp.now().year
+            ytd_start = pd.Timestamp(f"{current_year-1}-12-31").tz_localize(hist.index.tz)
+            if ytd_start >= hist.index[0]:
+                ytd_idx = hist.index.get_indexer([ytd_start], method='bfill')[0]
+                if ytd_idx >= 0 and ytd_idx < len(hist):
+                     ytd_price = hist["Close"].iloc[ytd_idx]
+                     metrics["calc_ret_ytd"] = (current_price - ytd_price) / ytd_price
+        except Exception:
+            pass
+
+        metrics["calc_ret_1mo"] = get_ret(30)
+        metrics["calc_ret_3mo"] = get_ret(90)
+        metrics["calc_ret_6mo"] = get_ret(180)
+        metrics["calc_ret_9mo"] = get_ret(270)
+        metrics["calc_ret_1y"] = get_ret(365)
+        metrics["calc_ret_3y"] = get_ret(365*3)
+        metrics["calc_ret_5y"] = get_ret(365*5)
+        metrics["calc_ret_10y"] = get_ret(365*10)
+
+    # --- 2. Advanced Calcs (CAGR, Debt, Capex) ---
+    
+    # Net Debt
+    try:
+        total_debt = info.get("totalDebt")
+        total_cash = info.get("totalCash")
+        if total_debt is not None and total_cash is not None:
+             metrics["calc_net_debt"] = total_debt - total_cash
+    except:
+        pass
+
+    # CapEx = Operating Cash Flow - Free Cash Flow (Approx)
+    try:
+        ocf = info.get("operatingCashflow")
+        fcf = info.get("freeCashflow")
+        if ocf is not None and fcf is not None:
+             metrics["calc_capex"] = ocf - fcf
+    except:
+        pass
+        
+    # CAGRs (3 Year) from Financials
+    # Financials columns are dates. 0 is TTM/CurrentYear, 1 is LastYear, etc.
+    # We will try to grab column 0 and column 3 (3 years ago). 
+    if financials is not None and not financials.empty and len(financials.columns) >= 4:
+         def calc_cagr(row_name):
+             try:
+                 row_name_key = row_name
+                 # Sometimes keys differ slightly in strict strings
+                 if row_name_key not in financials.index:
+                     # Try lenient matching or predefined keys
+                     pass
+                     
+                 if row_name_key in financials.index:
+                     start_val = financials.loc[row_name_key].iloc[3] # 3 years ago
+                     end_val = financials.loc[row_name_key].iloc[0]   # Current
+                     if start_val and end_val and start_val > 0 and end_val > 0:
+                         return (end_val / start_val)**(1/3) - 1
+             except:
+                 return None
+             return None
+         
+         metrics["calc_cagr_revenue_3y"] = calc_cagr("Total Revenue")
+         metrics["calc_cagr_netincome_3y"] = calc_cagr("Net Income")
+         metrics["calc_cagr_eps_3y"] = calc_cagr("Basic EPS")
+
+    return metrics
+
+# =========================
+# UI - HELPERS
+# =========================
+def render_styled_table(df):
+    """
+    Renders a Streamlit dataframe using custom HTML/CSS to match a specific React/Tailwind aesthetic.
+    Supports Dark/Light mode based on st.session_state.theme.
+    """
+    is_dark = st.session_state.get("theme", "light") == "dark"
+    
+    # --- Theme Colors (Extracted from React Component) ---
+    if is_dark:
+        # Dark Mode Palette
+        c_bg_card = "rgba(17, 24, 39, 0.6)"   # bg-gray-900/60
+        c_border = "#1f2937"                  # border-gray-800
+        c_header_bg = "rgba(31, 41, 55, 0.5)" # bg-gray-800/50
+        c_text_p = "#ffffff"                  # text-white
+        c_text_s = "#9ca3af"                  # text-gray-400
+        c_hover = "rgba(31, 41, 55, 0.3)"     # hover:bg-gray-800/30
+        c_accent = "#22d3ee"                  # text-cyan-400
+        c_pos = "#34d399"                     # text-emerald-400
+        c_neg = "#fb7185"                     # text-rose-400
+    else:
+        # Light Mode Palette
+        c_bg_card = "rgba(255, 255, 255, 0.8)" # bg-white/80
+        c_border = "#e5e7eb"                   # border-gray-200
+        c_header_bg = "#f9fafb"                # bg-gray-50
+        c_text_p = "#111827"                   # text-gray-900
+        c_text_s = "#4b5563"                   # text-gray-600
+        c_hover = "rgba(243, 244, 246, 0.8)"   # hover:bg-gray-100/80
+        c_accent = "#2563eb"                   # text-blue-600
+        c_pos = "#16a34a"                      # text-green-600
+        c_neg = "#dc2626"                      # text-red-600
+
+    # --- CSS Injection ---
+    css = f"""
+    <style>
+    .st-styled-table-wrap {{
+        background-color: {c_bg_card};
+        border: 1px solid {c_border};
+        border-radius: 1rem; /* rounded-2xl */
+        backdrop-filter: blur(4px); /* backdrop-blur-sm */
+        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05); /* shadow-2xl-ish */
+        overflow: hidden;
+        margin-bottom: 1.5rem;
+        font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    }}
+    .st-styled-table-scroll {{
+        overflow-x: auto;
+    }}
+    .st-styled-table {{
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.875rem; /* text-sm */
+        table-layout: fixed; /* Force even column distribution */
+    }}
+    .st-styled-table th {{
+        text-align: center;
+        padding: 1rem 0.5rem;
+        font-weight: 600;
+        color: {c_text_p};
+        background-color: {c_header_bg};
+        border-bottom: 1px solid {c_border};
+        white-space: normal; /* Allow wrap */
+        word-wrap: break-word; 
+    }}
+    .st-styled-table th:first-child {{
+        text-align: left;
+        padding-left: 1.5rem;
+    }}
+    .st-styled-table td {{
+        padding: 1rem 0.5rem;
+        color: {c_text_p};
+        border-bottom: 1px solid {c_border};
+        text-align: center;
+        transition: background-color 0.2s;
+        white-space: normal;
+        word-wrap: break-word;
+    }}
+    .st-styled-table td:first-child {{
+        text-align: left;
+        padding-left: 1.5rem;
+        font-weight: 600; /* mimic symbol bold */
+        color: {c_text_p}; 
+    }}
+    .st-styled-table tr:last-child td {{
+        border-bottom: none;
+    }}
+    .st-styled-table tr:hover td {{
+        background-color: {c_hover};
+    }}
+    
+    /* Utility Classes for Colors */
+    .st-text-pos {{ color: {c_pos}; font-weight: 600; }}
+    .st-text-neg {{ color: {c_neg}; font-weight: 600; }}
+    .st-text-accent {{ color: {c_accent}; }}
+    .st-text-secondary {{ color: {c_text_s}; }}
+    </style>
+    """
+    
+    # --- HTML Construction ---
+    # Header
+    html_table = f"""
+    <div class="st-styled-table-wrap">
+        <div class="st-styled-table-scroll">
+            <table class="st-styled-table">
+                <thead>
+                    <tr>
+                        <th>Metric</th>
+    """
+    
+    for col in df.columns:
+        # Wrap ticker headers in accent color or just standard
+        html_table += f"<th>{col}</th>"
+    
+    html_table += """
+                    </tr>
+                </thead>
+                <tbody>
+    """
+    
+    # Body
+    for idx, row in df.iterrows():
+        html_table += f"<tr><td>{idx}</td>"
+        
+        for col in df.columns:
+            val = row[col]
+            display_val = str(val)
+            class_name = ""
+            
+            # Smart Coloring Logic based on format string result
+            # e.g. "1.41%" or "-3.00%"
+            if "%" in display_val:
+                if "-" in display_val:
+                    class_name = "st-text-neg"
+                else:
+                    class_name = "st-text-pos"
+            
+            # Handle "x" multiples if needed, or just leave standard
+            elif isinstance(val, str) and val.endswith("x"):
+                class_name = "st-text-p" 
+            
+            html_table += f'<td class="{class_name}">{display_val}</td>'
+            
+        html_table += "</tr>"
+            
+    html_table += """
+                </tbody>
+            </table>
+        </div>
+    </div>
+    """
+    
+    st.markdown(css + html_table, unsafe_allow_html=True)
+
+
+# =========================
+# UI - PEER ANALYSIS
+# =========================
+def ui_peer_analysis():
+    st.subheader("📊 Peer Analysis")
+    st.caption("Compare multiple stocks side-by-side using Yahoo Finance data.")
+
+    if 'peer_tickers' not in st.session_state:
+        st.session_state.peer_tickers = []
+
+    # Input Section
+    with st.expander("➕ Add Stocks to Compare", expanded=True):
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            # Option 1: Kuwait List
+            kuwait_options = get_kuwait_stock_options()
+            selected_kuwait = st.selectbox(
+                "Select from Kuwait Stock List",
+                options=kuwait_options,
+                key="peer_select_kuwait"
+            )
+            
+            # Option 2: Manual YF Ticker (for non-Kuwait stocks)
+            manual_ticker = st.text_input("Or enter generic Yahoo Finance Ticker (e.g. AAPL, TSLA)", key="peer_manual_input")
+
+        with col2:
+            st.write("") # Spacing
+            st.write("") 
+            if st.button("Add to List", type="primary", key="add_peer_btn"):
+                ticker_to_add = None
+                
+                # Prioritize manual input if provided
+                if manual_ticker.strip():
+                    ticker_to_add = manual_ticker.strip().upper()
+                elif selected_kuwait and selected_kuwait != "-- Select from Kuwait Stock List --":
+                    _, _, yf_ticker = parse_kuwait_stock_selection(selected_kuwait)
+                    if yf_ticker:
+                        ticker_to_add = yf_ticker
+                    else:
+                        ticker_to_add = selected_kuwait.split(" - ")[0] # Fallback
+                
+                if ticker_to_add:
+                    if ticker_to_add not in st.session_state.peer_tickers:
+                        st.session_state.peer_tickers.append(ticker_to_add)
+                        st.success(f"Added {ticker_to_add}")
+                        st.rerun()
+                    else:
+                        st.warning("Ticker already in list.")
+                else:
+                    st.error("Please select a stock or enter a ticker.")
+
+    st.divider()
+
+    # Display & Manage List
+    if st.session_state.peer_tickers:
+        col_list, col_clear = st.columns([4, 1])
+        with col_list:
+            st.write(f"**Selected Peers ({len(st.session_state.peer_tickers)})**: " + ", ".join(st.session_state.peer_tickers))
+        
+        with col_clear:
+            if st.button("🗑️ Clear All", key="clear_all_peers", type="secondary"):
+                st.session_state.peer_tickers = []
+                st.rerun()
+        
+        with st.expander("Manage List", expanded=False):
+             cols = st.columns(5)
+             for i, tick in enumerate(st.session_state.peer_tickers):
+                 col_idx = i % 5
+                 with cols[col_idx]:
+                     if st.button(f"🗑️ {tick}", key=f"rm_peer_{tick}_{i}"):
+                         st.session_state.peer_tickers.remove(tick)
+                         st.rerun()
+        
+        st.markdown("---")
+        
+        # ----------------------------------------------------
+        # FETCH DATA & RENDER TABLES (New Implementation)
+        # ----------------------------------------------------
+        if st.button("🚀 Fetch Data & Run Analysis", type="primary", use_container_width=True):
+            if not YFINANCE_AVAILABLE:
+                st.error("Yahoo Finance library not available.")
+                return
+
+            # Main Progress bar for UX
+            prog_bar = st.progress(0, text="Initializing...")
+            
+            # Dictionary to store fetched data: {ticker: {info:..., calc_returns: ...}}
+            fetched_data = {}
+            
+            # 1. Fetch Loop
+            for i, ticker in enumerate(st.session_state.peer_tickers):
+                prog_bar.progress((i / len(st.session_state.peer_tickers)), text=f"Fetching data for {ticker}...")
+                
+                # Fetch Raw Data
+                raw_data = fetch_single_peer_data(ticker)
+                
+                if "error" not in raw_data:
+                    # Calculate Stats including new CAGRs etc.
+                    metrics_calc = calculate_peer_metrics(
+                        raw_data["history"], 
+                        raw_data["info"], 
+                        raw_data["financials"]
+                    )
+                    
+                    fetched_data[ticker] = {
+                        "info": raw_data["info"],
+                        "calculated": metrics_calc,
+                        "financials": raw_data["financials"],
+                        "balance_sheet": raw_data["balance_sheet"]
+                    }
+                else:
+                    st.warning(f"Failed to fetch {ticker}: {raw_data['error']}")
+            
+            prog_bar.empty()
+            
+            if not fetched_data:
+                st.error("No data fetched.")
+                return
+
+            # Helper for formatting
+            def fmt_val(val, metric_label, key_type):
+                if val is None or (isinstance(val, float) and pd.isna(val)):
+                    return "-"
+                
+                # Identify formatting needs based on label Keywords or prefixes
+                label_lower = metric_label.lower()
+                key_type_lower = key_type.lower()
+                
+                # 0. Date Conversion (Unix Timestamp -> String)
+                # Check if "date" is in label and value is a large number (likely timestamp)
+                if "date" in label_lower or "date" in key_type_lower:
+                    if isinstance(val, (int, float)) and val > 1_000_000_000:
+                         try:
+                             return datetime.fromtimestamp(val).strftime('%Y-%m-%d')
+                         except:
+                             pass
+                
+                # Force string if not number
+                if not isinstance(val, (int, float)):
+                    return str(val)
+
+                # 1. Percentages
+                # Keywords: Yield, Margin, Growth, CAGR, Ratio (sometimes), Return, ROE, ROA, Perf
+                # Also if key_type implies calculation which is likely % like calc_ret_
+                if any(x in label_lower for x in ["yield", "margin", "growth", "cagr", "roe", "roa", "return", "perf"]):
+                    # SPECIAL CASE: 5 Year Avg Dividend Yield from Yahoo is typically already a percentage (e.g. 1.41 not 0.0141)
+                    # We need to detect if the value is > 0.5 (likely a whole number %) or < 0.5 (likely a decimal)
+                    # But this is risky. Let's look at specific keys.
+                    
+                    is_dividend_yield = "yield" in label_lower or "yield" in key_type_lower
+                    
+                    # If it's a dividend yield and value is > 0.5, assume it's already multiplied by 100.
+                    # E.g. Yahoo returns 'fiveYearAvgDividendYield': 1.86 (which means 1.86%)
+                    # while 'dividendYield': 0.014 (which means 1.4%)
+                    if is_dividend_yield and abs(val) > 0.30: 
+                         # Likely already a percentage number (e.g. 1.86)
+                         return f"{val:.2f}%"
+                    
+                    # Use Python's built-in percentage formatting (handles x100 automatically)
+                    return f"{val:.2%}"
+                    
+                # 2. Multiples (x)
+                if any(x in label_lower for x in ["p/e", "ev/", "price/", "peg", "beta", "ratio"]):
+                    return f"{val:.2f}x"
+                
+                # 3. Large Numbers (Millions/Billions)
+                # Revenue, Income, Cash, Debt, CapEx, Value, Limit
+                if any(x in label_lower for x in ["total", "revenue", "profit", "income", "ebitda", "cash", "debt", "capex", "value", "equity"]):
+                    if abs(val) >= 1e9: return f"{val/1e9:.2f}B"
+                    if abs(val) >= 1e6: return f"{val/1e6:.2f}M"
+                    return f"{val:,.0f}"
+                
+                return f"{val:,.2f}"
+
+            # 2. Render 8 Tables
+            for section_name, metrics_map in PEER_METRICS.items():
+                st.subheader(section_name)
+                
+                # Build Data Frame: Index=Metrics, Cols=Tickers
+                section_data = {}
+                
+                for metric_label, metric_key in metrics_map.items():
+                    row_values = []
+                    for ticker in st.session_state.peer_tickers:
+                        if ticker not in fetched_data:
+                            row_values.append("-")
+                            continue
+                            
+                        t_data = fetched_data[ticker]
+                        val = None
+                        
+                        # --- DISPATCH LOGIC ---
+                        # Type A: info_
+                        if metric_key.startswith("info_"):
+                            key = metric_key.replace("info_", "")
+                            val = t_data["info"].get(key)
+                        
+                        # Type B: calc_
+                        elif metric_key.startswith("calc_"):
+                            val = t_data["calculated"].get(metric_key)
+                            
+                        # Type C: sheet_ (Financials/Balance Sheet typically)
+                        elif metric_key.startswith("sheet_"):
+                            # Look in both financials and balance_sheet?
+                            # Usually explicit but we will try both recent columns
+                            key = metric_key.replace("sheet_", "")
+                            
+                            # Helper to find row
+                            found = False
+                            for sheet in [t_data["financials"], t_data["balance_sheet"]]:
+                                if sheet is not None and not sheet.empty:
+                                    # Try exact match
+                                    if key in sheet.index:
+                                        val = sheet.loc[key].iloc[0] # Most recent
+                                        found = True
+                                        break
+                                    # Try Case Insensitive
+                                    else:
+                                         matches = [idx for idx in sheet.index if idx.lower() == key.lower()]
+                                         if matches:
+                                             val = sheet.loc[matches[0]].iloc[0]
+                                             found = True
+                                             break
+
+                            if not found:
+                                val = None
+
+                        # Format
+                        row_values.append(fmt_val(val, metric_label, metric_key))
+                    
+                    section_data[metric_label] = row_values
+                
+                # Convert to DF
+                df_table = pd.DataFrame(section_data).T 
+                df_table.columns = st.session_state.peer_tickers
+                
+                # Render with custom styled UI
+                render_styled_table(df_table)
+                # st.dataframe(df_table, use_container_width=True) # Replaced
+
+    else:
+        st.info("Add stocks above to begin comparison.")
+
+
+# =========================
 # MAIN
 # =========================
 def main():
@@ -7045,7 +7779,7 @@ def main():
         st.session_state.theme = "light" if st.session_state.theme == "dark" else "dark"
 
     # Header with theme toggle on the right
-    col1, col2 = st.columns([4, 1])
+    col1, col2, col3 = st.columns([6, 1, 1])
     with col1:
         st.title("📊 Portfolio App")
     with col2:
@@ -7056,7 +7790,12 @@ def main():
             on_change=toggle_theme,
             key="theme_toggle"
         )
-    
+    with col3:
+        st.write("")
+        if "privacy_mode" not in st.session_state:
+            st.session_state.privacy_mode = False
+        st.toggle("👁️ Privacy", key="privacy_mode")
+
     # Show price fetching status
     if not YFINANCE_AVAILABLE:
         st.error(f"""
@@ -7092,6 +7831,7 @@ def main():
             "Add Cash Deposit",
             "Add Transactions",
             "Portfolio Analysis",
+            "Peer Analysis",
             "Trading Section",
             "Portfolio Tracker",
             "Dividends Tracker",
@@ -7111,12 +7851,15 @@ def main():
         ui_portfolio_analysis()
 
     with tabs[4]:
-        ui_trading_section()
+        ui_peer_analysis()
 
     with tabs[5]:
-        ui_portfolio_tracker()
+        ui_trading_section()
 
     with tabs[6]:
+        ui_portfolio_tracker()
+
+    with tabs[7]:
         ui_dividends_tracker()
 
     st.caption("DB: portfolio.db | UI: Streamlit")
