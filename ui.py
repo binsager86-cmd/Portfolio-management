@@ -8813,7 +8813,8 @@ def login_page(cookie_manager=None):
             email_login = email_login_input.strip().lower()
 
             # Audit logs
-            print(f"DEBUG: Current Working Directory: {os.getcwd()}")
+            import os as os_module
+            print(f"DEBUG: Current Working Directory: {os_module.getcwd()}")
             print(f"DEBUG: Database Path being used: {DB_PATH}")
             print(f"DEBUG: Searching for Email/Username: '{email_login}'")
 
