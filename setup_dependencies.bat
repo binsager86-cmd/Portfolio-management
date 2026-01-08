@@ -17,7 +17,7 @@ echo.
 
 REM Install dependencies
 echo [*] Installing Streamlit and dependencies...
-pip install streamlit yfinance pandas numpy requests openpyxl xlsxwriter altair
+pip install streamlit yfinance pandas numpy requests openpyxl xlsxwriter altair openai
 echo.
 
 echo ========================================
