@@ -668,7 +668,52 @@ def map_to_tradingview(symbol: str, exchange: str = "KSE", limit: int = 20):
 # CONFIG
 # =========================
 st.set_page_config(page_title="Portfolio App", layout="wide")
-DB_PATH = "portfolio.db"
+
+# =========================
+# DB PATH CONFIGURATION (Streamlit Cloud compatible)
+# =========================
+def get_db_path():
+    """
+    Returns the database path.
+    On Streamlit Cloud, use /tmp (writable).
+    Locally, use portfolio.db in the current directory.
+    """
+    import os
+    from pathlib import Path
+    
+    # Check if running on Streamlit Cloud
+    if os.getenv("STREAMLIT_SERVER_RUNNING") == "true" or os.path.exists("/mount/src"):
+        return Path("/tmp/portfolio.db")
+    return Path("portfolio.db")  # Local dev path
+
+def ensure_db_seeded():
+    """
+    Ensure the database exists in the writable location.
+    On Streamlit Cloud, copy from repo to /tmp if needed.
+    """
+    from pathlib import Path
+    import shutil
+    
+    target = get_db_path()
+    
+    if target.exists():
+        return  # DB already exists
+    
+    # Try to copy from repo (if we shipped a DB file)
+    repo_db = Path("portfolio.db")
+    if repo_db.exists() and str(repo_db) != str(target):
+        try:
+            shutil.copy(repo_db, target)
+            return
+        except Exception:
+            pass
+    
+    # Create empty DB file (schema will be created by init_db)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(target, check_same_thread=False)
+    conn.close()
+
+DB_PATH = str(get_db_path())
 
 
 # =========================
@@ -679,10 +724,20 @@ def get_conn():
 
 
 def query_df(sql, params=()):
+    import traceback
     conn = get_conn()
-    df = pd.read_sql_query(sql, conn, params=params)
-    conn.close()
-    return df
+    try:
+        df = pd.read_sql_query(sql, conn, params=params)
+        return df
+    except Exception as e:
+        # Log the actual error for Streamlit Cloud debugging
+        print("SQL ERROR:", repr(e))
+        print("SQL WAS:\n", sql)
+        print("PARAMS:", params)
+        print(traceback.format_exc())
+        raise
+    finally:
+        conn.close()
 
 
 def query_val(sql, params=()):
@@ -8715,10 +8770,19 @@ def login_page(cookie_manager=None):
             st.rerun()
 
 def main():
+    # Ensure DB exists in writable location (for Streamlit Cloud)
+    try:
+        ensure_db_seeded()
+    except Exception as e:
+        st.error(f"Database Seed Error: {e}")
+        print(f"DB Seed Error: {e}")
+    
+    # Initialize database schema
     try:
         init_db()
     except Exception as e:
         st.error(f"Database Initialization Error: {e}")
+        print(f"DB Init Error: {e}")
 
     # Initialize Cookie Manager (Global)
     # Specific key is required to prevent reloading issues
