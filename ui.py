@@ -5119,25 +5119,21 @@ def ui_portfolio_tracker():
         with col_yes:
             if st.button("✅ Yes, Delete All", type="primary", use_container_width=True):
                 try:
-                    user_id = st.session_state.get('user_id', 1)
                     conn = get_conn()
                     cur = conn.cursor()
                     
-                    # Hard delete ALL snapshots for this user
-                    cur.execute("DELETE FROM portfolio_snapshots WHERE user_id = ?", (user_id,))
-                    count1 = cur.rowcount
+                    # Hard delete ALL snapshots - no filter, delete everything
+                    cur.execute("DELETE FROM portfolio_snapshots")
+                    deleted_count = cur.rowcount
                     
-                    # Also delete snapshots with NULL user_id (legacy data)
-                    cur.execute("DELETE FROM portfolio_snapshots WHERE user_id IS NULL")
-                    count2 = cur.rowcount
-                    
-                    # VACUUM to reclaim space (hard removal)
                     conn.commit()
+                    
+                    # VACUUM to reclaim space (hard removal from disk)
                     cur.execute("VACUUM")
                     conn.close()
                     
                     st.session_state.confirm_delete_snapshots = False
-                    st.success(f"✅ HARD DELETED {count1 + count2} snapshots from database.")
+                    st.success(f"✅ HARD DELETED {deleted_count} snapshots from database.")
                     time.sleep(1)
                     st.rerun()
                 except Exception as e:
