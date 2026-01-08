@@ -1045,20 +1045,41 @@ def fetch_price_tradingview_by_tv_symbol(tv_exchange: str, tv_symbol: str, sessi
 def init_db():
     conn = get_conn()
     cur = conn.cursor()
+    
+    print("🔧 Initializing database...")
 
-    # Users Table
+    # ============================================
+    # STEP 1: CREATE USERS TABLE FIRST (Priority #1)
+    # This MUST exist before any table with user_id FK
+    # ============================================
     cur.execute(
         """
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT NOT NULL UNIQUE,
             email TEXT UNIQUE,
+            username TEXT NOT NULL UNIQUE,
             password_hash TEXT NOT NULL,
+            name TEXT,
             created_at INTEGER NOT NULL
         )
         """
     )
+    conn.commit()  # Commit users table immediately
+    
+    # Verify users table exists
+    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
+    if not cur.fetchone():
+        raise Exception("CRITICAL: Failed to create users table!")
+    print("✅ Step 1: Users table verified.")
+    
+    # Add missing columns to users (backwards compatibility)
     add_column_if_missing("users", "email", "TEXT")
+    add_column_if_missing("users", "name", "TEXT")
+
+    # ============================================
+    # STEP 2: CREATE DEPENDENT TABLES (after users)
+    # ============================================
+    print("🔧 Step 2: Creating dependent tables...")
 
     # Password Resets (OTP)
     cur.execute(
@@ -1528,6 +1549,12 @@ def init_db():
 
     conn.commit()
     conn.close()
+    
+    # ============================================
+    # STEP 3: VERIFICATION
+    # ============================================
+    print("✅ Step 3: Database initialized. Users table verified.")
+    print("🔧 All tables created successfully.")
     
     # ============================================
     # SEED DEFAULT ADMIN USER (for cloud deployment)
