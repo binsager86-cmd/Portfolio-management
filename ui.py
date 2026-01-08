@@ -5114,16 +5114,17 @@ def ui_portfolio_tracker():
     
     # Confirmation dialog
     if st.session_state.get('confirm_delete_snapshots', False):
-        st.error("⚠️ **WARNING: This will PERMANENTLY delete ALL portfolio tracker data from the database!**")
+        st.error("⚠️ **WARNING: This will PERMANENTLY delete ALL your portfolio tracker data!**")
         col_yes, col_no = st.columns(2)
         with col_yes:
             if st.button("✅ Yes, Delete All", type="primary", use_container_width=True):
                 try:
+                    user_id = st.session_state.get('user_id')
                     conn = get_conn()
                     cur = conn.cursor()
                     
-                    # Hard delete ALL snapshots - no filter, delete everything
-                    cur.execute("DELETE FROM portfolio_snapshots")
+                    # Delete ALL snapshots for this user (including user_id=1 default and NULL)
+                    cur.execute("DELETE FROM portfolio_snapshots WHERE user_id = ? OR user_id = 1 OR user_id IS NULL", (user_id,))
                     deleted_count = cur.rowcount
                     
                     conn.commit()
@@ -5133,7 +5134,7 @@ def ui_portfolio_tracker():
                     conn.close()
                     
                     st.session_state.confirm_delete_snapshots = False
-                    st.success(f"✅ HARD DELETED {deleted_count} snapshots from database.")
+                    st.success(f"✅ Deleted {deleted_count} snapshots.")
                     time.sleep(1)
                     st.rerun()
                 except Exception as e:
