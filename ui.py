@@ -3101,7 +3101,11 @@ def load_stocks_master():
         # We query the stocks table. 
         # The user has stocks stored here with symbol, name, portfolio, currency etc.
         # We'll use this as the master list.
-        df = query_df("SELECT symbol, name, portfolio, currency FROM stocks ORDER BY symbol")
+        user_id = st.session_state.get('user_id', 1)
+        df = query_df(
+            "SELECT symbol, name, portfolio, currency FROM stocks WHERE (user_id = ? OR user_id IS NULL OR user_id = 1) ORDER BY symbol",
+            (user_id,)
+        )
         return df
     except Exception as e:
         print(f"Error loading stocks master: {e}")
@@ -3286,15 +3290,17 @@ def ui_transactions():
                                     progress_bar.progress((idx + 1) / total_rows, text=f"Processing row {idx+1}/{total_rows}")
 
                                 symbol = str(row['stock_symbol']).strip().upper()
-                                # 1. Ensure Stock Exists
-                                cur.execute("SELECT id FROM stocks WHERE symbol = ?", (symbol,))
+                                user_id = st.session_state.get('user_id', 1)
+                                
+                                # 1. Ensure Stock Exists for this user
+                                cur.execute("SELECT id FROM stocks WHERE symbol = ? AND (user_id = ? OR user_id IS NULL)", (symbol, user_id))
                                 if not cur.fetchone():
                                     # Create stock if missing (use backup data if available)
                                     s_name = row.get('stock_name', symbol)
                                     s_port = row.get('portfolio', 'KFH')
                                     s_curr = row.get('currency', 'KWD')
-                                    cur.execute("INSERT INTO stocks (symbol, name, portfolio, currency) VALUES (?, ?, ?, ?)", 
-                                                (symbol, s_name, s_port, s_curr))
+                                    cur.execute("INSERT INTO stocks (symbol, name, portfolio, currency, user_id) VALUES (?, ?, ?, ?, ?)", 
+                                                (symbol, s_name, s_port, s_curr, user_id))
                                     new_stocks += 1
                                 
                                 # 2. Extract Data
@@ -3327,10 +3333,10 @@ def ui_transactions():
                                         INSERT INTO transactions 
                                         (stock_symbol, txn_date, txn_type, category, shares, purchase_cost, 
                                          sell_value, cash_dividend, reinvested_dividend, bonus_shares, 
-                                         fees, broker, reference, notes, created_at)
-                                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                         fees, broker, reference, notes, created_at, user_id)
+                                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                                     """, (symbol, t_date, t_type, t_cat, t_shares, t_cost, t_sell, 
-                                          t_div, t_reinv, t_bonus, t_fees, t_broker, t_ref, t_notes, t_created))
+                                          t_div, t_reinv, t_bonus, t_fees, t_broker, t_ref, t_notes, t_created, user_id))
                                     restored_count += 1
                             
                             conn.commit()
@@ -3392,9 +3398,10 @@ def ui_transactions():
                 st.error("Symbol is required.")
             else:
                 try:
+                    user_id = st.session_state.get('user_id', 1)
                     exec_sql(
-                        "INSERT INTO stocks (symbol, name, current_price, portfolio, currency) VALUES (?, ?, ?, ?, ?)",
-                        (sym, name.strip(), 0.0, portfolio, currency),
+                        "INSERT INTO stocks (symbol, name, current_price, portfolio, currency, user_id) VALUES (?, ?, ?, ?, ?, ?)",
+                        (sym, name.strip(), 0.0, portfolio, currency, user_id),
                     )
                     st.success(f"Stock {sym} added.")
                     st.rerun()
