@@ -3107,8 +3107,107 @@ def load_stocks_master():
         print(f"Error loading stocks master: {e}")
         return pd.DataFrame(columns=["symbol", "name", "portfolio", "currency"])
 
+
+def generate_sample_transactions_excel():
+    """Generate a sample Excel file for transaction imports."""
+    import io
+    
+    # Sample data matching database schema
+    sample_data = {
+        'stock_symbol': ['NBK', 'ZAIN', 'AAPL', 'KFH', 'AGILITY'],
+        'stock_name': ['National Bank of Kuwait', 'Zain Telecom', 'Apple Inc', 'Kuwait Finance House', 'Agility Public Warehousing'],
+        'portfolio': ['KFH', 'KFH', 'USA', 'BBYN', 'KFH'],
+        'currency': ['KWD', 'KWD', 'USD', 'KWD', 'KWD'],
+        'txn_date': ['2024-01-15', '2024-02-20', '2024-03-10', '2024-04-05', '2024-05-15'],
+        'txn_type': ['Buy', 'Buy', 'Buy', 'Buy', 'Sell'],
+        'category': ['portfolio', 'portfolio', 'portfolio', 'portfolio', 'portfolio'],
+        'shares': [1000, 500, 50, 2000, 300],
+        'purchase_cost': [1050.000, 275.000, 8500.00, 1580.000, 0],
+        'sell_value': [0, 0, 0, 0, 450.000],
+        'cash_dividend': [0, 0, 0, 0, 0],
+        'reinvested_dividend': [0, 0, 0, 0, 0],
+        'bonus_shares': [0, 0, 0, 0, 0],
+        'fees': [5.25, 2.75, 10.00, 7.90, 3.50],
+        'broker': ['Markaz', 'NBK Capital', 'Interactive Brokers', 'KFH Capital', 'Markaz'],
+        'reference': ['TXN-2024-001', 'TXN-2024-002', 'TXN-2024-003', 'TXN-2024-004', 'TXN-2024-005'],
+        'notes': ['Initial purchase', 'Adding position', 'US market entry', 'Long term hold', 'Partial profit taking']
+    }
+    
+    df = pd.DataFrame(sample_data)
+    
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+        df.to_excel(writer, index=False, sheet_name='Transactions')
+        
+        workbook = writer.book
+        worksheet = writer.sheets['Transactions']
+        
+        # Header format
+        header_fmt = workbook.add_format({'bold': True, 'bg_color': '#4472C4', 'font_color': 'white', 'border': 1})
+        for col_num, value in enumerate(df.columns.values):
+            worksheet.write(0, col_num, value, header_fmt)
+            worksheet.set_column(col_num, col_num, 18)
+        
+        # Add instructions sheet
+        instructions_sheet = workbook.add_worksheet('Instructions')
+        instructions = [
+            ['Column', 'Required', 'Description', 'Example Values'],
+            ['stock_symbol', 'YES', 'Stock ticker symbol (uppercase)', 'NBK, ZAIN, AAPL'],
+            ['stock_name', 'No', 'Full company name', 'National Bank of Kuwait'],
+            ['portfolio', 'No', 'Portfolio group (default: KFH)', 'KFH, BBYN, USA'],
+            ['currency', 'No', 'Currency code (default: KWD)', 'KWD, USD'],
+            ['txn_date', 'YES', 'Transaction date (YYYY-MM-DD)', '2024-01-15'],
+            ['txn_type', 'YES', 'Transaction type', 'Buy, Sell, DIVIDEND_ONLY'],
+            ['category', 'No', 'Category (default: portfolio)', 'portfolio, record'],
+            ['shares', 'YES', 'Number of shares', '1000'],
+            ['purchase_cost', 'No', 'Total cost for Buy (in currency)', '1050.000'],
+            ['sell_value', 'No', 'Total value for Sell (in currency)', '1200.000'],
+            ['cash_dividend', 'No', 'Cash dividend received', '25.500'],
+            ['reinvested_dividend', 'No', 'Dividend reinvested', '0'],
+            ['bonus_shares', 'No', 'Bonus shares received', '50'],
+            ['fees', 'No', 'Transaction fees/commission', '5.25'],
+            ['broker', 'No', 'Broker name', 'Markaz, NBK Capital'],
+            ['reference', 'No', 'Reference number', 'TXN-2024-001'],
+            ['notes', 'No', 'Additional notes', 'Long term investment'],
+        ]
+        
+        title_fmt = workbook.add_format({'bold': True, 'font_size': 14, 'bg_color': '#4472C4', 'font_color': 'white'})
+        header_fmt2 = workbook.add_format({'bold': True, 'bg_color': '#D9E2F3', 'border': 1})
+        cell_fmt = workbook.add_format({'border': 1, 'text_wrap': True})
+        
+        instructions_sheet.set_column(0, 0, 20)
+        instructions_sheet.set_column(1, 1, 10)
+        instructions_sheet.set_column(2, 2, 45)
+        instructions_sheet.set_column(3, 3, 30)
+        
+        for row_num, row_data in enumerate(instructions):
+            fmt = header_fmt2 if row_num == 0 else cell_fmt
+            for col_num, value in enumerate(row_data):
+                instructions_sheet.write(row_num, col_num, value, fmt)
+    
+    return buffer.getvalue()
+
+
 def ui_transactions():
     st.subheader("Add Transactions (per stock)")
+    
+    # --- Sample Download ---
+    with st.expander("📥 Download Sample Template"):
+        st.markdown("""
+        Download a sample Excel template to see the expected format for importing transactions.
+        The template includes:
+        - **Transactions sheet**: Sample data with all columns
+        - **Instructions sheet**: Description of each column
+        """)
+        
+        sample_data = generate_sample_transactions_excel()
+        st.download_button(
+            label="📥 Download Sample Template",
+            data=sample_data,
+            file_name="transactions_sample_template.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
+        )
     
     # --- Import / Export All Transactions Option ---
     with st.expander("🔁 Import / Export All Transactions (Backup & Restore)"):
