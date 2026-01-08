@@ -5102,8 +5102,39 @@ def ui_portfolio_tracker():
         st.error("🚨 Critical: Plotly is not loaded! Charts will not display.")
         st.info("Try: `pip install plotly` in your terminal")
     
-    # === SAVE TODAY'S SNAPSHOT BUTTON ===
-    if st.button("💾 Save Today's Snapshot (Live Data)", type="primary", use_container_width=True):
+    # === ACTION BUTTONS ROW ===
+    col_save, col_delete = st.columns([3, 1])
+    
+    with col_save:
+        save_snapshot_btn = st.button("💾 Save Today's Snapshot (Live Data)", type="primary", use_container_width=True)
+    
+    with col_delete:
+        with st.popover("🗑️ Delete All", use_container_width=True):
+            st.warning("⚠️ **This will permanently delete ALL portfolio tracker snapshots!**")
+            st.caption("This action cannot be undone.")
+            
+            confirm_text = st.text_input("Type 'DELETE' to confirm:", key="delete_tracker_confirm")
+            
+            if st.button("🗑️ Confirm Delete All Snapshots", type="primary", use_container_width=True):
+                if confirm_text == "DELETE":
+                    try:
+                        user_id = st.session_state.get('user_id', 1)
+                        conn = get_conn()
+                        cur = conn.cursor()
+                        cur.execute("DELETE FROM portfolio_snapshots WHERE user_id = ? OR user_id IS NULL", (user_id,))
+                        deleted_count = cur.rowcount
+                        conn.commit()
+                        conn.close()
+                        st.success(f"✅ Deleted {deleted_count} snapshots.")
+                        time.sleep(1)
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error deleting snapshots: {e}")
+                else:
+                    st.error("Please type 'DELETE' to confirm.")
+    
+    # === SAVE TODAY'S SNAPSHOT ===
+    if save_snapshot_btn:
         with st.spinner("Calculating live portfolio value..."):
             # 1. Calculate LIVE portfolio value
             live_portfolio_value = 0.0
