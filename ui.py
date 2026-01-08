@@ -1098,6 +1098,15 @@ def init_db():
         )
         """
     )
+    
+    # Ensure stocks has all required columns immediately after creation
+    # This handles case where table existed with old schema
+    conn.commit()  # Commit the CREATE TABLE first
+    add_column_if_missing("stocks", "current_price", "REAL DEFAULT 0")
+    add_column_if_missing("stocks", "portfolio", "TEXT DEFAULT 'KFH'")
+    add_column_if_missing("stocks", "currency", "TEXT DEFAULT 'KWD'")
+    add_column_if_missing("stocks", "tradingview_symbol", "TEXT")
+    add_column_if_missing("stocks", "tradingview_exchange", "TEXT")
 
     # Transactions
     # MIGRATION: We remove the CHECK constraint to allow more types and add portfolio column
@@ -1249,8 +1258,19 @@ def init_db():
                  cur.execute("DROP TABLE stocks_old")
                  conn.commit()
     except Exception as e:
-        # print(f"Migration error (stocks): {e}")
+        # If migration fails, ensure we still have proper columns via add_column_if_missing
+        try:
+            conn.rollback()
+        except:
+            pass
         pass
+
+    # Ensure stocks table has all needed columns (in case migration failed or table was created with old schema)
+    add_column_if_missing("stocks", "current_price", "REAL DEFAULT 0")
+    add_column_if_missing("stocks", "portfolio", "TEXT DEFAULT 'KFH'")
+    add_column_if_missing("stocks", "currency", "TEXT DEFAULT 'KWD'")
+    add_column_if_missing("stocks", "tradingview_symbol", "TEXT")
+    add_column_if_missing("stocks", "tradingview_exchange", "TEXT")
 
     # 3. Fix 'portfolio_cash' PK (PK(portfolio) -> PK(portfolio, user_id))
     try:
