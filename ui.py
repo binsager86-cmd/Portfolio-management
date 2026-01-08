@@ -681,9 +681,14 @@ def get_db_path():
     import os
     from pathlib import Path
     
-    # Check if running on Streamlit Cloud
-    if os.getenv("STREAMLIT_SERVER_RUNNING") == "true" or os.path.exists("/mount/src"):
+    # Check if running on Streamlit Cloud - /mount/src exists or we're not on Windows
+    is_cloud = os.path.exists("/mount/src") or (os.name != 'nt' and os.path.exists("/tmp"))
+    
+    if is_cloud:
+        print(f"🔧 Detected Streamlit Cloud environment, using /tmp/portfolio.db")
         return Path("/tmp/portfolio.db")
+    
+    print(f"🔧 Local environment, using portfolio.db")
     return Path("portfolio.db")  # Local dev path
 
 def ensure_db_seeded():
@@ -695,8 +700,10 @@ def ensure_db_seeded():
     import shutil
     
     target = get_db_path()
+    print(f"🔧 DB target path: {target}")
     
     if target.exists():
+        print(f"✅ DB already exists at {target}")
         return  # DB already exists
     
     # Try to copy from repo (if we shipped a DB file)
@@ -704,16 +711,19 @@ def ensure_db_seeded():
     if repo_db.exists() and str(repo_db) != str(target):
         try:
             shutil.copy(repo_db, target)
+            print(f"✅ Copied DB from repo to {target}")
             return
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"⚠️ Could not copy DB: {e}")
     
     # Create empty DB file (schema will be created by init_db)
     target.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(target, check_same_thread=False)
     conn.close()
+    print(f"✅ Created new empty DB at {target}")
 
 DB_PATH = str(get_db_path())
+print(f"📁 Database path set to: {DB_PATH}")
 
 
 # =========================
@@ -8790,12 +8800,6 @@ def login_page(cookie_manager=None):
     else:
         # standard login page (default)
         st.subheader("🔑 Login")
-        
-        import os
-        # Ensure absolute DB path
-        BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-        global DB_PATH
-        DB_PATH = os.path.join(BASE_DIR, "portfolio.db")
 
         # Use st.form to ensure variables are captured correctly on submit
         with st.form("login_form"):
