@@ -824,28 +824,36 @@ def create_session_token(user_id: int, days: int = 30) -> str:
 
 def get_user_from_token(token: str) -> Optional[dict]:
     """Validate token and return user info if valid."""
-    conn = get_conn()
-    cur = conn.cursor()
-    now = int(time.time())
-    
-    # Clean expired sessions occasionally
-    if np.random.random() < 0.1:
-        conn.execute("DELETE FROM user_sessions WHERE expires_at < ?", (now,))
-        conn.commit()
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        now = int(time.time())
         
-    cur.execute("""
-        SELECT u.id, u.username, s.expires_at 
-        FROM user_sessions s
-        JOIN users u ON s.user_id = u.id
-        WHERE s.token = ? AND s.expires_at > ?
-    """, (token, now))
-    
-    row = cur.fetchone()
-    conn.close()
-    
-    if row:
-        return {"id": row[0], "username": row[1]}
-    return None
+        # Clean expired sessions occasionally
+        if np.random.random() < 0.1:
+            try:
+                conn.execute("DELETE FROM user_sessions WHERE expires_at < ?", (now,))
+                conn.commit()
+            except Exception:
+                pass
+            
+        cur.execute("""
+            SELECT u.id, u.username, sess.expires_at 
+            FROM user_sessions sess
+            JOIN users u ON sess.user_id = u.id
+            WHERE sess.token = ? AND sess.expires_at > ?
+        """, (token, now))
+        
+        row = cur.fetchone()
+        conn.close()
+        
+        if row:
+            return {"id": row[0], "username": row[1]}
+        return None
+    except Exception as e:
+        # Table may not exist yet during init
+        print(f"get_user_from_token error (may be expected on first run): {e}")
+        return None
 
 def delete_session_token(token: str):
     """Delete a specific session token."""
@@ -1265,6 +1273,7 @@ def init_db():
         # Mapping old columns to new. 'portfolio' needs to be inferred from stocks table if possible
         # For now we default to KFH or try to join? 
         # Joining in an INSERT SELECT is possible.
+        # NOTE: We avoid joining on stocks.user_id since it may not exist yet
         cur.execute("""
             INSERT INTO transactions (
                 id, user_id, portfolio, stock_symbol, txn_date, txn_type, 
@@ -1272,11 +1281,10 @@ def init_db():
                 cash_dividend, reinvested_dividend, notes, created_at, category
             )
             SELECT 
-                t.id, t.user_id, COALESCE(s.portfolio, 'KFH'), t.stock_symbol, t.txn_date, t.txn_type,
+                t.id, t.user_id, 'KFH', t.stock_symbol, t.txn_date, t.txn_type,
                 t.purchase_cost, t.sell_value, t.shares, t.bonus_shares,
                 t.cash_dividend, t.reinvested_dividend, t.notes, t.created_at, t.category
             FROM transactions_old t
-            LEFT JOIN stocks s ON t.stock_symbol = s.symbol AND t.user_id = s.user_id
         """)
         
         # Drop old
