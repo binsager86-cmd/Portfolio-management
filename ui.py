@@ -1163,13 +1163,43 @@ def init_db():
     add_column_if_missing("stocks", "tradingview_symbol", "TEXT")
     add_column_if_missing("stocks", "tradingview_exchange", "TEXT")
 
-    # Transactions
-    # MIGRATION: We remove the CHECK constraint to allow more types and add portfolio column
+    # Transactions - CREATE TABLE FIRST (for fresh DB)
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS transactions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            portfolio TEXT DEFAULT 'KFH',
+            stock_symbol TEXT NOT NULL,
+            txn_date TEXT NOT NULL,
+            txn_type TEXT NOT NULL, 
+            purchase_cost REAL NOT NULL DEFAULT 0,
+            sell_value REAL NOT NULL DEFAULT 0,
+            shares REAL NOT NULL DEFAULT 0,
+            bonus_shares REAL NOT NULL DEFAULT 0,
+            cash_dividend REAL NOT NULL DEFAULT 0,
+            reinvested_dividend REAL NOT NULL DEFAULT 0,
+            price_override REAL,
+            planned_cum_shares REAL,
+            fees REAL DEFAULT 0,
+            broker TEXT,
+            reference TEXT,
+            notes TEXT,
+            category TEXT DEFAULT 'portfolio',
+            created_at INTEGER NOT NULL
+        )
+        """
+    )
+    conn.commit()
+    
+    # Ensure transactions has user_id (auto-migration for existing DBs)
+    add_column_if_missing("transactions", "user_id", "INTEGER")
+    add_column_if_missing("transactions", "portfolio", "TEXT DEFAULT 'KFH'")
+    add_column_if_missing("transactions", "category", "TEXT DEFAULT 'portfolio'")
+
+    # Transactions MIGRATION: Check if we need to expand txn_type constraint
     cur.execute("PRAGMA table_info(transactions)")
     cols = [r[1] for r in cur.fetchall()]
-    
-    if "portfolio" not in cols:
-        add_column_if_missing("transactions", "portfolio", "TEXT DEFAULT 'KFH'")
 
     # Check if we need to remove the strict CHECK constraint on txn_type
     # We do this by checking if we can insert a 'Deposit' type.
@@ -1498,6 +1528,48 @@ def init_db():
 
     conn.commit()
     conn.close()
+    
+    # ============================================
+    # SEED DEFAULT ADMIN USER (for cloud deployment)
+    # ============================================
+    seed_default_admin()
+
+
+def seed_default_admin():
+    """
+    Create a default admin user if the users table is empty.
+    This ensures cloud deployments have a login account.
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    
+    try:
+        cur.execute("SELECT count(*) FROM users")
+        user_count = cur.fetchone()[0]
+        
+        if user_count == 0:
+            import time
+            
+            # Hash the password with bcrypt
+            try:
+                import bcrypt
+                hashed_pw = bcrypt.hashpw("admin123".encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+            except ImportError:
+                # Fallback if bcrypt not available (plain text - not recommended for production)
+                hashed_pw = "admin123"
+                print("⚠️ WARNING: bcrypt not available, using plain text password")
+            
+            cur.execute(
+                "INSERT INTO users (username, email, password_hash, created_at) VALUES (?, ?, ?, ?)",
+                ('admin', 'admin@cloud.com', hashed_pw, int(time.time()))
+            )
+            conn.commit()
+            print("✅ Default Admin User Created: admin / admin123")
+            print("⚠️ IMPORTANT: Change this password after first login!")
+    except Exception as e:
+        print(f"Admin seed error: {e}")
+    finally:
+        conn.close()
 
 
 # =========================
