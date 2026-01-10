@@ -9058,25 +9058,29 @@ def main():
         # 1. If we are NOT logged in via Session State, BUT we have a valid Cookie:
         if "logged_in" not in st.session_state or not st.session_state.logged_in:
             if cookie_user:
-                # Restore session from cookie
-                st.session_state.logged_in = True
-                st.session_state.email = cookie_user
-                
                 # Fetch user details from DB based on cookie_user email here
                 try:
                     conn = get_conn()
-                    # Query for user by username (stored in cookie)
-                    res = conn.execute("SELECT id, username FROM users WHERE username=?", (cookie_user,)).fetchone()
+                    # Query for user by username OR email (case-insensitive to match login behavior)
+                    cookie_user_lower = cookie_user.strip().lower() if cookie_user else ""
+                    res = conn.execute(
+                        "SELECT id, username FROM users WHERE LOWER(username)=? OR LOWER(email)=?", 
+                        (cookie_user_lower, cookie_user_lower)
+                    ).fetchone()
                     conn.close()
                     
                     if res:
+                        # Only set logged_in AFTER confirming user exists in DB
+                        st.session_state.logged_in = True
                         st.session_state.user_id = res[0]
                         st.session_state.username = res[1]
+                        st.session_state.email = cookie_user
                         st.rerun() # Force rerun to skip login screen immediately
                     else:
-                        # Cookie user not found in DB
+                        # Cookie user not found in DB - clear invalid cookie
                         cookie_manager.delete("portfolio_user")
-                except Exception:
+                except Exception as e:
+                    print(f"Cookie restore error: {e}")
                     pass
 
     # Auth Check
