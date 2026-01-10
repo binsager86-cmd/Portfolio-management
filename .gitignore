@@ -25,3 +25,12 @@ env/
 # OS generated files
 .DS_Store
 Thumbs.db
+# Secrets (use Streamlit Cloud secrets instead)
+.streamlit/secrets.toml
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Test files
+test_*.py
+*.ipynb

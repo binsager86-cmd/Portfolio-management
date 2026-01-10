@@ -2491,7 +2491,7 @@ def ui_cash_deposits():
         if not corrupt_deposits.empty and corrupt_deposits["count"].iloc[0] > 0:
             count = corrupt_deposits["count"].iloc[0]
             exec_sql("DELETE FROM cash_deposits WHERE deposit_date LIKE '1970%' AND user_id=?", (user_id,))
-            st.success(f"🧹 Cleaned up {count} corrupt deposit(s) from year 1970")
+            st.success(f"🧹 Cleaned up {count:,} corrupt deposit(s) from year 1970")
     except:
         pass  # Silently continue if cleanup fails
 
@@ -3343,9 +3343,9 @@ def ui_transactions():
                             conn.close()
                             progress_bar.empty()
                             
-                            st.success(f"✅ Restoration Complete: {restored_count} imported, {skipped_count} skipped (duplicates).")
+                            st.success(f"✅ Restoration Complete: {restored_count:,} imported, {skipped_count:,} skipped (duplicates).")
                             if new_stocks > 0:
-                                st.info(f"🆕 Created {new_stocks} missing stock entries.")
+                                st.info(f"🆕 Created {new_stocks:,} missing stock entries.")
                             
                             time.sleep(2)
                             st.rerun()
@@ -3565,7 +3565,7 @@ def ui_transactions():
                     # Clear confirmation state
                     del st.session_state['confirm_delete_stock']
                     
-                    st.success(f"✅ Deleted {selected_symbol} and {txn_deleted} transactions")
+                    st.success(f"✅ Deleted {selected_symbol} and {txn_deleted:,} transactions")
                     time.sleep(2)
                     st.rerun()
                     
@@ -3719,7 +3719,7 @@ def ui_transactions():
                     df = raw.copy()
                     df.columns = [_norm_col(c) for c in df.columns]
                     
-                    st.write(f"Preview ({len(df)} rows):")
+                    st.write(f"Preview ({len(df):,} rows):")
                     st.dataframe(df.head(20), use_container_width=True)
                     
                     if st.button("Import These Transactions", type="primary", key=f"import_btn_{selected_symbol}"):
@@ -3766,7 +3766,7 @@ def ui_transactions():
                             st.write(errors[:10])
                         
                         if imported > 0:
-                            st.success(f"✅ Imported {imported} transactions for {selected_symbol}")
+                            st.success(f"✅ Imported {imported:,} transactions for {selected_symbol}")
                             time.sleep(1)
                             st.rerun()
                         
@@ -4229,159 +4229,476 @@ def ui_transactions():
 # =========================
 
 def ui_financial_planner():
-    """Dynamic Financial Planner Calculator with TVM calculations."""
-    st.title("📈 Financial Planner")
-    st.caption("Plan your financial future with Time Value of Money calculations.")
+    """Dynamic Financial Planner Calculator with TVM calculations - Gradio-inspired UI."""
     
-    # --- Goal Selector (Master Trigger) ---
-    st.markdown("### 🎯 What do you want to calculate?")
+    # Comprehensive Gradio-inspired CSS
+    st.markdown("""
+    <style>
+        /* ===== GRADIO-INSPIRED THEME FOR PLANNER ===== */
+        
+        /* Container styling */
+        [data-testid="stVerticalBlock"] > [data-testid="stVerticalBlock"] {
+            background: transparent;
+        }
+        
+        /* Modern card container */
+        .planner-card {
+            background: linear-gradient(145deg, #ffffff 0%, #f8fafc 100%);
+            border: 1px solid #e2e8f0;
+            border-radius: 16px;
+            padding: 24px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+        }
+        
+        /* Dark mode card */
+        @media (prefers-color-scheme: dark) {
+            .planner-card {
+                background: linear-gradient(145deg, #1e293b 0%, #0f172a 100%);
+                border: 1px solid #334155;
+            }
+        }
+        
+        /* Modern header styling */
+        .planner-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
+            border-radius: 20px;
+            padding: 32px;
+            margin-bottom: 24px;
+            box-shadow: 0 10px 40px rgba(102, 126, 234, 0.3);
+            text-align: center;
+        }
+        
+        .planner-header h1 {
+            color: white;
+            font-size: 2.5rem;
+            font-weight: 800;
+            margin: 0 0 8px 0;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .planner-header p {
+            color: rgba(255,255,255,0.9);
+            font-size: 1.1rem;
+            margin: 0;
+        }
+        
+        .planner-badge {
+            display: inline-block;
+            background: rgba(255,255,255,0.2);
+            backdrop-filter: blur(10px);
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            color: white;
+            font-weight: 600;
+            margin-top: 12px;
+        }
+        
+        /* Section headers */
+        .section-title {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+        
+        .section-icon {
+            width: 44px;
+            height: 44px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.4rem;
+        }
+        
+        .section-icon.green { background: linear-gradient(135deg, #10b981, #059669); }
+        .section-icon.purple { background: linear-gradient(135deg, #8b5cf6, #7c3aed); }
+        .section-icon.blue { background: linear-gradient(135deg, #3b82f6, #2563eb); }
+        .section-icon.pink { background: linear-gradient(135deg, #ec4899, #db2777); }
+        
+        .section-title h2 {
+            font-size: 1.4rem;
+            font-weight: 700;
+            color: #1e293b;
+            margin: 0;
+        }
+        
+        @media (prefers-color-scheme: dark) {
+            .section-title h2 { color: #f1f5f9; }
+        }
+        
+        /* Input labels */
+        .input-label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-weight: 600;
+            font-size: 0.95rem;
+            color: #374151;
+            margin-bottom: 8px;
+        }
+        
+        .input-label .icon {
+            font-size: 1.2rem;
+        }
+        
+        @media (prefers-color-scheme: dark) {
+            .input-label { color: #e2e8f0; }
+        }
+        
+        /* Streamlit input overrides - Gradio style */
+        .stNumberInput > div > div > input,
+        .stTextInput > div > div > input {
+            border: 2px solid #e2e8f0 !important;
+            border-radius: 12px !important;
+            padding: 14px 16px !important;
+            font-size: 1rem !important;
+            background: #ffffff !important;
+            transition: all 0.2s ease !important;
+        }
+        
+        .stNumberInput > div > div > input:focus,
+        .stTextInput > div > div > input:focus {
+            border-color: #8b5cf6 !important;
+            box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.15) !important;
+        }
+        
+        /* Select box styling */
+        .stSelectbox > div > div {
+            border: 2px solid #e2e8f0 !important;
+            border-radius: 12px !important;
+            background: #ffffff !important;
+        }
+        
+        .stSelectbox > div > div:hover {
+            border-color: #8b5cf6 !important;
+        }
+        
+        /* Primary button - Gradio style */
+        .stFormSubmitButton > button,
+        .stButton > button[kind="primary"] {
+            background: linear-gradient(135deg, #f97316 0%, #ea580c 100%) !important;
+            color: white !important;
+            border: none !important;
+            border-radius: 12px !important;
+            padding: 16px 32px !important;
+            font-weight: 700 !important;
+            font-size: 1.1rem !important;
+            box-shadow: 0 4px 15px rgba(249, 115, 22, 0.4) !important;
+            transition: all 0.3s ease !important;
+            text-transform: none !important;
+        }
+        
+        .stFormSubmitButton > button:hover,
+        .stButton > button[kind="primary"]:hover {
+            transform: translateY(-2px) !important;
+            box-shadow: 0 8px 25px rgba(249, 115, 22, 0.5) !important;
+        }
+        
+        /* Secondary button */
+        .stButton > button {
+            border: 2px solid #e2e8f0 !important;
+            border-radius: 12px !important;
+            padding: 12px 24px !important;
+            font-weight: 600 !important;
+            background: white !important;
+            color: #374151 !important;
+            transition: all 0.2s ease !important;
+        }
+        
+        .stButton > button:hover {
+            border-color: #8b5cf6 !important;
+            color: #8b5cf6 !important;
+            background: #faf5ff !important;
+        }
+        
+        /* Result card - Big prominent display */
+        .result-display {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            border-radius: 20px;
+            padding: 40px;
+            text-align: center;
+            box-shadow: 0 10px 40px rgba(16, 185, 129, 0.35);
+            margin: 24px 0;
+        }
+        
+        .result-display .label {
+            color: rgba(255,255,255,0.85);
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+        
+        .result-display .value {
+            color: white;
+            font-size: 3rem;
+            font-weight: 800;
+            text-shadow: 0 2px 8px rgba(0,0,0,0.15);
+        }
+        
+        /* Stats grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 16px;
+            margin: 24px 0;
+        }
+        
+        .stat-box {
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 14px;
+            padding: 20px;
+            text-align: center;
+        }
+        
+        .stat-box .label {
+            color: #64748b;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            font-weight: 600;
+            margin-bottom: 6px;
+        }
+        
+        .stat-box .value {
+            color: #1e293b;
+            font-size: 1.3rem;
+            font-weight: 700;
+        }
+        
+        @media (prefers-color-scheme: dark) {
+            .stat-box {
+                background: #1e293b;
+                border-color: #334155;
+            }
+            .stat-box .label { color: #94a3b8; }
+            .stat-box .value { color: #f1f5f9; }
+        }
+        
+        /* Progress bar */
+        .progress-container {
+            background: #e2e8f0;
+            border-radius: 10px;
+            height: 24px;
+            overflow: hidden;
+            margin: 16px 0;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            border-radius: 10px;
+            transition: width 0.5s ease;
+        }
+        
+        .progress-principal { background: linear-gradient(90deg, #22c55e, #16a34a); }
+        .progress-interest { background: linear-gradient(90deg, #3b82f6, #2563eb); }
+        
+        /* Data table styling */
+        .stDataFrame {
+            border-radius: 12px !important;
+            overflow: hidden !important;
+        }
+        
+        /* Footer */
+        .planner-footer {
+            text-align: center;
+            padding: 24px;
+            background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+            border-radius: 16px;
+            margin-top: 32px;
+            border: 1px solid #e2e8f0;
+        }
+        
+        .planner-footer .title {
+            font-weight: 700;
+            color: #475569;
+            margin-bottom: 4px;
+        }
+        
+        .planner-footer .subtitle {
+            color: #94a3b8;
+            font-size: 0.85rem;
+        }
+        
+        @media (prefers-color-scheme: dark) {
+            .planner-footer {
+                background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+                border-color: #334155;
+            }
+            .planner-footer .title { color: #e2e8f0; }
+        }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    # ===== HEADER =====
+    st.markdown("""
+    <div class="planner-header">
+        <h1>📈 Financial Planner Pro</h1>
+        <p>Advanced Time Value of Money Calculations</p>
+        <span class="planner-badge">✨ TVM Calculator</span>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # ===== GOAL SELECTOR =====
+    st.markdown("""
+    <div class="section-title">
+        <div class="section-icon purple">🎯</div>
+        <h2>What do you want to calculate?</h2>
+    </div>
+    """, unsafe_allow_html=True)
     
     goal_options = {
-        "future_value": "💰 I want to know my Future Portfolio Value (Solve for FV)",
-        "required_yield": "📊 I want to know the Required Yield % to reach a target (Solve for Rate)",
-        "required_contribution": "💵 I want to know the Required Monthly Contribution to reach a target (Solve for PMT)"
+        "future_value": "📊 Future Portfolio Value (Solve for FV)",
+        "required_yield": "📈 Required Yield % to reach a target (Solve for Rate)",
+        "required_contribution": "💰 Required Contribution to reach a target (Solve for PMT)"
     }
     
     selected_goal = st.selectbox(
-        "Select your financial goal:",
+        "Select goal",
         options=list(goal_options.keys()),
         format_func=lambda x: goal_options[x],
-        key="planner_goal"
+        key="planner_goal",
+        label_visibility="collapsed"
     )
     
-    st.divider()
-    
-    # --- Common Inputs (Always Visible) ---
-    st.markdown("### 📋 Basic Information")
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        present_value = st.number_input(
-            "💼 Present Value (Current Savings)",
-            min_value=0.0,
-            value=None,
-            step=1000.0,
-            format="%.2f",
-            placeholder="Enter starting amount",
-            help="Your current portfolio value or starting amount"
-        )
-    
-    with col2:
-        years = st.number_input(
-            "📅 Investment Period (Years)",
-            min_value=1,
-            max_value=100,
-            value=None,
-            step=1,
-            placeholder="Enter years",
-            help="How many years do you plan to invest?"
-        )
-    
-    with col3:
-        frequency_options = {"Monthly": 12, "Quarterly": 4, "Annually": 1}
-        frequency_label = st.selectbox(
-            "🔄 Contribution Frequency",
-            options=list(frequency_options.keys()),
-            index=0,
-            help="How often will you add money?"
-        )
-        frequency = frequency_options[frequency_label]
-    
-    st.divider()
-    
-    # --- Conditional Inputs (Based on Selection) ---
-    st.markdown("### 📊 Goal-Specific Inputs")
-    
-    # Initialize variables
-    annual_yield = None
-    contribution = None
-    target_fv = None
-    
-    if selected_goal == "future_value":
-        # Solve for Future Value: Need Yield and Contribution
-        col1, col2 = st.columns(2)
+    # Use a form to prevent refreshes while inputting data
+    with st.form("planner_form"):
+        # Inputs Section
+        st.markdown("""
+        <div class="section-title">
+            <div class="section-icon green">📋</div>
+            <h2>Input Parameters</h2>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        col1, col2, col3 = st.columns(3)
         
         with col1:
-            annual_yield = st.number_input(
-                "📈 Expected Annual Yield (%)",
+            st.markdown('<div class="input-label"><span class="icon">💰</span>Present Value (Current Savings)</div>', unsafe_allow_html=True)
+            present_value = st.number_input(
+                "Present Value",
                 min_value=0.0,
-                max_value=100.0,
                 value=None,
-                step=0.5,
+                step=1000.0,
                 format="%.2f",
-                placeholder="e.g., 8.0",
-                help="Expected annual return on investment"
+                placeholder="Enter starting amount",
+                label_visibility="collapsed"
             )
         
         with col2:
-            contribution = st.number_input(
-                f"💵 {frequency_label} Contribution Amount",
-                min_value=0.0,
+            st.markdown('<div class="input-label"><span class="icon">📅</span>Investment Period (Years)</div>', unsafe_allow_html=True)
+            years = st.number_input(
+                "Years",
+                min_value=1,
+                max_value=100,
                 value=None,
-                step=100.0,
-                format="%.2f",
-                placeholder="Enter amount",
-                help=f"Amount you'll add {frequency_label.lower()}"
+                step=1,
+                placeholder="Enter years",
+                label_visibility="collapsed"
             )
         
-    elif selected_goal == "required_yield":
-        # Solve for Yield: Need Target FV and Contribution
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            target_fv = st.number_input(
-                "🎯 Target Future Value",
-                min_value=0.0,
-                value=None,
-                step=10000.0,
-                format="%.2f",
-                placeholder="Enter target amount",
-                help="The amount you want to reach"
+        with col3:
+            st.markdown('<div class="input-label"><span class="icon">🔄</span>Contribution Frequency</div>', unsafe_allow_html=True)
+            frequency_options = {"Annually": 1, "Semiannually": 2, "Quarterly": 4, "Monthly": 12}
+            frequency_label = st.selectbox(
+                "Frequency",
+                options=list(frequency_options.keys()),
+                index=0,
+                label_visibility="collapsed"
             )
+            frequency = frequency_options[frequency_label]
         
-        with col2:
-            contribution = st.number_input(
-                f"💵 {frequency_label} Contribution Amount",
-                min_value=0.0,
-                value=None,
-                step=100.0,
-                format="%.2f",
-                placeholder="Enter amount",
-                help=f"Amount you'll add {frequency_label.lower()}"
-            )
+        # Initialize variables
+        annual_yield = None
+        contribution = None
+        target_fv = None
         
-    elif selected_goal == "required_contribution":
-        # Solve for PMT: Need Target FV and Yield
-        col1, col2 = st.columns(2)
+        if selected_goal == "future_value":
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown('<div class="input-label"><span class="icon">📈</span>Expected Annual Yield (%)</div>', unsafe_allow_html=True)
+                annual_yield = st.number_input(
+                    "Yield",
+                    min_value=0.0,
+                    max_value=100.0,
+                    value=None,
+                    step=0.5,
+                    format="%.2f",
+                    placeholder="e.g., 8.0",
+                    label_visibility="collapsed"
+                )
+            with col2:
+                st.markdown(f'<div class="input-label"><span class="icon">💵</span>{frequency_label} Contribution Amount</div>', unsafe_allow_html=True)
+                contribution = st.number_input(
+                    "Contribution",
+                    min_value=0.0,
+                    value=None,
+                    step=100.0,
+                    format="%.2f",
+                    placeholder="Enter amount",
+                    label_visibility="collapsed"
+                )
         
-        with col1:
-            target_fv = st.number_input(
-                "🎯 Target Future Value",
-                min_value=0.0,
-                value=None,
-                step=10000.0,
-                format="%.2f",
-                placeholder="Enter target amount",
-                help="The amount you want to reach"
-            )
+        elif selected_goal == "required_yield":
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown('<div class="input-label"><span class="icon">🎯</span>Target Future Value</div>', unsafe_allow_html=True)
+                target_fv = st.number_input(
+                    "Target FV",
+                    min_value=0.0,
+                    value=None,
+                    step=10000.0,
+                    format="%.2f",
+                    placeholder="Enter target amount",
+                    label_visibility="collapsed"
+                )
+            with col2:
+                st.markdown(f'<div class="input-label"><span class="icon">💵</span>{frequency_label} Contribution Amount</div>', unsafe_allow_html=True)
+                contribution = st.number_input(
+                    "Contribution",
+                    min_value=0.0,
+                    value=None,
+                    step=100.0,
+                    format="%.2f",
+                    placeholder="Enter amount",
+                    label_visibility="collapsed"
+                )
         
-        with col2:
-            annual_yield = st.number_input(
-                "📈 Expected Annual Yield (%)",
-                min_value=0.0,
-                max_value=100.0,
-                value=None,
-                step=0.5,
-                format="%.2f",
-                placeholder="e.g., 8.0",
-                help="Expected annual return on investment"
-            )
-    
-    st.divider()
-    
-    # --- Calculate Button ---
-    calculate_btn = st.button("🧮 Calculate", type="primary", use_container_width=True)
+        elif selected_goal == "required_contribution":
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown('<div class="input-label"><span class="icon">🎯</span>Target Future Value</div>', unsafe_allow_html=True)
+                target_fv = st.number_input(
+                    "Target FV",
+                    min_value=0.0,
+                    value=None,
+                    step=10000.0,
+                    format="%.2f",
+                    placeholder="Enter target amount",
+                    label_visibility="collapsed"
+                )
+            with col2:
+                st.markdown('<div class="input-label"><span class="icon">📈</span>Expected Annual Yield (%)</div>', unsafe_allow_html=True)
+                annual_yield = st.number_input(
+                    "Yield",
+                    min_value=0.0,
+                    max_value=100.0,
+                    value=None,
+                    step=0.5,
+                    format="%.2f",
+                    placeholder="e.g., 8.0",
+                    label_visibility="collapsed"
+                )
+        
+        st.markdown("<br>", unsafe_allow_html=True)
+        
+        # Calculate Button (form submit)
+        calculate_btn = st.form_submit_button("🧮 Calculate Financial Future", use_container_width=True)
     
     # Validation
     if calculate_btn:
@@ -4514,35 +4831,48 @@ def ui_financial_planner():
             final_value = data["target_fv"]
         
         # --- Display Result ---
-        st.divider()
-        st.markdown("### 🎉 Result")
-        
-        result_col1, result_col2, result_col3 = st.columns([1, 2, 1])
-        with result_col2:
-            st.metric(
-                label=result_label,
-                value=result_format,
-                delta=None
-            )
+        st.markdown(f"""
+        <div class="result-display">
+            <div class="label">{result_label.upper()}</div>
+            <div class="value">{result_format}</div>
+        </div>
+        """, unsafe_allow_html=True)
         
         # Summary stats
         if calc_yield is not None and calc_contribution is not None:
             total_contributions_amount = pv + (calc_contribution * total_periods)
             total_interest = final_value - total_contributions_amount
             
-            stat_col1, stat_col2, stat_col3, stat_col4 = st.columns(4)
-            with stat_col1:
-                st.metric("Starting Value", f"${pv:,.2f}")
-            with stat_col2:
-                st.metric("Total Contributions", f"${calc_contribution * total_periods:,.2f}")
-            with stat_col3:
-                st.metric("Total Interest Earned", f"${total_interest:,.2f}")
-            with stat_col4:
-                st.metric("Final Value", f"${final_value:,.2f}")
+            st.markdown(f"""
+            <div class="stats-grid">
+                <div class="stat-box">
+                    <div class="label">Starting Amount</div>
+                    <div class="value">${pv:,.2f}</div>
+                </div>
+                <div class="stat-box">
+                    <div class="label">Total Contributions</div>
+                    <div class="value">${total_contributions_amount:,.2f}</div>
+                </div>
+                <div class="stat-box">
+                    <div class="label">Interest Earned</div>
+                    <div class="value">${total_interest:,.2f}</div>
+                </div>
+                <div class="stat-box">
+                    <div class="label">Time Period</div>
+                    <div class="value">{yrs} Years</div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
         
-        # --- Projection Table & Chart ---
-        st.divider()
-        st.markdown("### 📊 Projection Schedule")
+        st.markdown("<br>", unsafe_allow_html=True)
+        
+        # --- Projection Table ---
+        st.markdown("""
+        <div class="section-title">
+            <div class="section-icon blue">📊</div>
+            <h2>Projection Schedule</h2>
+        </div>
+        """, unsafe_allow_html=True)
         
         # Generate projection data
         if calc_yield is not None and calc_contribution is not None:
@@ -4597,8 +4927,15 @@ def ui_financial_planner():
             
             st.dataframe(df_formatted, use_container_width=True, hide_index=True)
             
+            st.markdown("<br>", unsafe_allow_html=True)
+            
             # --- Chart ---
-            st.markdown("### 📈 Growth Visualization")
+            st.markdown("""
+            <div class="section-header">
+                <div class="icon-box icon-success">📈</div>
+                <h3>Growth Visualization</h3>
+            </div>
+            """, unsafe_allow_html=True)
             
             chart_data = df_projection[["Year", "Principal (Cash Invested)", "Total Balance"]].copy()
             chart_data = chart_data.rename(columns={
@@ -4634,7 +4971,12 @@ def ui_financial_planner():
             st.altair_chart(chart, use_container_width=True)
             
             # Interest vs Principal breakdown
-            st.markdown("### 📊 Breakdown")
+            st.markdown("""
+            <div class="section-title">
+                <div class="section-icon pink">💎</div>
+                <h2>Portfolio Breakdown</h2>
+            </div>
+            """, unsafe_allow_html=True)
             
             if len(projection_data) > 0:
                 final_data = projection_data[-1]
@@ -4646,22 +4988,305 @@ def ui_financial_planner():
                     principal_pct = (final_principal / final_bal) * 100
                     interest_pct = (final_interest / final_bal) * 100
                     
-                    breakdown_col1, breakdown_col2 = st.columns(2)
+                    st.markdown(f"""
+                    <div class="stats-grid" style="grid-template-columns: repeat(2, 1fr);">
+                        <div class="stat-box">
+                            <div class="label">💼 Principal (Your Money)</div>
+                            <div class="value">${final_principal:,.2f}</div>
+                            <div style="color: #22c55e; font-weight: 600; margin-top: 8px; font-size: 0.9rem;">{principal_pct:.1f}% of portfolio</div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="label">📈 Interest (Growth)</div>
+                            <div class="value">${final_interest:,.2f}</div>
+                            <div style="color: #3b82f6; font-weight: 600; margin-top: 8px; font-size: 0.9rem;">{interest_pct:.1f}% of portfolio</div>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
                     
-                    with breakdown_col1:
-                        st.markdown(f"""
-                        **💼 Principal (Your Money):** ${final_principal:,.2f} ({principal_pct:.1f}%)  
-                        **📈 Interest (Growth):** ${final_interest:,.2f} ({interest_pct:.1f}%)
-                        """)
-                    
-                    with breakdown_col2:
-                        st.progress(principal_pct / 100, text=f"Principal: {principal_pct:.1f}%")
+                    # Visual breakdown bar
+                    st.markdown(f"""
+                    <div class="progress-container">
+                        <div class="progress-fill progress-principal" style="width: {principal_pct}%; display: inline-block; float: left;"></div>
+                        <div class="progress-fill progress-interest" style="width: {interest_pct}%; display: inline-block;"></div>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; margin-top: 0.5rem; font-size: 0.85rem; color: #64748b;">
+                        <span>🟢 Principal: {principal_pct:.1f}%</span>
+                        <span>🔵 Interest: {interest_pct:.1f}%</span>
+                    </div>
+                    """, unsafe_allow_html=True)
         
-        # Clear button
-        if st.button("🔄 Clear & Start Over"):
-            st.session_state.planner_calculated = False
-            st.session_state.planner_data = None
-            st.rerun()
+        # ===== EXPORT BUTTONS =====
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown("""
+        <div class="section-title">
+            <div class="section-icon blue">📥</div>
+            <h2>Export Results</h2>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        export_col1, export_col2 = st.columns(2)
+        
+        # Prepare export data
+        export_summary = {
+            "Goal Type": data["goal"].replace("_", " ").title(),
+            "Present Value": f"${pv:,.2f}",
+            "Investment Period": f"{yrs} years",
+            "Frequency": freq_label,
+            "Result": result_format,
+        }
+        if calc_yield is not None:
+            export_summary["Annual Yield"] = f"{calc_yield:.2f}%"
+        if calc_contribution is not None:
+            export_summary["Contribution Amount"] = f"${calc_contribution:,.2f}"
+        if data.get("target_fv"):
+            export_summary["Target Future Value"] = f"${data['target_fv']:,.2f}"
+        
+        # Excel Export
+        with export_col1:
+            excel_buffer = io.BytesIO()
+            with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+                # Summary sheet
+                summary_df = pd.DataFrame([export_summary]).T.reset_index()
+                summary_df.columns = ["Parameter", "Value"]
+                summary_df.to_excel(writer, sheet_name="Summary", index=False)
+                
+                # Projection sheet
+                df_projection.to_excel(writer, sheet_name="Projection Schedule", index=False)
+            
+            excel_buffer.seek(0)
+            st.download_button(
+                label="📊 Export to Excel",
+                data=excel_buffer,
+                file_name=f"financial_plan_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
+            )
+        
+        # PDF Export
+        with export_col2:
+            def generate_planner_pdf():
+                """Generate a styled PDF report with visualization."""
+                from reportlab.lib import colors
+                from reportlab.lib.pagesizes import letter
+                from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+                from reportlab.lib.units import inch
+                from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
+                from reportlab.graphics.shapes import Drawing, Rect
+                from reportlab.graphics.charts.lineplots import LinePlot
+                from reportlab.graphics.charts.legends import Legend
+                from reportlab.graphics.widgets.markers import makeMarker
+                from reportlab.lib.enums import TA_CENTER
+                
+                pdf_buffer = io.BytesIO()
+                doc = SimpleDocTemplate(pdf_buffer, pagesize=letter, topMargin=0.5*inch, bottomMargin=0.5*inch)
+                
+                styles = getSampleStyleSheet()
+                title_style = ParagraphStyle(
+                    'CustomTitle',
+                    parent=styles['Heading1'],
+                    fontSize=24,
+                    textColor=colors.HexColor('#667eea'),
+                    spaceAfter=20,
+                    alignment=TA_CENTER
+                )
+                heading_style = ParagraphStyle(
+                    'CustomHeading',
+                    parent=styles['Heading2'],
+                    fontSize=14,
+                    textColor=colors.HexColor('#1e293b'),
+                    spaceBefore=20,
+                    spaceAfter=10
+                )
+                normal_style = styles['Normal']
+                
+                elements = []
+                
+                # Title
+                elements.append(Paragraph("📈 Financial Planner Report", title_style))
+                elements.append(Paragraph(f"Generated on {datetime.now().strftime('%B %d, %Y at %I:%M %p')}", 
+                                         ParagraphStyle('Subtitle', parent=normal_style, alignment=TA_CENTER, textColor=colors.gray)))
+                elements.append(Spacer(1, 20))
+                
+                # Result highlight
+                result_data = [[result_label.upper()], [result_format]]
+                result_table = Table(result_data, colWidths=[5*inch])
+                result_table.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#10b981')),
+                    ('TEXTCOLOR', (0, 0), (-1, -1), colors.white),
+                    ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica'),
+                    ('FONTSIZE', (0, 0), (-1, 0), 10),
+                    ('FONTNAME', (0, 1), (-1, 1), 'Helvetica-Bold'),
+                    ('FONTSIZE', (0, 1), (-1, 1), 24),
+                    ('TOPPADDING', (0, 0), (-1, -1), 15),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 15),
+                    ('ROUNDEDCORNERS', [10, 10, 10, 10]),
+                ]))
+                elements.append(result_table)
+                elements.append(Spacer(1, 20))
+                
+                # Summary section
+                elements.append(Paragraph("📋 Summary", heading_style))
+                summary_table_data = [[k, v] for k, v in export_summary.items()]
+                summary_table = Table(summary_table_data, colWidths=[2.5*inch, 3*inch])
+                summary_table.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#f8fafc')),
+                    ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#1e293b')),
+                    ('ALIGN', (0, 0), (0, -1), 'LEFT'),
+                    ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
+                    ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+                    ('FONTSIZE', (0, 0), (-1, -1), 10),
+                    ('TOPPADDING', (0, 0), (-1, -1), 8),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+                    ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e2e8f0')),
+                ]))
+                elements.append(summary_table)
+                elements.append(Spacer(1, 20))
+                
+                # Statistics
+                if calc_yield is not None and calc_contribution is not None:
+                    elements.append(Paragraph("📊 Statistics", heading_style))
+                    stats_data = [
+                        ["Starting Value", f"${pv:,.2f}"],
+                        ["Total Contributions", f"${total_contributions_amount:,.2f}"],
+                        ["Total Interest Earned", f"${total_interest:,.2f}"],
+                        ["Final Portfolio Value", f"${final_value:,.2f}"],
+                    ]
+                    stats_table = Table(stats_data, colWidths=[2.5*inch, 3*inch])
+                    stats_table.setStyle(TableStyle([
+                        ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#f8fafc')),
+                        ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#1e293b')),
+                        ('ALIGN', (0, 0), (0, -1), 'LEFT'),
+                        ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
+                        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+                        ('FONTSIZE', (0, 0), (-1, -1), 10),
+                        ('TOPPADDING', (0, 0), (-1, -1), 8),
+                        ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+                        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e2e8f0')),
+                    ]))
+                    elements.append(stats_table)
+                    elements.append(Spacer(1, 20))
+                
+                # Growth Chart
+                elements.append(Paragraph("📈 Growth Visualization", heading_style))
+                
+                drawing = Drawing(500, 200)
+                
+                # Prepare chart data - sample every few periods for clarity
+                sample_rate = max(1, len(projection_data) // 20)
+                sampled_data = projection_data[::sample_rate]
+                if projection_data[-1] not in sampled_data:
+                    sampled_data.append(projection_data[-1])
+                
+                principal_points = [(d["Year"], d["Principal (Cash Invested)"]) for d in sampled_data]
+                balance_points = [(d["Year"], d["Total Balance"]) for d in sampled_data]
+                
+                lp = LinePlot()
+                lp.x = 50
+                lp.y = 30
+                lp.height = 150
+                lp.width = 420
+                lp.data = [principal_points, balance_points]
+                lp.lines[0].strokeColor = colors.HexColor('#4CAF50')
+                lp.lines[0].strokeWidth = 2
+                lp.lines[1].strokeColor = colors.HexColor('#2196F3')
+                lp.lines[1].strokeWidth = 2
+                lp.xValueAxis.valueMin = 0
+                lp.xValueAxis.valueMax = yrs
+                lp.yValueAxis.valueMin = 0
+                lp.yValueAxis.valueMax = max(d["Total Balance"] for d in projection_data) * 1.1
+                
+                drawing.add(lp)
+                
+                # Legend
+                legend = Legend()
+                legend.x = 200
+                legend.y = 5
+                legend.dx = 8
+                legend.dy = 8
+                legend.fontName = 'Helvetica'
+                legend.fontSize = 8
+                legend.boxAnchor = 'c'
+                legend.columnMaximum = 1
+                legend.strokeWidth = 0.5
+                legend.alignment = 'right'
+                legend.colorNamePairs = [
+                    (colors.HexColor('#4CAF50'), 'Principal'),
+                    (colors.HexColor('#2196F3'), 'Portfolio Value')
+                ]
+                drawing.add(legend)
+                
+                elements.append(drawing)
+                elements.append(Spacer(1, 20))
+                
+                # Portfolio Breakdown
+                if len(projection_data) > 0:
+                    final_d = projection_data[-1]
+                    f_principal = final_d["Principal (Cash Invested)"]
+                    f_interest = final_d["Cumulative Interest"]
+                    f_bal = final_d["Total Balance"]
+                    
+                    if f_bal > 0:
+                        p_pct = (f_principal / f_bal) * 100
+                        i_pct = (f_interest / f_bal) * 100
+                        
+                        elements.append(Paragraph("💎 Portfolio Breakdown", heading_style))
+                        breakdown_data = [
+                            ["Component", "Amount", "Percentage"],
+                            ["Principal (Your Money)", f"${f_principal:,.2f}", f"{p_pct:.1f}%"],
+                            ["Interest (Growth)", f"${f_interest:,.2f}", f"{i_pct:.1f}%"],
+                            ["Total", f"${f_bal:,.2f}", "100%"],
+                        ]
+                        breakdown_table = Table(breakdown_data, colWidths=[2*inch, 2*inch, 1.5*inch])
+                        breakdown_table.setStyle(TableStyle([
+                            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#667eea')),
+                            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                            ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#f8fafc')),
+                            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                            ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
+                            ('FONTSIZE', (0, 0), (-1, -1), 10),
+                            ('TOPPADDING', (0, 0), (-1, -1), 10),
+                            ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
+                            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e2e8f0')),
+                        ]))
+                        elements.append(breakdown_table)
+                
+                # Build PDF
+                doc.build(elements)
+                pdf_buffer.seek(0)
+                return pdf_buffer.getvalue()
+            
+            try:
+                pdf_data = generate_planner_pdf()
+                st.download_button(
+                    label="📄 Export to PDF",
+                    data=pdf_data,
+                    file_name=f"financial_plan_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+                    mime="application/pdf",
+                    use_container_width=True
+                )
+            except ImportError:
+                st.warning("⚠️ PDF export requires reportlab. Install with: pip install reportlab")
+            except Exception as e:
+                st.error(f"❌ PDF generation failed: {str(e)}")
+        
+        # Clear button with modern styling
+        st.markdown("<br>", unsafe_allow_html=True)
+        col_btn1, col_btn2, col_btn3 = st.columns([1, 2, 1])
+        with col_btn2:
+            if st.button("🔄 Clear & Start Over", use_container_width=True):
+                st.session_state.planner_calculated = False
+                st.session_state.planner_data = None
+                st.rerun()
+    
+    # Footer
+    st.markdown("""
+    <div class="planner-footer">
+        <div class="title">📈 Financial Planner Pro</div>
+        <div class="subtitle">Professional Time Value of Money Calculator</div>
+    </div>
+    """, unsafe_allow_html=True)
 
 
 def ui_backup_restore():
@@ -4691,7 +5316,7 @@ def ui_backup_restore():
                     file_name=f"portfolio_backup_{date.today()}.xlsx", 
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
-                st.success(f"Ready to export {len(df_export)} records.")
+                st.success(f"Ready to export {len(df_export):,} records.")
             else:
                 st.warning("No transactions found to export.")
         except Exception as e:
@@ -4764,7 +5389,7 @@ def ui_backup_restore():
                     if count_errors > 0:
                         st.warning(f"Restore Complete: {count_success} imported, {count_errors} failed.")
                     else:
-                        st.success(f"✅ Successfully restored {count_success} transactions!")
+                        st.success(f"✅ Successfully restored {count_success:,} transactions!")
                     
                     time.sleep(2)
                     st.rerun()
@@ -5113,9 +5738,24 @@ def ui_portfolio_analysis():
     with col3:
         st.write("")  # Spacing for alignment
         if st.button("🔄 Fetch All Prices", key="fetch_all_portfolio", use_container_width=True):
-            stocks_df = query_df("SELECT DISTINCT symbol FROM stocks ORDER BY symbol ASC")
+            user_id = st.session_state.get('user_id')
+            # Only fetch prices for stocks the user is currently holding (shares > 0)
+            stocks_df = query_df("""
+                SELECT symbol, SUM(
+                    CASE 
+                        WHEN txn_type IN ('Buy', 'Bonus', 'Dividend Reinvestment') THEN COALESCE(shares, 0) + COALESCE(bonus_shares, 0)
+                        WHEN txn_type = 'Sell' THEN -COALESCE(shares, 0)
+                        ELSE 0
+                    END
+                ) as total_shares
+                FROM transactions
+                WHERE user_id = ?
+                GROUP BY symbol
+                HAVING total_shares > 0
+                ORDER BY symbol ASC
+            """, (user_id,))
             if stocks_df.empty:
-                st.info("No stocks in portfolio to update.")
+                st.info("No stocks currently held in portfolio to update.")
             else:
                 symbols = stocks_df["symbol"].tolist()
                 
@@ -5163,7 +5803,7 @@ def ui_portfolio_analysis():
                     progress_bar.empty()
                     status_text.empty()
                     
-                    st.success(f"✅ Prices updated: {updated} | ⚠️ Skipped: {skipped}")
+                    st.success(f"✅ Prices updated: {updated:,} | ⚠️ Skipped: {skipped:,}")
                     
                     if success_details:
                         with st.expander("✓ Successfully fetched prices"):
@@ -5574,7 +6214,7 @@ def ui_portfolio_tracker():
                     conn.close()
                     
                     st.session_state.confirm_delete_snapshots = False
-                    st.success(f"✅ Deleted {deleted_count} snapshots.")
+                    st.success(f"✅ Deleted {deleted_count:,} snapshots.")
                     time.sleep(1)
                     st.rerun()
                 except Exception as e:
@@ -5862,7 +6502,7 @@ def ui_portfolio_tracker():
                             conn.commit()
                             conn.close()
                             
-                            st.success(f"✅ Imported {len(records_to_insert)} snapshots successfully!")
+                            st.success(f"✅ Imported {len(records_to_insert):,} snapshots successfully!")
                             if duplicates:
                                 st.warning(f"⚠️ Skipped {len(duplicates)} duplicate dates: {', '.join(duplicates[:5])}{'...' if len(duplicates) > 5 else ''}")
                             st.rerun()
@@ -6399,7 +7039,7 @@ def ui_dividends_tracker():
     with col3:
         st.metric("🔄 Total Reinvested", fmt_money(total_reinvested, "KWD"))
     with col4:
-        st.metric("📊 Dividend-Paying Stocks", f"{unique_stocks}")
+        st.metric("📊 Dividend-Paying Stocks", f"{unique_stocks:,}")
     
     st.divider()
     
@@ -6473,7 +7113,7 @@ def ui_dividends_tracker():
         summary_display['Total Bonus Shares'] = summary_display['Total Bonus Shares'].apply(lambda x: f"{x:,.0f}")
         summary_display['Total Reinvested'] = summary_display['Total Reinvested'].apply(lambda x: f"{x:,.3f} KWD")
         summary_display['Total Dividends'] = summary_display['Total Dividends'].apply(lambda x: f"{x:,.3f} KWD")
-        summary_display['Dividend Count'] = summary_display['Dividend Count'].apply(lambda x: f"{x:.0f}")
+        summary_display['Dividend Count'] = summary_display['Dividend Count'].apply(lambda x: f"{x:,.0f}")
         summary_display['Yield on Cost %'] = summary_display['Yield on Cost %'].apply(lambda x: f"{x:.2f}%")
         
         st.dataframe(
@@ -7035,7 +7675,7 @@ def ui_trading_section():
                     
                 else:
                     st.success(f"✅ Validation passed! All {len(df)} rows are valid.")
-                    st.write(f"**Preview** ({len(df)} rows from sheet '{sheet}'):")
+                    st.write(f"**Preview** ({len(df):,} rows from sheet '{sheet}'):")
                     st.dataframe(df, use_container_width=True, height=300)
                 
                 if st.button("✅ Import Trading Data", key="import_trades") or proceed_with_errors:
@@ -7324,15 +7964,15 @@ def ui_trading_section():
                         
                         col_summary1, col_summary2, col_summary3, col_summary4 = st.columns(4)
                         with col_summary1:
-                            st.metric("📥 Excel Rows Imported", imported)
+                            st.metric("📥 Excel Rows Imported", f"{imported:,}")
                         with col_summary2:
-                            st.metric("✅ Buy Transactions Created", buy_count, delta="Database records")
+                            st.metric("✅ Buy Transactions Created", f"{buy_count:,}", delta="Database records")
                         with col_summary3:
-                            st.metric("✅ Sell Transactions Created", sell_count, delta="Database records")
+                            st.metric("✅ Sell Transactions Created", f"{sell_count:,}", delta="Database records")
                         with col_summary4:
-                            st.metric("📊 Total DB Transactions", transactions_after, delta=f"+{transactions_created}")
+                            st.metric("📊 Total DB Transactions", f"{transactions_after:,}", delta=f"+{transactions_created:,}")
                         
-                        st.info(f"ℹ️ **Explanation:** Each closed trade creates 2 database transactions (1 Buy + 1 Sell). You imported {imported} Excel rows which created {transactions_created} database transactions.")
+                        st.info(f"ℹ️ **Explanation:** Each closed trade creates 2 database transactions (1 Buy + 1 Sell). You imported {imported:,} Excel rows which created {transactions_created:,} database transactions.")
                         
                         st.divider()
                         
@@ -7738,9 +8378,9 @@ def ui_trading_section():
     st.divider()
     k1, k2, k3 = st.columns(3)
     k1.metric("💰 Realized Profit", fmt_money_plain(total_realized_profit), 
-              delta=f"{total_realized_profit:.2f}", delta_color="normal")
+              delta=f"{total_realized_profit:,.2f}", delta_color="normal")
     k2.metric("📊 Unrealized Profit", fmt_money_plain(total_unrealized_profit), 
-              delta=f"{total_unrealized_profit:.2f}", delta_color="off")
+              delta=f"{total_unrealized_profit:,.2f}", delta_color="off")
     k3.metric("📈 Total P&L", fmt_money_plain(total_realized_profit + total_unrealized_profit))
     st.divider()
     
@@ -9012,7 +9652,7 @@ def ui_peer_analysis():
     if st.session_state.peer_tickers:
         col_list, col_clear = st.columns([4, 1])
         with col_list:
-            st.write(f"**Selected Peers ({len(st.session_state.peer_tickers)})**: " + ", ".join(st.session_state.peer_tickers))
+            st.write(f"**Selected Peers ({len(st.session_state.peer_tickers):,})**: " + ", ".join(st.session_state.peer_tickers))
         
         with col_clear:
             if st.button("🗑️ Clear All", key="clear_all_peers", type="secondary"):
