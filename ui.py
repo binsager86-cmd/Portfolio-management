@@ -8986,13 +8986,16 @@ def login_page(cookie_manager=None):
                             st.session_state.user_id = user_id
                             st.session_state.username = db_username
 
-                            # HANDLE REMEMBER ME
+                            # HANDLE REMEMBER ME - Create persistent session token
                             if remember_me and cookie_manager:
                                 try:
+                                    # Create a secure session token in DB
+                                    token, token_expires = create_session_token(user_id, days=30)
                                     expires = datetime.now() + timedelta(days=30)
-                                    cookie_manager.set("portfolio_user", db_username, expires_at=expires)
+                                    # Store token in cookie (not username)
+                                    cookie_manager.set("portfolio_session", token, expires_at=expires)
                                 except Exception as ce:
-                                    print(f"Cookie Error: {ce}")
+                                    print(f"Session Token Error: {ce}")
 
                             st.success("Login Successful!")
                             st.rerun()
@@ -9043,16 +9046,36 @@ def main():
     # The "Cookie Sync" Block (Crucial)
     # Check for existing cookie
     if cookie_manager:
-        cookie_user = cookie_manager.get("portfolio_user")
+        # Check for session token (new secure method)
+        session_token = cookie_manager.get("portfolio_session")
+        # Also check legacy cookie for backwards compatibility
+        legacy_cookie = cookie_manager.get("portfolio_user")
 
-        # 1. If we are NOT logged in via Session State, BUT we have a valid Cookie:
+        # 1. If we are NOT logged in via Session State, BUT we have a valid token/cookie:
         if "logged_in" not in st.session_state or not st.session_state.logged_in:
-            if cookie_user:
-                # Fetch user details from DB based on cookie_user email here
+            
+            # Try token-based authentication first (more secure)
+            if session_token:
+                try:
+                    user_info = get_user_from_token(session_token)
+                    if user_info:
+                        # Token is valid - restore session
+                        st.session_state.logged_in = True
+                        st.session_state.user_id = user_info["id"]
+                        st.session_state.username = user_info["username"]
+                        st.rerun()  # Force rerun to skip login screen immediately
+                    else:
+                        # Token expired or invalid - clear it
+                        cookie_manager.delete("portfolio_session")
+                except Exception as e:
+                    print(f"Token restore error: {e}")
+                    cookie_manager.delete("portfolio_session")
+            
+            # Fallback to legacy cookie method (for existing users)
+            elif legacy_cookie:
                 try:
                     conn = get_conn()
-                    # Query for user by username OR email (case-insensitive to match login behavior)
-                    cookie_user_lower = cookie_user.strip().lower() if cookie_user else ""
+                    cookie_user_lower = legacy_cookie.strip().lower() if legacy_cookie else ""
                     res = conn.execute(
                         "SELECT id, username FROM users WHERE LOWER(username)=? OR LOWER(email)=?", 
                         (cookie_user_lower, cookie_user_lower)
@@ -9060,17 +9083,24 @@ def main():
                     conn.close()
                     
                     if res:
-                        # Only set logged_in AFTER confirming user exists in DB
                         st.session_state.logged_in = True
                         st.session_state.user_id = res[0]
                         st.session_state.username = res[1]
-                        st.session_state.email = cookie_user
-                        st.rerun() # Force rerun to skip login screen immediately
+                        
+                        # Upgrade to token-based session
+                        try:
+                            token, _ = create_session_token(res[0], days=30)
+                            expires = datetime.now() + timedelta(days=30)
+                            cookie_manager.set("portfolio_session", token, expires_at=expires)
+                            cookie_manager.delete("portfolio_user")  # Remove legacy cookie
+                        except Exception:
+                            pass
+                        
+                        st.rerun()
                     else:
-                        # Cookie user not found in DB - clear invalid cookie
                         cookie_manager.delete("portfolio_user")
                 except Exception as e:
-                    print(f"Cookie restore error: {e}")
+                    print(f"Legacy cookie restore error: {e}")
                     pass
 
     # Auth Check
@@ -9087,12 +9117,20 @@ def main():
     with st.sidebar:
         st.write(f"👤 **{st.session_state.get('username', 'User')}**")
         if st.button("Logout", key="logout_btn"):
-            # Update Logout Function (Deleting the Cookie)
+            # Delete session token from database
             if cookie_manager:
-                cookie_manager.delete("portfolio_user")
+                session_token = cookie_manager.get("portfolio_session")
+                if session_token:
+                    try:
+                        delete_session_token(session_token)
+                    except Exception:
+                        pass
+                cookie_manager.delete("portfolio_session")
+                cookie_manager.delete("portfolio_user")  # Also clean legacy cookie
             
             st.session_state.logged_in = False
             st.session_state.user_id = None
+            st.session_state.username = None
             st.rerun()
         st.divider()
 
