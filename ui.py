@@ -8960,17 +8960,10 @@ def login_page(cookie_manager=None):
         if submitted:
             email_login = email_login_input.strip().lower()
 
-            # Audit logs
-            import os as os_module
-            print(f"DEBUG: Current Working Directory: {os_module.getcwd()}")
-            print(f"DEBUG: Database Path being used: {DB_PATH}")
-            print(f"DEBUG: Searching for Email/Username: '{email_login}'")
-
             conn = get_conn()
             cur = conn.cursor()
             try:
-                # Broaden the SQL Query: Check BOTH columns
-                # New SQL: SELECT password_hash, username, id FROM users WHERE LOWER(email) = ? OR LOWER(username) = ?
+                # Check BOTH email and username columns (case-insensitive)
                 cur.execute("SELECT password_hash, username, id FROM users WHERE LOWER(email) = ? OR LOWER(username) = ?", (email_login, email_login))
                 row = cur.fetchone()
 
@@ -9004,14 +8997,11 @@ def login_page(cookie_manager=None):
                             st.success("Login Successful!")
                             st.rerun()
                         else:
-                            print(f"DEBUG: Password verification failed for '{email_login}'")
-                            st.error("❌ Invalid password (User found, password incorrect).")
+                            st.error("❌ Invalid email or password.")
                     except Exception as e:
                         st.error(f"Login processing error: {e}")
                 else:
-                    # TEMP DEBUGGING - REMOVE AFTER FIX
-                    st.warning(f"DEBUG INFO: Tried searching for '{email_login}' in DB: {DB_PATH}")
-                    st.error("User not found in database.")
+                    st.error("❌ Invalid email or password. Please check your credentials or register a new account.")
 
             except Exception as e:
                 st.error(f"Login error: {e}")
