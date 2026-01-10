@@ -670,121 +670,27 @@ def map_to_tradingview(symbol: str, exchange: str = "KSE", limit: int = 20):
 st.set_page_config(page_title="Portfolio App", layout="wide")
 
 # =========================
-# DB PATH CONFIGURATION (Streamlit Cloud compatible)
+# DATABASE LAYER (Supports SQLite & PostgreSQL/Supabase)
 # =========================
-def get_db_path():
-    """
-    Returns the database path.
-    On Streamlit Cloud, use /tmp (writable).
-    Locally, use portfolio.db in the current directory.
-    """
-    import os
-    from pathlib import Path
-    
-    # Check if running on Streamlit Cloud - /mount/src exists or we're not on Windows
-    is_cloud = os.path.exists("/mount/src") or (os.name != 'nt' and os.path.exists("/tmp"))
-    
-    if is_cloud:
-        print(f"🔧 Detected Streamlit Cloud environment, using /tmp/portfolio.db")
-        return Path("/tmp/portfolio.db")
-    
-    print(f"🔧 Local environment, using portfolio.db")
-    return Path("portfolio.db")  # Local dev path
+from db_layer import (
+    get_conn, 
+    query_df, 
+    query_val, 
+    exec_sql, 
+    table_columns, 
+    add_column_if_missing,
+    get_db_type,
+    is_postgres,
+    init_postgres_schema,
+    get_connection
+)
 
-def ensure_db_seeded():
-    """
-    Ensure the database exists in the writable location.
-    On Streamlit Cloud, copy from repo to /tmp if needed.
-    """
-    from pathlib import Path
-    import shutil
-    
-    target = get_db_path()
-    print(f"🔧 DB target path: {target}")
-    
-    if target.exists():
-        print(f"✅ DB already exists at {target}")
-        return  # DB already exists
-    
-    # Try to copy from repo (if we shipped a DB file)
-    repo_db = Path("portfolio.db")
-    if repo_db.exists() and str(repo_db) != str(target):
-        try:
-            shutil.copy(repo_db, target)
-            print(f"✅ Copied DB from repo to {target}")
-            return
-        except Exception as e:
-            print(f"⚠️ Could not copy DB: {e}")
-    
-    # Create empty DB file (schema will be created by init_db)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(target, check_same_thread=False)
-    conn.close()
-    print(f"✅ Created new empty DB at {target}")
-
-DB_PATH = str(get_db_path())
-print(f"📁 Database path set to: {DB_PATH}")
-
-
-# =========================
-# DB HELPERS
-# =========================
-def get_conn():
-    return sqlite3.connect(DB_PATH, check_same_thread=False)
-
-
-def query_df(sql, params=()):
-    import traceback
-    conn = get_conn()
-    try:
-        df = pd.read_sql_query(sql, conn, params=params)
-        return df
-    except Exception as e:
-        # Log the actual error for Streamlit Cloud debugging
-        print("SQL ERROR:", repr(e))
-        print("SQL WAS:\n", sql)
-        print("PARAMS:", params)
-        print(traceback.format_exc())
-        raise
-    finally:
-        conn.close()
-
-
-def query_val(sql, params=()):
-    """Helper to fetch a single scalar value from DB."""
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute(sql, params)
-    res = cur.fetchone()
-    conn.close()
-    return res[0] if res else None
-
-
-def exec_sql(sql, params=()):
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute(sql, params)
-    conn.commit()
-    conn.close()
-
-
-def table_columns(table_name: str) -> set:
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute(f"PRAGMA table_info({table_name})")
-    cols = {row[1] for row in cur.fetchall()}
-    conn.close()
-    return cols
-
-
-def add_column_if_missing(table: str, col: str, coltype: str):
-    cols = table_columns(table)
-    if col not in cols:
-        conn = get_conn()
-        cur = conn.cursor()
-        cur.execute(f"ALTER TABLE {table} ADD COLUMN {col} {coltype}")
-        conn.commit()
-        conn.close()
+# Initialize PostgreSQL schema if using Supabase
+if is_postgres():
+    init_postgres_schema()
+    print("🐘 PostgreSQL database ready")
+else:
+    print("📁 SQLite database ready")
 
 # =========================
 # AUTH HELPER FUNCTIONS
@@ -1061,10 +967,34 @@ def fetch_price_tradingview_by_tv_symbol(tv_exchange: str, tv_symbol: str, sessi
 
 
 def init_db():
+    """Initialize database schema. Handles both SQLite and PostgreSQL."""
+    
+    # If PostgreSQL, schema is already created by db_layer.init_postgres_schema()
+    if is_postgres():
+        print("🐘 Using PostgreSQL - schema already initialized")
+        # Just ensure any missing columns are added
+        for tbl in ["stocks", "transactions", "trading_history", "portfolio_cash", "cash_deposits"]:
+            add_column_if_missing(tbl, "user_id", "INTEGER DEFAULT 1")
+        add_column_if_missing("users", "email", "TEXT")
+        add_column_if_missing("users", "name", "TEXT")
+        add_column_if_missing("cash_deposits", "portfolio", "TEXT DEFAULT 'KFH'")
+        add_column_if_missing("cash_deposits", "include_in_analysis", "INTEGER DEFAULT 1")
+        add_column_if_missing("cash_deposits", "currency", "TEXT DEFAULT 'KWD'")
+        add_column_if_missing("stocks", "current_price", "REAL DEFAULT 0")
+        add_column_if_missing("stocks", "portfolio", "TEXT DEFAULT 'KFH'")
+        add_column_if_missing("stocks", "currency", "TEXT DEFAULT 'KWD'")
+        add_column_if_missing("stocks", "tradingview_symbol", "TEXT")
+        add_column_if_missing("stocks", "tradingview_exchange", "TEXT")
+        add_column_if_missing("transactions", "portfolio", "TEXT DEFAULT 'KFH'")
+        add_column_if_missing("transactions", "category", "TEXT DEFAULT 'portfolio'")
+        print("✅ PostgreSQL schema ready")
+        return
+    
+    # SQLite initialization (original logic)
     conn = get_conn()
     cur = conn.cursor()
     
-    print("🔧 Initializing database...")
+    print("🔧 Initializing SQLite database...")
 
     # ============================================
     # STEP 1: CREATE USERS TABLE FIRST (Priority #1)
@@ -10103,14 +10033,7 @@ def login_page(cookie_manager=None):
             st.rerun()
 
 def main():
-    # Ensure DB exists in writable location (for Streamlit Cloud)
-    try:
-        ensure_db_seeded()
-    except Exception as e:
-        st.error(f"Database Seed Error: {e}")
-        print(f"DB Seed Error: {e}")
-    
-    # Initialize database schema
+    # Initialize database schema (handles both SQLite and PostgreSQL)
     try:
         init_db()
     except Exception as e:
