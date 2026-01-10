@@ -4260,9 +4260,10 @@ def ui_financial_planner():
         present_value = st.number_input(
             "💼 Present Value (Current Savings)",
             min_value=0.0,
-            value=0.0,
+            value=None,
             step=1000.0,
             format="%.2f",
+            placeholder="Enter starting amount",
             help="Your current portfolio value or starting amount"
         )
     
@@ -4271,8 +4272,9 @@ def ui_financial_planner():
             "📅 Investment Period (Years)",
             min_value=1,
             max_value=100,
-            value=10,
+            value=None,
             step=1,
+            placeholder="Enter years",
             help="How many years do you plan to invest?"
         )
     
@@ -4286,8 +4288,6 @@ def ui_financial_planner():
         )
         frequency = frequency_options[frequency_label]
     
-    total_periods = years * frequency
-    
     st.divider()
     
     # --- Conditional Inputs (Based on Selection) ---
@@ -4297,8 +4297,6 @@ def ui_financial_planner():
     annual_yield = None
     contribution = None
     target_fv = None
-    result = None
-    result_label = ""
     
     if selected_goal == "future_value":
         # Solve for Future Value: Need Yield and Contribution
@@ -4309,9 +4307,10 @@ def ui_financial_planner():
                 "📈 Expected Annual Yield (%)",
                 min_value=0.0,
                 max_value=100.0,
-                value=8.0,
+                value=None,
                 step=0.5,
                 format="%.2f",
+                placeholder="e.g., 8.0",
                 help="Expected annual return on investment"
             )
         
@@ -4319,25 +4318,12 @@ def ui_financial_planner():
             contribution = st.number_input(
                 f"💵 {frequency_label} Contribution Amount",
                 min_value=0.0,
-                value=500.0,
+                value=None,
                 step=100.0,
                 format="%.2f",
+                placeholder="Enter amount",
                 help=f"Amount you'll add {frequency_label.lower()}"
             )
-        
-        # Calculate Future Value
-        periodic_rate = (annual_yield / 100) / frequency
-        
-        if periodic_rate > 0:
-            # FV = PV * (1 + r)^n + PMT * [((1 + r)^n - 1) / r]
-            fv_pv = present_value * ((1 + periodic_rate) ** total_periods)
-            fv_pmt = contribution * (((1 + periodic_rate) ** total_periods - 1) / periodic_rate)
-            result = fv_pv + fv_pmt
-        else:
-            result = present_value + (contribution * total_periods)
-        
-        result_label = "Future Portfolio Value"
-        result_format = f"${result:,.2f}"
         
     elif selected_goal == "required_yield":
         # Solve for Yield: Need Target FV and Contribution
@@ -4347,9 +4333,10 @@ def ui_financial_planner():
             target_fv = st.number_input(
                 "🎯 Target Future Value",
                 min_value=0.0,
-                value=100000.0,
+                value=None,
                 step=10000.0,
                 format="%.2f",
+                placeholder="Enter target amount",
                 help="The amount you want to reach"
             )
         
@@ -4357,50 +4344,12 @@ def ui_financial_planner():
             contribution = st.number_input(
                 f"💵 {frequency_label} Contribution Amount",
                 min_value=0.0,
-                value=500.0,
+                value=None,
                 step=100.0,
                 format="%.2f",
+                placeholder="Enter amount",
                 help=f"Amount you'll add {frequency_label.lower()}"
             )
-        
-        # Solve for Rate using iterative method
-        def calculate_fv_for_rate(rate_annual, pv, pmt, n, freq):
-            periodic_rate = rate_annual / freq
-            if periodic_rate > 0:
-                fv_pv = pv * ((1 + periodic_rate) ** n)
-                fv_pmt = pmt * (((1 + periodic_rate) ** n - 1) / periodic_rate)
-                return fv_pv + fv_pmt
-            else:
-                return pv + (pmt * n)
-        
-        # Binary search for rate
-        low_rate, high_rate = 0.0001, 1.0  # 0.01% to 100%
-        annual_yield = None
-        
-        total_contributions = present_value + (contribution * total_periods)
-        
-        if target_fv <= total_contributions:
-            annual_yield = 0.0
-            result = 0.0
-        else:
-            for _ in range(100):  # Max iterations
-                mid_rate = (low_rate + high_rate) / 2
-                calc_fv = calculate_fv_for_rate(mid_rate, present_value, contribution, total_periods, frequency)
-                
-                if abs(calc_fv - target_fv) < 0.01:
-                    annual_yield = mid_rate * 100
-                    break
-                elif calc_fv < target_fv:
-                    low_rate = mid_rate
-                else:
-                    high_rate = mid_rate
-                    
-                annual_yield = mid_rate * 100
-            
-            result = annual_yield
-        
-        result_label = "Required Annual Yield"
-        result_format = f"{result:.2f}%"
         
     elif selected_goal == "required_contribution":
         # Solve for PMT: Need Target FV and Yield
@@ -4410,9 +4359,10 @@ def ui_financial_planner():
             target_fv = st.number_input(
                 "🎯 Target Future Value",
                 min_value=0.0,
-                value=100000.0,
+                value=None,
                 step=10000.0,
                 format="%.2f",
+                placeholder="Enter target amount",
                 help="The amount you want to reach"
             )
         
@@ -4421,198 +4371,297 @@ def ui_financial_planner():
                 "📈 Expected Annual Yield (%)",
                 min_value=0.0,
                 max_value=100.0,
-                value=8.0,
+                value=None,
                 step=0.5,
                 format="%.2f",
+                placeholder="e.g., 8.0",
                 help="Expected annual return on investment"
             )
-        
-        # Calculate Required PMT
-        periodic_rate = (annual_yield / 100) / frequency
-        
-        if periodic_rate > 0:
-            # FV = PV * (1 + r)^n + PMT * [((1 + r)^n - 1) / r]
-            # Solve for PMT: PMT = (FV - PV * (1 + r)^n) / [((1 + r)^n - 1) / r]
-            fv_from_pv = present_value * ((1 + periodic_rate) ** total_periods)
-            remaining_fv = target_fv - fv_from_pv
-            annuity_factor = ((1 + periodic_rate) ** total_periods - 1) / periodic_rate
-            contribution = remaining_fv / annuity_factor if annuity_factor > 0 else 0
-        else:
-            contribution = (target_fv - present_value) / total_periods if total_periods > 0 else 0
-        
-        result = max(0, contribution)
-        contribution = result  # For projection table
-        
-        result_label = f"Required {frequency_label} Contribution"
-        result_format = f"${result:,.2f}"
     
-    # --- Display Result ---
     st.divider()
-    st.markdown("### 🎉 Result")
     
-    result_col1, result_col2, result_col3 = st.columns([1, 2, 1])
-    with result_col2:
-        st.metric(
-            label=result_label,
-            value=result_format,
-            delta=None
-        )
+    # --- Calculate Button ---
+    calculate_btn = st.button("🧮 Calculate", type="primary", use_container_width=True)
     
-    # Summary stats
-    if annual_yield is not None and contribution is not None:
-        total_contributions_amount = present_value + (contribution * total_periods)
+    # Validation
+    if calculate_btn:
+        # Check required fields
+        missing_fields = []
+        
+        if present_value is None:
+            missing_fields.append("Present Value")
+        if years is None:
+            missing_fields.append("Investment Period")
         
         if selected_goal == "future_value":
-            final_value = result
+            if annual_yield is None:
+                missing_fields.append("Expected Annual Yield")
+            if contribution is None:
+                missing_fields.append("Contribution Amount")
         elif selected_goal == "required_yield":
-            final_value = target_fv
+            if target_fv is None:
+                missing_fields.append("Target Future Value")
+            if contribution is None:
+                missing_fields.append("Contribution Amount")
+        elif selected_goal == "required_contribution":
+            if target_fv is None:
+                missing_fields.append("Target Future Value")
+            if annual_yield is None:
+                missing_fields.append("Expected Annual Yield")
+        
+        if missing_fields:
+            st.error(f"❌ Please fill in: {', '.join(missing_fields)}")
         else:
-            final_value = target_fv
-        
-        total_interest = final_value - total_contributions_amount
-        
-        stat_col1, stat_col2, stat_col3, stat_col4 = st.columns(4)
-        with stat_col1:
-            st.metric("Starting Value", f"${present_value:,.2f}")
-        with stat_col2:
-            st.metric("Total Contributions", f"${contribution * total_periods:,.2f}")
-        with stat_col3:
-            st.metric("Total Interest Earned", f"${total_interest:,.2f}")
-        with stat_col4:
-            st.metric("Final Value", f"${final_value:,.2f}")
+            # Store calculation flag in session state
+            st.session_state.planner_calculated = True
+            st.session_state.planner_data = {
+                "goal": selected_goal,
+                "present_value": present_value,
+                "years": years,
+                "frequency": frequency,
+                "frequency_label": frequency_label,
+                "annual_yield": annual_yield,
+                "contribution": contribution,
+                "target_fv": target_fv
+            }
     
-    # --- Projection Table & Chart ---
-    st.divider()
-    st.markdown("### 📊 Projection Schedule")
-    
-    # Generate projection data
-    if annual_yield is not None and contribution is not None:
-        # Determine the rate to use
-        if selected_goal == "required_yield" and result is not None:
-            calc_yield = result  # result is the yield percentage
-        else:
-            calc_yield = annual_yield
+    # --- Display Results (only after calculation) ---
+    if st.session_state.get("planner_calculated") and st.session_state.get("planner_data"):
+        data = st.session_state.planner_data
         
-        periodic_rate = (calc_yield / 100) / frequency
+        # Extract data
+        pv = data["present_value"]
+        yrs = data["years"]
+        freq = data["frequency"]
+        freq_label = data["frequency_label"]
+        total_periods = yrs * freq
         
-        projection_data = []
-        balance = present_value
-        total_principal = present_value
-        cumulative_interest = 0
+        result = None
+        result_label = ""
+        result_format = ""
+        calc_contribution = data["contribution"]
+        calc_yield = data["annual_yield"]
         
-        # Period 0
-        projection_data.append({
-            "Period": 0,
-            "Year": 0,
-            "Payment Added": 0,
-            "Principal (Cash Invested)": present_value,
-            "Interest Earned": 0,
-            "Cumulative Interest": 0,
-            "Total Balance": present_value
-        })
-        
-        for period in range(1, total_periods + 1):
-            # Add contribution at start of period
-            balance += contribution
-            total_principal += contribution
+        if data["goal"] == "future_value":
+            # Calculate Future Value
+            periodic_rate = (data["annual_yield"] / 100) / freq
             
-            # Calculate interest for this period
-            interest_this_period = balance * periodic_rate
-            balance += interest_this_period
-            cumulative_interest += interest_this_period
+            if periodic_rate > 0:
+                fv_pv = pv * ((1 + periodic_rate) ** total_periods)
+                fv_pmt = data["contribution"] * (((1 + periodic_rate) ** total_periods - 1) / periodic_rate)
+                result = fv_pv + fv_pmt
+            else:
+                result = pv + (data["contribution"] * total_periods)
             
-            year = period / frequency
+            result_label = "Future Portfolio Value"
+            result_format = f"${result:,.2f}"
+            final_value = result
+            
+        elif data["goal"] == "required_yield":
+            # Solve for Rate using iterative method
+            def calculate_fv_for_rate(rate_annual, pv_val, pmt, n, fr):
+                periodic_rate = rate_annual / fr
+                if periodic_rate > 0:
+                    fv_pv = pv_val * ((1 + periodic_rate) ** n)
+                    fv_pmt = pmt * (((1 + periodic_rate) ** n - 1) / periodic_rate)
+                    return fv_pv + fv_pmt
+                else:
+                    return pv_val + (pmt * n)
+            
+            low_rate, high_rate = 0.0001, 1.0
+            total_contributions = pv + (data["contribution"] * total_periods)
+            
+            if data["target_fv"] <= total_contributions:
+                calc_yield = 0.0
+                result = 0.0
+            else:
+                for _ in range(100):
+                    mid_rate = (low_rate + high_rate) / 2
+                    calc_fv = calculate_fv_for_rate(mid_rate, pv, data["contribution"], total_periods, freq)
+                    
+                    if abs(calc_fv - data["target_fv"]) < 0.01:
+                        calc_yield = mid_rate * 100
+                        break
+                    elif calc_fv < data["target_fv"]:
+                        low_rate = mid_rate
+                    else:
+                        high_rate = mid_rate
+                    calc_yield = mid_rate * 100
+                
+                result = calc_yield
+            
+            result_label = "Required Annual Yield"
+            result_format = f"{result:.2f}%"
+            final_value = data["target_fv"]
+            
+        elif data["goal"] == "required_contribution":
+            # Calculate Required PMT
+            periodic_rate = (data["annual_yield"] / 100) / freq
+            
+            if periodic_rate > 0:
+                fv_from_pv = pv * ((1 + periodic_rate) ** total_periods)
+                remaining_fv = data["target_fv"] - fv_from_pv
+                annuity_factor = ((1 + periodic_rate) ** total_periods - 1) / periodic_rate
+                calc_contribution = remaining_fv / annuity_factor if annuity_factor > 0 else 0
+            else:
+                calc_contribution = (data["target_fv"] - pv) / total_periods if total_periods > 0 else 0
+            
+            result = max(0, calc_contribution)
+            calc_contribution = result
+            
+            result_label = f"Required {freq_label} Contribution"
+            result_format = f"${result:,.2f}"
+            final_value = data["target_fv"]
+        
+        # --- Display Result ---
+        st.divider()
+        st.markdown("### 🎉 Result")
+        
+        result_col1, result_col2, result_col3 = st.columns([1, 2, 1])
+        with result_col2:
+            st.metric(
+                label=result_label,
+                value=result_format,
+                delta=None
+            )
+        
+        # Summary stats
+        if calc_yield is not None and calc_contribution is not None:
+            total_contributions_amount = pv + (calc_contribution * total_periods)
+            total_interest = final_value - total_contributions_amount
+            
+            stat_col1, stat_col2, stat_col3, stat_col4 = st.columns(4)
+            with stat_col1:
+                st.metric("Starting Value", f"${pv:,.2f}")
+            with stat_col2:
+                st.metric("Total Contributions", f"${calc_contribution * total_periods:,.2f}")
+            with stat_col3:
+                st.metric("Total Interest Earned", f"${total_interest:,.2f}")
+            with stat_col4:
+                st.metric("Final Value", f"${final_value:,.2f}")
+        
+        # --- Projection Table & Chart ---
+        st.divider()
+        st.markdown("### 📊 Projection Schedule")
+        
+        # Generate projection data
+        if calc_yield is not None and calc_contribution is not None:
+            periodic_rate = (calc_yield / 100) / freq
+            
+            projection_data = []
+            balance = pv
+            total_principal = pv
+            cumulative_interest = 0
             
             projection_data.append({
-                "Period": period,
-                "Year": round(year, 2),
-                "Payment Added": contribution,
-                "Principal (Cash Invested)": total_principal,
-                "Interest Earned": interest_this_period,
-                "Cumulative Interest": cumulative_interest,
-                "Total Balance": balance
+                "Period": 0,
+                "Year": 0,
+                "Payment Added": 0,
+                "Principal (Cash Invested)": pv,
+                "Interest Earned": 0,
+                "Cumulative Interest": 0,
+                "Total Balance": pv
             })
-        
-        df_projection = pd.DataFrame(projection_data)
-        
-        # Show summary table (yearly or every N periods for readability)
-        if total_periods > 24:
-            # Show yearly summary
-            yearly_periods = [0] + [i for i in range(frequency, total_periods + 1, frequency)]
-            df_display = df_projection[df_projection['Period'].isin(yearly_periods)].copy()
-        else:
-            df_display = df_projection.copy()
-        
-        # Format for display
-        df_formatted = df_display.copy()
-        for col in ["Payment Added", "Principal (Cash Invested)", "Interest Earned", "Cumulative Interest", "Total Balance"]:
-            df_formatted[col] = df_formatted[col].apply(lambda x: f"${x:,.2f}")
-        
-        st.dataframe(df_formatted, use_container_width=True, hide_index=True)
-        
-        # --- Chart ---
-        st.markdown("### 📈 Growth Visualization")
-        
-        # Prepare chart data
-        chart_data = df_projection[["Year", "Principal (Cash Invested)", "Total Balance"]].copy()
-        chart_data = chart_data.rename(columns={
-            "Principal (Cash Invested)": "Principal",
-            "Total Balance": "Portfolio Value"
-        })
-        
-        # Melt for line chart
-        chart_melted = chart_data.melt(
-            id_vars=["Year"], 
-            value_vars=["Principal", "Portfolio Value"],
-            var_name="Type",
-            value_name="Amount"
-        )
-        
-        # Use Streamlit's native line chart with area
-        import altair as alt
-        
-        chart = alt.Chart(chart_melted).mark_area(opacity=0.6).encode(
-            x=alt.X('Year:Q', title='Years'),
-            y=alt.Y('Amount:Q', title='Value ($)', stack=None),
-            color=alt.Color('Type:N', 
-                           scale=alt.Scale(
-                               domain=['Principal', 'Portfolio Value'],
-                               range=['#4CAF50', '#2196F3']
-                           ),
-                           legend=alt.Legend(title=""))
-        ).properties(
-            height=400
-        ).configure_axis(
-            labelFontSize=12,
-            titleFontSize=14
-        )
-        
-        st.altair_chart(chart, use_container_width=True)
-        
-        # Interest vs Principal breakdown
-        st.markdown("### 📊 Breakdown")
-        
-        if len(projection_data) > 0:
-            final_data = projection_data[-1]
-            final_principal = final_data["Principal (Cash Invested)"]
-            final_interest = final_data["Cumulative Interest"]
-            final_balance = final_data["Total Balance"]
             
-            if final_balance > 0:
-                principal_pct = (final_principal / final_balance) * 100
-                interest_pct = (final_interest / final_balance) * 100
+            for period in range(1, total_periods + 1):
+                balance += calc_contribution
+                total_principal += calc_contribution
                 
-                breakdown_col1, breakdown_col2 = st.columns(2)
+                interest_this_period = balance * periodic_rate
+                balance += interest_this_period
+                cumulative_interest += interest_this_period
                 
-                with breakdown_col1:
-                    st.markdown(f"""
-                    **💼 Principal (Your Money):** ${final_principal:,.2f} ({principal_pct:.1f}%)  
-                    **📈 Interest (Growth):** ${final_interest:,.2f} ({interest_pct:.1f}%)
-                    """)
+                year = period / freq
                 
-                with breakdown_col2:
-                    # Simple bar representation
-                    st.progress(principal_pct / 100, text=f"Principal: {principal_pct:.1f}%")
+                projection_data.append({
+                    "Period": period,
+                    "Year": round(year, 2),
+                    "Payment Added": calc_contribution,
+                    "Principal (Cash Invested)": total_principal,
+                    "Interest Earned": interest_this_period,
+                    "Cumulative Interest": cumulative_interest,
+                    "Total Balance": balance
+                })
+            
+            df_projection = pd.DataFrame(projection_data)
+            
+            if total_periods > 24:
+                yearly_periods = [0] + [i for i in range(freq, total_periods + 1, freq)]
+                df_display = df_projection[df_projection['Period'].isin(yearly_periods)].copy()
+            else:
+                df_display = df_projection.copy()
+            
+            df_formatted = df_display.copy()
+            for col in ["Payment Added", "Principal (Cash Invested)", "Interest Earned", "Cumulative Interest", "Total Balance"]:
+                df_formatted[col] = df_formatted[col].apply(lambda x: f"${x:,.2f}")
+            
+            st.dataframe(df_formatted, use_container_width=True, hide_index=True)
+            
+            # --- Chart ---
+            st.markdown("### 📈 Growth Visualization")
+            
+            chart_data = df_projection[["Year", "Principal (Cash Invested)", "Total Balance"]].copy()
+            chart_data = chart_data.rename(columns={
+                "Principal (Cash Invested)": "Principal",
+                "Total Balance": "Portfolio Value"
+            })
+            
+            chart_melted = chart_data.melt(
+                id_vars=["Year"], 
+                value_vars=["Principal", "Portfolio Value"],
+                var_name="Type",
+                value_name="Amount"
+            )
+            
+            import altair as alt
+            
+            chart = alt.Chart(chart_melted).mark_area(opacity=0.6).encode(
+                x=alt.X('Year:Q', title='Years'),
+                y=alt.Y('Amount:Q', title='Value ($)', stack=None),
+                color=alt.Color('Type:N', 
+                               scale=alt.Scale(
+                                   domain=['Principal', 'Portfolio Value'],
+                                   range=['#4CAF50', '#2196F3']
+                               ),
+                               legend=alt.Legend(title=""))
+            ).properties(
+                height=400
+            ).configure_axis(
+                labelFontSize=12,
+                titleFontSize=14
+            )
+            
+            st.altair_chart(chart, use_container_width=True)
+            
+            # Interest vs Principal breakdown
+            st.markdown("### 📊 Breakdown")
+            
+            if len(projection_data) > 0:
+                final_data = projection_data[-1]
+                final_principal = final_data["Principal (Cash Invested)"]
+                final_interest = final_data["Cumulative Interest"]
+                final_bal = final_data["Total Balance"]
+                
+                if final_bal > 0:
+                    principal_pct = (final_principal / final_bal) * 100
+                    interest_pct = (final_interest / final_bal) * 100
+                    
+                    breakdown_col1, breakdown_col2 = st.columns(2)
+                    
+                    with breakdown_col1:
+                        st.markdown(f"""
+                        **💼 Principal (Your Money):** ${final_principal:,.2f} ({principal_pct:.1f}%)  
+                        **📈 Interest (Growth):** ${final_interest:,.2f} ({interest_pct:.1f}%)
+                        """)
+                    
+                    with breakdown_col2:
+                        st.progress(principal_pct / 100, text=f"Principal: {principal_pct:.1f}%")
+        
+        # Clear button
+        if st.button("🔄 Clear & Start Over"):
+            st.session_state.planner_calculated = False
+            st.session_state.planner_data = None
+            st.rerun()
 
 
 def ui_backup_restore():
