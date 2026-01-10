@@ -9044,12 +9044,16 @@ def main():
         cookie_manager = stx.CookieManager(key="auth_cookie_manager")
 
     # The "Cookie Sync" Block (Crucial)
-    # Check for existing cookie
+    # IMPORTANT: Cookies load asynchronously - we need to handle the first-render case
+    # where get() returns None even if a cookie exists
     if cookie_manager:
+        # Get all cookies at once to check if they've loaded
+        all_cookies = cookie_manager.get_all()
+        
         # Check for session token (new secure method)
-        session_token = cookie_manager.get("portfolio_session")
+        session_token = all_cookies.get("portfolio_session") if all_cookies else None
         # Also check legacy cookie for backwards compatibility
-        legacy_cookie = cookie_manager.get("portfolio_user")
+        legacy_cookie = all_cookies.get("portfolio_user") if all_cookies else None
 
         # 1. If we are NOT logged in via Session State, BUT we have a valid token/cookie:
         if "logged_in" not in st.session_state or not st.session_state.logged_in:
@@ -9119,7 +9123,8 @@ def main():
         if st.button("Logout", key="logout_btn"):
             # Delete session token from database
             if cookie_manager:
-                session_token = cookie_manager.get("portfolio_session")
+                all_cookies = cookie_manager.get_all()
+                session_token = all_cookies.get("portfolio_session") if all_cookies else None
                 if session_token:
                     try:
                         delete_session_token(session_token)
