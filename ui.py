@@ -682,15 +682,27 @@ from db_layer import (
     get_db_type,
     is_postgres,
     init_postgres_schema,
-    get_connection
+    get_connection,
+    convert_sql,
+    convert_params,
+    execute_with_cursor
 )
 
-# Initialize PostgreSQL schema if using Supabase
+# Initialize PostgreSQL schema if using Supabase/DigitalOcean PostgreSQL
 if is_postgres():
     init_postgres_schema()
     print("🐘 PostgreSQL database ready")
 else:
     print("📁 SQLite database ready")
+
+
+def db_execute(cur, sql: str, params: tuple = ()):
+    """Execute SQL with automatic ? to %s conversion for PostgreSQL.
+    
+    Use this wrapper instead of cur.execute() to ensure cross-database compatibility.
+    """
+    return execute_with_cursor(None, cur, sql, params)
+
 
 # =========================
 # AUTH HELPER FUNCTIONS
@@ -730,9 +742,9 @@ def create_session_token(user_id: int, days: int = 30) -> str:
     conn = get_conn()
     cur = conn.cursor()
     # Ensure cleanup of old tokens for this user to avoid bloat
-    cur.execute("DELETE FROM user_sessions WHERE user_id = ?", (user_id,))
+    db_execute(cur, "DELETE FROM user_sessions WHERE user_id = ?", (user_id,))
     
-    cur.execute("INSERT INTO user_sessions (token, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)",
+    db_execute(cur, "INSERT INTO user_sessions (token, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)",
                (token, user_id, expires_at, now))
     conn.commit()
     conn.close()
@@ -2986,7 +2998,7 @@ def ui_cash_deposits():
                             # Hard delete individual deposit
                             conn = get_conn()
                             cur = conn.cursor()
-                            cur.execute("DELETE FROM cash_deposits WHERE id = ?", (deposit_id,))
+                            db_execute(cur, "DELETE FROM cash_deposits WHERE id = ?", (deposit_id,))
                             conn.commit()
                             conn.close()
                             st.rerun()
@@ -3004,16 +3016,16 @@ def update_portfolio_cash(user_id: int, portfolio: str, delta: float, currency="
         cur = conn.cursor()
         
         # Check current balance
-        cur.execute("SELECT balance FROM portfolio_cash WHERE user_id=? AND portfolio=?", (user_id, portfolio))
+        db_execute(cur, "SELECT balance FROM portfolio_cash WHERE user_id=? AND portfolio=?", (user_id, portfolio))
         row = cur.fetchone()
         
         if row:
             new_bal = row[0] + delta
-            cur.execute("UPDATE portfolio_cash SET balance=?, last_updated=? WHERE user_id=? AND portfolio=?", 
+            db_execute(cur, "UPDATE portfolio_cash SET balance=?, last_updated=? WHERE user_id=? AND portfolio=?", 
                        (new_bal, int(time.time()), user_id, portfolio))
         else:
             # Initialize if missing
-            cur.execute("INSERT INTO portfolio_cash (user_id, portfolio, balance, currency, last_updated) VALUES (?, ?, ?, ?, ?)",
+            db_execute(cur, "INSERT INTO portfolio_cash (user_id, portfolio, balance, currency, last_updated) VALUES (?, ?, ?, ?, ?)",
                        (user_id, portfolio, delta, currency, int(time.time())))
         
         conn.commit()
@@ -3223,13 +3235,13 @@ def ui_transactions():
                                 user_id = st.session_state.get('user_id', 1)
                                 
                                 # 1. Ensure Stock Exists for this user
-                                cur.execute("SELECT id FROM stocks WHERE symbol = ? AND (user_id = ? OR user_id IS NULL)", (symbol, user_id))
+                                db_execute(cur, "SELECT id FROM stocks WHERE symbol = ? AND (user_id = ? OR user_id IS NULL)", (symbol, user_id))
                                 if not cur.fetchone():
                                     # Create stock if missing (use backup data if available)
                                     s_name = row.get('stock_name', symbol)
                                     s_port = row.get('portfolio', 'KFH')
                                     s_curr = row.get('currency', 'KWD')
-                                    cur.execute("INSERT INTO stocks (symbol, name, portfolio, currency, user_id) VALUES (?, ?, ?, ?, ?)", 
+                                    db_execute(cur, "INSERT INTO stocks (symbol, name, portfolio, currency, user_id) VALUES (?, ?, ?, ?, ?)", 
                                                 (symbol, s_name, s_port, s_curr, user_id))
                                     new_stocks += 1
                                 
@@ -3483,11 +3495,11 @@ def ui_transactions():
                     cur = conn.cursor()
                     
                     # Delete all PORTFOLIO transactions for this stock (not trading)
-                    cur.execute("DELETE FROM transactions WHERE stock_symbol = ? AND COALESCE(category, 'portfolio') = 'portfolio'", (selected_symbol,))
+                    db_execute(cur, "DELETE FROM transactions WHERE stock_symbol = ? AND COALESCE(category, 'portfolio') = 'portfolio'", (selected_symbol,))
                     txn_deleted = cur.rowcount
                     
                     # Delete the stock itself
-                    cur.execute("DELETE FROM stocks WHERE symbol = ?", (selected_symbol,))
+                    db_execute(cur, "DELETE FROM stocks WHERE symbol = ?", (selected_symbol,))
                     
                     conn.commit()
                     conn.close()
@@ -3548,9 +3560,8 @@ def ui_transactions():
                             conn = get_conn()
                             cur = conn.cursor()
                             # perform updates inside a transaction
-                            cur.execute("BEGIN")
-                            cur.execute("UPDATE transactions SET stock_symbol = ? WHERE stock_symbol = ?", (ns, current_symbol))
-                            cur.execute("UPDATE stocks SET symbol = ? WHERE symbol = ?", (ns, current_symbol))
+                            db_execute(cur, "UPDATE transactions SET stock_symbol = ? WHERE stock_symbol = ?", (ns, current_symbol))
+                            db_execute(cur, "UPDATE stocks SET symbol = ? WHERE symbol = ?", (ns, current_symbol))
                             conn.commit()
                             conn.close()
                             st.success(f"Ticker renamed {current_symbol} ➡️ {ns} and transactions updated.")
@@ -5717,7 +5728,7 @@ def ui_portfolio_analysis():
                         price, used_ticker = fetch_price_yfinance(sym)
                         if price and price > 0:
                             try:
-                                cur.execute("UPDATE stocks SET current_price = ? WHERE symbol = ?", (float(price), sym))
+                                db_execute(cur, "UPDATE stocks SET current_price = ? WHERE symbol = ?", (float(price), sym))
                                 updated += 1
                                 success_details.append(f"{sym} = {price:.3f} (using {used_ticker})")
                             except Exception as e:
@@ -6134,13 +6145,14 @@ def ui_portfolio_tracker():
                     cur = conn.cursor()
                     
                     # Delete ALL snapshots for this user (including user_id=1 default and NULL)
-                    cur.execute("DELETE FROM portfolio_snapshots WHERE user_id = ? OR user_id = 1 OR user_id IS NULL", (user_id,))
+                    db_execute(cur, "DELETE FROM portfolio_snapshots WHERE user_id = ? OR user_id = 1 OR user_id IS NULL", (user_id,))
                     deleted_count = cur.rowcount
                     
                     conn.commit()
                     
-                    # VACUUM to reclaim space (hard removal from disk)
-                    cur.execute("VACUUM")
+                    # VACUUM to reclaim space (SQLite only - hard removal from disk)
+                    if not is_postgres():
+                        cur.execute("VACUUM")
                     conn.close()
                     
                     st.session_state.confirm_delete_snapshots = False
@@ -7267,9 +7279,9 @@ def ui_trading_section():
                         cur = conn.cursor()
                         
                         # Check/Add Stock
-                        cur.execute("SELECT id FROM stocks WHERE symbol = ?", (stock_symbol,))
+                        db_execute(cur, "SELECT id FROM stocks WHERE symbol = ?", (stock_symbol,))
                         if not cur.fetchone():
-                            cur.execute(
+                            db_execute(cur,
                                 "INSERT INTO stocks (symbol, name, portfolio, currency) VALUES (?, ?, ?, ?)",
                                 (stock_symbol, stock_symbol, "KFH", "KWD")
                             )
@@ -7830,7 +7842,7 @@ def ui_trading_section():
                                     continue
                                 elif buy_exists and has_sale and not sell_exists:
                                     # Buy exists but sell doesn't - just add the sell transaction
-                                    cur.execute("""
+                                    db_execute(cur, """
                                         INSERT INTO trading_history 
                                         (stock_symbol, txn_date, txn_type, purchase_cost, sell_value, shares, 
                                          cash_dividend, bonus_shares, created_at)
@@ -7842,10 +7854,10 @@ def ui_trading_section():
                                     continue
                                 
                                 # Check if stock exists in stocks table
-                                cur.execute("SELECT id FROM stocks WHERE symbol = ?", (stock,))
+                                db_execute(cur, "SELECT id FROM stocks WHERE symbol = ?", (stock,))
                                 if not cur.fetchone():
                                     # Add stock if missing
-                                    cur.execute(
+                                    db_execute(cur,
                                         "INSERT INTO stocks (symbol, name, portfolio, currency) VALUES (?, ?, ?, ?)",
                                         (stock, stock, "KFH", "KWD")
                                     )
@@ -8418,12 +8430,12 @@ def ui_trading_section():
                     b_id = row_orig['_buy_id']
                     if pd.notna(b_id):
                         # Delete Buy
-                        cur.execute("DELETE FROM trading_history WHERE id = ?", (int(b_id),))
+                        db_execute(cur, "DELETE FROM trading_history WHERE id = ?", (int(b_id),))
                         
                         # Delete Sell
                         s_id = row_orig.get('_sell_id')
                         if pd.notna(s_id):
-                            cur.execute("DELETE FROM trading_history WHERE id = ?", (int(s_id),))
+                            db_execute(cur, "DELETE FROM trading_history WHERE id = ?", (int(s_id),))
                         
                         changes_count += 1
     
@@ -8498,21 +8510,21 @@ def ui_trading_section():
                             sell_val = s_price * qty
                             if pd.notna(sell_id):
                                 # Update existing Sell
-                                cur.execute("""
+                                db_execute(cur, """
                                     UPDATE trading_history
                                     SET stock_symbol = ?, txn_date = ?, shares = ?, sell_value = ?
                                     WHERE id = ?
                                 """, (symbol, s_date, qty, sell_val, int(sell_id)))
                             else:
                                 # Insert NEW Sell (Transition to Realized)
-                                cur.execute("""
+                                db_execute(cur, """
                                     INSERT INTO trading_history (stock_symbol, txn_date, txn_type, shares, sell_value, created_at)
                                     VALUES (?, ?, 'Sell', ?, ?, ?)
                                 """, (symbol, s_date, qty, sell_val, int(time.time())))
                         else:
                             # Transferred to Unrealized: Delete potential sell record
                             if pd.notna(sell_id):
-                                cur.execute("DELETE FROM trading_history WHERE id = ?", (int(sell_id),))
+                                db_execute(cur, "DELETE FROM trading_history WHERE id = ?", (int(sell_id),))
                         
                         changes_count += 0.5 # Track updates lightly
                     
@@ -9938,12 +9950,12 @@ def login_page(cookie_manager=None):
                         hashed = hash_password(reg_pass)
                         
                         # Check if email exists
-                        cur.execute("SELECT id FROM users WHERE email = ? OR username = ?", (reg_email, reg_email))
+                        db_execute(cur, "SELECT id FROM users WHERE email = ? OR username = ?", (reg_email, reg_email))
                         if cur.fetchone():
                             st.error("User with this email already exists.")
                         else:
                             # Insert with username = email
-                            cur.execute("INSERT INTO users (username, email, password_hash, created_at) VALUES (?, ?, ?, ?)", 
+                            db_execute(cur, "INSERT INTO users (username, email, password_hash, created_at) VALUES (?, ?, ?, ?)", 
                                        (reg_email, reg_email, hashed, int(time.time())))
                             conn.commit()
                             st.success("Registered successfully! Redirecting to login...")
@@ -9974,7 +9986,7 @@ def login_page(cookie_manager=None):
             cur = conn.cursor()
             try:
                 # Check BOTH email and username columns (case-insensitive)
-                cur.execute("SELECT password_hash, username, id FROM users WHERE LOWER(email) = ? OR LOWER(username) = ?", (email_login, email_login))
+                db_execute(cur, "SELECT password_hash, username, id FROM users WHERE LOWER(email) = ? OR LOWER(username) = ?", (email_login, email_login))
                 row = cur.fetchone()
 
                 if row:
