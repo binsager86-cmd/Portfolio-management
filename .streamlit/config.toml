@@ -1,13 +1,13 @@
 [server]
 headless = true
 port = 8502
-address = "localhost"
+address = "127.0.0.1"
 enableCORS = false
 enableXsrfProtection = false
 
 [browser]
 gatherUsageStats = false
-serverAddress = "localhost"
+serverAddress = "127.0.0.1"
 serverPort = 8502
 
 [theme]
