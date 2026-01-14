@@ -5779,13 +5779,14 @@ def ui_portfolio_analysis():
     cash_data = []
     _cash_portfolios = ["KFH", "BBYN", "USA"]
     
+    _user_id = st.session_state.get('user_id')
     for p in _cash_portfolios:
         # A. Total Deposited (Read-only Reference)
-        _total_dep = query_val("SELECT SUM(amount) FROM cash_deposits WHERE portfolio=?", (p,)) 
+        _total_dep = query_val("SELECT SUM(amount) FROM cash_deposits WHERE portfolio=? AND user_id=?", (p, _user_id)) 
         if _total_dep is None: _total_dep = 0.0
         
         # B. Manual Cash Balance (Source of Truth for Buying Power)
-        _manual_bal_df = query_df("SELECT balance FROM portfolio_cash WHERE portfolio=?", (p,))
+        _manual_bal_df = query_df("SELECT balance FROM portfolio_cash WHERE portfolio=? AND user_id=?", (p, _user_id))
         _manual_balance = float(_manual_bal_df.iloc[0]['balance']) if not _manual_bal_df.empty else 0.0
         
         _currency = PORTFOLIO_CCY.get(p, "KWD")
