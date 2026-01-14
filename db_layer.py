@@ -1,10 +1,16 @@
 """
 Database Abstraction Layer for Portfolio App
-Supports both SQLite (local development) and PostgreSQL (Supabase for production)
+Supports both SQLite (local development) and PostgreSQL (DigitalOcean/Supabase for production)
 
 Usage:
-    - Local: Uses SQLite automatically
-    - Cloud: Set SUPABASE_URL and SUPABASE_KEY in Streamlit secrets or environment
+    - Local: Uses SQLite automatically (portfolio.db)
+    - Cloud: Set DATABASE_URL environment variable (DigitalOcean sets this automatically)
+    
+Priority for database detection:
+    1. os.environ["DATABASE_URL"] (DigitalOcean Managed Database)
+    2. Streamlit secrets DATABASE_URL
+    3. Streamlit secrets SUPABASE_URL + SUPABASE_KEY
+    4. Fallback to SQLite (portfolio.db)
 """
 
 import os
@@ -28,41 +34,52 @@ DB_CONFIG = {}
 
 
 def init_db_config():
-    """Initialize database configuration from environment or Streamlit secrets."""
+    """Initialize database configuration from environment or Streamlit secrets.
+    
+    Priority:
+    1. os.environ["DATABASE_URL"] - DigitalOcean sets this for managed databases
+    2. Streamlit secrets DATABASE_URL
+    3. Streamlit secrets SUPABASE_URL + SUPABASE_KEY  
+    4. Fallback to SQLite
+    """
     global DB_TYPE, DB_CONFIG
     
-    # Try to get Supabase/PostgreSQL config
+    database_url = None
     supabase_url = None
     supabase_key = None
-    database_url = None
     
-    # Check Streamlit secrets first
-    try:
-        import streamlit as st
-        if hasattr(st, 'secrets'):
-            supabase_url = st.secrets.get("SUPABASE_URL")
-            supabase_key = st.secrets.get("SUPABASE_KEY")
-            database_url = st.secrets.get("DATABASE_URL")
-    except:
-        pass
+    # PRIORITY 1: Check environment variable first (DigitalOcean sets DATABASE_URL)
+    database_url = os.environ.get("DATABASE_URL")
     
-    # Fall back to environment variables
+    # PRIORITY 2: Check Streamlit secrets
     if not database_url:
-        database_url = os.environ.get("DATABASE_URL")
+        try:
+            import streamlit as st
+            if hasattr(st, 'secrets'):
+                database_url = st.secrets.get("DATABASE_URL")
+                supabase_url = st.secrets.get("SUPABASE_URL")
+                supabase_key = st.secrets.get("SUPABASE_KEY")
+        except:
+            pass
+    
+    # PRIORITY 3: Environment variables for Supabase
     if not supabase_url:
         supabase_url = os.environ.get("SUPABASE_URL")
     if not supabase_key:
         supabase_key = os.environ.get("SUPABASE_KEY")
     
-    # Determine database type
+    # Determine database type and configure
     if database_url and HAS_POSTGRES:
+        # Handle DigitalOcean's postgres:// vs postgresql:// URL scheme
+        if database_url.startswith("postgres://"):
+            database_url = database_url.replace("postgres://", "postgresql://", 1)
+        
         DB_TYPE = 'postgres'
         DB_CONFIG = {'url': database_url}
-        print("🐘 Using PostgreSQL database")
+        print("🐘 Using PostgreSQL database (DATABASE_URL)")
+        
     elif supabase_url and supabase_key and HAS_POSTGRES:
         # Build connection string from Supabase URL
-        # Supabase URL format: https://xxx.supabase.co
-        # Connection: postgresql://postgres:[PASSWORD]@db.xxx.supabase.co:5432/postgres
         project_id = supabase_url.replace("https://", "").replace(".supabase.co", "")
         DB_TYPE = 'postgres'
         DB_CONFIG = {
@@ -73,13 +90,20 @@ def init_db_config():
             'password': supabase_key
         }
         print("🐘 Using Supabase PostgreSQL database")
+        
     else:
         DB_TYPE = 'sqlite'
-        # Use /tmp for cloud, local path otherwise
-        is_cloud = os.path.exists("/mount/src") or (os.name != 'nt' and os.path.exists("/tmp"))
-        db_path = "/tmp/portfolio.db" if is_cloud else "portfolio.db"
+        # Use appropriate path based on environment
+        is_cloud = os.path.exists("/mount/src") or os.environ.get("DIGITALOCEAN_APP_PLATFORM")
+        if is_cloud:
+            db_path = "/tmp/portfolio.db"  # Temporary - won't persist!
+            print("⚠️  WARNING: Using SQLite on cloud - data will NOT persist!")
+        else:
+            db_path = "portfolio.db"
         DB_CONFIG = {'path': db_path}
         print(f"📁 Using SQLite database: {db_path}")
+    
+    return DB_TYPE
     
     return DB_TYPE
 
@@ -123,23 +147,59 @@ def get_placeholder():
 
 
 def convert_sql(sql: str) -> str:
-    """Convert SQLite SQL to PostgreSQL compatible SQL."""
+    """Convert SQLite SQL to PostgreSQL compatible SQL.
+    
+    Handles:
+    - Parameter placeholders: ? -> %s
+    - AUTOINCREMENT -> SERIAL
+    - PRAGMA commands (SQLite only)
+    - Boolean handling
+    """
     if DB_TYPE == 'postgres':
-        # Replace ? with %s for parameters
+        # Replace ? with %s for parameters (careful not to replace inside strings)
+        # Simple approach - works for most cases
         sql = sql.replace("?", "%s")
         
         # Replace AUTOINCREMENT with SERIAL
         sql = sql.replace("INTEGER PRIMARY KEY AUTOINCREMENT", "SERIAL PRIMARY KEY")
         sql = sql.replace("integer PRIMARY KEY AUTOINCREMENT", "SERIAL PRIMARY KEY")
+        sql = sql.replace("INTEGER PRIMARY KEY", "SERIAL PRIMARY KEY")
         
-        # Replace INTEGER with proper types
-        sql = sql.replace("INTEGER NOT NULL", "INTEGER NOT NULL")
+        # Handle SQLite's last_insert_rowid()
+        sql = sql.replace("last_insert_rowid()", "lastval()")
         
         # Handle PRAGMA (SQLite specific) - return empty for postgres
         if sql.strip().upper().startswith("PRAGMA"):
             return ""
         
+        # Handle datetime functions
+        sql = sql.replace("datetime('now')", "NOW()")
+        sql = sql.replace("date('now')", "CURRENT_DATE")
+        
+        # Handle IFNULL -> COALESCE
+        sql = sql.replace("IFNULL(", "COALESCE(")
+        sql = sql.replace("ifnull(", "COALESCE(")
+        
     return sql
+
+
+def convert_params(params: tuple) -> tuple:
+    """Convert parameters for the current database type.
+    
+    PostgreSQL is stricter about types, so we ensure proper conversion.
+    """
+    if DB_TYPE != 'postgres':
+        return params
+    
+    converted = []
+    for p in params:
+        if isinstance(p, bool):
+            converted.append(p)  # PostgreSQL handles bool natively
+        elif p is None:
+            converted.append(None)
+        else:
+            converted.append(p)
+    return tuple(converted)
 
 
 def query_df(sql: str, params: tuple = ()) -> pd.DataFrame:
@@ -147,6 +207,8 @@ def query_df(sql: str, params: tuple = ()) -> pd.DataFrame:
     import traceback
     
     sql = convert_sql(sql)
+    params = convert_params(params)
+    
     if not sql:  # PRAGMA commands return empty
         return pd.DataFrame()
     
@@ -165,6 +227,8 @@ def query_df(sql: str, params: tuple = ()) -> pd.DataFrame:
 def query_val(sql: str, params: tuple = ()) -> Any:
     """Execute a query and return a single scalar value."""
     sql = convert_sql(sql)
+    params = convert_params(params)
+    
     if not sql:
         return None
     
@@ -178,6 +242,8 @@ def query_val(sql: str, params: tuple = ()) -> Any:
 def exec_sql(sql: str, params: tuple = ()):
     """Execute a SQL statement (INSERT, UPDATE, DELETE)."""
     sql = convert_sql(sql)
+    params = convert_params(params)
+    
     if not sql:
         return
     
@@ -392,3 +458,54 @@ def is_sqlite() -> bool:
 
 def get_db_type() -> str:
     return DB_TYPE
+
+
+def execute_with_cursor(conn, cur, sql: str, params: tuple = ()):
+    """Execute SQL with automatic conversion for the current database type.
+    
+    Use this for raw cursor.execute() calls that need ? to %s conversion.
+    """
+    sql = convert_sql(sql)
+    params = convert_params(params)
+    cur.execute(sql, params)
+    return cur
+
+
+def query_one(sql: str, params: tuple = ()) -> Optional[tuple]:
+    """Execute a query and return a single row."""
+    sql = convert_sql(sql)
+    params = convert_params(params)
+    
+    if not sql:
+        return None
+    
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(sql, params)
+        return cur.fetchone()
+
+
+def query_all(sql: str, params: tuple = ()) -> List[tuple]:
+    """Execute a query and return all rows."""
+    sql = convert_sql(sql)
+    params = convert_params(params)
+    
+    if not sql:
+        return []
+    
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(sql, params)
+        return cur.fetchall()
+
+
+# Re-export convert_sql for use in ui.py where raw cursor access is needed
+__all__ = [
+    'get_conn', 'get_connection', 'get_placeholder',
+    'convert_sql', 'convert_params',
+    'query_df', 'query_val', 'query_one', 'query_all', 'exec_sql',
+    'table_exists', 'table_columns', 'add_column_if_missing',
+    'get_last_insert_id', 'init_postgres_schema',
+    'is_postgres', 'is_sqlite', 'get_db_type',
+    'execute_with_cursor', 'HAS_POSTGRES', 'DB_TYPE'
+]
