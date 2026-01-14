@@ -5680,85 +5680,100 @@ def ui_portfolio_analysis():
         st.write("")  # Spacing for alignment
         if st.button("🔄 Fetch All Prices", key="fetch_all_portfolio", use_container_width=True):
             user_id = st.session_state.get('user_id')
-            # Only fetch prices for stocks the user is currently holding (shares > 0)
-            stocks_df = query_df("""
-                SELECT symbol, SUM(
-                    CASE 
-                        WHEN txn_type IN ('Buy', 'Bonus', 'Dividend Reinvestment') THEN COALESCE(shares, 0) + COALESCE(bonus_shares, 0)
-                        WHEN txn_type = 'Sell' THEN -COALESCE(shares, 0)
-                        ELSE 0
-                    END
-                ) as total_shares
-                FROM transactions
-                WHERE user_id = ?
-                GROUP BY symbol
-                HAVING total_shares > 0
-                ORDER BY symbol ASC
-            """, (user_id,))
-            if stocks_df.empty:
-                st.info("No stocks currently held in portfolio to update.")
+            if not user_id:
+                st.error("Please log in to fetch prices.")
             else:
-                symbols = stocks_df["symbol"].tolist()
+                # Only fetch prices for stocks the user is currently holding (shares > 0)
+                try:
+                    stocks_df = query_df("""
+                        SELECT t.stock_symbol as symbol, SUM(
+                            CASE 
+                                WHEN t.txn_type IN ('Buy', 'Bonus', 'Dividend Reinvestment') THEN COALESCE(t.shares, 0) + COALESCE(t.bonus_shares, 0)
+                                WHEN t.txn_type = 'Sell' THEN -COALESCE(t.shares, 0)
+                                ELSE 0
+                            END
+                        ) as total_shares
+                        FROM transactions t
+                        WHERE t.user_id = ?
+                        GROUP BY t.stock_symbol
+                        HAVING SUM(
+                            CASE 
+                                WHEN t.txn_type IN ('Buy', 'Bonus', 'Dividend Reinvestment') THEN COALESCE(t.shares, 0) + COALESCE(t.bonus_shares, 0)
+                                WHEN t.txn_type = 'Sell' THEN -COALESCE(t.shares, 0)
+                                ELSE 0
+                            END
+                        ) > 0
+                        ORDER BY t.stock_symbol ASC
+                    """, (user_id,))
+                except Exception as e:
+                    st.error(f"SQL Error fetching stocks: {e}")
+                    print(f"SQL ERROR in ui_portfolio_analysis: {e}")
+                    stocks_df = pd.DataFrame()
                 
-                # Check if yfinance is available
-                if not YFINANCE_AVAILABLE:
-                    st.error(f"⚠️ yfinance not available: {YFINANCE_ERROR}")
-                    st.info("Please install yfinance: pip install yfinance")
+                if stocks_df.empty:
+                    st.info("No stocks currently held in portfolio to update.")
                 else:
-                    st.info(f"Fetching prices for {len(symbols)} stocks...")
-                    st.caption("⏱️ Using cached prices when available (1 hour TTL). First fetch may be slow due to rate limiting.")
+                    symbols = stocks_df["symbol"].tolist()
                     
-                    conn = get_conn()
-                    cur = conn.cursor()
-                    updated = 0
-                    skipped = 0
-                    failed_symbols = []
-                    success_details = []
-                    
-                    progress_bar = st.progress(0)
-                    status_text = st.empty()
-                    
-                    start_time = time.time()
-                    
-                    for idx, sym in enumerate(symbols):
-                        elapsed = time.time() - start_time
-                        status_text.text(f"Fetching {sym}... ({idx + 1}/{len(symbols)}) - {elapsed:.1f}s elapsed")
-                        progress_bar.progress((idx + 1) / len(symbols))
+                    # Check if yfinance is available
+                    if not YFINANCE_AVAILABLE:
+                        st.error(f"⚠️ yfinance not available: {YFINANCE_ERROR}")
+                        st.info("Please install yfinance: pip install yfinance")
+                    else:
+                        st.info(f"Fetching prices for {len(symbols)} stocks...")
+                        st.caption("⏱️ Using cached prices when available (1 hour TTL). First fetch may be slow due to rate limiting.")
                         
-                        price, used_ticker = fetch_price_yfinance(sym)
-                        if price and price > 0:
-                            try:
-                                db_execute(cur, "UPDATE stocks SET current_price = ? WHERE symbol = ?", (float(price), sym))
-                                updated += 1
-                                success_details.append(f"{sym} = {price:.3f} (using {used_ticker})")
-                            except Exception as e:
+                        conn = get_conn()
+                        cur = conn.cursor()
+                        updated = 0
+                        skipped = 0
+                        failed_symbols = []
+                        success_details = []
+                        
+                        progress_bar = st.progress(0)
+                        status_text = st.empty()
+                        
+                        start_time = time.time()
+                        
+                        for idx, sym in enumerate(symbols):
+                            elapsed = time.time() - start_time
+                            status_text.text(f"Fetching {sym}... ({idx + 1}/{len(symbols)}) - {elapsed:.1f}s elapsed")
+                            progress_bar.progress((idx + 1) / len(symbols))
+                            
+                            price, used_ticker = fetch_price_yfinance(sym)
+                            if price and price > 0:
+                                try:
+                                    db_execute(cur, "UPDATE stocks SET current_price = ? WHERE symbol = ?", (float(price), sym))
+                                    updated += 1
+                                    success_details.append(f"{sym} = {price:.3f} (using {used_ticker})")
+                                except Exception as e:
+                                    skipped += 1
+                                    failed_symbols.append(f"{sym} (DB error)")
+                            else:
                                 skipped += 1
-                                failed_symbols.append(f"{sym} (DB error)")
-                        else:
-                            skipped += 1
-                            failed_symbols.append(sym)
-                    
-                    conn.commit()
-                    conn.close()
-                    
-                    progress_bar.empty()
-                    status_text.empty()
-                    
-                    st.success(f"✅ Prices updated: {updated:,} | ⚠️ Skipped: {skipped:,}")
-                    
-                    if success_details:
-                        with st.expander("✓ Successfully fetched prices"):
-                            for detail in success_details:
-                                st.text(detail)
-                    
-                    if failed_symbols:
-                        with st.expander("⚠️ View skipped symbols"):
-                            st.write(", ".join(failed_symbols))
-                    
-                    try:
-                        st.rerun()
-                    except Exception:
-                        pass
+                                failed_symbols.append(sym)
+                        
+                        conn.commit()
+                        conn.close()
+                        
+                        progress_bar.empty()
+                        status_text.empty()
+                        
+                        st.success(f"✅ Prices updated: {updated:,} | ⚠️ Skipped: {skipped:,}")
+                        
+                        if success_details:
+                            with st.expander("✓ Successfully fetched prices"):
+                                for detail in success_details:
+                                    st.text(detail)
+                        
+                        if failed_symbols:
+                            with st.expander("⚠️ View skipped symbols"):
+                                st.write(", ".join(failed_symbols))
+                        
+                        try:
+                            st.rerun()
+                        except Exception:
+                            pass
 
     st.divider()
 
