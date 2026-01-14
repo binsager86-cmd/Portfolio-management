@@ -8709,7 +8709,7 @@ def ui_overview():
     )
     
     # Calculate LIVE portfolio value from current prices and holdings
-    live_portfolio_value = 0.0
+    live_stock_value = 0.0
     num_stocks = 0
     
     for port_name in PORTFOLIO_CCY.keys():
@@ -8720,7 +8720,19 @@ def ui_overview():
             num_stocks += len(active_holdings)
             
             for _, row in df_port.iterrows():
-                live_portfolio_value += convert_to_kwd(row['Market Value'], row['Currency'])
+                live_stock_value += convert_to_kwd(row['Market Value'], row['Currency'])
+
+    # --- Integration of Manual Cash for Totals (matching Portfolio Analysis) ---
+    user_id = st.session_state.get('user_id')
+    manual_cash_kwd = 0.0
+    cash_recs = query_df("SELECT balance, currency FROM portfolio_cash WHERE user_id=?", (user_id,))
+    if not cash_recs.empty:
+        for _, cr in cash_recs.iterrows():
+            manual_cash_kwd += convert_to_kwd(cr["balance"], cr["currency"])
+    
+    # LIVE Portfolio Value = Stock Market Values + Manual Cash
+    live_portfolio_value = live_stock_value + manual_cash_kwd
+    # ---------------------------------------------------------------------------
 
     # Get total cash deposits
     all_deposits = query_df("SELECT amount, currency, include_in_analysis FROM cash_deposits")
@@ -8847,12 +8859,13 @@ def ui_overview():
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        sub_text = f"Last snap: {latest_snapshot['snapshot_date'].iloc[0]}" if not latest_snapshot.empty else "Live based on current prices"
+        # Show breakdown: Stocks + Cash
+        cash_text = f"Cash: {fmt_money_plain(manual_cash_kwd, 2)} KWD" if manual_cash_kwd > 0 else "Live prices"
         st.markdown(f"""
         <div class="ov-card">
             <div class="ov-title">💼 Portfolio Value</div>
             <div class="ov-value">{fmt_money_plain(live_portfolio_value, 3)} <span class="ov-currency">KWD</span></div>
-            <div class="ov-sub">{sub_text}</div>
+            <div class="ov-sub">{cash_text}</div>
         </div>
         """, unsafe_allow_html=True)
     
@@ -10140,6 +10153,47 @@ def main():
         login_page(cookie_manager)
         return
 
+    # =============================
+    # COOKIE-BASED USER PREFERENCES
+    # =============================
+    # Load user preferences from cookies (theme, privacy mode, etc.)
+    def load_user_preferences():
+        """Load user preferences from cookies into session state."""
+        if not cookie_manager:
+            return
+        try:
+            all_cookies = cookie_manager.get_all() or {}
+            
+            # Theme preference
+            saved_theme = all_cookies.get("portfolio_theme")
+            if saved_theme and "theme" not in st.session_state:
+                st.session_state.theme = saved_theme
+                
+            # Privacy mode preference
+            saved_privacy = all_cookies.get("portfolio_privacy")
+            if saved_privacy is not None and "privacy_mode" not in st.session_state:
+                st.session_state.privacy_mode = saved_privacy == "true"
+                
+            # Last selected portfolio tab
+            saved_portfolio = all_cookies.get("portfolio_last_tab")
+            if saved_portfolio and "last_portfolio_tab" not in st.session_state:
+                st.session_state.last_portfolio_tab = saved_portfolio
+        except Exception as e:
+            print(f"Error loading preferences: {e}")
+    
+    def save_preference(key: str, value: str):
+        """Save a user preference to cookies (30-day expiry)."""
+        if not cookie_manager:
+            return
+        try:
+            expires = datetime.now() + timedelta(days=30)
+            cookie_manager.set(f"portfolio_{key}", str(value), expires_at=expires)
+        except Exception as e:
+            print(f"Error saving preference {key}: {e}")
+    
+    # Load preferences on page load
+    load_user_preferences()
+
     # Sidebar Logout
     with st.sidebar:
         st.write(f"👤 **{st.session_state.get('username', 'User')}**")
@@ -10174,7 +10228,14 @@ def main():
     """, unsafe_allow_html=True)
 
     def toggle_theme():
-        st.session_state.theme = "light" if st.session_state.theme == "dark" else "dark"
+        new_theme = "light" if st.session_state.theme == "dark" else "dark"
+        st.session_state.theme = new_theme
+        save_preference("theme", new_theme)
+    
+    def toggle_privacy():
+        new_privacy = not st.session_state.get("privacy_mode", False)
+        st.session_state.privacy_mode = new_privacy
+        save_preference("privacy", "true" if new_privacy else "false")
 
     # Header with theme toggle and logout on the right
     col1, col2, col3, col4 = st.columns([6, 1, 1, 1])
@@ -10192,7 +10253,12 @@ def main():
         st.write("")
         if "privacy_mode" not in st.session_state:
             st.session_state.privacy_mode = False
-        st.toggle("👁️ Privacy", key="privacy_mode")
+        st.toggle(
+            "👁️ Privacy",
+            value=st.session_state.get("privacy_mode", False),
+            on_change=toggle_privacy,
+            key="privacy_toggle"
+        )
     with col4:
         st.write("")  # Spacing
         if st.button("🚪 Logout", key="logout_btn", type="secondary"):
