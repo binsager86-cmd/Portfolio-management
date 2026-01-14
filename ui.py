@@ -32,10 +32,6 @@ if sys.version_info < REQUIRED:
     st.code("venv\\Scripts\\activate\npython -m streamlit run ui.py", language="bash")
     st.stop()
 
-# ✅ Show success status when version is correct
-st.sidebar.success(f"✅ Python OK: {sys.version.split()[0]}")
-st.sidebar.caption(f"📍 {sys.executable}")
-
 try:
     import altair as alt
 except Exception:
@@ -163,13 +159,9 @@ try:
     import yfinance as yf
     YFINANCE_AVAILABLE = True
     YFINANCE_PATH = yf.__file__
-    st.sidebar.success("✓ yfinance loaded")
-    st.sidebar.code(f"Path:\n{YFINANCE_PATH}")
 except Exception as e:
     YFINANCE_ERROR = str(e)
     yf = None
-    st.sidebar.error("✗ yfinance import failed")
-    st.sidebar.code(YFINANCE_ERROR)
 
 
 def session_tv(timeout=20):
@@ -10150,23 +10142,6 @@ def main():
     # Sidebar Logout
     with st.sidebar:
         st.write(f"👤 **{st.session_state.get('username', 'User')}**")
-        if st.button("Logout", key="logout_btn"):
-            # Delete session token from database
-            if cookie_manager:
-                all_cookies = cookie_manager.get_all()
-                session_token = all_cookies.get("portfolio_session") if all_cookies else None
-                if session_token:
-                    try:
-                        delete_session_token(session_token)
-                    except Exception:
-                        pass
-                cookie_manager.delete("portfolio_session")
-                cookie_manager.delete("portfolio_user")  # Also clean legacy cookie
-            
-            st.session_state.logged_in = False
-            st.session_state.user_id = None
-            st.session_state.username = None
-            st.rerun()
         st.divider()
 
     # --- THEME TOGGLE ---
@@ -10200,8 +10175,8 @@ def main():
     def toggle_theme():
         st.session_state.theme = "light" if st.session_state.theme == "dark" else "dark"
 
-    # Header with theme toggle on the right
-    col1, col2, col3 = st.columns([6, 1, 1])
+    # Header with theme toggle and logout on the right
+    col1, col2, col3, col4 = st.columns([6, 1, 1, 1])
     with col1:
         st.title("📊 Portfolio App")
     with col2:
@@ -10217,6 +10192,25 @@ def main():
         if "privacy_mode" not in st.session_state:
             st.session_state.privacy_mode = False
         st.toggle("👁️ Privacy", key="privacy_mode")
+    with col4:
+        st.write("")  # Spacing
+        if st.button("🚪 Logout", key="logout_btn", type="secondary"):
+            # Delete session token from database
+            if cookie_manager:
+                all_cookies = cookie_manager.get_all()
+                session_token = all_cookies.get("portfolio_session") if all_cookies else None
+                if session_token:
+                    try:
+                        delete_session_token(session_token)
+                    except Exception:
+                        pass
+                cookie_manager.delete("portfolio_session")
+                cookie_manager.delete("portfolio_user")  # Also clean legacy cookie
+            
+            st.session_state.logged_in = False
+            st.session_state.user_id = None
+            st.session_state.username = None
+            st.rerun()
 
     # Show price fetching status
     if not YFINANCE_AVAILABLE:
