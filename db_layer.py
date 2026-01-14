@@ -70,9 +70,29 @@ def init_db_config():
     
     # Determine database type and configure
     if database_url and HAS_POSTGRES:
+        # Validate the URL is not empty or malformed
+        database_url = database_url.strip() if database_url else None
+        
+        if not database_url or len(database_url) < 10:
+            print(f"⚠️ DATABASE_URL is empty or invalid, falling back to SQLite")
+            DB_TYPE = 'sqlite'
+            db_path = "/tmp/portfolio.db" if os.path.exists("/mount/src") else "portfolio.db"
+            DB_CONFIG = {'path': db_path}
+            print(f"📁 Using SQLite database: {db_path}")
+            return DB_TYPE
+        
         # Handle DigitalOcean's postgres:// vs postgresql:// URL scheme
         if database_url.startswith("postgres://"):
             database_url = database_url.replace("postgres://", "postgresql://", 1)
+        
+        # Validate URL starts with postgresql://
+        if not database_url.startswith("postgresql://"):
+            print(f"⚠️ DATABASE_URL doesn't look like a PostgreSQL URL, falling back to SQLite")
+            DB_TYPE = 'sqlite'
+            db_path = "/tmp/portfolio.db" if os.path.exists("/mount/src") else "portfolio.db"
+            DB_CONFIG = {'path': db_path}
+            print(f"📁 Using SQLite database: {db_path}")
+            return DB_TYPE
         
         DB_TYPE = 'postgres'
         DB_CONFIG = {'url': database_url}
@@ -119,12 +139,20 @@ def get_connection():
     try:
         if DB_TYPE == 'postgres':
             if 'url' in DB_CONFIG:
-                conn = psycopg2.connect(DB_CONFIG['url'])
+                url = DB_CONFIG['url']
+                if not url or not url.strip():
+                    raise ValueError("DATABASE_URL is empty or not configured")
+                conn = psycopg2.connect(url)
             else:
                 conn = psycopg2.connect(**DB_CONFIG)
         else:
             conn = sqlite3.connect(DB_CONFIG['path'], check_same_thread=False)
         yield conn
+    except Exception as e:
+        print(f"❌ Database connection error: {e}")
+        print(f"   DB_TYPE: {DB_TYPE}")
+        print(f"   DB_CONFIG keys: {list(DB_CONFIG.keys()) if DB_CONFIG else 'None'}")
+        raise
     finally:
         if conn:
             conn.close()
@@ -134,7 +162,10 @@ def get_conn():
     """Get a database connection (non-context manager, for compatibility)."""
     if DB_TYPE == 'postgres':
         if 'url' in DB_CONFIG:
-            return psycopg2.connect(DB_CONFIG['url'])
+            url = DB_CONFIG['url']
+            if not url or not url.strip():
+                raise ValueError("DATABASE_URL is empty or not configured")
+            return psycopg2.connect(url)
         else:
             return psycopg2.connect(**DB_CONFIG)
     else:
