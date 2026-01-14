@@ -682,8 +682,27 @@ from db_layer import (
 
 # Initialize PostgreSQL schema if using Supabase/DigitalOcean PostgreSQL
 if is_postgres():
-    init_postgres_schema()
-    print("🐘 PostgreSQL database ready")
+    try:
+        init_postgres_schema()
+        print("🐘 PostgreSQL database ready")
+    except Exception as e:
+        import streamlit as st
+        st.error(f"""
+        ❌ **Database Connection Error**
+        
+        Could not connect to PostgreSQL database: `{e}`
+        
+        **Possible causes:**
+        - DATABASE_URL is not set correctly in Heroku/DigitalOcean config vars
+        - DATABASE_URL is empty or malformed
+        - Database server is not accessible
+        
+        **To fix:**
+        1. Check your Heroku config vars: `heroku config`
+        2. Ensure DATABASE_URL is set: `heroku config:set DATABASE_URL=postgresql://...`
+        3. Verify the database is running and accessible
+        """)
+        st.stop()
 else:
     print("📁 SQLite database ready")
 
