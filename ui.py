@@ -677,14 +677,17 @@ from db_layer import (
     get_connection,
     convert_sql,
     convert_params,
-    execute_with_cursor
+    execute_with_cursor,
+    DB_TYPE,
+    DB_CONFIG,
+    IS_PRODUCTION
 )
 
 # Initialize PostgreSQL schema if using Supabase/DigitalOcean PostgreSQL
 if is_postgres():
     try:
         init_postgres_schema()
-        print("🐘 PostgreSQL database ready")
+        print("✅ PostgreSQL schema initialized successfully")
     except Exception as e:
         import streamlit as st
         st.error(f"""
@@ -693,34 +696,61 @@ if is_postgres():
         Could not connect to PostgreSQL database: `{e}`
         
         **Possible causes:**
-        - DATABASE_URL is not set correctly in Heroku/DigitalOcean config vars
+        - DATABASE_URL is not set correctly in DigitalOcean/Heroku config vars
         - DATABASE_URL is empty or malformed
         - Database server is not accessible
+        - psycopg2 driver not installed
         
         **To fix:**
-        1. Check your Heroku config vars: `heroku config`
-        2. Ensure DATABASE_URL is set: `heroku config:set DATABASE_URL=postgresql://...`
-        3. Verify the database is running and accessible
+        1. Verify DATABASE_URL is set in your app's environment variables
+        2. Check the database is running and accessible
+        3. Ensure the connection string includes `?sslmode=require`
         """)
         st.stop()
 else:
-    print("📁 SQLite database ready")
+    if IS_PRODUCTION:
+        import streamlit as st
+        st.error("""
+        ❌ **CRITICAL: No PostgreSQL database in production!**
+        
+        Your app is running in a cloud environment but is using SQLite.
+        **All data will be LOST on each deployment!**
+        
+        To fix: Add DATABASE_URL to your app's environment variables.
+        """)
+        st.stop()
+    else:
+        print("📁 SQLite database ready (local development)")
 
 
 def get_db_info():
     """Get current database type and status for display."""
     try:
-        from db_layer import DB_TYPE, DB_CONFIG
+        from db_layer import DB_TYPE, DB_CONFIG, IS_PRODUCTION
+        from urllib.parse import urlparse
+        
         if DB_TYPE == 'postgres':
+            # Parse URL to show host safely
+            url = DB_CONFIG.get('url', '')
+            if url:
+                try:
+                    parsed = urlparse(url)
+                    host = parsed.hostname or 'unknown'
+                    dbname = parsed.path.lstrip('/') if parsed.path else 'unknown'
+                    return f"🐘 PostgreSQL ({host[:20]}.../{dbname})"
+                except:
+                    pass
             return "🐘 PostgreSQL (persistent)"
         elif DB_TYPE == 'sqlite':
             path = DB_CONFIG.get('path', 'portfolio.db')
             if '/tmp/' in path:
                 return "⚠️ SQLite (EPHEMERAL - /tmp)"
-            return f"📁 SQLite ({path})"
+            if IS_PRODUCTION:
+                return "❌ SQLite in PRODUCTION (DATA LOSS RISK!)"
+            return f"📁 SQLite ({path}) - Local Dev"
         return "❓ Unknown"
-    except:
-        return "📁 SQLite"
+    except Exception as e:
+        return f"📁 SQLite ({e})"
 
 
 def db_execute(cur, sql: str, params: tuple = ()):
