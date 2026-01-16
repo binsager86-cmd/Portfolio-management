@@ -10603,15 +10603,18 @@ def login_page(cookie_manager=None):
                     db_username = row[1]
                     user_id = row[2]
 
-                    # Handle Byte/String encoding issues (Common source of bugs)
-                    if isinstance(stored_hash, str):
-                        stored_hash = stored_hash.encode('utf-8') # bcrypt needs bytes
-
-                    input_bytes = password_login.encode('utf-8')
-
-                    # Use bcrypt explicitly
-                    try:
-                        if bcrypt.checkpw(input_bytes, stored_hash):
+                    # Handle various encoding issues (SQLite returns str, PostgreSQL may return bytes/memoryview)
+                    if stored_hash is None:
+                        st.error("❌ Account exists but no password set. Please use 'Forgot Password'.")
+                    else:
+                        # Normalize hash to string for check_password
+                        if isinstance(stored_hash, memoryview):
+                            stored_hash = bytes(stored_hash).decode('utf-8')
+                        elif isinstance(stored_hash, bytes):
+                            stored_hash = stored_hash.decode('utf-8')
+                        
+                        # Use the check_password helper function
+                        if check_password(password_login, stored_hash):
                             # SUCCESS CASE
                             st.session_state.logged_in = True
                             st.session_state.user_id = user_id
@@ -10636,8 +10639,6 @@ def login_page(cookie_manager=None):
                             st.rerun()
                         else:
                             st.error("❌ Invalid email or password.")
-                    except Exception as e:
-                        st.error(f"Login processing error: {e}")
                 else:
                     st.error("❌ Invalid email or password. Please check your credentials or register a new account.")
 
