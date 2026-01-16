@@ -8,16 +8,19 @@ Usage:
     
 Priority for database detection:
     1. os.environ["DATABASE_URL"] (DigitalOcean Managed Database)
-    2. Streamlit secrets DATABASE_URL
-    3. Streamlit secrets SUPABASE_URL + SUPABASE_KEY
-    4. Fallback to SQLite (portfolio.db)
+    2. os.environ["db-portfolio"] or similar component-named variables
+    3. Streamlit secrets DATABASE_URL
+    4. Streamlit secrets SUPABASE_URL + SUPABASE_KEY
+    5. Fallback to SQLite (ONLY in local development, raises error in production)
 """
 
 import os
 import sqlite3
+import sys
 from contextlib import contextmanager
 from typing import Optional, List, Tuple, Any
 import pandas as pd
+from urllib.parse import urlparse
 
 # Try to import psycopg2 for PostgreSQL support
 try:
@@ -31,75 +34,151 @@ except ImportError:
 # Database configuration
 DB_TYPE = None  # 'sqlite' or 'postgres'
 DB_CONFIG = {}
+IS_PRODUCTION = False  # Track if we're running in cloud environment
+
+
+def _detect_production_environment():
+    """Detect if we're running in a production cloud environment."""
+    indicators = [
+        os.path.exists("/mount/src"),  # Streamlit Cloud
+        os.environ.get("DIGITALOCEAN_APP_PLATFORM"),  # DigitalOcean App Platform
+        os.environ.get("DYNO"),  # Heroku
+        os.environ.get("RENDER"),  # Render
+        os.environ.get("RAILWAY_ENVIRONMENT"),  # Railway
+        os.environ.get("VERCEL"),  # Vercel
+        os.environ.get("AWS_LAMBDA_FUNCTION_NAME"),  # AWS Lambda
+        os.environ.get("GOOGLE_CLOUD_PROJECT"),  # Google Cloud
+    ]
+    return any(indicators)
+
+
+def _find_database_url():
+    """Search for DATABASE_URL in multiple locations.
+    
+    DigitalOcean App Platform may use component-specific variable names.
+    """
+    # Check common DATABASE_URL patterns
+    url_candidates = [
+        os.environ.get("DATABASE_URL"),
+        os.environ.get("DATABASE"),
+        os.environ.get("POSTGRES_URL"),
+        os.environ.get("POSTGRESQL_URL"),
+    ]
+    
+    # Check for DigitalOcean component-specific variables (e.g., db-portfolio)
+    for key, value in os.environ.items():
+        key_lower = key.lower()
+        if value and isinstance(value, str):
+            # Check if value looks like a postgres URL
+            if value.startswith("postgres://") or value.startswith("postgresql://"):
+                url_candidates.append(value)
+            # Check for keys that might be database connections
+            elif "database" in key_lower or "postgres" in key_lower or key_lower.startswith("db"):
+                if "://" in value:
+                    url_candidates.append(value)
+    
+    # Check Streamlit secrets
+    try:
+        import streamlit as st
+        if hasattr(st, 'secrets'):
+            if st.secrets.get("DATABASE_URL"):
+                url_candidates.append(st.secrets.get("DATABASE_URL"))
+    except:
+        pass
+    
+    # Return first valid URL found
+    for url in url_candidates:
+        if url and isinstance(url, str) and len(url) > 10:
+            if "postgres" in url.lower() or "postgresql" in url.lower():
+                return url
+    
+    return None
+
+
+def _log_db_connection(db_type: str, url_or_path: str):
+    """Log database connection info safely (without passwords)."""
+    if db_type == 'postgres' and url_or_path:
+        try:
+            parsed = urlparse(url_or_path)
+            host = parsed.hostname or "unknown"
+            port = parsed.port or 5432
+            dbname = parsed.path.lstrip('/') if parsed.path else "unknown"
+            user = parsed.username or "unknown"
+            print(f"🐘 DATABASE CONNECTED:")
+            print(f"   Driver: PostgreSQL (psycopg2)")
+            print(f"   Host: {host}")
+            print(f"   Port: {port}")
+            print(f"   Database: {dbname}")
+            print(f"   User: {user}")
+            print(f"   SSL: {'require' in url_or_path}")
+        except Exception as e:
+            print(f"🐘 Using PostgreSQL database (could not parse URL details: {e})")
+    else:
+        print(f"📁 DATABASE CONNECTED:")
+        print(f"   Driver: SQLite")
+        print(f"   Path: {url_or_path}")
 
 
 def init_db_config():
     """Initialize database configuration from environment or Streamlit secrets.
     
+    CRITICAL: In production environments, this will FAIL if no PostgreSQL 
+    connection is available, to prevent silent data loss to ephemeral SQLite.
+    
     Priority:
     1. os.environ["DATABASE_URL"] - DigitalOcean sets this for managed databases
-    2. Streamlit secrets DATABASE_URL
-    3. Streamlit secrets SUPABASE_URL + SUPABASE_KEY  
-    4. Fallback to SQLite
+    2. Component-specific environment variables
+    3. Streamlit secrets DATABASE_URL
+    4. Streamlit secrets SUPABASE_URL + SUPABASE_KEY  
+    5. Fallback to SQLite (LOCAL DEVELOPMENT ONLY)
     """
-    global DB_TYPE, DB_CONFIG
+    global DB_TYPE, DB_CONFIG, IS_PRODUCTION
     
-    database_url = None
-    supabase_url = None
-    supabase_key = None
+    IS_PRODUCTION = _detect_production_environment()
+    database_url = _find_database_url()
     
-    # PRIORITY 1: Check environment variable first (DigitalOcean sets DATABASE_URL)
-    database_url = os.environ.get("DATABASE_URL")
+    # Also check for Supabase credentials
+    supabase_url = os.environ.get("SUPABASE_URL")
+    supabase_key = os.environ.get("SUPABASE_KEY")
     
-    # PRIORITY 2: Check Streamlit secrets
-    if not database_url:
-        try:
-            import streamlit as st
-            if hasattr(st, 'secrets'):
-                database_url = st.secrets.get("DATABASE_URL")
-                supabase_url = st.secrets.get("SUPABASE_URL")
-                supabase_key = st.secrets.get("SUPABASE_KEY")
-        except:
-            pass
+    try:
+        import streamlit as st
+        if hasattr(st, 'secrets'):
+            supabase_url = supabase_url or st.secrets.get("SUPABASE_URL")
+            supabase_key = supabase_key or st.secrets.get("SUPABASE_KEY")
+    except:
+        pass
     
-    # PRIORITY 3: Environment variables for Supabase
-    if not supabase_url:
-        supabase_url = os.environ.get("SUPABASE_URL")
-    if not supabase_key:
-        supabase_key = os.environ.get("SUPABASE_KEY")
-    
-    # Determine database type and configure
-    if database_url and HAS_POSTGRES:
-        # Validate the URL is not empty or malformed
-        database_url = database_url.strip() if database_url else None
+    # ===== ATTEMPT POSTGRESQL CONNECTION =====
+    if database_url:
+        if not HAS_POSTGRES:
+            error_msg = """
+╔══════════════════════════════════════════════════════════════════╗
+║  CRITICAL ERROR: PostgreSQL driver (psycopg2) not installed!    ║
+║                                                                  ║
+║  DATABASE_URL is set but psycopg2 is not available.            ║
+║  Install with: pip install psycopg2-binary                      ║
+╚══════════════════════════════════════════════════════════════════╝
+"""
+            print(error_msg)
+            if IS_PRODUCTION:
+                raise RuntimeError("PostgreSQL driver not installed but DATABASE_URL is set")
         
-        if not database_url or len(database_url) < 10:
-            print(f"⚠️ DATABASE_URL is empty or invalid, falling back to SQLite")
-            DB_TYPE = 'sqlite'
-            db_path = "/tmp/portfolio.db" if os.path.exists("/mount/src") else "portfolio.db"
-            DB_CONFIG = {'path': db_path}
-            print(f"📁 Using SQLite database: {db_path}")
-            return DB_TYPE
-        
-        # Handle DigitalOcean's postgres:// vs postgresql:// URL scheme
+        # Normalize postgres:// to postgresql:// for SQLAlchemy/psycopg2 compatibility
+        database_url = database_url.strip()
         if database_url.startswith("postgres://"):
             database_url = database_url.replace("postgres://", "postgresql://", 1)
         
-        # Validate URL starts with postgresql://
-        if not database_url.startswith("postgresql://"):
-            print(f"⚠️ DATABASE_URL doesn't look like a PostgreSQL URL, falling back to SQLite")
-            DB_TYPE = 'sqlite'
-            db_path = "/tmp/portfolio.db" if os.path.exists("/mount/src") else "portfolio.db"
-            DB_CONFIG = {'path': db_path}
-            print(f"📁 Using SQLite database: {db_path}")
+        if database_url.startswith("postgresql://"):
+            DB_TYPE = 'postgres'
+            DB_CONFIG = {'url': database_url}
+            _log_db_connection('postgres', database_url)
             return DB_TYPE
-        
-        DB_TYPE = 'postgres'
-        DB_CONFIG = {'url': database_url}
-        print("🐘 Using PostgreSQL database (DATABASE_URL)")
-        
-    elif supabase_url and supabase_key and HAS_POSTGRES:
-        # Build connection string from Supabase URL
+        else:
+            print(f"⚠️ DATABASE_URL found but doesn't look like PostgreSQL: {database_url[:30]}...")
+    
+    # ===== ATTEMPT SUPABASE CONNECTION =====
+    if supabase_url and supabase_key and HAS_POSTGRES:
         project_id = supabase_url.replace("https://", "").replace(".supabase.co", "")
         DB_TYPE = 'postgres'
         DB_CONFIG = {
@@ -109,21 +188,42 @@ def init_db_config():
             'user': 'postgres',
             'password': supabase_key
         }
-        print("🐘 Using Supabase PostgreSQL database")
-        
-    else:
-        DB_TYPE = 'sqlite'
-        # Use appropriate path based on environment
-        is_cloud = os.path.exists("/mount/src") or os.environ.get("DIGITALOCEAN_APP_PLATFORM")
-        if is_cloud:
-            db_path = "/tmp/portfolio.db"  # Temporary - won't persist!
-            print("⚠️  WARNING: Using SQLite on cloud - data will NOT persist!")
-        else:
-            db_path = "portfolio.db"
-        DB_CONFIG = {'path': db_path}
-        print(f"📁 Using SQLite database: {db_path}")
+        print("🐘 DATABASE CONNECTED:")
+        print(f"   Driver: PostgreSQL (Supabase)")
+        print(f"   Host: db.{project_id}.supabase.co")
+        print(f"   Database: postgres")
+        return DB_TYPE
     
-    return DB_TYPE
+    # ===== PRODUCTION WITHOUT DATABASE - FATAL ERROR =====
+    if IS_PRODUCTION:
+        error_msg = """
+╔══════════════════════════════════════════════════════════════════════════╗
+║  CRITICAL ERROR: No PostgreSQL database configured in production!       ║
+║                                                                          ║
+║  Your app is running in a cloud environment but no DATABASE_URL is set. ║
+║  Using SQLite would cause DATA LOSS on each deployment.                 ║
+║                                                                          ║
+║  To fix:                                                                 ║
+║  1. Go to DigitalOcean App Platform → Your App → Settings              ║
+║  2. Add environment variable: DATABASE_URL                              ║
+║  3. Value: postgresql://user:pass@host:port/dbname?sslmode=require     ║
+║                                                                          ║
+║  Or attach a Dev Database component to your app.                        ║
+╚══════════════════════════════════════════════════════════════════════════╝
+"""
+        print(error_msg, file=sys.stderr)
+        raise RuntimeError(
+            "CRITICAL: No PostgreSQL database configured. "
+            "Set DATABASE_URL environment variable to prevent data loss. "
+            "Refusing to use ephemeral SQLite in production."
+        )
+    
+    # ===== LOCAL DEVELOPMENT - SQLite OK =====
+    DB_TYPE = 'sqlite'
+    db_path = "portfolio.db"
+    DB_CONFIG = {'path': db_path}
+    _log_db_connection('sqlite', db_path)
+    print("   ℹ️  This is OK for local development only.")
     
     return DB_TYPE
 
@@ -148,6 +248,21 @@ def get_connection():
         else:
             conn = sqlite3.connect(DB_CONFIG['path'], check_same_thread=False)
         yield conn
+    except psycopg2.OperationalError as e:
+        error_msg = f"""
+╔══════════════════════════════════════════════════════════════════╗
+║  DATABASE CONNECTION FAILED                                      ║
+╚══════════════════════════════════════════════════════════════════╝
+Error: {str(e)[:60]}
+
+Possible causes:
+1. Database server is not running or unreachable
+2. Incorrect credentials in DATABASE_URL
+3. Network/firewall blocking connection
+4. SSL certificate issues (try adding ?sslmode=require)
+"""
+        print(error_msg, file=sys.stderr)
+        raise
     except Exception as e:
         print(f"❌ Database connection error: {e}")
         print(f"   DB_TYPE: {DB_TYPE}")
