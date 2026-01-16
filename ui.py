@@ -10511,11 +10511,10 @@ def login_page(cookie_manager=None):
                         conn.execute("DELETE FROM password_resets WHERE email=?", (target_email,))
                         conn.commit()
                         conn.close()
-                        st.success("✅ Password reset successfully! Please login.")
                         st.session_state.auth_mode = "login"
+                        st.session_state._password_reset_success = True
                         # Clear temp state
                         del st.session_state.reset_email
-                        time.sleep(1)
                         st.rerun()
                     else:
                         conn.close()
@@ -10563,9 +10562,8 @@ def login_page(cookie_manager=None):
                             db_execute(cur, "INSERT INTO users (username, email, password_hash, created_at) VALUES (?, ?, ?, ?)", 
                                        (reg_email, reg_email, hashed, int(time.time())))
                             conn.commit()
-                            st.success("Registered successfully! Redirecting to login...")
-                            time.sleep(1)
                             st.session_state.auth_mode = "login"
+                            st.session_state._register_success = True
                             st.rerun()
                     except Exception as e:
                         st.error(f"Registration error: {e}")
@@ -10575,6 +10573,12 @@ def login_page(cookie_manager=None):
     else:
         # standard login page (default)
         st.subheader("🔑 Login")
+        
+        # Show success messages from redirects (registration, password reset)
+        if st.session_state.pop('_register_success', False):
+            st.success("✅ Registered successfully! Please login.")
+        if st.session_state.pop('_password_reset_success', False):
+            st.success("✅ Password reset successfully! Please login.")
 
         # Use st.form to ensure variables are captured correctly on submit
         with st.form("login_form"):
@@ -10629,8 +10633,6 @@ def login_page(cookie_manager=None):
                                 except Exception as ce:
                                     print(f"Session Token Error: {ce}")
 
-                            st.toast("✅ Login Successful!", icon="✅")
-                            st.rerun()
                             st.rerun()
                         else:
                             st.error("❌ Invalid email or password.")
@@ -10679,70 +10681,51 @@ def main():
     # 2. cookies (persistent, but async loading)
     # 3. query_params as backup signaling mechanism
     
-    def try_restore_session():
-        """Try to restore session from cookie. Returns True if successful."""
-        if not cookie_manager:
-            return False
+    # =============================
+    # FAST SESSION CHECK
+    # =============================
+    # Check if already logged in (fastest path)
+    if st.session_state.get('logged_in'):
+        pass  # Continue to main app
+    else:
+        # Try to restore session from cookie
+        restored = False
+        cookies_loaded = False  # Track if cookies have actually loaded
         
-        try:
-            # Get all cookies - this may return None on first render
-            all_cookies = cookie_manager.get_all()
-            
-            # Debug: uncomment to see cookie state
-            # st.sidebar.write(f"DEBUG cookies: {all_cookies}")
-            
-            if not all_cookies:
-                return False
-            
-            session_token = all_cookies.get("portfolio_session")
-            if not session_token:
-                return False
-            
-            # Validate token against database
-            user_info = get_user_from_token(session_token)
-            if user_info:
-                st.session_state.logged_in = True
-                st.session_state.user_id = user_info["id"]
-                st.session_state.username = user_info["username"]
-                return True
-            else:
-                # Token invalid/expired - clean up
-                try:
-                    cookie_manager.delete("portfolio_session")
-                except:
-                    pass
-                return False
-        except Exception as e:
-            print(f"Session restore error: {e}")
-            return False
-    
-    # Check current login state
-    is_logged_in = st.session_state.get('logged_in', False)
-    
-    # If not logged in via session_state, try to restore from cookie
-    if not is_logged_in:
-        # First attempt to restore
-        restored = try_restore_session()
+        if cookie_manager:
+            try:
+                all_cookies = cookie_manager.get_all()
+                # all_cookies is None if component hasn't rendered yet
+                # all_cookies is {} (empty dict) if rendered but no cookies
+                if all_cookies is not None:
+                    cookies_loaded = True
+                    session_token = all_cookies.get("portfolio_session")
+                    if session_token:
+                        user_info = get_user_from_token(session_token)
+                        if user_info:
+                            st.session_state.logged_in = True
+                            st.session_state.user_id = user_info["id"]
+                            st.session_state.username = user_info["username"]
+                            restored = True
+                        else:
+                            # Token invalid - clean up silently
+                            try:
+                                cookie_manager.delete("portfolio_session")
+                            except:
+                                pass
+            except Exception as e:
+                print(f"Session restore error: {e}")
         
-        if restored:
-            # Successfully restored - session_state is now updated
-            # Continue to main app (no rerun needed, state is set)
-            pass
-        else:
-            # Cookies might not be loaded yet on first render
-            # Check if we have a "checking" flag to avoid infinite loop
-            if not st.session_state.get('_auth_checked'):
-                st.session_state._auth_checked = True
-                # Rerun once to allow cookies to load
-                st.rerun()
-    
-    # Final auth check - use session_state directly
-    if not st.session_state.get('logged_in'):
-        # Reset the auth check flag when showing login page
-        # so next login attempt can retry cookie restoration
-        st.session_state._auth_checked = False
-        login_page(cookie_manager)
-        return
+        # If cookies haven't loaded yet, rerun to let them load
+        # Only rerun if we haven't checked AND cookies aren't loaded yet
+        if not cookies_loaded and not st.session_state.get('_auth_checked'):
+            st.session_state._auth_checked = True
+            st.rerun()
+        
+        # Still not logged in? Show login page
+        if not st.session_state.get('logged_in'):
+            login_page(cookie_manager)
+            return
 
     # =============================
     # COOKIE-BASED USER PREFERENCES
@@ -10853,21 +10836,28 @@ def main():
     with col4:
         st.write("")  # Spacing
         if st.button("🚪 Logout", key="logout_btn", type="secondary"):
-            # Delete session token from database
-            if cookie_manager:
-                all_cookies = cookie_manager.get_all()
-                session_token = all_cookies.get("portfolio_session") if all_cookies else None
-                if session_token:
-                    try:
-                        delete_session_token(session_token)
-                    except Exception:
-                        pass
-                cookie_manager.delete("portfolio_session")
-                cookie_manager.delete("portfolio_user")  # Also clean legacy cookie
+            # First, invalidate the session token in the database
+            # This ensures even if the cookie still exists, it won't work
+            try:
+                user_id = st.session_state.get('user_id')
+                if user_id:
+                    conn = get_conn()
+                    conn.execute("DELETE FROM user_sessions WHERE user_id = ?", (user_id,))
+                    conn.commit()
+                    conn.close()
+            except Exception as e:
+                print(f"Error deleting session: {e}")
             
-            st.session_state.logged_in = False
-            st.session_state.user_id = None
-            st.session_state.username = None
+            # Delete cookies
+            if cookie_manager:
+                try:
+                    cookie_manager.delete("portfolio_session")
+                    cookie_manager.delete("portfolio_user")
+                except Exception:
+                    pass
+            
+            # Clear all session state
+            st.session_state.clear()
             st.rerun()
 
     # Show price fetching status
