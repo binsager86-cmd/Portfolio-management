@@ -2875,7 +2875,7 @@ def ui_cash_deposits():
                 conn = get_conn()
                 cur = conn.cursor()
                 user_id = st.session_state.get('user_id', 1)
-                cur.execute("DELETE FROM cash_deposits WHERE user_id = ?", (user_id,))
+                db_execute(cur, "DELETE FROM cash_deposits WHERE user_id = ?", (user_id,))
                 conn.commit()
                 conn.close()
                 st.session_state.confirm_delete_all = False
@@ -7572,7 +7572,7 @@ def ui_portfolio_tracker():
             # 1. Delete all existing snapshots for this user
             conn = get_conn()
             cur = conn.cursor()
-            cur.execute("DELETE FROM portfolio_snapshots WHERE user_id = ?", (user_id,))
+            db_execute(cur, "DELETE FROM portfolio_snapshots WHERE user_id = ?", (user_id,))
             
             # 2. Insert all rows from edited_data
             records = []
@@ -8353,7 +8353,7 @@ def ui_trading_section():
                     conn = get_conn()
                     cur = conn.cursor()
                     user_id = st.session_state.get('user_id', 1)
-                    cur.execute("SELECT COUNT(*) FROM trading_history WHERE user_id = ?", (user_id,))
+                    db_execute(cur, "SELECT COUNT(*) FROM trading_history WHERE user_id = ?", (user_id,))
                     transactions_before = cur.fetchone()[0]
                     
                     st.info(f"📊 Current database: {transactions_before} transactions | Starting import...")
@@ -8766,7 +8766,7 @@ def ui_trading_section():
     # First, check total trading transactions in database for debugging
     cur = conn.cursor()
     user_id = st.session_state.get('user_id', 1)
-    cur.execute("SELECT COUNT(*) FROM trading_history WHERE user_id = ?", (user_id,))
+    db_execute(cur, "SELECT COUNT(*) FROM trading_history WHERE user_id = ?", (user_id,))
     total_txns = cur.fetchone()[0]
     
     if total_txns == 0:
