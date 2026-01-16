@@ -5667,6 +5667,9 @@ def ui_backup_restore():
                 # Restore button
                 if st.button("🔄 Start Restore", type="primary", disabled=not can_proceed, use_container_width=True):
                     
+                    # IMPORTANT: Reset file pointer for reading sheets again
+                    uploaded_file.seek(0)
+                    
                     conn = get_conn()
                     cur = conn.cursor()
                     
@@ -5691,15 +5694,19 @@ def ui_backup_restore():
                         # STEP 2: Restore Stocks (must be first - other tables reference stocks)
                         if 'stocks' in preview_data:
                             progress.progress(15, text="📈 Restoring stocks...")
+                            uploaded_file.seek(0)  # Reset file pointer
                             df = pd.read_excel(uploaded_file, sheet_name='stocks')
+                            stocks_imported = 0
+                            stocks_updated = 0
                             for _, row in df.iterrows():
                                 try:
                                     symbol = safe_str(row.get('symbol'))
                                     if not symbol:
                                         continue
-                                    # Check if exists (for merge mode)
+                                    # Check if exists
                                     existing = query_df("SELECT id FROM stocks WHERE symbol = ? AND user_id = ?", (symbol, user_id))
                                     if existing.empty:
+                                        # INSERT new stock
                                         db_execute(cur, """
                                             INSERT INTO stocks (user_id, symbol, company_name, portfolio, currency, 
                                                 sector, current_price, price_source, last_price_update, created_at)
@@ -5715,16 +5722,38 @@ def ui_backup_restore():
                                             safe_str(row.get('last_price_update')),
                                             int(time.time())
                                         ))
-                                        imported += 1
+                                        stocks_imported += 1
+                                    else:
+                                        # UPDATE existing stock with backup data
+                                        db_execute(cur, """
+                                            UPDATE stocks SET 
+                                                company_name = ?, portfolio = ?, currency = ?, sector = ?,
+                                                current_price = ?, price_source = ?, last_price_update = ?
+                                            WHERE symbol = ? AND user_id = ?
+                                        """, (
+                                            safe_str(row.get('company_name')),
+                                            safe_str(row.get('portfolio'), 'KFH'),
+                                            safe_str(row.get('currency'), 'KWD'),
+                                            safe_str(row.get('sector')),
+                                            safe_float(row.get('current_price')),
+                                            safe_str(row.get('price_source')),
+                                            safe_str(row.get('last_price_update')),
+                                            symbol, user_id
+                                        ))
+                                        stocks_updated += 1
+                                    imported += 1
                                 except Exception as e:
                                     errors += 1
                                     error_details.append(f"Stock {row.get('symbol')}: {e}")
                             conn.commit()
+                            error_details.append(f"Stocks: {stocks_imported} new, {stocks_updated} updated")
                         
                         # STEP 3: Restore Transactions (includes dividends, bonus shares)
                         if 'transactions' in preview_data:
                             progress.progress(35, text="💳 Restoring transactions...")
+                            uploaded_file.seek(0)  # Reset file pointer
                             df = pd.read_excel(uploaded_file, sheet_name='transactions')
+                            txn_count = 0
                             for _, row in df.iterrows():
                                 try:
                                     db_execute(cur, """
@@ -5756,14 +5785,19 @@ def ui_backup_restore():
                                         int(time.time())
                                     ))
                                     imported += 1
+                                    txn_count += 1
                                 except Exception as e:
                                     errors += 1
+                                    error_details.append(f"Transaction: {e}")
                             conn.commit()
+                            error_details.append(f"Transactions: {txn_count} imported")
                         
                         # STEP 4: Restore Cash Deposits
                         if 'cash_deposits' in preview_data:
                             progress.progress(50, text="💵 Restoring cash deposits...")
+                            uploaded_file.seek(0)  # Reset file pointer
                             df = pd.read_excel(uploaded_file, sheet_name='cash_deposits')
+                            cash_count = 0
                             for _, row in df.iterrows():
                                 try:
                                     db_execute(cur, """
@@ -5783,13 +5817,17 @@ def ui_backup_restore():
                                         int(time.time())
                                     ))
                                     imported += 1
+                                    cash_count += 1
                                 except Exception as e:
                                     errors += 1
+                                    error_details.append(f"Cash deposit: {e}")
                             conn.commit()
+                            error_details.append(f"Cash Deposits: {cash_count} imported")
                         
                         # STEP 5: Restore Portfolio Cash Balances
                         if 'portfolio_cash' in preview_data:
                             progress.progress(65, text="💰 Restoring cash balances...")
+                            uploaded_file.seek(0)  # Reset file pointer
                             df = pd.read_excel(uploaded_file, sheet_name='portfolio_cash')
                             for _, row in df.iterrows():
                                 try:
@@ -5823,6 +5861,7 @@ def ui_backup_restore():
                         # STEP 6: Restore Trading History
                         if 'trading_history' in preview_data:
                             progress.progress(80, text="📊 Restoring trading history...")
+                            uploaded_file.seek(0)  # Reset file pointer
                             df = pd.read_excel(uploaded_file, sheet_name='trading_history')
                             for _, row in df.iterrows():
                                 try:
@@ -5850,7 +5889,9 @@ def ui_backup_restore():
                         # STEP 7: Restore Portfolio Snapshots
                         if 'portfolio_snapshots' in preview_data:
                             progress.progress(92, text="📉 Restoring portfolio snapshots...")
+                            uploaded_file.seek(0)  # Reset file pointer
                             df = pd.read_excel(uploaded_file, sheet_name='portfolio_snapshots')
+                            snap_count = 0
                             for _, row in df.iterrows():
                                 try:
                                     snap_date = safe_date(row.get('snapshot_date'))
@@ -5876,22 +5917,29 @@ def ui_backup_restore():
                                             int(time.time())
                                         ))
                                         imported += 1
+                                        snap_count += 1
                                 except Exception as e:
                                     errors += 1
+                                    error_details.append(f"Snapshot {snap_date}: {e}")
                             conn.commit()
+                            error_details.append(f"Portfolio Snapshots: {snap_count} imported")
                         
                         progress.progress(100, text="✅ Complete!")
                         conn.close()
                         
-                        # Show results
+                        # Show results with details
+                        st.success(f"✅ **Restore completed! {imported:,} total records processed.**")
+                        
+                        # Show details breakdown
+                        with st.expander("📋 View restore details", expanded=True):
+                            for detail in error_details:
+                                if "imported" in detail or "new" in detail or "updated" in detail:
+                                    st.info(detail)
+                                elif errors > 0:
+                                    st.warning(detail)
+                        
                         if errors > 0:
-                            st.warning(f"⚠️ Restore completed with issues: **{imported:,}** imported, **{errors:,}** skipped/failed")
-                            if error_details:
-                                with st.expander("View error details"):
-                                    for err in error_details[:20]:
-                                        st.text(err)
-                        else:
-                            st.success(f"✅ **Successfully restored {imported:,} records!**")
+                            st.warning(f"⚠️ {errors:,} records skipped (likely duplicates or invalid data)")
                         
                         st.balloons()
                         time.sleep(2)
