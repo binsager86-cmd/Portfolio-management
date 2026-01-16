@@ -707,6 +707,22 @@ else:
     print("📁 SQLite database ready")
 
 
+def get_db_info():
+    """Get current database type and status for display."""
+    try:
+        from db_layer import DB_TYPE, DB_CONFIG
+        if DB_TYPE == 'postgres':
+            return "🐘 PostgreSQL (persistent)"
+        elif DB_TYPE == 'sqlite':
+            path = DB_CONFIG.get('path', 'portfolio.db')
+            if '/tmp/' in path:
+                return "⚠️ SQLite (EPHEMERAL - /tmp)"
+            return f"📁 SQLite ({path})"
+        return "❓ Unknown"
+    except:
+        return "📁 SQLite"
+
+
 def db_execute(cur, sql: str, params: tuple = ()):
     """Execute SQL with automatic ? to %s conversion for PostgreSQL.
     
@@ -10705,6 +10721,10 @@ def login_page(cookie_manager=None):
         if st.button("Create an Account", type="secondary", use_container_width=True):
             st.session_state.auth_mode = "register"
             st.rerun()
+    
+    # Show database info at bottom of login page
+    st.markdown("---")
+    st.caption(f"{get_db_info()}")
 
 def main():
     # Initialize database schema (handles both SQLite and PostgreSQL)
@@ -10983,7 +11003,7 @@ def main():
     with tabs[9]:
         ui_backup_restore()
 
-    st.caption("DB: portfolio.db | UI: Streamlit")
+    st.caption(f"{get_db_info()} | UI: Streamlit")
 
 
 if __name__ == "__main__":
