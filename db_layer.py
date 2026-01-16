@@ -508,11 +508,10 @@ def init_postgres_schema():
                 id SERIAL PRIMARY KEY,
                 user_id INTEGER,
                 portfolio TEXT DEFAULT 'KFH',
-                bank_name TEXT NOT NULL,
+                source TEXT,
                 deposit_date TEXT NOT NULL,
                 amount DOUBLE PRECISION NOT NULL,
-                description TEXT,
-                comments TEXT,
+                notes TEXT,
                 currency TEXT DEFAULT 'KWD',
                 include_in_analysis INTEGER DEFAULT 1,
                 created_at INTEGER NOT NULL
@@ -537,12 +536,16 @@ def init_postgres_schema():
                 id SERIAL PRIMARY KEY,
                 user_id INTEGER DEFAULT 1,
                 symbol TEXT NOT NULL,
-                name TEXT,
+                company_name TEXT,
+                sector TEXT,
                 current_price DOUBLE PRECISION DEFAULT 0,
+                price_source TEXT,
+                last_price_update TEXT,
                 portfolio TEXT DEFAULT 'KFH',
                 currency TEXT DEFAULT 'KWD',
                 tradingview_symbol TEXT,
                 tradingview_exchange TEXT,
+                created_at INTEGER,
                 UNIQUE(symbol, user_id)
             )
         """)
@@ -588,6 +591,24 @@ def init_postgres_schema():
                 bonus_shares DOUBLE PRECISION NOT NULL DEFAULT 0,
                 notes TEXT,
                 created_at INTEGER NOT NULL
+            )
+        """)
+        
+        # Portfolio snapshots (for tracking portfolio value over time)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS portfolio_snapshots (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER,
+                snapshot_date TEXT NOT NULL,
+                portfolio_value DOUBLE PRECISION DEFAULT 0,
+                daily_movement DOUBLE PRECISION DEFAULT 0,
+                beginning_difference DOUBLE PRECISION DEFAULT 0,
+                deposit_cash DOUBLE PRECISION DEFAULT 0,
+                accumulated_cash DOUBLE PRECISION DEFAULT 0,
+                net_gain DOUBLE PRECISION DEFAULT 0,
+                change_percent DOUBLE PRECISION DEFAULT 0,
+                roi_percent DOUBLE PRECISION DEFAULT 0,
+                created_at INTEGER
             )
         """)
         
