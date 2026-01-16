@@ -3502,15 +3502,16 @@ def ui_transactions():
         with col_confirm:
             if st.button("✅ Confirm Delete", type="primary", key="confirm_delete_btn"):
                 try:
+                    user_id = st.session_state.get('user_id')
                     conn = get_conn()
                     cur = conn.cursor()
                     
                     # Delete all PORTFOLIO transactions for this stock (not trading)
-                    db_execute(cur, "DELETE FROM transactions WHERE stock_symbol = ? AND COALESCE(category, 'portfolio') = 'portfolio'", (selected_symbol,))
+                    db_execute(cur, "DELETE FROM transactions WHERE stock_symbol = ? AND user_id = ? AND COALESCE(category, 'portfolio') = 'portfolio'", (selected_symbol, user_id))
                     txn_deleted = cur.rowcount
                     
                     # Delete the stock itself
-                    db_execute(cur, "DELETE FROM stocks WHERE symbol = ?", (selected_symbol,))
+                    db_execute(cur, "DELETE FROM stocks WHERE symbol = ? AND user_id = ?", (selected_symbol, user_id))
                     
                     conn.commit()
                     conn.close()
@@ -5242,112 +5243,673 @@ def ui_financial_planner():
 
 
 def ui_backup_restore():
+    """
+    Professional Backup & Restore System
+    - Exports ALL user data to a single Excel file with multiple sheets
+    - The same exported file can be directly imported for restore
+    - Supports Merge (add to existing) or Full Replace modes
+    """
     user_id = st.session_state.get('user_id')
-    st.title("💾 Backup & Restore (Excel)")
-    st.caption("Export your transaction history or restore from a previous backup file.")
+    username = st.session_state.get('username', 'user')
     
-    tab_exp, tab_imp = st.tabs(["📤 Export Data", "📥 Import / Restore"])
+    # Professional styling
+    st.markdown("""
+    <style>
+    .backup-card {
+        background: linear-gradient(135deg, rgba(59, 130, 246, 0.1) 0%, rgba(139, 92, 246, 0.1) 100%);
+        border: 1px solid rgba(59, 130, 246, 0.3);
+        border-radius: 12px;
+        padding: 1.5rem;
+        margin: 1rem 0;
+    }
+    .backup-title {
+        font-size: 1.1rem;
+        font-weight: 600;
+        margin-bottom: 0.5rem;
+    }
+    .backup-info {
+        font-size: 0.85rem;
+        opacity: 0.8;
+    }
+    .data-table-header {
+        background: rgba(59, 130, 246, 0.2);
+        padding: 0.5rem 1rem;
+        border-radius: 8px;
+        font-weight: 600;
+        margin-bottom: 0.5rem;
+    }
+    </style>
+    """, unsafe_allow_html=True)
     
-    with tab_exp:
-        st.markdown("### 📤 Export Transactions")
-        st.write("Download your entire transaction history as an Excel file.")
-        
+    st.title("💾 Backup & Restore Center")
+    st.caption("Securely export and restore all your portfolio data. The exported file can be directly re-imported.")
+    
+    # =============================
+    # HELPER: Ensure all backup tables exist
+    # =============================
+    def ensure_backup_tables():
+        """Create any missing tables required for backup."""
+        conn = get_conn()
+        cur = conn.cursor()
         try:
-            # Fetch data immediately so download button is always available
-            export_sql = "SELECT * FROM transactions WHERE user_id = ? ORDER BY txn_date DESC"
-            df_export = query_df(export_sql, (user_id,))
-            
-            if not df_export.empty:
-                buffer = io.BytesIO()
-                with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
-                    df_export.to_excel(writer, index=False, sheet_name='Transactions')
-                
-                st.download_button(
-                    label="📥 Download Excel File", 
-                    data=buffer.getvalue(), 
-                    file_name=f"portfolio_backup_{date.today()}.xlsx", 
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            # Create trading_history if missing
+            db_execute(cur, """
+                CREATE TABLE IF NOT EXISTS trading_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    symbol TEXT NOT NULL,
+                    trade_date TEXT NOT NULL,
+                    trade_type TEXT DEFAULT 'Buy',
+                    quantity REAL DEFAULT 0,
+                    price REAL DEFAULT 0,
+                    total_value REAL DEFAULT 0,
+                    notes TEXT,
+                    created_at INTEGER
                 )
-                st.success(f"Ready to export {len(df_export):,} records.")
-            else:
-                st.warning("No transactions found to export.")
+            """)
+            # Create portfolio_snapshots if missing
+            db_execute(cur, """
+                CREATE TABLE IF NOT EXISTS portfolio_snapshots (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    snapshot_date TEXT NOT NULL,
+                    portfolio_value REAL DEFAULT 0,
+                    daily_movement REAL DEFAULT 0,
+                    beginning_difference REAL DEFAULT 0,
+                    deposit_cash REAL DEFAULT 0,
+                    accumulated_cash REAL DEFAULT 0,
+                    net_gain REAL DEFAULT 0,
+                    change_percent REAL DEFAULT 0,
+                    roi_percent REAL DEFAULT 0,
+                    created_at INTEGER
+                )
+            """)
+            conn.commit()
+        except Exception:
+            pass
+        finally:
+            conn.close()
+    
+    # Ensure tables exist
+    ensure_backup_tables()
+    
+    # =============================
+    # HELPER: Get all exportable data
+    # =============================
+    def safe_query(sql, params):
+        """Query that returns empty DataFrame if table doesn't exist."""
+        try:
+            return query_df(sql, params)
         except Exception as e:
-            st.error(f"Export Error: {e}")
-
-    with tab_imp:
-        st.markdown("### 📥 Import / Restore Transactions")
-        st.warning("⚠️ This will APPEND transactions to your database. It does not delete existing records.")
+            return pd.DataFrame()
+    
+    def get_all_user_data():
+        """Fetch all data tables for the current user."""
+        data = {
+            'stocks': safe_query("SELECT * FROM stocks WHERE user_id = ? ORDER BY symbol", (user_id,)),
+            'transactions': safe_query("SELECT * FROM transactions WHERE user_id = ? ORDER BY txn_date DESC", (user_id,)),
+            'cash_deposits': safe_query("SELECT * FROM cash_deposits WHERE user_id = ? ORDER BY deposit_date DESC", (user_id,)),
+            'portfolio_cash': safe_query("SELECT * FROM portfolio_cash WHERE user_id = ?", (user_id,)),
+            'trading_history': safe_query("SELECT * FROM trading_history WHERE user_id = ? ORDER BY trade_date DESC", (user_id,)),
+            # Include portfolio_snapshots for current user OR legacy data (user_id=1 or NULL)
+            'portfolio_snapshots': safe_query(
+                "SELECT * FROM portfolio_snapshots WHERE user_id = ? OR user_id = 1 OR user_id IS NULL ORDER BY snapshot_date DESC", 
+                (user_id,)
+            ),
+        }
+        return data
+    
+    # =============================
+    # HELPER: Parse date safely
+    # =============================
+    def safe_date(val, default=None):
+        """Convert various date formats to YYYY-MM-DD string."""
+        if pd.isna(val) or val is None:
+            return default or str(date.today())
+        if isinstance(val, pd.Timestamp):
+            return val.strftime('%Y-%m-%d')
+        if isinstance(val, datetime):
+            return val.strftime('%Y-%m-%d')
+        if isinstance(val, date):
+            return val.strftime('%Y-%m-%d')
+        return str(val).split(' ')[0].split('T')[0]
+    
+    # =============================
+    # HELPER: Safe float conversion
+    # =============================
+    def safe_float(val, default=0.0):
+        """Safely convert value to float."""
+        if pd.isna(val) or val is None:
+            return default
+        try:
+            return float(val)
+        except:
+            return default
+    
+    # =============================
+    # HELPER: Safe string conversion
+    # =============================
+    def safe_str(val, default=''):
+        """Safely convert value to string."""
+        if pd.isna(val) or val is None:
+            return default
+        return str(val)
+    
+    tab_exp, tab_imp = st.tabs(["📤 Export Backup", "📥 Restore from Backup"])
+    
+    # =====================================================
+    # TAB 1: EXPORT
+    # =====================================================
+    with tab_exp:
+        st.markdown("### 📤 Download Complete Backup")
         
-        uploaded_file = st.file_uploader("Upload Backup File (.xlsx)", type=['xlsx'])
+        # Fetch all data
+        all_data = get_all_user_data()
+        
+        # Extract dividends from transactions for a dedicated sheet
+        dividends_df = pd.DataFrame()
+        txn_df = all_data['transactions']
+        if not txn_df.empty:
+            # Filter transactions that have dividends or bonus shares
+            div_mask = pd.Series([False] * len(txn_df))
+            if 'cash_dividend' in txn_df.columns:
+                div_mask = div_mask | (txn_df['cash_dividend'].fillna(0) > 0)
+            if 'bonus_shares' in txn_df.columns:
+                div_mask = div_mask | (txn_df['bonus_shares'].fillna(0) > 0)
+            if 'reinvested_dividend' in txn_df.columns:
+                div_mask = div_mask | (txn_df['reinvested_dividend'].fillna(0) > 0)
+            
+            dividends_df = txn_df[div_mask].copy()
+            if not dividends_df.empty:
+                # Select relevant columns for dividend sheet
+                div_cols = ['portfolio', 'stock_symbol', 'txn_date', 'cash_dividend', 'bonus_shares', 
+                           'reinvested_dividend', 'notes']
+                available_cols = [c for c in div_cols if c in dividends_df.columns]
+                dividends_df = dividends_df[available_cols]
+        
+        # Add dividends to all_data for export
+        all_data['dividends'] = dividends_df
+        
+        # Calculate statistics
+        stats = {name: len(df) for name, df in all_data.items()}
+        total_records = sum(stats.values())
+        
+        # Professional summary display
+        st.markdown('<div class="data-table-header">📊 Your Data Summary</div>', unsafe_allow_html=True)
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.markdown("**📈 Portfolio Data**")
+            st.metric("Stocks Tracked", stats['stocks'], help="Unique stocks in your portfolio")
+            st.metric("Transactions", stats['transactions'], help="Buy, Sell, Dividend, Bonus transactions")
+            st.metric("Dividends & Bonus", stats['dividends'], help="Cash dividends, bonus shares, reinvested dividends")
+        
+        with col2:
+            st.markdown("**💰 Cash Management**")
+            st.metric("Cash Deposits", stats['cash_deposits'], help="Capital injection records")
+            st.metric("Manual Cash Balances", stats['portfolio_cash'], help="Per-portfolio available cash overrides")
+        
+        with col3:
+            st.markdown("**📊 Tracking & History**")
+            st.metric("📈 Portfolio Tracker", stats['portfolio_snapshots'], help="Daily portfolio value snapshots for performance tracking")
+            st.metric("Trading History", stats['trading_history'], help="Short-term trading records")
+        
+        st.divider()
+        
+        # Show what's included
+        st.markdown("**📋 What's Included in Backup:**")
+        
+        included_items = []
+        if stats['stocks'] > 0:
+            included_items.append(f"✅ **Stocks** ({stats['stocks']}) - Symbols, names, currency, sectors, TradingView mappings")
+        if stats['transactions'] > 0:
+            included_items.append(f"✅ **Transactions** ({stats['transactions']}) - All Buy/Sell transactions with costs, fees, notes")
+        if stats['dividends'] > 0:
+            # Calculate totals
+            total_cash_div = 0
+            total_bonus = 0
+            if not dividends_df.empty:
+                if 'cash_dividend' in dividends_df.columns:
+                    total_cash_div = dividends_df['cash_dividend'].fillna(0).sum()
+                if 'bonus_shares' in dividends_df.columns:
+                    total_bonus = dividends_df['bonus_shares'].fillna(0).sum()
+            included_items.append(f"✅ **Dividends** ({stats['dividends']}) - Cash: {total_cash_div:,.2f}, Bonus shares: {total_bonus:,.0f}")
+        if stats['cash_deposits'] > 0:
+            included_items.append(f"✅ **Cash Deposits** ({stats['cash_deposits']}) - Capital injections history")
+        if stats['portfolio_cash'] > 0:
+            included_items.append(f"✅ **Manual Cash Balances** ({stats['portfolio_cash']}) - Available cash overrides per portfolio")
+        if stats['portfolio_snapshots'] > 0:
+            # Show date range for snapshots
+            snap_df = all_data['portfolio_snapshots']
+            if not snap_df.empty and 'snapshot_date' in snap_df.columns:
+                min_date = snap_df['snapshot_date'].min()
+                max_date = snap_df['snapshot_date'].max()
+                included_items.append(f"✅ **Portfolio Tracker History** ({stats['portfolio_snapshots']}) - Daily values from {min_date} to {max_date}")
+            else:
+                included_items.append(f"✅ **Portfolio Tracker History** ({stats['portfolio_snapshots']})")
+        if stats['trading_history'] > 0:
+            included_items.append(f"✅ **Trading History** ({stats['trading_history']}) - Short-term trading records")
+        
+        for item in included_items:
+            st.markdown(item)
+        
+        if total_records == 0:
+            st.warning("⚠️ No data to export. Start adding transactions and data to your portfolio!")
+        else:
+            st.divider()
+            
+            # Generate backup file
+            buffer = io.BytesIO()
+            with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+                workbook = writer.book
+                
+                # Create formats
+                header_format = workbook.add_format({
+                    'bold': True, 'bg_color': '#4F81BD', 'font_color': 'white',
+                    'border': 1, 'align': 'center'
+                })
+                
+                # Write each non-empty table
+                for sheet_name, df in all_data.items():
+                    if not df.empty:
+                        df.to_excel(writer, index=False, sheet_name=sheet_name)
+                        # Format headers
+                        worksheet = writer.sheets[sheet_name]
+                        for col_num, value in enumerate(df.columns.values):
+                            worksheet.write(0, col_num, value, header_format)
+                            # Auto-adjust column width
+                            max_len = max(df[value].astype(str).map(len).max(), len(str(value))) + 2
+                            worksheet.set_column(col_num, col_num, min(max_len, 40))
+                
+                # Add metadata sheet (for validation on import)
+                metadata = pd.DataFrame({
+                    'key': [
+                        'backup_version', 'backup_date', 'backup_time', 'username',
+                        'stocks_count', 'transactions_count', 'dividends_count', 'cash_deposits_count',
+                        'portfolio_cash_count', 'trading_history_count', 'portfolio_snapshots_count',
+                        'total_records'
+                    ],
+                    'value': [
+                        '3.1', str(date.today()), datetime.now().strftime('%H:%M:%S'), username,
+                        stats['stocks'], stats['transactions'], stats['dividends'], stats['cash_deposits'],
+                        stats['portfolio_cash'], stats['trading_history'], stats['portfolio_snapshots'],
+                        total_records
+                    ]
+                })
+                metadata.to_excel(writer, index=False, sheet_name='_backup_info')
+            
+            # Generate filename with timestamp
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M')
+            filename = f"portfolio_backup_{username}_{timestamp}.xlsx"
+            
+            st.markdown(f"""
+            <div class="backup-card">
+                <div class="backup-title">📦 Backup Ready</div>
+                <div class="backup-info">
+                    Total: <strong>{total_records:,}</strong> records across <strong>{len([s for s in stats.values() if s > 0])}</strong> tables<br>
+                    File: <strong>{filename}</strong>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            st.download_button(
+                label="⬇️ Download Backup File",
+                data=buffer.getvalue(),
+                file_name=filename,
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                type="primary",
+                use_container_width=True
+            )
+            
+            st.info("💡 **Tip:** Store this file safely. You can restore from it anytime using the 'Restore from Backup' tab.")
+    
+    # =====================================================
+    # TAB 2: RESTORE
+    # =====================================================
+    with tab_imp:
+        st.markdown("### 📥 Restore from Backup File")
+        st.markdown("Upload a backup file previously exported from this app. The same Excel file you downloaded can be directly restored.")
+        
+        # Restore mode selection
+        st.markdown("**🔧 Restore Mode:**")
+        restore_mode = st.radio(
+            "Select how to handle existing data:",
+            options=["merge", "replace"],
+            format_func=lambda x: "🔄 **Merge** - Add backup data to existing records (safe, no data loss)" if x == "merge" else "🗑️ **Full Replace** - Delete ALL current data and restore from backup",
+            label_visibility="collapsed"
+        )
+        
+        if restore_mode == "replace":
+            st.error("⚠️ **DANGER:** Full Replace will permanently DELETE all your current data before restoring!")
+        
+        st.divider()
+        
+        # File upload
+        uploaded_file = st.file_uploader(
+            "📁 Upload your backup file (.xlsx)",
+            type=['xlsx'],
+            help="Upload the Excel backup file you want to restore from"
+        )
         
         if uploaded_file:
-            if st.button("Process Restore", type="primary"):
-                try:
-                    df = pd.read_excel(uploaded_file)
-                    df.columns = [c.lower().strip() for c in df.columns]
+            try:
+                # Read and validate the file
+                xl = pd.ExcelFile(uploaded_file)
+                sheets = xl.sheet_names
+                
+                # Check for metadata
+                backup_info = {}
+                if '_backup_info' in sheets:
+                    info_df = pd.read_excel(uploaded_file, sheet_name='_backup_info')
+                    backup_info = dict(zip(info_df['key'], info_df['value']))
+                elif '_metadata' in sheets:  # Legacy format
+                    info_df = pd.read_excel(uploaded_file, sheet_name='_metadata')
+                    backup_info = dict(zip(info_df['info'], info_df['value']))
+                
+                # Show backup info
+                if backup_info:
+                    st.success(f"✅ Valid backup file detected")
+                    backup_date = backup_info.get('backup_date', backup_info.get('backup_date', 'Unknown'))
+                    backup_version = backup_info.get('backup_version', backup_info.get('app_version', '1.0'))
+                    st.info(f"📅 **Backup Date:** {backup_date} | **Version:** {backup_version}")
+                
+                # Preview contents
+                st.markdown("**📋 Backup Contents:**")
+                
+                # Exclude dividends sheet from restore (it's derived from transactions)
+                data_sheets = [s for s in sheets if not s.startswith('_') and s != 'dividends']
+                preview_data = {}
+                
+                for sheet in data_sheets:
+                    df = pd.read_excel(uploaded_file, sheet_name=sheet)
+                    preview_data[sheet] = {'count': len(df), 'columns': list(df.columns)}
+                
+                # Also show dividends if present (read-only info)
+                if 'dividends' in sheets:
+                    div_df = pd.read_excel(uploaded_file, sheet_name='dividends')
+                    st.info(f"💰 **Dividends sheet detected:** {len(div_df)} dividend records (included in transactions, no separate restore needed)")
+                
+                # Display in grid
+                cols = st.columns(3)
+                for idx, (sheet, info) in enumerate(preview_data.items()):
+                    with cols[idx % 3]:
+                        icon = {
+                            'stocks': '📈',
+                            'transactions': '💳',
+                            'cash_deposits': '💵',
+                            'portfolio_cash': '💰',
+                            'trading_history': '📊',
+                            'portfolio_snapshots': '📉'
+                        }.get(sheet, '📄')
+                        st.metric(f"{icon} {sheet}", f"{info['count']:,} rows")
+                
+                total_to_restore = sum(info['count'] for info in preview_data.values())
+                
+                st.divider()
+                
+                # Confirmation section
+                st.markdown("**🔐 Confirm Restore:**")
+                
+                if restore_mode == "replace":
+                    confirm_text = st.text_input(
+                        "Type **DELETE ALL AND RESTORE** to confirm full replacement:",
+                        help="This confirmation prevents accidental data loss"
+                    )
+                    can_proceed = (confirm_text == "DELETE ALL AND RESTORE")
+                else:
+                    confirm_text = st.text_input(
+                        "Type **RESTORE** to confirm:",
+                        help="This confirmation prevents accidental restoration"
+                    )
+                    can_proceed = (confirm_text == "RESTORE")
+                
+                # Restore button
+                if st.button("🔄 Start Restore", type="primary", disabled=not can_proceed, use_container_width=True):
                     
                     conn = get_conn()
                     cur = conn.cursor()
                     
-                    count_success = 0
-                    count_errors = 0
-                    progress_bar = st.progress(0)
-                    
-                    for i, row in df.iterrows():
-                        try:
-                            # Robust mapping
-                            r_date = row.get('txn_date')
-                            r_type = row.get('txn_type')
-                            r_port = row.get('portfolio')
-                            r_sym = row.get('stock_symbol')
-                            
-                            if pd.isna(r_sym) or pd.isna(r_type): continue
-                            
-                            # Normalize Date
-                            if isinstance(r_date, pd.Timestamp):
-                                r_date_str = r_date.strftime('%Y-%m-%d')
-                            else:
-                                r_date_str = str(r_date).split(' ')[0]
-
-                            # Defaults
-                            r_shares = float(row.get('shares', 0) or 0)
-                            r_cost = float(row.get('purchase_cost', 0) or 0)
-                            r_sell = float(row.get('sell_value', 0) or 0)
-                            r_div = float(row.get('cash_dividend', 0) or 0)
-                            r_fees = float(row.get('fees', 0) or 0)
-                            r_notes = str(row.get('notes', '') or '')
-                            r_cat = str(row.get('category', 'portfolio') or 'portfolio')
-                            
-                            cur.execute("""
-                                INSERT INTO transactions 
-                                (user_id, portfolio, stock_symbol, txn_date, txn_type, 
-                                 shares, purchase_cost, sell_value, cash_dividend, fees, 
-                                 notes, category, created_at)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                            """, (user_id, r_port, r_sym, r_date_str, r_type,
-                                  r_shares, r_cost, r_sell, r_div, r_fees,
-                                  r_notes, r_cat, int(time.time())))
-                            count_success += 1
-                        except Exception as inner_e:
-                            count_errors += 1
+                    try:
+                        progress = st.progress(0, text="Initializing...")
+                        imported = 0
+                        errors = 0
+                        error_details = []
                         
-                        if i % 5 == 0:
-                            progress_bar.progress(min((i+1)/len(df), 1.0))
+                        # STEP 1: Clear data if Full Replace
+                        if restore_mode == "replace":
+                            progress.progress(5, text="🗑️ Clearing existing data...")
+                            tables_to_clear = ['trading_history', 'portfolio_snapshots', 'portfolio_cash', 
+                                             'cash_deposits', 'transactions', 'stocks']
+                            for tbl in tables_to_clear:
+                                try:
+                                    db_execute(cur, f"DELETE FROM {tbl} WHERE user_id = ?", (user_id,))
+                                except Exception as e:
+                                    error_details.append(f"Clear {tbl}: {e}")
+                            conn.commit()
+                        
+                        # STEP 2: Restore Stocks (must be first - other tables reference stocks)
+                        if 'stocks' in preview_data:
+                            progress.progress(15, text="📈 Restoring stocks...")
+                            df = pd.read_excel(uploaded_file, sheet_name='stocks')
+                            for _, row in df.iterrows():
+                                try:
+                                    symbol = safe_str(row.get('symbol'))
+                                    if not symbol:
+                                        continue
+                                    # Check if exists (for merge mode)
+                                    existing = query_df("SELECT id FROM stocks WHERE symbol = ? AND user_id = ?", (symbol, user_id))
+                                    if existing.empty:
+                                        db_execute(cur, """
+                                            INSERT INTO stocks (user_id, symbol, company_name, portfolio, currency, 
+                                                sector, current_price, price_source, last_price_update, created_at)
+                                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                        """, (
+                                            user_id, symbol,
+                                            safe_str(row.get('company_name')),
+                                            safe_str(row.get('portfolio'), 'KFH'),
+                                            safe_str(row.get('currency'), 'KWD'),
+                                            safe_str(row.get('sector')),
+                                            safe_float(row.get('current_price')),
+                                            safe_str(row.get('price_source')),
+                                            safe_str(row.get('last_price_update')),
+                                            int(time.time())
+                                        ))
+                                        imported += 1
+                                except Exception as e:
+                                    errors += 1
+                                    error_details.append(f"Stock {row.get('symbol')}: {e}")
+                            conn.commit()
+                        
+                        # STEP 3: Restore Transactions (includes dividends, bonus shares)
+                        if 'transactions' in preview_data:
+                            progress.progress(35, text="💳 Restoring transactions...")
+                            df = pd.read_excel(uploaded_file, sheet_name='transactions')
+                            for _, row in df.iterrows():
+                                try:
+                                    db_execute(cur, """
+                                        INSERT INTO transactions 
+                                        (user_id, portfolio, stock_symbol, txn_date, txn_type, 
+                                         shares, purchase_cost, sell_value, cash_dividend, 
+                                         bonus_shares, reinvested_dividend, fees, broker,
+                                         reference, notes, category, price_override, planned_cum_shares, created_at)
+                                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                    """, (
+                                        user_id,
+                                        safe_str(row.get('portfolio'), 'KFH'),
+                                        safe_str(row.get('stock_symbol')),
+                                        safe_date(row.get('txn_date')),
+                                        safe_str(row.get('txn_type'), 'Buy'),
+                                        safe_float(row.get('shares')),
+                                        safe_float(row.get('purchase_cost')),
+                                        safe_float(row.get('sell_value')),
+                                        safe_float(row.get('cash_dividend')),
+                                        safe_float(row.get('bonus_shares')),
+                                        safe_float(row.get('reinvested_dividend')),
+                                        safe_float(row.get('fees')),
+                                        safe_str(row.get('broker')),
+                                        safe_str(row.get('reference')),
+                                        safe_str(row.get('notes')),
+                                        safe_str(row.get('category'), 'portfolio'),
+                                        safe_float(row.get('price_override')) if pd.notna(row.get('price_override')) else None,
+                                        safe_float(row.get('planned_cum_shares')) if pd.notna(row.get('planned_cum_shares')) else None,
+                                        int(time.time())
+                                    ))
+                                    imported += 1
+                                except Exception as e:
+                                    errors += 1
+                            conn.commit()
+                        
+                        # STEP 4: Restore Cash Deposits
+                        if 'cash_deposits' in preview_data:
+                            progress.progress(50, text="💵 Restoring cash deposits...")
+                            df = pd.read_excel(uploaded_file, sheet_name='cash_deposits')
+                            for _, row in df.iterrows():
+                                try:
+                                    db_execute(cur, """
+                                        INSERT INTO cash_deposits 
+                                        (user_id, portfolio, amount, currency, deposit_date, 
+                                         source, notes, include_in_analysis, created_at)
+                                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                    """, (
+                                        user_id,
+                                        safe_str(row.get('portfolio'), 'KFH'),
+                                        safe_float(row.get('amount')),
+                                        safe_str(row.get('currency'), 'KWD'),
+                                        safe_date(row.get('deposit_date')),
+                                        safe_str(row.get('source')),
+                                        safe_str(row.get('notes')),
+                                        int(safe_float(row.get('include_in_analysis'), 1)),
+                                        int(time.time())
+                                    ))
+                                    imported += 1
+                                except Exception as e:
+                                    errors += 1
+                            conn.commit()
+                        
+                        # STEP 5: Restore Portfolio Cash Balances
+                        if 'portfolio_cash' in preview_data:
+                            progress.progress(65, text="💰 Restoring cash balances...")
+                            df = pd.read_excel(uploaded_file, sheet_name='portfolio_cash')
+                            for _, row in df.iterrows():
+                                try:
+                                    portfolio = safe_str(row.get('portfolio'))
+                                    existing = query_df("SELECT id FROM portfolio_cash WHERE portfolio = ? AND user_id = ?", (portfolio, user_id))
+                                    if existing.empty:
+                                        db_execute(cur, """
+                                            INSERT INTO portfolio_cash (user_id, portfolio, balance, currency, last_updated)
+                                            VALUES (?, ?, ?, ?, ?)
+                                        """, (
+                                            user_id, portfolio,
+                                            safe_float(row.get('balance')),
+                                            safe_str(row.get('currency'), 'KWD'),
+                                            int(time.time())
+                                        ))
+                                    else:
+                                        db_execute(cur, """
+                                            UPDATE portfolio_cash SET balance = ?, currency = ?, last_updated = ?
+                                            WHERE portfolio = ? AND user_id = ?
+                                        """, (
+                                            safe_float(row.get('balance')),
+                                            safe_str(row.get('currency'), 'KWD'),
+                                            int(time.time()),
+                                            portfolio, user_id
+                                        ))
+                                    imported += 1
+                                except Exception as e:
+                                    errors += 1
+                            conn.commit()
+                        
+                        # STEP 6: Restore Trading History
+                        if 'trading_history' in preview_data:
+                            progress.progress(80, text="📊 Restoring trading history...")
+                            df = pd.read_excel(uploaded_file, sheet_name='trading_history')
+                            for _, row in df.iterrows():
+                                try:
+                                    db_execute(cur, """
+                                        INSERT INTO trading_history 
+                                        (user_id, symbol, trade_date, trade_type, quantity, 
+                                         price, total_value, notes, created_at)
+                                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                    """, (
+                                        user_id,
+                                        safe_str(row.get('symbol')),
+                                        safe_date(row.get('trade_date')),
+                                        safe_str(row.get('trade_type'), 'Buy'),
+                                        safe_float(row.get('quantity')),
+                                        safe_float(row.get('price')),
+                                        safe_float(row.get('total_value')),
+                                        safe_str(row.get('notes')),
+                                        int(time.time())
+                                    ))
+                                    imported += 1
+                                except Exception as e:
+                                    errors += 1
+                            conn.commit()
+                        
+                        # STEP 7: Restore Portfolio Snapshots
+                        if 'portfolio_snapshots' in preview_data:
+                            progress.progress(92, text="📉 Restoring portfolio snapshots...")
+                            df = pd.read_excel(uploaded_file, sheet_name='portfolio_snapshots')
+                            for _, row in df.iterrows():
+                                try:
+                                    snap_date = safe_date(row.get('snapshot_date'))
+                                    # Check for existing (unique per user+date)
+                                    existing = query_df("SELECT id FROM portfolio_snapshots WHERE snapshot_date = ? AND user_id = ?", (snap_date, user_id))
+                                    if existing.empty:
+                                        db_execute(cur, """
+                                            INSERT INTO portfolio_snapshots 
+                                            (user_id, snapshot_date, portfolio_value, daily_movement,
+                                             beginning_difference, deposit_cash, accumulated_cash,
+                                             net_gain, change_percent, roi_percent, created_at)
+                                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                        """, (
+                                            user_id, snap_date,
+                                            safe_float(row.get('portfolio_value')),
+                                            safe_float(row.get('daily_movement')),
+                                            safe_float(row.get('beginning_difference')),
+                                            safe_float(row.get('deposit_cash')),
+                                            safe_float(row.get('accumulated_cash')),
+                                            safe_float(row.get('net_gain')),
+                                            safe_float(row.get('change_percent')),
+                                            safe_float(row.get('roi_percent')),
+                                            int(time.time())
+                                        ))
+                                        imported += 1
+                                except Exception as e:
+                                    errors += 1
+                            conn.commit()
+                        
+                        progress.progress(100, text="✅ Complete!")
+                        conn.close()
+                        
+                        # Show results
+                        if errors > 0:
+                            st.warning(f"⚠️ Restore completed with issues: **{imported:,}** imported, **{errors:,}** skipped/failed")
+                            if error_details:
+                                with st.expander("View error details"):
+                                    for err in error_details[:20]:
+                                        st.text(err)
+                        else:
+                            st.success(f"✅ **Successfully restored {imported:,} records!**")
+                        
+                        st.balloons()
+                        time.sleep(2)
+                        st.rerun()
+                        
+                    except Exception as e:
+                        conn.rollback()
+                        conn.close()
+                        st.error(f"❌ Restore failed: {e}")
+                
+                if not can_proceed:
+                    expected = "DELETE ALL AND RESTORE" if restore_mode == "replace" else "RESTORE"
+                    st.caption(f"💡 Type `{expected}` above to enable the restore button")
+                    
+            except Exception as e:
+                st.error(f"❌ Error reading file: {e}")
+                st.info("Make sure you uploaded a valid Excel backup file exported from this app.")
 
-                    conn.commit()
-                    conn.close()
-                    progress_bar.progress(1.0)
-                    
-                    if count_errors > 0:
-                        st.warning(f"Restore Complete: {count_success} imported, {count_errors} failed.")
-                    else:
-                        st.success(f"✅ Successfully restored {count_success:,} transactions!")
-                    
-                    time.sleep(2)
-                    st.rerun()
-                    
-                except Exception as e:
-                    st.error(f"Import Failed: {e}")
 
 # =========================
 # UI - PORTFOLIO ANALYSIS
@@ -6145,6 +6707,9 @@ def ui_portfolio_analysis():
 def ui_portfolio_tracker():
     st.subheader("Portfolio Tracker")
     
+    # Get user_id for all queries
+    user_id = st.session_state.get('user_id')
+    
     # Debug: Check if Plotly is available
     if go is None:
         st.error("🚨 Critical: Plotly is not loaded! Charts will not display.")
@@ -6167,7 +6732,6 @@ def ui_portfolio_tracker():
         with col_yes:
             if st.button("✅ Yes, Delete All", type="primary", use_container_width=True):
                 try:
-                    user_id = st.session_state.get('user_id')
                     conn = get_conn()
                     cur = conn.cursor()
                     
@@ -6230,8 +6794,8 @@ def ui_portfolio_tracker():
             
             # 3. Get Previous Snapshot for Deltas
             prev_snap = query_df(
-                "SELECT * FROM portfolio_snapshots WHERE snapshot_date < ? ORDER BY snapshot_date DESC LIMIT 1",
-                (today_str,)
+                "SELECT * FROM portfolio_snapshots WHERE snapshot_date < ? AND (user_id = ? OR user_id = 1 OR user_id IS NULL) ORDER BY snapshot_date DESC LIMIT 1",
+                (today_str, user_id)
             )
             
             prev_value = 0.0
@@ -6274,7 +6838,7 @@ def ui_portfolio_tracker():
             
             # Calculate Beginning Diff: Current Value - First Value (Baseline)
             # Get the baseline value (value of the earliest snapshot)
-            first_snap = query_df("SELECT portfolio_value, snapshot_date FROM portfolio_snapshots ORDER BY snapshot_date ASC LIMIT 1")
+            first_snap = query_df("SELECT portfolio_value, snapshot_date FROM portfolio_snapshots WHERE user_id = ? OR user_id = 1 OR user_id IS NULL ORDER BY snapshot_date ASC LIMIT 1", (user_id,))
             
             if first_snap.empty:
                 # This is the first snapshot ever
@@ -6297,7 +6861,7 @@ def ui_portfolio_tracker():
             
             # 5. Insert or Update
             # Check if exists
-            existing = query_df("SELECT * FROM portfolio_snapshots WHERE snapshot_date = ?", (today_str,))
+            existing = query_df("SELECT * FROM portfolio_snapshots WHERE snapshot_date = ? AND (user_id = ? OR user_id = 1 OR user_id IS NULL)", (today_str, user_id))
             
             if not existing.empty:
                 exec_sql(
@@ -6306,23 +6870,23 @@ def ui_portfolio_tracker():
                     SET portfolio_value = ?, daily_movement = ?, beginning_difference = ?,
                         deposit_cash = ?, accumulated_cash = ?, net_gain = ?, 
                         change_percent = ?, roi_percent = ?, created_at = ?
-                    WHERE snapshot_date = ?
+                    WHERE snapshot_date = ? AND (user_id = ? OR user_id = 1 OR user_id IS NULL)
                     """,
                     (live_portfolio_value, daily_movement, beginning_diff,
                      today_deposits_kwd, accumulated_cash, net_gain,
                      change_percent, roi_percent, int(time.time()),
-                     today_str)
+                     today_str, user_id)
                 )
                 st.success(f"✅ Updated snapshot for {today_str}")
             else:
                 exec_sql(
                     """
                     INSERT INTO portfolio_snapshots 
-                    (snapshot_date, portfolio_value, daily_movement, beginning_difference, 
+                    (user_id, snapshot_date, portfolio_value, daily_movement, beginning_difference, 
                      deposit_cash, accumulated_cash, net_gain, change_percent, roi_percent, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (today_str, live_portfolio_value, daily_movement, beginning_diff,
+                    (user_id, today_str, live_portfolio_value, daily_movement, beginning_diff,
                      today_deposits_kwd, accumulated_cash, net_gain, change_percent, roi_percent, int(time.time()))
                 )
                 st.success(f"✅ Saved new snapshot for {today_str}")
@@ -6400,8 +6964,8 @@ def ui_portfolio_tracker():
                         # Get accumulated cash from the date BEFORE our import data
                         earliest_import_date = df['snapshot_date'].iloc[0]
                         before_import = query_df(
-                            "SELECT accumulated_cash FROM portfolio_snapshots WHERE snapshot_date < ? ORDER BY snapshot_date DESC LIMIT 1",
-                            (earliest_import_date,)
+                            "SELECT accumulated_cash FROM portfolio_snapshots WHERE snapshot_date < ? AND (user_id = ? OR user_id = 1 OR user_id IS NULL) ORDER BY snapshot_date DESC LIMIT 1",
+                            (earliest_import_date, user_id)
                         )
                         if not before_import.empty:
                             val = before_import["accumulated_cash"].iloc[0]
@@ -6422,7 +6986,7 @@ def ui_portfolio_tracker():
                             deposit_cash = float(row.get('deposit_cash', 0))
                             
                             # Check for duplicates
-                            existing = query_df("SELECT * FROM portfolio_snapshots WHERE snapshot_date = ?", (snap_date,))
+                            existing = query_df("SELECT * FROM portfolio_snapshots WHERE snapshot_date = ? AND (user_id = ? OR user_id = 1 OR user_id IS NULL)", (snap_date, user_id))
                             if not existing.empty:
                                 duplicates.append(snap_date)
                                 continue
@@ -6449,7 +7013,7 @@ def ui_portfolio_tracker():
                             change_percent = ((portfolio_value - prev_value) / prev_value * 100) if prev_value > 0 else 0
                             
                             records_to_insert.append((
-                                snap_date, portfolio_value, daily_movement, beginning_diff,
+                                user_id, snap_date, portfolio_value, daily_movement, beginning_diff,
                                 deposit_cash, accumulated_cash, net_gain, change_percent, roi_percent, int(time.time())
                             ))
                             
@@ -6462,9 +7026,9 @@ def ui_portfolio_tracker():
                             cur.executemany(
                                 """
                                 INSERT INTO portfolio_snapshots 
-                                (snapshot_date, portfolio_value, daily_movement, beginning_difference, 
+                                (user_id, snapshot_date, portfolio_value, daily_movement, beginning_difference, 
                                  deposit_cash, accumulated_cash, net_gain, change_percent, roi_percent, created_at)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                                 """,
                                 records_to_insert
                             )
@@ -6499,14 +7063,14 @@ def ui_portfolio_tracker():
             snap_date_str = snap_date.strftime("%Y-%m-%d")
             
             # Check if snapshot already exists
-            existing = query_df("SELECT * FROM portfolio_snapshots WHERE snapshot_date = ?", (snap_date_str,))
+            existing = query_df("SELECT * FROM portfolio_snapshots WHERE snapshot_date = ? AND (user_id = ? OR user_id = 1 OR user_id IS NULL)", (snap_date_str, user_id))
             if not existing.empty:
                 st.error(f"Snapshot for {snap_date_str} already exists. Please edit it in the table below instead.")
             else:
                 # Get previous snapshot relative to this date
                 prev_snap = query_df(
-                    "SELECT * FROM portfolio_snapshots WHERE snapshot_date < ? ORDER BY snapshot_date DESC LIMIT 1",
-                    (snap_date_str,)
+                    "SELECT * FROM portfolio_snapshots WHERE snapshot_date < ? AND (user_id = ? OR user_id = 1 OR user_id IS NULL) ORDER BY snapshot_date DESC LIMIT 1",
+                    (snap_date_str, user_id)
                 )
                 
                 prev_value = 0.0
@@ -6525,7 +7089,7 @@ def ui_portfolio_tracker():
                 
                 if beginning_diff == 0:
                     # Calculate Beginning Diff: Current Value - First Value (Baseline)
-                    first_snap = query_df("SELECT portfolio_value, snapshot_date FROM portfolio_snapshots ORDER BY snapshot_date ASC LIMIT 1")
+                    first_snap = query_df("SELECT portfolio_value, snapshot_date FROM portfolio_snapshots WHERE user_id = ? OR user_id = 1 OR user_id IS NULL ORDER BY snapshot_date ASC LIMIT 1", (user_id,))
                     if first_snap.empty:
                         beginning_diff = 0.0
                     else:
@@ -6543,11 +7107,11 @@ def ui_portfolio_tracker():
                 exec_sql(
                     """
                     INSERT INTO portfolio_snapshots 
-                    (snapshot_date, portfolio_value, daily_movement, beginning_difference, 
+                    (user_id, snapshot_date, portfolio_value, daily_movement, beginning_difference, 
                      deposit_cash, accumulated_cash, net_gain, change_percent, roi_percent, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (snap_date_str, portfolio_value, daily_movement, beginning_diff,
+                    (user_id, snap_date_str, portfolio_value, daily_movement, beginning_diff,
                      deposit_cash, accumulated_cash, net_gain, change_percent, roi_percent, int(time.time()))
                 )
                 st.success(f"✅ Saved snapshot for {snap_date_str}")
@@ -6558,7 +7122,8 @@ def ui_portfolio_tracker():
     
     # Display snapshots
     snapshots = query_df(
-        "SELECT * FROM portfolio_snapshots ORDER BY snapshot_date DESC"
+        "SELECT * FROM portfolio_snapshots WHERE user_id = ? OR user_id = 1 OR user_id IS NULL ORDER BY snapshot_date DESC",
+        (user_id,)
     )
     
     if snapshots.empty:
@@ -6879,11 +7444,10 @@ def ui_portfolio_tracker():
     
     if st.button("💾 Save Changes", type="primary"):
         try:
-            # 1. Delete all existing snapshots (simplest way to handle edits/deletes/renames)
-            # Note: In a high-concurrency app this is risky, but for single-user local app it's fine.
+            # 1. Delete all existing snapshots for this user
             conn = get_conn()
             cur = conn.cursor()
-            cur.execute("DELETE FROM portfolio_snapshots")
+            cur.execute("DELETE FROM portfolio_snapshots WHERE user_id = ? OR user_id = 1 OR user_id IS NULL", (user_id,))
             
             # 2. Insert all rows from edited_data
             records = []
@@ -6892,6 +7456,7 @@ def ui_portfolio_tracker():
                 s_date = row["snapshot_date"].strftime("%Y-%m-%d") if isinstance(row["snapshot_date"], date) else str(row["snapshot_date"])
                 
                 records.append((
+                    user_id,
                     s_date,
                     float(row["portfolio_value"]),
                     float(row["daily_movement"]),
@@ -6907,9 +7472,9 @@ def ui_portfolio_tracker():
             cur.executemany(
                 """
                 INSERT INTO portfolio_snapshots 
-                (snapshot_date, portfolio_value, daily_movement, beginning_difference, 
+                (user_id, snapshot_date, portfolio_value, daily_movement, beginning_difference, 
                  deposit_cash, accumulated_cash, net_gain, change_percent, roi_percent, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 records
             )
@@ -9876,6 +10441,35 @@ def login_page(cookie_manager=None):
     
     st.title("🔐 Portfolio Access")
     
+    # Debug section (can be removed after fixing)
+    with st.expander("🔧 Debug Info", expanded=False):
+        st.write(f"**Cookie Manager Available:** {cookie_manager is not None}")
+        st.write(f"**stx module loaded:** {stx is not None}")
+        if cookie_manager:
+            try:
+                all_cookies = cookie_manager.get_all()
+                st.write(f"**Cookies loaded:** {all_cookies is not None}")
+                if all_cookies:
+                    st.write(f"**Cookie keys:** {list(all_cookies.keys())}")
+                    if "portfolio_session" in all_cookies:
+                        token = all_cookies["portfolio_session"]
+                        st.write(f"**Session token exists:** Yes (length: {len(token) if token else 0})")
+                        # Try to validate
+                        user_info = get_user_from_token(token)
+                        st.write(f"**Token valid:** {user_info is not None}")
+                        if user_info:
+                            st.write(f"**User info:** {user_info}")
+                    else:
+                        st.write("**Session token:** Not found in cookies")
+                else:
+                    st.write("**Cookies:** Empty or not loaded yet")
+            except Exception as e:
+                st.write(f"**Cookie error:** {e}")
+        
+        st.write(f"**Session state logged_in:** {st.session_state.get('logged_in')}")
+        st.write(f"**Session state user_id:** {st.session_state.get('user_id')}")
+        st.write(f"**Session state _auth_checked:** {st.session_state.get('_auth_checked')}")
+    
     if "auth_mode" not in st.session_state:
         st.session_state.auth_mode = "login" # login, register, forgot_pass
         
@@ -10047,19 +10641,25 @@ def login_page(cookie_manager=None):
                             st.session_state.logged_in = True
                             st.session_state.user_id = user_id
                             st.session_state.username = db_username
+                            st.session_state._auth_checked = True  # Mark as checked
 
-                            # HANDLE REMEMBER ME - Create persistent session token
-                            if remember_me and cookie_manager:
+                            # CREATE PERSISTENT SESSION
+                            # If "Remember me" is checked: 30 days
+                            # If not checked: 7 days (persists through refreshes for a week)
+                            session_days = 30 if remember_me else 7
+                            
+                            if cookie_manager:
                                 try:
                                     # Create a secure session token in DB
-                                    token, token_expires = create_session_token(user_id, days=30)
-                                    expires = datetime.now() + timedelta(days=30)
-                                    # Store token in cookie (not username)
+                                    token, token_expires = create_session_token(user_id, days=session_days)
+                                    expires = datetime.now() + timedelta(days=session_days)
+                                    # Store token in cookie
                                     cookie_manager.set("portfolio_session", token, expires_at=expires)
                                 except Exception as ce:
                                     print(f"Session Token Error: {ce}")
 
-                            st.success("Login Successful!")
+                            st.toast("✅ Login Successful!", icon="✅")
+                            st.rerun()
                             st.rerun()
                         else:
                             st.error("❌ Invalid email or password.")
@@ -10093,82 +10693,83 @@ def main():
         print(f"DB Init Error: {e}")
 
     # Initialize Cookie Manager (Global)
-    # Specific key is required to prevent reloading issues
     cookie_manager = None
     if stx:
-        cookie_manager = stx.CookieManager(key="auth_cookie_manager")
+        try:
+            cookie_manager = stx.CookieManager(key="portfolio_auth_v3")
+        except Exception as e:
+            print(f"Cookie manager init error: {e}")
 
-    # The "Cookie Sync" Block (Crucial)
-    # IMPORTANT: Cookies load asynchronously - we need to handle the first-render case
-    # where get() returns None even if a cookie exists
-    if cookie_manager:
-        # Get all cookies at once to check if they've loaded
-        all_cookies = cookie_manager.get_all()
+    # =============================
+    # ROBUST SESSION PERSISTENCE
+    # =============================
+    # Strategy: Use multiple methods to persist login:
+    # 1. session_state (in-memory, lost on refresh)
+    # 2. cookies (persistent, but async loading)
+    # 3. query_params as backup signaling mechanism
+    
+    def try_restore_session():
+        """Try to restore session from cookie. Returns True if successful."""
+        if not cookie_manager:
+            return False
         
-        # Check for session token (new secure method)
-        session_token = all_cookies.get("portfolio_session") if all_cookies else None
-        # Also check legacy cookie for backwards compatibility
-        legacy_cookie = all_cookies.get("portfolio_user") if all_cookies else None
-
-        # 1. If we are NOT logged in via Session State, BUT we have a valid token/cookie:
-        if "logged_in" not in st.session_state or not st.session_state.logged_in:
+        try:
+            # Get all cookies - this may return None on first render
+            all_cookies = cookie_manager.get_all()
             
-            # Try token-based authentication first (more secure)
-            if session_token:
+            # Debug: uncomment to see cookie state
+            # st.sidebar.write(f"DEBUG cookies: {all_cookies}")
+            
+            if not all_cookies:
+                return False
+            
+            session_token = all_cookies.get("portfolio_session")
+            if not session_token:
+                return False
+            
+            # Validate token against database
+            user_info = get_user_from_token(session_token)
+            if user_info:
+                st.session_state.logged_in = True
+                st.session_state.user_id = user_info["id"]
+                st.session_state.username = user_info["username"]
+                return True
+            else:
+                # Token invalid/expired - clean up
                 try:
-                    user_info = get_user_from_token(session_token)
-                    if user_info:
-                        # Token is valid - restore session
-                        st.session_state.logged_in = True
-                        st.session_state.user_id = user_info["id"]
-                        st.session_state.username = user_info["username"]
-                        st.rerun()  # Force rerun to skip login screen immediately
-                    else:
-                        # Token expired or invalid - clear it
-                        cookie_manager.delete("portfolio_session")
-                except Exception as e:
-                    print(f"Token restore error: {e}")
                     cookie_manager.delete("portfolio_session")
-            
-            # Fallback to legacy cookie method (for existing users)
-            elif legacy_cookie:
-                try:
-                    conn = get_conn()
-                    cookie_user_lower = legacy_cookie.strip().lower() if legacy_cookie else ""
-                    res = conn.execute(
-                        "SELECT id, username FROM users WHERE LOWER(username)=? OR LOWER(email)=?", 
-                        (cookie_user_lower, cookie_user_lower)
-                    ).fetchone()
-                    conn.close()
-                    
-                    if res:
-                        st.session_state.logged_in = True
-                        st.session_state.user_id = res[0]
-                        st.session_state.username = res[1]
-                        
-                        # Upgrade to token-based session
-                        try:
-                            token, _ = create_session_token(res[0], days=30)
-                            expires = datetime.now() + timedelta(days=30)
-                            cookie_manager.set("portfolio_session", token, expires_at=expires)
-                            cookie_manager.delete("portfolio_user")  # Remove legacy cookie
-                        except Exception:
-                            pass
-                        
-                        st.rerun()
-                    else:
-                        cookie_manager.delete("portfolio_user")
-                except Exception as e:
-                    print(f"Legacy cookie restore error: {e}")
+                except:
                     pass
-
-    # Auth Check
+                return False
+        except Exception as e:
+            print(f"Session restore error: {e}")
+            return False
+    
+    # Check current login state
+    is_logged_in = st.session_state.get('logged_in', False)
+    
+    # If not logged in via session_state, try to restore from cookie
+    if not is_logged_in:
+        # First attempt to restore
+        restored = try_restore_session()
+        
+        if restored:
+            # Successfully restored - session_state is now updated
+            # Continue to main app (no rerun needed, state is set)
+            pass
+        else:
+            # Cookies might not be loaded yet on first render
+            # Check if we have a "checking" flag to avoid infinite loop
+            if not st.session_state.get('_auth_checked'):
+                st.session_state._auth_checked = True
+                # Rerun once to allow cookies to load
+                st.rerun()
+    
+    # Final auth check - use session_state directly
     if not st.session_state.get('logged_in'):
-        # If we are checking auth, we pass the manager so login page can SET the cookie.
-        # But we must ensure we don't flash the login page if cookies are still loading.
-        # Unfortunately, with Streamlit, it's hard to distinguish "loading" from "no cookie".
-        # We will render the login page, but maybe add a spinner?
-        # Actually, showing login page is fine. If cookie appears, it will auto-rerun.
+        # Reset the auth check flag when showing login page
+        # so next login attempt can retry cookie restoration
+        st.session_state._auth_checked = False
         login_page(cookie_manager)
         return
 
