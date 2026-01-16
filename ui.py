@@ -5759,41 +5759,35 @@ def ui_backup_restore():
                                     symbol = safe_str(row.get('symbol'))
                                     if not symbol:
                                         continue
+                                    
+                                    # Handle both 'name' (SQLite) and 'company_name' (PostgreSQL) columns
+                                    stock_name = safe_str(row.get('name')) or safe_str(row.get('company_name')) or symbol
+                                    
                                     # Check if exists
                                     existing = query_df("SELECT id FROM stocks WHERE symbol = ? AND user_id = ?", (symbol, user_id))
                                     if existing.empty:
-                                        # INSERT new stock
+                                        # INSERT new stock - use simpler column set that works for both schemas
                                         db_execute(cur, """
-                                            INSERT INTO stocks (user_id, symbol, company_name, portfolio, currency, 
-                                                sector, current_price, price_source, last_price_update, created_at)
-                                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                            INSERT INTO stocks (user_id, symbol, name, portfolio, currency, current_price)
+                                            VALUES (?, ?, ?, ?, ?, ?)
                                         """, (
-                                            user_id, symbol,
-                                            safe_str(row.get('company_name')),
+                                            user_id, symbol, stock_name,
                                             safe_str(row.get('portfolio'), 'KFH'),
                                             safe_str(row.get('currency'), 'KWD'),
-                                            safe_str(row.get('sector')),
-                                            safe_float(row.get('current_price')),
-                                            safe_str(row.get('price_source')),
-                                            safe_str(row.get('last_price_update')),
-                                            int(time.time())
+                                            safe_float(row.get('current_price'))
                                         ))
                                         stocks_imported += 1
                                     else:
                                         # UPDATE existing stock with backup data
                                         db_execute(cur, """
                                             UPDATE stocks SET 
-                                                company_name = ?, portfolio = ?, currency = ?, sector = ?,
-                                                current_price = ?, price_source = ?, last_price_update = ?
+                                                name = ?, portfolio = ?, currency = ?, current_price = ?
                                             WHERE symbol = ? AND user_id = ?
                                         """, (
-                                            safe_str(row.get('company_name')),
+                                            stock_name,
                                             safe_str(row.get('portfolio'), 'KFH'),
                                             safe_str(row.get('currency'), 'KWD'),
-                                            safe_str(row.get('sector')),
                                             safe_float(row.get('current_price')),
-                                            safe_str(row.get('price_source')),
-                                            safe_str(row.get('last_price_update')),
                                             symbol, user_id
                                         ))
                                         stocks_updated += 1
@@ -5810,8 +5804,18 @@ def ui_backup_restore():
                             uploaded_file.seek(0)  # Reset file pointer
                             df = pd.read_excel(uploaded_file, sheet_name='transactions')
                             txn_count = 0
-                            for _, row in df.iterrows():
+                            txn_errors = 0
+                            for idx, row in df.iterrows():
                                 try:
+                                    stock_sym = safe_str(row.get('stock_symbol'))
+                                    txn_date = safe_date(row.get('txn_date'))
+                                    txn_type = safe_str(row.get('txn_type'), 'Buy')
+                                    
+                                    if not stock_sym:
+                                        txn_errors += 1
+                                        error_details.append(f"Transaction row {idx}: Missing stock_symbol")
+                                        continue
+                                    
                                     db_execute(cur, """
                                         INSERT INTO transactions 
                                         (user_id, portfolio, stock_symbol, txn_date, txn_type, 
@@ -5822,9 +5826,9 @@ def ui_backup_restore():
                                     """, (
                                         user_id,
                                         safe_str(row.get('portfolio'), 'KFH'),
-                                        safe_str(row.get('stock_symbol')),
-                                        safe_date(row.get('txn_date')),
-                                        safe_str(row.get('txn_type'), 'Buy'),
+                                        stock_sym,
+                                        txn_date,
+                                        txn_type,
                                         safe_float(row.get('shares')),
                                         safe_float(row.get('purchase_cost')),
                                         safe_float(row.get('sell_value')),
@@ -5844,9 +5848,10 @@ def ui_backup_restore():
                                     txn_count += 1
                                 except Exception as e:
                                     errors += 1
-                                    error_details.append(f"Transaction: {e}")
+                                    txn_errors += 1
+                                    error_details.append(f"Transaction row {idx} ({row.get('stock_symbol')}): {str(e)[:100]}")
                             conn.commit()
-                            error_details.append(f"Transactions: {txn_count} imported")
+                            error_details.append(f"Transactions: {txn_count} imported, {txn_errors} errors")
                         
                         # STEP 4: Restore Cash Deposits
                         if 'cash_deposits' in preview_data:

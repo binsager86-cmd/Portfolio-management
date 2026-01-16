@@ -536,11 +536,8 @@ def init_postgres_schema():
                 id SERIAL PRIMARY KEY,
                 user_id INTEGER DEFAULT 1,
                 symbol TEXT NOT NULL,
-                company_name TEXT,
-                sector TEXT,
+                name TEXT,
                 current_price DOUBLE PRECISION DEFAULT 0,
-                price_source TEXT,
-                last_price_update TEXT,
                 portfolio TEXT DEFAULT 'KFH',
                 currency TEXT DEFAULT 'KWD',
                 tradingview_symbol TEXT,
@@ -611,6 +608,19 @@ def init_postgres_schema():
                 created_at INTEGER
             )
         """)
+        
+        # Handle column migrations for existing tables
+        # Add 'name' column to stocks if it doesn't exist (for old schemas with company_name)
+        try:
+            cur.execute("ALTER TABLE stocks ADD COLUMN IF NOT EXISTS name TEXT")
+        except Exception:
+            pass
+        
+        # Copy data from company_name to name if company_name exists
+        try:
+            cur.execute("UPDATE stocks SET name = company_name WHERE name IS NULL AND company_name IS NOT NULL")
+        except Exception:
+            pass
         
         conn.commit()
         print("✅ PostgreSQL schema initialized")
