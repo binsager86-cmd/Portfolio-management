@@ -10441,35 +10441,6 @@ def login_page(cookie_manager=None):
     
     st.title("🔐 Portfolio Access")
     
-    # Debug section (can be removed after fixing)
-    with st.expander("🔧 Debug Info", expanded=False):
-        st.write(f"**Cookie Manager Available:** {cookie_manager is not None}")
-        st.write(f"**stx module loaded:** {stx is not None}")
-        if cookie_manager:
-            try:
-                all_cookies = cookie_manager.get_all()
-                st.write(f"**Cookies loaded:** {all_cookies is not None}")
-                if all_cookies:
-                    st.write(f"**Cookie keys:** {list(all_cookies.keys())}")
-                    if "portfolio_session" in all_cookies:
-                        token = all_cookies["portfolio_session"]
-                        st.write(f"**Session token exists:** Yes (length: {len(token) if token else 0})")
-                        # Try to validate
-                        user_info = get_user_from_token(token)
-                        st.write(f"**Token valid:** {user_info is not None}")
-                        if user_info:
-                            st.write(f"**User info:** {user_info}")
-                    else:
-                        st.write("**Session token:** Not found in cookies")
-                else:
-                    st.write("**Cookies:** Empty or not loaded yet")
-            except Exception as e:
-                st.write(f"**Cookie error:** {e}")
-        
-        st.write(f"**Session state logged_in:** {st.session_state.get('logged_in')}")
-        st.write(f"**Session state user_id:** {st.session_state.get('user_id')}")
-        st.write(f"**Session state _auth_checked:** {st.session_state.get('_auth_checked')}")
-    
     if "auth_mode" not in st.session_state:
         st.session_state.auth_mode = "login" # login, register, forgot_pass
         
