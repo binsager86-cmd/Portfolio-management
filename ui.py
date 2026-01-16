@@ -1159,6 +1159,8 @@ def init_db():
     add_column_if_missing("cash_deposits", "portfolio", "TEXT DEFAULT 'KFH'")
     add_column_if_missing("cash_deposits", "include_in_analysis", "INTEGER DEFAULT 1")
     add_column_if_missing("cash_deposits", "currency", "TEXT DEFAULT 'KWD'")
+    add_column_if_missing("cash_deposits", "source", "TEXT")  # New standardized column
+    add_column_if_missing("cash_deposits", "notes", "TEXT")   # New standardized column
     
     # Check if we need to migrate portfolio_cash (it was PK=portfolio, now needs PK=(portfolio, user_id))
     # We can't casually alter PK in SQLite. We might need to handle this if old table exists.
@@ -2245,7 +2247,7 @@ def build_portfolio_table(portfolio_name: str):
             COALESCE(portfolio,'KFH') AS portfolio,
             COALESCE(currency,'KWD') AS currency
         FROM stocks
-        WHERE COALESCE(portfolio,'KFH') = ? AND (user_id = ? OR user_id = 1 OR user_id IS NULL)
+        WHERE COALESCE(portfolio,'KFH') = ? AND user_id = ?
         ORDER BY symbol ASC
         """,
         (portfolio_name, user_id),
@@ -2269,7 +2271,7 @@ def build_portfolio_table(portfolio_name: str):
                 reinvested_dividend, fees,
                 broker, reference, notes, created_at
             FROM transactions
-            WHERE stock_symbol = ? AND COALESCE(category, 'portfolio') = 'portfolio' AND (user_id = ? OR user_id = 1 OR user_id IS NULL)
+            WHERE stock_symbol = ? AND COALESCE(category, 'portfolio') = 'portfolio' AND user_id = ?
             ORDER BY txn_date ASC, created_at ASC, id ASC
             """,
             (sym, user_id),
@@ -2703,17 +2705,17 @@ def ui_cash_deposits():
                                 
                                 # Sync to portfolio_snapshots if include_in_analysis is True
                                 if include_in_analysis:
-                                    existing = query_df("SELECT * FROM portfolio_snapshots WHERE snapshot_date = ?", (deposit_date_str,))
+                                    existing = query_df("SELECT * FROM portfolio_snapshots WHERE snapshot_date = ? AND user_id = ?", (deposit_date_str, user_id))
                                     
                                     if not existing.empty:
                                         exec_sql(
-                                            "UPDATE portfolio_snapshots SET deposit_cash = deposit_cash + ? WHERE snapshot_date = ?",
-                                            (amount_val, deposit_date_str)
+                                            "UPDATE portfolio_snapshots SET deposit_cash = deposit_cash + ? WHERE snapshot_date = ? AND user_id = ?",
+                                            (amount_val, deposit_date_str, user_id)
                                         )
                                     else:
                                         prev_snap = query_df(
-                                            "SELECT accumulated_cash FROM portfolio_snapshots WHERE snapshot_date < ? ORDER BY snapshot_date DESC LIMIT 1",
-                                            (deposit_date_str,)
+                                            "SELECT accumulated_cash FROM portfolio_snapshots WHERE snapshot_date < ? AND user_id = ? ORDER BY snapshot_date DESC LIMIT 1",
+                                            (deposit_date_str, user_id)
                                         )
                                         
                                         if not prev_snap.empty:
@@ -2787,7 +2789,7 @@ def ui_cash_deposits():
             f"""
             SELECT id, portfolio, bank_name, deposit_date, amount, currency, description, comments, include_in_analysis
             FROM cash_deposits
-            WHERE include_in_analysis = 1 AND (user_id = ? OR user_id = 1 OR user_id IS NULL)
+            WHERE include_in_analysis = 1 AND user_id = ?
             ORDER BY deposit_date {sort_order}, id {sort_order}
             """, (user_id,)
         )
@@ -2796,7 +2798,7 @@ def ui_cash_deposits():
             f"""
             SELECT id, portfolio, bank_name, deposit_date, amount, currency, description, comments, include_in_analysis
             FROM cash_deposits
-            WHERE include_in_analysis = 0 AND (user_id = ? OR user_id = 1 OR user_id IS NULL)
+            WHERE include_in_analysis = 0 AND user_id = ?
             ORDER BY deposit_date {sort_order}, id {sort_order}
             """, (user_id,)
         )
@@ -2805,7 +2807,7 @@ def ui_cash_deposits():
             f"""
             SELECT id, portfolio, bank_name, deposit_date, amount, currency, description, comments, include_in_analysis
             FROM cash_deposits
-            WHERE (user_id = ? OR user_id = 1 OR user_id IS NULL)
+            WHERE user_id = ?
             ORDER BY deposit_date {sort_order}, id {sort_order}
             """, (user_id,)
         )
@@ -2869,11 +2871,11 @@ def ui_cash_deposits():
         
         with col3:
             if st.button("✅ Confirm Delete All", type="primary", use_container_width=True, key="confirm_delete_btn"):
-                # Hard delete all deposits
+                # Hard delete all deposits for current user only
                 conn = get_conn()
                 cur = conn.cursor()
-                cur.execute("DELETE FROM cash_deposits")
-                cur.execute("DELETE FROM sqlite_sequence WHERE name='cash_deposits'")
+                user_id = st.session_state.get('user_id', 1)
+                cur.execute("DELETE FROM cash_deposits WHERE user_id = ?", (user_id,))
                 conn.commit()
                 conn.close()
                 st.session_state.confirm_delete_all = False
@@ -3102,7 +3104,7 @@ def load_stocks_master():
         # We'll use this as the master list.
         user_id = st.session_state.get('user_id', 1)
         df = query_df(
-            "SELECT symbol, name, portfolio, currency FROM stocks WHERE (user_id = ? OR user_id IS NULL OR user_id = 1) ORDER BY symbol",
+            "SELECT symbol, name, portfolio, currency FROM stocks WHERE user_id = ? ORDER BY symbol",
             (user_id,)
         )
         return df
@@ -3292,7 +3294,7 @@ def ui_transactions():
                                 user_id = st.session_state.get('user_id', 1)
                                 
                                 # 1. Ensure Stock Exists for this user
-                                db_execute(cur, "SELECT id FROM stocks WHERE symbol = ? AND (user_id = ? OR user_id IS NULL)", (symbol, user_id))
+                                db_execute(cur, "SELECT id FROM stocks WHERE symbol = ? AND user_id = ?", (symbol, user_id))
                                 if not cur.fetchone():
                                     # Create stock if missing (use backup data if available)
                                     s_name = row.get('stock_name', symbol)
@@ -3322,8 +3324,8 @@ def ui_transactions():
                                 cur.execute("""
                                     SELECT id FROM transactions 
                                     WHERE stock_symbol=? AND txn_date=? AND txn_type=? 
-                                    AND shares=? AND purchase_cost=? AND sell_value=?
-                                """, (symbol, t_date, t_type, t_shares, t_cost, t_sell))
+                                    AND shares=? AND purchase_cost=? AND sell_value=? AND user_id=?
+                                """, (symbol, t_date, t_type, t_shares, t_cost, t_sell, user_id))
                                 
                                 if cur.fetchone():
                                     skipped_count += 1
@@ -3465,7 +3467,8 @@ def ui_transactions():
     
     # Fetch FRESH details for the single selected stock
     # This ensures if we update price, it reflects immediately without invalidating the huge master cache.
-    stock_row_df = query_df("SELECT * FROM stocks WHERE symbol = ?", (selected_symbol,))
+    user_id = st.session_state.get('user_id', 1)
+    stock_row_df = query_df("SELECT * FROM stocks WHERE symbol = ? AND user_id = ?", (selected_symbol, user_id))
     if stock_row_df.empty:
         st.error(f"Stock {selected_symbol} not found in DB.")
         return
@@ -3509,7 +3512,8 @@ def ui_transactions():
                                     if p is not None:
                                         source = f"TradingView ({cand_exch}:{cand_sym})"
                                         try:
-                                            exec_sql("UPDATE stocks SET tradingview_symbol = ?, tradingview_exchange = ? WHERE symbol = ?", (cand_sym, cand_exch, selected_symbol))
+                                            user_id = st.session_state.get('user_id', 1)
+                                            exec_sql("UPDATE stocks SET tradingview_symbol = ?, tradingview_exchange = ? WHERE symbol = ? AND user_id = ?", (cand_sym, cand_exch, selected_symbol, user_id))
                                         except Exception:
                                             pass
                                         break
@@ -3521,7 +3525,8 @@ def ui_transactions():
                     st.info("Try mapping to TradingView symbol (Edit Stock Details -> Map to TradingView) or check ticker suffix (.KW, .KSE)")
                 else:
                     try:
-                        exec_sql("UPDATE stocks SET current_price = ? WHERE symbol = ?", (float(p), selected_symbol))
+                        user_id = st.session_state.get('user_id', 1)
+                        exec_sql("UPDATE stocks SET current_price = ? WHERE symbol = ? AND user_id = ?", (float(p), selected_symbol, user_id))
                         st.success(f"Price updated: {p:.6f} (from {source})")
                         try:
                             st.rerun()
@@ -3593,7 +3598,8 @@ def ui_transactions():
             if st.button("Save Name"):
                 # Replace the stock name completely with the entered value (allow empty string)
                 try:
-                    exec_sql("UPDATE stocks SET name = ? WHERE symbol = ?", (edited_name, selected_symbol))
+                    user_id = st.session_state.get('user_id', 1)
+                    exec_sql("UPDATE stocks SET name = ? WHERE symbol = ? AND user_id = ?", (edited_name, selected_symbol, user_id))
                     st.success("Stock name updated.")
                     try:
                         st.rerun()
@@ -3610,7 +3616,8 @@ def ui_transactions():
                     st.info("Ticker unchanged.")
                 else:
                     # ensure no existing stock uses the new symbol
-                    dup = query_df("SELECT COUNT(1) AS c FROM stocks WHERE symbol = ?", (ns,))
+                    user_id = st.session_state.get('user_id', 1)
+                    dup = query_df("SELECT COUNT(1) AS c FROM stocks WHERE symbol = ? AND user_id = ?", (ns, user_id))
                     if int(dup.iloc[0]["c"]) > 0:
                         st.error(f"Cannot rename: symbol '{ns}' already exists.")
                     else:
@@ -3618,8 +3625,9 @@ def ui_transactions():
                             conn = get_conn()
                             cur = conn.cursor()
                             # perform updates inside a transaction
-                            db_execute(cur, "UPDATE transactions SET stock_symbol = ? WHERE stock_symbol = ?", (ns, current_symbol))
-                            db_execute(cur, "UPDATE stocks SET symbol = ? WHERE symbol = ?", (ns, current_symbol))
+                            user_id = st.session_state.get('user_id', 1)
+                            db_execute(cur, "UPDATE transactions SET stock_symbol = ? WHERE stock_symbol = ? AND user_id = ?", (ns, current_symbol, user_id))
+                            db_execute(cur, "UPDATE stocks SET symbol = ? WHERE symbol = ? AND user_id = ?", (ns, current_symbol, user_id))
                             conn.commit()
                             conn.close()
                             st.success(f"Ticker renamed {current_symbol} ➡️ {ns} and transactions updated.")
@@ -3649,7 +3657,8 @@ def ui_transactions():
                     chosen = tv_cands[idx]
                     if st.button("Apply TradingView Symbol"):
                         try:
-                            exec_sql("UPDATE stocks SET tradingview_symbol = ?, tradingview_exchange = ? WHERE symbol = ?", (chosen['tv_symbol'], chosen.get('exchange'), selected_symbol))
+                            user_id = st.session_state.get('user_id', 1)
+                            exec_sql("UPDATE stocks SET tradingview_symbol = ?, tradingview_exchange = ? WHERE symbol = ? AND user_id = ?", (chosen['tv_symbol'], chosen.get('exchange'), selected_symbol, user_id))
                             st.success(f"Saved TradingView mapping: {chosen.get('exchange','')}:{chosen['tv_symbol']}")
                             try:
                                 st.rerun()
@@ -4216,8 +4225,9 @@ def ui_transactions():
     with st.expander("⚠️ Remove Stock (deletes all transactions)"):
         st.warning("This deletes the stock AND all related PORTFOLIO transactions (trading transactions are preserved).")
         if st.button(f"Remove {selected_symbol}", type="secondary"):
-            exec_sql("DELETE FROM transactions WHERE stock_symbol = ? AND COALESCE(category, 'portfolio') = 'portfolio'", (selected_symbol,))
-            exec_sql("DELETE FROM stocks WHERE symbol = ?", (selected_symbol,))
+            user_id = st.session_state.get('user_id', 1)
+            exec_sql("DELETE FROM transactions WHERE stock_symbol = ? AND COALESCE(category, 'portfolio') = 'portfolio' AND user_id = ?", (selected_symbol, user_id))
+            exec_sql("DELETE FROM stocks WHERE symbol = ? AND user_id = ?", (selected_symbol, user_id))
             st.success("Stock removed.")
             st.rerun()
 
@@ -5397,9 +5407,9 @@ def ui_backup_restore():
             'cash_deposits': safe_query("SELECT * FROM cash_deposits WHERE user_id = ? ORDER BY deposit_date DESC", (user_id,)),
             'portfolio_cash': safe_query("SELECT * FROM portfolio_cash WHERE user_id = ?", (user_id,)),
             'trading_history': safe_query("SELECT * FROM trading_history WHERE user_id = ? ORDER BY trade_date DESC", (user_id,)),
-            # Include portfolio_snapshots for current user OR legacy data (user_id=1 or NULL)
+            # Include only current user's portfolio_snapshots
             'portfolio_snapshots': safe_query(
-                "SELECT * FROM portfolio_snapshots WHERE user_id = ? OR user_id = 1 OR user_id IS NULL ORDER BY snapshot_date DESC", 
+                "SELECT * FROM portfolio_snapshots WHERE user_id = ? ORDER BY snapshot_date DESC", 
                 (user_id,)
             ),
         }
@@ -5846,6 +5856,21 @@ def ui_backup_restore():
                             cash_count = 0
                             for _, row in df.iterrows():
                                 try:
+                                    # Handle different column naming conventions
+                                    # Old schema: bank_name, description, comments
+                                    # New schema: source, notes
+                                    source_val = (
+                                        safe_str(row.get('source')) or 
+                                        safe_str(row.get('bank_name')) or 
+                                        ''
+                                    )
+                                    notes_val = (
+                                        safe_str(row.get('notes')) or 
+                                        safe_str(row.get('description')) or 
+                                        safe_str(row.get('comments')) or 
+                                        ''
+                                    )
+                                    
                                     db_execute(cur, """
                                         INSERT INTO cash_deposits 
                                         (user_id, portfolio, amount, currency, deposit_date, 
@@ -5857,8 +5882,8 @@ def ui_backup_restore():
                                         safe_float(row.get('amount')),
                                         safe_str(row.get('currency'), 'KWD'),
                                         safe_date(row.get('deposit_date')),
-                                        safe_str(row.get('source')),
-                                        safe_str(row.get('notes')),
+                                        source_val,
+                                        notes_val,
                                         int(safe_float(row.get('include_in_analysis'), 1)),
                                         int(time.time())
                                     ))
@@ -6410,7 +6435,8 @@ def ui_portfolio_analysis():
                             price, used_ticker = fetch_price_yfinance(sym)
                             if price and price > 0:
                                 try:
-                                    db_execute(cur, "UPDATE stocks SET current_price = ? WHERE symbol = ?", (float(price), sym))
+                                    user_id = st.session_state.get('user_id', 1)
+                                    db_execute(cur, "UPDATE stocks SET current_price = ? WHERE symbol = ? AND user_id = ?", (float(price), sym, user_id))
                                     updated += 1
                                     success_details.append(f"{sym} = {price:.3f} (using {used_ticker})")
                                 except Exception as e:
@@ -6830,7 +6856,7 @@ def ui_portfolio_tracker():
                     cur = conn.cursor()
                     
                     # Delete ALL snapshots for this user (including user_id=1 default and NULL)
-                    db_execute(cur, "DELETE FROM portfolio_snapshots WHERE user_id = ? OR user_id = 1 OR user_id IS NULL", (user_id,))
+                    db_execute(cur, "DELETE FROM portfolio_snapshots WHERE user_id = ?", (user_id,))
                     deleted_count = cur.rowcount
                     
                     conn.commit()
@@ -6863,7 +6889,7 @@ def ui_portfolio_tracker():
                         live_portfolio_value += convert_to_kwd(row['Market Value'], row['Currency'])
             
             # 2. Calculate Accumulated Cash (Total Deposits)
-            all_deposits = query_df("SELECT amount, currency, include_in_analysis, deposit_date FROM cash_deposits")
+            all_deposits = query_df("SELECT amount, currency, include_in_analysis, deposit_date FROM cash_deposits WHERE user_id = ?", (user_id,))
             today_str = date.today().strftime("%Y-%m-%d")
             
             total_deposits_kwd = 0.0
@@ -6888,7 +6914,7 @@ def ui_portfolio_tracker():
             
             # 3. Get Previous Snapshot for Deltas
             prev_snap = query_df(
-                "SELECT * FROM portfolio_snapshots WHERE snapshot_date < ? AND (user_id = ? OR user_id = 1 OR user_id IS NULL) ORDER BY snapshot_date DESC LIMIT 1",
+                "SELECT * FROM portfolio_snapshots WHERE snapshot_date < ? AND user_id = ? ORDER BY snapshot_date DESC LIMIT 1",
                 (today_str, user_id)
             )
             
@@ -6932,7 +6958,7 @@ def ui_portfolio_tracker():
             
             # Calculate Beginning Diff: Current Value - First Value (Baseline)
             # Get the baseline value (value of the earliest snapshot)
-            first_snap = query_df("SELECT portfolio_value, snapshot_date FROM portfolio_snapshots WHERE user_id = ? OR user_id = 1 OR user_id IS NULL ORDER BY snapshot_date ASC LIMIT 1", (user_id,))
+            first_snap = query_df("SELECT portfolio_value, snapshot_date FROM portfolio_snapshots WHERE user_id = ? ORDER BY snapshot_date ASC LIMIT 1", (user_id,))
             
             if first_snap.empty:
                 # This is the first snapshot ever
@@ -6955,7 +6981,7 @@ def ui_portfolio_tracker():
             
             # 5. Insert or Update
             # Check if exists
-            existing = query_df("SELECT * FROM portfolio_snapshots WHERE snapshot_date = ? AND (user_id = ? OR user_id = 1 OR user_id IS NULL)", (today_str, user_id))
+            existing = query_df("SELECT * FROM portfolio_snapshots WHERE snapshot_date = ? AND user_id = ?", (today_str, user_id))
             
             if not existing.empty:
                 exec_sql(
@@ -6964,7 +6990,7 @@ def ui_portfolio_tracker():
                     SET portfolio_value = ?, daily_movement = ?, beginning_difference = ?,
                         deposit_cash = ?, accumulated_cash = ?, net_gain = ?, 
                         change_percent = ?, roi_percent = ?, created_at = ?
-                    WHERE snapshot_date = ? AND (user_id = ? OR user_id = 1 OR user_id IS NULL)
+                    WHERE snapshot_date = ? AND user_id = ?
                     """,
                     (live_portfolio_value, daily_movement, beginning_diff,
                      today_deposits_kwd, accumulated_cash, net_gain,
@@ -7058,7 +7084,7 @@ def ui_portfolio_tracker():
                         # Get accumulated cash from the date BEFORE our import data
                         earliest_import_date = df['snapshot_date'].iloc[0]
                         before_import = query_df(
-                            "SELECT accumulated_cash FROM portfolio_snapshots WHERE snapshot_date < ? AND (user_id = ? OR user_id = 1 OR user_id IS NULL) ORDER BY snapshot_date DESC LIMIT 1",
+                            "SELECT accumulated_cash FROM portfolio_snapshots WHERE snapshot_date < ? AND user_id = ? ORDER BY snapshot_date DESC LIMIT 1",
                             (earliest_import_date, user_id)
                         )
                         if not before_import.empty:
@@ -7080,7 +7106,7 @@ def ui_portfolio_tracker():
                             deposit_cash = float(row.get('deposit_cash', 0))
                             
                             # Check for duplicates
-                            existing = query_df("SELECT * FROM portfolio_snapshots WHERE snapshot_date = ? AND (user_id = ? OR user_id = 1 OR user_id IS NULL)", (snap_date, user_id))
+                            existing = query_df("SELECT * FROM portfolio_snapshots WHERE snapshot_date = ? AND user_id = ?", (snap_date, user_id))
                             if not existing.empty:
                                 duplicates.append(snap_date)
                                 continue
@@ -7157,13 +7183,13 @@ def ui_portfolio_tracker():
             snap_date_str = snap_date.strftime("%Y-%m-%d")
             
             # Check if snapshot already exists
-            existing = query_df("SELECT * FROM portfolio_snapshots WHERE snapshot_date = ? AND (user_id = ? OR user_id = 1 OR user_id IS NULL)", (snap_date_str, user_id))
+            existing = query_df("SELECT * FROM portfolio_snapshots WHERE snapshot_date = ? AND user_id = ?", (snap_date_str, user_id))
             if not existing.empty:
                 st.error(f"Snapshot for {snap_date_str} already exists. Please edit it in the table below instead.")
             else:
                 # Get previous snapshot relative to this date
                 prev_snap = query_df(
-                    "SELECT * FROM portfolio_snapshots WHERE snapshot_date < ? AND (user_id = ? OR user_id = 1 OR user_id IS NULL) ORDER BY snapshot_date DESC LIMIT 1",
+                    "SELECT * FROM portfolio_snapshots WHERE snapshot_date < ? AND user_id = ? ORDER BY snapshot_date DESC LIMIT 1",
                     (snap_date_str, user_id)
                 )
                 
@@ -7183,7 +7209,7 @@ def ui_portfolio_tracker():
                 
                 if beginning_diff == 0:
                     # Calculate Beginning Diff: Current Value - First Value (Baseline)
-                    first_snap = query_df("SELECT portfolio_value, snapshot_date FROM portfolio_snapshots WHERE user_id = ? OR user_id = 1 OR user_id IS NULL ORDER BY snapshot_date ASC LIMIT 1", (user_id,))
+                    first_snap = query_df("SELECT portfolio_value, snapshot_date FROM portfolio_snapshots WHERE user_id = ? ORDER BY snapshot_date ASC LIMIT 1", (user_id,))
                     if first_snap.empty:
                         beginning_diff = 0.0
                     else:
@@ -7216,7 +7242,7 @@ def ui_portfolio_tracker():
     
     # Display snapshots
     snapshots = query_df(
-        "SELECT * FROM portfolio_snapshots WHERE user_id = ? OR user_id = 1 OR user_id IS NULL ORDER BY snapshot_date DESC",
+        "SELECT * FROM portfolio_snapshots WHERE user_id = ? ORDER BY snapshot_date DESC",
         (user_id,)
     )
     
@@ -7541,7 +7567,7 @@ def ui_portfolio_tracker():
             # 1. Delete all existing snapshots for this user
             conn = get_conn()
             cur = conn.cursor()
-            cur.execute("DELETE FROM portfolio_snapshots WHERE user_id = ? OR user_id = 1 OR user_id IS NULL", (user_id,))
+            cur.execute("DELETE FROM portfolio_snapshots WHERE user_id = ?", (user_id,))
             
             # 2. Insert all rows from edited_data
             records = []
@@ -7587,7 +7613,8 @@ def ui_portfolio_tracker():
         del_date = st.date_input("Select date to delete", value=date.today(), key="del_snap_date")
         if st.button("Delete Snapshot", key="del_snap"):
             del_date_str = del_date.strftime("%Y-%m-%d")
-            exec_sql("DELETE FROM portfolio_snapshots WHERE snapshot_date = ?", (del_date_str,))
+            user_id = st.session_state.get('user_id', 1)
+            exec_sql("DELETE FROM portfolio_snapshots WHERE snapshot_date = ? AND user_id = ?", (del_date_str, user_id))
             st.success(f"Deleted snapshot for {del_date_str} (if it existed).")
             st.rerun()
 
@@ -7596,6 +7623,7 @@ def ui_dividends_tracker():
     st.subheader("💰 Dividends Tracker")
     
     # Query all dividend data - include ALL rows to check what's available
+    user_id = st.session_state.get('user_id', 1)
     all_transactions = query_df("""
         SELECT 
             stock_symbol,
@@ -7605,9 +7633,10 @@ def ui_dividends_tracker():
             COALESCE(bonus_shares, 0) as bonus_shares,
             COALESCE(reinvested_dividend, 0) as reinvested_dividend
         FROM transactions
+        WHERE user_id = ?
         ORDER BY txn_date DESC
         LIMIT 10
-    """)
+    """, (user_id,))
     
     # Debug: Show sample data
     with st.expander("🔍 Debug: Sample Transaction Data", expanded=False):
@@ -7965,11 +7994,12 @@ def ui_trading_section():
                         cur = conn.cursor()
                         
                         # Check/Add Stock
-                        db_execute(cur, "SELECT id FROM stocks WHERE symbol = ?", (stock_symbol,))
+                        user_id = st.session_state.get('user_id', 1)
+                        db_execute(cur, "SELECT id FROM stocks WHERE symbol = ? AND user_id = ?", (stock_symbol, user_id))
                         if not cur.fetchone():
                             db_execute(cur,
-                                "INSERT INTO stocks (symbol, name, portfolio, currency) VALUES (?, ?, ?, ?)",
-                                (stock_symbol, stock_symbol, "KFH", "KWD")
+                                "INSERT INTO stocks (symbol, name, portfolio, currency, user_id) VALUES (?, ?, ?, ?, ?)",
+                                (stock_symbol, stock_symbol, "KFH", "KWD", user_id)
                             )
                         
                         # Calculate totals
@@ -8027,29 +8057,30 @@ def ui_trading_section():
                 try:
                     conn = get_conn()
                     cur = conn.cursor()
+                    user_id = st.session_state.get('user_id', 1)
                     
-                    # Find and remove duplicate Buy transactions
+                    # Find and remove duplicate Buy transactions for current user
                     cur.execute("""
                         DELETE FROM trading_history 
                         WHERE id NOT IN (
                             SELECT MIN(id) 
                             FROM trading_history 
-                            WHERE txn_type = 'Buy' 
+                            WHERE txn_type = 'Buy' AND user_id = ?
                             GROUP BY stock_symbol, txn_date, shares, purchase_cost
-                        ) AND txn_type = 'Buy'
-                    """)
+                        ) AND txn_type = 'Buy' AND user_id = ?
+                    """, (user_id, user_id))
                     buy_dupes = cur.rowcount
                     
-                    # Find and remove duplicate Sell transactions
+                    # Find and remove duplicate Sell transactions for current user
                     cur.execute("""
                         DELETE FROM trading_history 
                         WHERE id NOT IN (
                             SELECT MIN(id) 
                             FROM trading_history 
-                            WHERE txn_type = 'Sell' 
+                            WHERE txn_type = 'Sell' AND user_id = ?
                             GROUP BY stock_symbol, txn_date, shares, sell_value
-                        ) AND txn_type = 'Sell'
-                    """)
+                        ) AND txn_type = 'Sell' AND user_id = ?
+                    """, (user_id, user_id))
                     sell_dupes = cur.rowcount
                     
                     conn.commit()
@@ -8316,7 +8347,8 @@ def ui_trading_section():
                     # Get count before import
                     conn = get_conn()
                     cur = conn.cursor()
-                    cur.execute("SELECT COUNT(*) FROM trading_history")
+                    user_id = st.session_state.get('user_id', 1)
+                    cur.execute("SELECT COUNT(*) FROM trading_history WHERE user_id = ?", (user_id,))
                     transactions_before = cur.fetchone()[0]
                     
                     st.info(f"📊 Current database: {transactions_before} transactions | Starting import...")
@@ -8495,11 +8527,12 @@ def ui_trading_section():
                                 sell_value = sale_price * quantity if has_sale and quantity > 0 else 0
                                 
                                 # Check for duplicates with STRICT matching (stock, date, quantity, cost)
+                                user_id = st.session_state.get('user_id', 1)
                                 cur.execute("""
                                     SELECT id FROM trading_history 
                                     WHERE stock_symbol = ? AND txn_date = ? AND txn_type = 'Buy' 
-                                    AND shares = ? AND purchase_cost = ?
-                                """, (stock, purchase_date, quantity, purchase_cost))
+                                    AND shares = ? AND purchase_cost = ? AND user_id = ?
+                                """, (stock, purchase_date, quantity, purchase_cost, user_id))
                                 
                                 existing_buy = cur.fetchone()
                                 buy_exists = existing_buy is not None
@@ -8511,8 +8544,8 @@ def ui_trading_section():
                                     cur.execute("""
                                         SELECT id FROM trading_history 
                                         WHERE stock_symbol = ? AND txn_date = ? AND txn_type = 'Sell' 
-                                        AND shares = ? AND sell_value = ?
-                                    """, (stock, sale_date, quantity, sell_value))
+                                        AND shares = ? AND sell_value = ? AND user_id = ?
+                                    """, (stock, sale_date, quantity, sell_value, user_id))
                                     
                                     existing_sell = cur.fetchone()
                                     sell_exists = existing_sell is not None
@@ -8540,12 +8573,13 @@ def ui_trading_section():
                                     continue
                                 
                                 # Check if stock exists in stocks table
-                                db_execute(cur, "SELECT id FROM stocks WHERE symbol = ?", (stock,))
+                                user_id = st.session_state.get('user_id', 1)
+                                db_execute(cur, "SELECT id FROM stocks WHERE symbol = ? AND user_id = ?", (stock, user_id))
                                 if not cur.fetchone():
                                     # Add stock if missing
                                     db_execute(cur,
-                                        "INSERT INTO stocks (symbol, name, portfolio, currency) VALUES (?, ?, ?, ?)",
-                                        (stock, stock, "KFH", "KWD")
+                                        "INSERT INTO stocks (symbol, name, portfolio, currency, user_id) VALUES (?, ?, ?, ?, ?)",
+                                        (stock, stock, "KFH", "KWD", user_id)
                                     )
                                 
                                 # Insert Buy transaction (always)
@@ -8580,7 +8614,8 @@ def ui_trading_section():
                         # Get count after import
                         conn2 = get_conn()
                         cur2 = conn2.cursor()
-                        cur2.execute("SELECT COUNT(*) FROM trading_history")
+                        user_id = st.session_state.get('user_id', 1)
+                        cur2.execute("SELECT COUNT(*) FROM trading_history WHERE user_id = ?", (user_id,))
                         transactions_after = cur2.fetchone()[0]
                         conn2.close()
                         
@@ -8725,7 +8760,8 @@ def ui_trading_section():
     
     # First, check total trading transactions in database for debugging
     cur = conn.cursor()
-    cur.execute("SELECT COUNT(*) FROM trading_history")
+    user_id = st.session_state.get('user_id', 1)
+    cur.execute("SELECT COUNT(*) FROM trading_history WHERE user_id = ?", (user_id,))
     total_txns = cur.fetchone()[0]
     
     if total_txns == 0:
@@ -8794,8 +8830,9 @@ def ui_trading_section():
         
         # Show date range of existing trading transactions
         conn2 = get_conn()
-        date_range_query = "SELECT MIN(txn_date) as min_date, MAX(txn_date) as max_date FROM trading_history"
-        date_df = pd.read_sql_query(date_range_query, conn2)
+        user_id = st.session_state.get('user_id', 1)
+        date_range_query = "SELECT MIN(txn_date) as min_date, MAX(txn_date) as max_date FROM trading_history WHERE user_id = ?"
+        date_df = pd.read_sql_query(date_range_query, conn2, params=(user_id,))
         conn2.close()
         
         if not date_df.empty and date_df['min_date'].iloc[0]:
@@ -9289,7 +9326,8 @@ def get_risk_free_rate():
 def calculate_sharpe_ratio(rf_rate):
     """Calculate Sharpe Ratio based on portfolio snapshots."""
     # Load portfolio snapshots
-    df = query_df("SELECT snapshot_date, portfolio_value FROM portfolio_snapshots ORDER BY snapshot_date ASC")
+    user_id = st.session_state.get('user_id', 1)
+    df = query_df("SELECT snapshot_date, portfolio_value FROM portfolio_snapshots WHERE user_id = ? ORDER BY snapshot_date ASC", (user_id,))
     
     if df.empty or len(df) < 2:
         return None
@@ -9342,7 +9380,8 @@ def get_us_risk_free_rate():
 def calculate_sortino_ratio(rf_rate):
     """Calculate Sortino Ratio based on portfolio snapshots."""
     # Load portfolio snapshots
-    df = query_df("SELECT snapshot_date, portfolio_value FROM portfolio_snapshots ORDER BY snapshot_date ASC")
+    user_id = st.session_state.get('user_id', 1)
+    df = query_df("SELECT snapshot_date, portfolio_value FROM portfolio_snapshots WHERE user_id = ? ORDER BY snapshot_date ASC", (user_id,))
     
     if df.empty or len(df) < 2:
         return None
@@ -9382,8 +9421,10 @@ def ui_overview():
     st.header("📊 Portfolio Overview")
     
     # Get total portfolio value from latest snapshot (for reference)
+    user_id = st.session_state.get('user_id', 1)
     latest_snapshot = query_df(
-        "SELECT portfolio_value, accumulated_cash, net_gain, roi_percent, snapshot_date FROM portfolio_snapshots ORDER BY snapshot_date DESC LIMIT 1"
+        "SELECT portfolio_value, accumulated_cash, net_gain, roi_percent, snapshot_date FROM portfolio_snapshots WHERE user_id = ? ORDER BY snapshot_date DESC LIMIT 1",
+        (user_id,)
     )
     
     # Calculate LIVE portfolio value from current prices and holdings
@@ -9413,7 +9454,8 @@ def ui_overview():
     # ---------------------------------------------------------------------------
 
     # Get total cash deposits
-    all_deposits = query_df("SELECT amount, currency, include_in_analysis FROM cash_deposits")
+    user_id = st.session_state.get('user_id', 1)
+    all_deposits = query_df("SELECT amount, currency, include_in_analysis FROM cash_deposits WHERE user_id = ?", (user_id,))
     
     if not all_deposits.empty:
         all_deposits["amount_in_kwd"] = all_deposits.apply(
@@ -9444,7 +9486,8 @@ def ui_overview():
     
     
     # Get total transactions
-    total_txns = query_df("SELECT COUNT(*) as count FROM transactions")
+    user_id = st.session_state.get('user_id', 1)
+    total_txns = query_df("SELECT COUNT(*) as count FROM transactions WHERE user_id = ?", (user_id,))
     num_txns = total_txns["count"].iloc[0] if not total_txns.empty else 0
     
     # Calculate Sharpe Ratio
@@ -9648,9 +9691,11 @@ def ui_overview():
     st.subheader("📈 Performance Metrics")
     
     # Prepare data for calculations
+    user_id = st.session_state.get('user_id', 1)
     try:
         portfolio_history = query_df(
-            "SELECT snapshot_date as date, portfolio_value as balance, accumulated_cash FROM portfolio_snapshots ORDER BY snapshot_date"
+            "SELECT snapshot_date as date, portfolio_value as balance, accumulated_cash FROM portfolio_snapshots WHERE user_id = ? ORDER BY snapshot_date",
+            (user_id,)
         )
     except Exception:
         portfolio_history = pd.DataFrame(columns=['date', 'balance', 'accumulated_cash'])
@@ -9693,9 +9738,11 @@ def ui_overview():
         cash_dividends_only = pd.DataFrame(columns=['date', 'amount', 'type'])
     
     # FOR TWR: Still use cash_deposits with include_in_analysis flag
+    user_id = st.session_state.get('user_id', 1)
     try:
         deposits_for_twr = query_df(
-            "SELECT deposit_date as date, amount, 'DEPOSIT' as type FROM cash_deposits WHERE include_in_analysis = 1"
+            "SELECT deposit_date as date, amount, 'DEPOSIT' as type FROM cash_deposits WHERE include_in_analysis = 1 AND user_id = ?",
+            (user_id,)
         )
     except Exception:
         deposits_for_twr = pd.DataFrame(columns=['date', 'amount', 'type'])
