@@ -9648,80 +9648,101 @@ def ui_overview():
     st.subheader("📈 Performance Metrics")
     
     # Prepare data for calculations
-    portfolio_history = query_df(
-        "SELECT snapshot_date as date, portfolio_value as balance, accumulated_cash FROM portfolio_snapshots ORDER BY snapshot_date"
-    )
+    try:
+        portfolio_history = query_df(
+            "SELECT snapshot_date as date, portfolio_value as balance, accumulated_cash FROM portfolio_snapshots ORDER BY snapshot_date"
+        )
+    except Exception:
+        portfolio_history = pd.DataFrame(columns=['date', 'balance', 'accumulated_cash'])
     
     # Collect ALL cash flows (deposits + dividends) with their timing
     # FOR MWRR: Use CORRECT data sources per user specification
     
     # 1. CASH DEPOSITS from cash_deposits table (MY OWN MONEY = NEGATIVE)
     # Exclude 1970 dates and zero amounts
-    cash_deposits_for_mwrr = query_df(
-        """
-        SELECT deposit_date as date, 
-               amount, 
-               'DEPOSIT' as type 
-        FROM cash_deposits 
-        WHERE deposit_date NOT LIKE '1970%'
-        AND deposit_date IS NOT NULL
-        AND amount > 0
-        """
-    )
+    try:
+        cash_deposits_for_mwrr = query_df(
+            """
+            SELECT deposit_date as date, 
+                   amount, 
+                   'DEPOSIT' as type 
+            FROM cash_deposits 
+            WHERE deposit_date IS NOT NULL
+            AND amount > 0
+            AND deposit_date > '1971-01-01'
+            """
+        )
+    except Exception:
+        cash_deposits_for_mwrr = pd.DataFrame(columns=['date', 'amount', 'type'])
     
     # 2. NON-REINVESTED DIVIDENDS ONLY (CASH PAID OUT = POSITIVE)
     # Exclude reinvested dividends from IRR calculation
-    cash_dividends_only = query_df(
-        """
-        SELECT txn_date as date, 
-               COALESCE(cash_dividend, 0) as amount, 
-               'DIVIDEND' as type 
-        FROM transactions 
-        WHERE COALESCE(cash_dividend, 0) > 0
-        AND txn_date NOT LIKE '1970%'
-        AND txn_date IS NOT NULL
-        """
-    )
+    try:
+        cash_dividends_only = query_df(
+            """
+            SELECT txn_date as date, 
+                   COALESCE(cash_dividend, 0) as amount, 
+                   'DIVIDEND' as type 
+            FROM transactions 
+            WHERE COALESCE(cash_dividend, 0) > 0
+            AND txn_date IS NOT NULL
+            AND txn_date > '1971-01-01'
+            """
+        )
+    except Exception:
+        cash_dividends_only = pd.DataFrame(columns=['date', 'amount', 'type'])
     
     # FOR TWR: Still use cash_deposits with include_in_analysis flag
-    deposits_for_twr = query_df(
-        "SELECT deposit_date as date, amount, 'DEPOSIT' as type FROM cash_deposits WHERE include_in_analysis = 1"
-    )
+    try:
+        deposits_for_twr = query_df(
+            "SELECT deposit_date as date, amount, 'DEPOSIT' as type FROM cash_deposits WHERE include_in_analysis = 1"
+        )
+    except Exception:
+        deposits_for_twr = pd.DataFrame(columns=['date', 'amount', 'type'])
     
     # For TWR: Include BOTH cash and reinvested dividends (all returns)
-    all_dividends = query_df(
-        """
-        SELECT txn_date as date, 
-               COALESCE(cash_dividend, 0) + COALESCE(reinvested_dividend, 0) as amount, 
-               'DIVIDEND' as type 
-        FROM transactions 
-        WHERE (COALESCE(cash_dividend, 0) + COALESCE(reinvested_dividend, 0)) > 0
-        """
-    )
+    try:
+        all_dividends = query_df(
+            """
+            SELECT txn_date as date, 
+                   COALESCE(cash_dividend, 0) + COALESCE(reinvested_dividend, 0) as amount, 
+                   'DIVIDEND' as type 
+            FROM transactions 
+            WHERE (COALESCE(cash_dividend, 0) + COALESCE(reinvested_dividend, 0)) > 0
+            """
+        )
+    except Exception:
+        all_dividends = pd.DataFrame(columns=['date', 'amount', 'type'])
     
     # Withdrawals (Explicit Withdrawals Only - NOT Sells)
     # Using the new General Ledger 'Withdrawal' type
-    withdrawals = query_df(
-        """
-        SELECT txn_date as date,
-               sell_value as amount,
-               'WITHDRAWAL' as type
-        FROM transactions
-        WHERE txn_type = 'Withdrawal' OR category = 'FLOW_OUT'
-        """
-    )
+    try:
+        withdrawals = query_df(
+            """
+            SELECT txn_date as date,
+                   sell_value as amount,
+                   'WITHDRAWAL' as type
+            FROM transactions
+            WHERE txn_type = 'Withdrawal' OR category = 'FLOW_OUT'
+            """
+        )
+    except Exception:
+        withdrawals = pd.DataFrame(columns=['date', 'amount', 'type'])
     
     # NEW: Additional Deposits from General Ledger (Type = Deposit)
     # Merging with legacy cash_deposits
-    ledger_deposits = query_df(
-        """
-        SELECT txn_date as date,
-               purchase_cost as amount,
-               'DEPOSIT' as type
-        FROM transactions
-        WHERE txn_type = 'Deposit' OR category = 'FLOW_IN'
-        """
-    )
+    try:
+        ledger_deposits = query_df(
+            """
+            SELECT txn_date as date,
+                   purchase_cost as amount,
+                   'DEPOSIT' as type
+            FROM transactions
+            WHERE txn_type = 'Deposit' OR category = 'FLOW_IN'
+            """
+        )
+    except Exception:
+        ledger_deposits = pd.DataFrame(columns=['date', 'amount', 'type'])
 
     # Cash flows for MWRR (Legacy Cash Deposits + New Ledger Deposits + Dividends + Withdrawals)
     # NOTE: Reinvested dividends are EXCLUDED (they stay in portfolio value)
