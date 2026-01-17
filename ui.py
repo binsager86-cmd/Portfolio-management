@@ -5851,11 +5851,21 @@ def ui_backup_restore():
                                 uploaded_file.seek(0)  # Reset file pointer
                                 df = pd.read_excel(uploaded_file, sheet_name='cash_deposits')
                                 cash_count = 0
+                                
+                                # Detect which schema we're using by checking table columns
+                                try:
+                                    db_cols = table_columns("cash_deposits")
+                                    has_new_schema = 'source' in db_cols
+                                    has_old_schema = 'bank_name' in db_cols
+                                except:
+                                    has_new_schema = True
+                                    has_old_schema = False
+                                
                                 for _, row in df.iterrows():
                                     try:
-                                        # Handle different column naming conventions
-                                        # Old schema: bank_name, description, comments
-                                        # New schema: source, notes
+                                        # Handle different column naming conventions in backup file
+                                        # Old schema exports: bank_name, description, comments
+                                        # New schema exports: source, notes
                                         source_val = (
                                             safe_str(row.get('source')) or 
                                             safe_str(row.get('bank_name')) or 
@@ -5868,22 +5878,42 @@ def ui_backup_restore():
                                             ''
                                         )
                                         
-                                        db_execute(cur, """
-                                            INSERT INTO cash_deposits 
-                                            (user_id, portfolio, amount, currency, deposit_date, 
-                                             source, notes, include_in_analysis, created_at)
-                                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                        """, (
-                                            user_id,
-                                            safe_str(row.get('portfolio'), 'KFH'),
-                                            safe_float(row.get('amount')),
-                                            safe_str(row.get('currency'), 'KWD'),
-                                            safe_date(row.get('deposit_date')),
-                                            source_val,
-                                            notes_val,
-                                            int(safe_float(row.get('include_in_analysis'), 1)),
-                                            int(time.time())
-                                        ))
+                                        # Use appropriate INSERT based on target DB schema
+                                        if has_new_schema:
+                                            # PostgreSQL / new SQLite with source, notes columns
+                                            db_execute(cur, """
+                                                INSERT INTO cash_deposits 
+                                                (user_id, portfolio, amount, currency, deposit_date, 
+                                                 source, notes, include_in_analysis, created_at)
+                                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                            """, (
+                                                user_id,
+                                                safe_str(row.get('portfolio'), 'KFH'),
+                                                safe_float(row.get('amount')),
+                                                safe_str(row.get('currency'), 'KWD'),
+                                                safe_date(row.get('deposit_date')),
+                                                source_val,
+                                                notes_val,
+                                                int(safe_float(row.get('include_in_analysis'), 1)),
+                                                int(time.time())
+                                            ))
+                                        elif has_old_schema:
+                                            # Old SQLite with bank_name, description, comments columns
+                                            db_execute(cur, """
+                                                INSERT INTO cash_deposits 
+                                                (user_id, portfolio, bank_name, deposit_date, amount, 
+                                                 description, comments, created_at)
+                                                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                                            """, (
+                                                user_id,
+                                                safe_str(row.get('portfolio'), 'KFH'),
+                                                source_val or 'Unknown',  # bank_name is NOT NULL
+                                                safe_date(row.get('deposit_date')),
+                                                safe_float(row.get('amount')),
+                                                notes_val,
+                                                '',
+                                                int(time.time())
+                                            ))
                                         imported += 1
                                         cash_count += 1
                                     except Exception as e:
