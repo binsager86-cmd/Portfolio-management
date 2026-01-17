@@ -2,6 +2,7 @@ from typing import Optional
 import sqlite3
 import time
 import uuid
+import html
 try:
     import pandas as pd
     from datetime import date, datetime, timedelta # Added for peer analysis
@@ -10176,11 +10177,27 @@ def calculate_peer_metrics(hist, info, financials):
 # =========================
 # UI - HELPERS
 # =========================
-def render_styled_table(df):
+def render_styled_table(df: pd.DataFrame, highlight_logic: bool = True) -> None:
     """
     Renders a Streamlit dataframe using custom HTML/CSS to match a specific React/Tailwind aesthetic.
     Supports Dark/Light mode based on st.session_state.theme.
+    
+    Args:
+        df: DataFrame to render as a styled HTML table.
+        highlight_logic: If True, applies smart coloring based on column names and values.
+                        Status column: Realized → muted, Unrealized → accent
+                        Stock column: accent
+                        Profit/Change/Gain/Yield/% columns: positive → green, negative → red
+                        Current Price/Sale Price == 0: display "-" with muted color
+    
+    Returns:
+        None. Renders the table directly via st.markdown.
     """
+    # (A) Empty / None DataFrame handling
+    if df is None or df.empty:
+        st.info("No data to display.")
+        return
+    
     is_dark = st.session_state.get("theme", "light") == "dark"
     
     # --- Theme Colors (Extracted from React Component) ---
@@ -10195,6 +10212,7 @@ def render_styled_table(df):
         c_accent = "#22d3ee"                  # text-cyan-400
         c_pos = "#34d399"                     # text-emerald-400
         c_neg = "#fb7185"                     # text-rose-400
+        c_muted = "#6b7280"                   # text-gray-500
     else:
         # Light Mode Palette
         c_bg_card = "rgba(255, 255, 255, 0.8)" # bg-white/80
@@ -10206,11 +10224,12 @@ def render_styled_table(df):
         c_accent = "#2563eb"                   # text-blue-600
         c_pos = "#16a34a"                      # text-green-600
         c_neg = "#dc2626"                      # text-red-600
+        c_muted = "#9ca3af"                    # text-gray-400
 
     # --- CSS Injection ---
     css = f"""
     <style>
-    .st-styled-table-wrap {{
+    .univ-table-wrap {{
         background-color: {c_bg_card};
         border: 1px solid {c_border};
         border-radius: 1rem; /* rounded-2xl */
@@ -10220,16 +10239,16 @@ def render_styled_table(df):
         margin-bottom: 1.5rem;
         font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     }}
-    .st-styled-table-scroll {{
+    .univ-table-scroll {{
         overflow-x: auto;
     }}
-    .st-styled-table {{
+    .univ-table {{
         width: 100%;
         border-collapse: collapse;
         font-size: 0.875rem; /* text-sm */
         table-layout: fixed; /* Force even column distribution */
     }}
-    .st-styled-table th {{
+    .univ-table th {{
         text-align: center;
         padding: 1rem 0.5rem;
         font-weight: 600;
@@ -10239,11 +10258,11 @@ def render_styled_table(df):
         white-space: normal; /* Allow wrap */
         word-wrap: break-word; 
     }}
-    .st-styled-table th:first-child {{
+    .univ-table th:first-child {{
         text-align: left;
         padding-left: 1.5rem;
     }}
-    .st-styled-table td {{
+    .univ-table td {{
         padding: 1rem 0.5rem;
         color: {c_text_p};
         border-bottom: 1px solid {c_border};
@@ -10252,81 +10271,130 @@ def render_styled_table(df):
         white-space: normal;
         word-wrap: break-word;
     }}
-    .st-styled-table td:first-child {{
+    .univ-table td:first-child {{
         text-align: left;
         padding-left: 1.5rem;
         font-weight: 600; /* mimic symbol bold */
         color: {c_text_p}; 
     }}
-    .st-styled-table tr:last-child td {{
+    .univ-table tr:last-child td {{
         border-bottom: none;
     }}
-    .st-styled-table tr:hover td {{
+    .univ-table tr:hover td {{
         background-color: {c_hover};
     }}
     
     /* Utility Classes for Colors */
-    .st-text-pos {{ color: {c_pos}; font-weight: 600; }}
-    .st-text-neg {{ color: {c_neg}; font-weight: 600; }}
-    .st-text-accent {{ color: {c_accent}; }}
-    .st-text-secondary {{ color: {c_text_s}; }}
+    .t-pos {{ color: {c_pos}; font-weight: 600; }}
+    .t-neg {{ color: {c_neg}; font-weight: 600; }}
+    .t-accent {{ color: {c_accent}; }}
+    .t-muted {{ color: {c_muted}; }}
+    .t-secondary {{ color: {c_text_s}; }}
     </style>
     """
     
-    # --- HTML Construction ---
+    # --- HTML Construction using list buffer ---
+    html_parts = []
+    
     # Header
-    html_table = f"""
-    <div class="st-styled-table-wrap">
-        <div class="st-styled-table-scroll">
-            <table class="st-styled-table">
-                <thead>
-                    <tr>
-                        <th>Metric</th>
-    """
+    html_parts.append('<div class="univ-table-wrap">')
+    html_parts.append('<div class="univ-table-scroll">')
+    html_parts.append('<table class="univ-table">')
+    html_parts.append('<thead><tr>')
     
+    # First column header (for index/Metric)
+    html_parts.append('<th>Metric</th>')
+    
+    # Column headers - escape HTML
     for col in df.columns:
-        # Wrap ticker headers in accent color or just standard
-        html_table += f"<th>{col}</th>"
+        escaped_col = html.escape(str(col))
+        html_parts.append(f'<th>{escaped_col}</th>')
     
-    html_table += """
-                    </tr>
-                </thead>
-                <tbody>
-    """
+    html_parts.append('</tr></thead>')
+    html_parts.append('<tbody>')
     
-    # Body
-    for idx, row in df.iterrows():
-        html_table += f"<tr><td>{idx}</td>"
+    # Define highlight keywords for numeric sign coloring
+    numeric_highlight_keywords = ("Profit", "%", "Change", "Gain", "Yield")
+    
+    # Body - use itertuples for performance
+    # We need the index, so we iterate with enumerate on index
+    for row_idx, row_data in enumerate(df.itertuples(index=True, name=None)):
+        idx = row_data[0]  # First element is the index
+        row_values = row_data[1:]  # Rest are column values
         
-        for col in df.columns:
-            val = row[col]
-            display_val = str(val)
-            class_name = ""
+        escaped_idx = html.escape(str(idx))
+        html_parts.append(f'<tr><td>{escaped_idx}</td>')
+        
+        for col_idx, col in enumerate(df.columns):
+            val = row_values[col_idx]
+            col_str = str(col)
             
-            # Smart Coloring Logic based on format string result
-            # e.g. "1.41%" or "-3.00%"
-            if "%" in display_val:
-                if "-" in display_val:
-                    class_name = "st-text-neg"
-                else:
-                    class_name = "st-text-pos"
+            # (E) Handle NaN/None cleanly
+            if pd.isna(val):
+                display_val = ""
+                cls = ""
+            else:
+                display_val = str(val)
+                cls = ""
             
-            # Handle "x" multiples if needed, or just leave standard
-            elif isinstance(val, str) and val.endswith("x"):
-                class_name = "st-text-p" 
+            if highlight_logic and display_val:
+                # (G) Apply special case for Current Price / Sale Price first
+                if col_str in ("Current Price", "Sale Price"):
+                    # Check if value is 0 or 0.0
+                    try:
+                        num_val = float(val) if not isinstance(val, str) else float(val.replace(",", "").replace("$", "").replace("KWD", "").strip())
+                        if num_val == 0:
+                            display_val = "-"
+                            cls = "t-muted"
+                    except (ValueError, TypeError):
+                        pass
+                
+                # Status column: Realized → muted, Unrealized → accent
+                elif col_str == "Status":
+                    if display_val == "Realized":
+                        cls = "t-muted"
+                    elif display_val == "Unrealized":
+                        cls = "t-accent"
+                
+                # Stock column: accent
+                elif col_str == "Stock":
+                    cls = "t-accent"
+                
+                # Columns with Profit, %, Change, Gain, Yield → numeric sign coloring
+                elif any(kw in col_str for kw in numeric_highlight_keywords):
+                    # Don't override if already set (Current Price/Sale Price zero case)
+                    if not cls:
+                        try:
+                            # Try to parse numeric value for sign detection
+                            clean_val = display_val.replace(",", "").replace("%", "").replace("$", "").replace("KWD", "").strip()
+                            num = float(clean_val)
+                            if num > 0:
+                                cls = "t-pos"
+                            elif num < 0:
+                                cls = "t-neg"
+                            else:
+                                cls = "t-muted"
+                        except (ValueError, TypeError):
+                            pass
+                
+                # Fallback: check for % in display value
+                elif "%" in display_val and not cls:
+                    if "-" in display_val:
+                        cls = "t-neg"
+                    else:
+                        cls = "t-pos"
             
-            html_table += f'<td class="{class_name}">{display_val}</td>'
-            
-        html_table += "</tr>"
-            
-    html_table += """
-                </tbody>
-            </table>
-        </div>
-    </div>
-    """
+            # (C) Escape HTML in display value
+            escaped_val = html.escape(display_val)
+            html_parts.append(f'<td class="{cls}">{escaped_val}</td>')
+        
+        html_parts.append('</tr>')
     
-    st.markdown(css + html_table, unsafe_allow_html=True)
+    html_parts.append('</tbody></table></div></div>')
+    
+    # Join and render
+    html_str = "".join(html_parts)
+    st.markdown(css + html_str, unsafe_allow_html=True)
 
 
 # =========================
