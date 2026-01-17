@@ -6440,55 +6440,121 @@ def ui_portfolio_analysis():
                         st.info("Please install yfinance: pip install yfinance")
                     else:
                         st.info(f"Fetching prices for {len(symbols)} stocks...")
-                        st.caption("⏱️ Using cached prices when available (1 hour TTL). First fetch may be slow due to rate limiting.")
                         
-                        conn = get_conn()
-                        cur = conn.cursor()
-                        updated = 0
-                        skipped = 0
-                        failed_symbols = []
-                        success_details = []
+                        # OPTIMIZED: Batch fetch using yf.download() - ~1-2 seconds total vs 1-2 seconds PER stock
+                        import yfinance as yf
                         
-                        progress_bar = st.progress(0)
-                        status_text = st.empty()
+                        # Convert symbols to yfinance format
+                        unique_yf_tickers = []
+                        symbol_to_yf = {}  # Map original symbol to yfinance ticker
                         
+                        for sym in symbols:
+                            # Normalize symbol for yfinance
+                            if sym.endswith('.KW'):
+                                yf_ticker = sym  # Kuwait stocks already have .KW
+                            elif '.' not in sym:
+                                # Check if it's a Kuwait stock (common patterns)
+                                yf_ticker = f"{sym}.KW"  # Default to Kuwait
+                            else:
+                                yf_ticker = sym
+                            unique_yf_tickers.append(yf_ticker)
+                            symbol_to_yf[sym] = yf_ticker
+                        
+                        progress_bar = st.progress(0, text="Downloading prices...")
                         start_time = time.time()
                         
-                        for idx, sym in enumerate(symbols):
-                            elapsed = time.time() - start_time
-                            status_text.text(f"Fetching {sym}... ({idx + 1}/{len(symbols)}) - {elapsed:.1f}s elapsed")
-                            progress_bar.progress((idx + 1) / len(symbols))
+                        try:
+                            # Batch download all tickers at once
+                            batch_data = yf.download(
+                                unique_yf_tickers,
+                                period="5d",  # Get 5 days to ensure we have recent data
+                                group_by='ticker',
+                                threads=True,
+                                progress=False
+                            )
                             
-                            price, used_ticker = fetch_price_yfinance(sym)
-                            if price and price > 0:
+                            progress_bar.progress(50, text="Processing prices...")
+                            
+                            conn = get_conn()
+                            cur = conn.cursor()
+                            updated = 0
+                            skipped = 0
+                            failed_symbols = []
+                            success_details = []
+                            
+                            for sym in symbols:
+                                yf_ticker = symbol_to_yf[sym]
+                                price = None
+                                
                                 try:
-                                    user_id = st.session_state.get('user_id', 1)
-                                    db_execute(cur, "UPDATE stocks SET current_price = ? WHERE symbol = ? AND user_id = ?", (float(price), sym, user_id))
-                                    updated += 1
-                                    success_details.append(f"{sym} = {price:.3f} (using {used_ticker})")
+                                    if len(unique_yf_tickers) == 1:
+                                        # Single ticker - batch_data has different structure
+                                        if 'Close' in batch_data.columns and not batch_data['Close'].empty:
+                                            price = float(batch_data['Close'].dropna().iloc[-1])
+                                    else:
+                                        # Multiple tickers - access by ticker name
+                                        if yf_ticker in batch_data.columns.get_level_values(0):
+                                            ticker_data = batch_data[yf_ticker]
+                                            if 'Close' in ticker_data.columns and not ticker_data['Close'].dropna().empty:
+                                                price = float(ticker_data['Close'].dropna().iloc[-1])
                                 except Exception as e:
+                                    pass
+                                
+                                if price and price > 0:
+                                    try:
+                                        db_execute(cur, "UPDATE stocks SET current_price = ? WHERE symbol = ? AND user_id = ?", 
+                                                  (float(price), sym, user_id))
+                                        updated += 1
+                                        success_details.append(f"{sym} = {price:.3f}")
+                                    except Exception as e:
+                                        skipped += 1
+                                        failed_symbols.append(f"{sym} (DB error)")
+                                else:
                                     skipped += 1
-                                    failed_symbols.append(f"{sym} (DB error)")
-                            else:
-                                skipped += 1
-                                failed_symbols.append(sym)
-                        
-                        conn.commit()
-                        conn.close()
-                        
-                        progress_bar.empty()
-                        status_text.empty()
-                        
-                        st.success(f"✅ Prices updated: {updated:,} | ⚠️ Skipped: {skipped:,}")
-                        
-                        if success_details:
-                            with st.expander("✓ Successfully fetched prices"):
-                                for detail in success_details:
-                                    st.text(detail)
-                        
-                        if failed_symbols:
-                            with st.expander("⚠️ View skipped symbols"):
-                                st.write(", ".join(failed_symbols))
+                                    failed_symbols.append(sym)
+                            
+                            conn.commit()
+                            conn.close()
+                            
+                            elapsed = time.time() - start_time
+                            progress_bar.progress(100, text=f"Done in {elapsed:.1f}s!")
+                            time.sleep(0.5)
+                            progress_bar.empty()
+                            
+                            st.success(f"✅ Prices updated: {updated:,} | ⚠️ Skipped: {skipped:,} | ⏱️ {elapsed:.1f}s")
+                            
+                            if success_details:
+                                with st.expander("✓ Successfully fetched prices"):
+                                    for detail in success_details:
+                                        st.text(detail)
+                            
+                            if failed_symbols:
+                                with st.expander("⚠️ View skipped symbols"):
+                                    st.write(", ".join(failed_symbols))
+                            
+                        except Exception as e:
+                            progress_bar.empty()
+                            st.error(f"Batch fetch failed: {e}")
+                            st.info("Falling back to individual fetch...")
+                            
+                            # Fallback to individual fetch if batch fails
+                            conn = get_conn()
+                            cur = conn.cursor()
+                            updated = 0
+                            skipped = 0
+                            
+                            for sym in symbols:
+                                price, _ = fetch_price_yfinance(sym)
+                                if price and price > 0:
+                                    db_execute(cur, "UPDATE stocks SET current_price = ? WHERE symbol = ? AND user_id = ?", 
+                                              (float(price), sym, user_id))
+                                    updated += 1
+                                else:
+                                    skipped += 1
+                            
+                            conn.commit()
+                            conn.close()
+                            st.success(f"✅ Updated: {updated} | Skipped: {skipped}")
                         
                         try:
                             st.rerun()
