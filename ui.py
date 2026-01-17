@@ -5704,50 +5704,42 @@ def ui_backup_restore():
                 
                 st.divider()
                 
-                # Confirmation section
-                st.markdown("**🔐 Confirm Restore:**")
-                
+                # Confirmation section - simple button confirmation
                 if restore_mode == "replace":
-                    confirm_text = st.text_input(
-                        "Type **DELETE ALL AND RESTORE** to confirm full replacement:",
-                        help="This confirmation prevents accidental data loss"
-                    )
-                    can_proceed = (confirm_text == "DELETE ALL AND RESTORE")
+                    st.warning("⚠️ **Full Replace Mode:** This will DELETE all your existing data and replace it with the backup.")
                 else:
-                    confirm_text = st.text_input(
-                        "Type **RESTORE** to confirm:",
-                        help="This confirmation prevents accidental restoration"
-                    )
-                    can_proceed = (confirm_text == "RESTORE")
+                    st.info("ℹ️ **Merge Mode:** This will add backup data to your existing data (duplicates may occur).")
                 
-                # Restore button
-                if st.button("🔄 Start Restore", type="primary", disabled=not can_proceed, use_container_width=True):
-                    
-                    # IMPORTANT: Reset file pointer for reading sheets again
-                    uploaded_file.seek(0)
-                    
-                    conn = get_conn()
-                    cur = conn.cursor()
-                    
-                    try:
-                        progress = st.progress(0, text="Initializing...")
-                        imported = 0
-                        errors = 0
-                        error_details = []
+                # Restore button with confirmation
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("🔄 Confirm & Restore", type="primary", use_container_width=True):
                         
-                        # STEP 1: Clear data if Full Replace
-                        if restore_mode == "replace":
-                            progress.progress(5, text="🗑️ Clearing existing data...")
-                            tables_to_clear = ['trading_history', 'portfolio_snapshots', 'portfolio_cash', 
-                                             'cash_deposits', 'transactions', 'stocks']
-                            for tbl in tables_to_clear:
-                                try:
-                                    db_execute(cur, f"DELETE FROM {tbl} WHERE user_id = ?", (user_id,))
-                                except Exception as e:
-                                    error_details.append(f"Clear {tbl}: {e}")
-                            conn.commit()
+                        # IMPORTANT: Reset file pointer for reading sheets again
+                        uploaded_file.seek(0)
                         
-                        # STEP 2: Restore Stocks (must be first - other tables reference stocks)
+                        conn = get_conn()
+                        cur = conn.cursor()
+                        
+                        try:
+                            progress = st.progress(0, text="Initializing...")
+                            imported = 0
+                            errors = 0
+                            error_details = []
+                            
+                            # STEP 1: Clear data if Full Replace
+                            if restore_mode == "replace":
+                                progress.progress(5, text="🗑️ Clearing existing data...")
+                                tables_to_clear = ['trading_history', 'portfolio_snapshots', 'portfolio_cash', 
+                                                 'cash_deposits', 'transactions', 'stocks']
+                                for tbl in tables_to_clear:
+                                    try:
+                                        db_execute(cur, f"DELETE FROM {tbl} WHERE user_id = ?", (user_id,))
+                                    except Exception as e:
+                                        error_details.append(f"Clear {tbl}: {e}")
+                                conn.commit()
+                            
+                            # STEP 2: Restore Stocks (must be first - other tables reference stocks)
                         if 'stocks' in preview_data:
                             progress.progress(15, text="📈 Restoring stocks...")
                             uploaded_file.seek(0)  # Reset file pointer
@@ -6021,14 +6013,12 @@ def ui_backup_restore():
                         time.sleep(2)
                         st.rerun()
                         
-                    except Exception as e:
-                        conn.rollback()
-                        conn.close()
-                        st.error(f"❌ Restore failed: {e}")
-                
-                if not can_proceed:
-                    expected = "DELETE ALL AND RESTORE" if restore_mode == "replace" else "RESTORE"
-                    st.caption(f"💡 Type `{expected}` above to enable the restore button")
+                            except Exception as e:
+                                conn.rollback()
+                                conn.close()
+                                st.error(f"❌ Restore failed: {e}")
+                with col2:
+                    st.caption("Click the button to start restoring your backup data.")
                     
             except Exception as e:
                 st.error(f"❌ Error reading file: {e}")
