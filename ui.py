@@ -5740,7 +5740,7 @@ def ui_backup_restore():
                                 conn.commit()
                             
                             # STEP 2: Restore Stocks (must be first - other tables reference stocks)
-                        if 'stocks' in preview_data:
+                            if 'stocks' in preview_data:
                             progress.progress(15, text="📈 Restoring stocks...")
                             uploaded_file.seek(0)  # Reset file pointer
                             df = pd.read_excel(uploaded_file, sheet_name='stocks')
@@ -6013,10 +6013,10 @@ def ui_backup_restore():
                         time.sleep(2)
                         st.rerun()
                         
-                            except Exception as e:
-                                conn.rollback()
-                                conn.close()
-                                st.error(f"❌ Restore failed: {e}")
+                        except Exception as e:
+                            conn.rollback()
+                            conn.close()
+                            st.error(f"❌ Restore failed: {e}")
                 with col2:
                     st.caption("Click the button to start restoring your backup data.")
                     
