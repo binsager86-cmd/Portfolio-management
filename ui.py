@@ -1572,6 +1572,75 @@ def init_db():
     conn.close()
     
     # ============================================
+    # PFM (Personal Financial Management) TABLES
+    # ============================================
+    conn = get_conn()
+    cur = conn.cursor()
+    
+    # PFM Snapshots - master table for each reporting date
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS pfm_snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            snapshot_date TEXT NOT NULL,
+            notes TEXT,
+            created_at INTEGER NOT NULL,
+            UNIQUE(user_id, snapshot_date)
+        )
+    """)
+    
+    # PFM Income & Expense Items
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS pfm_income_expense_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            snapshot_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            kind TEXT NOT NULL CHECK(kind IN ('income', 'expense')),
+            category TEXT NOT NULL,
+            monthly_amount REAL NOT NULL DEFAULT 0,
+            is_finance_cost INTEGER DEFAULT 0,
+            is_gna INTEGER DEFAULT 0,
+            sort_order INTEGER DEFAULT 0,
+            FOREIGN KEY (snapshot_id) REFERENCES pfm_snapshots(id) ON DELETE CASCADE
+        )
+    """)
+    
+    # PFM Asset Items
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS pfm_asset_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            snapshot_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            asset_type TEXT NOT NULL CHECK(asset_type IN ('real_estate', 'shares', 'gold', 'cash', 'crypto', 'other')),
+            category TEXT NOT NULL,
+            name TEXT NOT NULL,
+            quantity REAL,
+            price REAL,
+            currency TEXT DEFAULT 'KWD',
+            value_kwd REAL NOT NULL DEFAULT 0,
+            FOREIGN KEY (snapshot_id) REFERENCES pfm_snapshots(id) ON DELETE CASCADE
+        )
+    """)
+    
+    # PFM Liability Items
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS pfm_liability_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            snapshot_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            category TEXT NOT NULL,
+            amount_kwd REAL NOT NULL DEFAULT 0,
+            is_current INTEGER DEFAULT 0,
+            is_long_term INTEGER DEFAULT 0,
+            FOREIGN KEY (snapshot_id) REFERENCES pfm_snapshots(id) ON DELETE CASCADE
+        )
+    """)
+    
+    conn.commit()
+    conn.close()
+    print("✅ PFM tables created.")
+    
+    # ============================================
     # STEP 3: VERIFICATION
     # ============================================
     print("✅ Step 3: Database initialized. Users table verified.")
@@ -10720,6 +10789,950 @@ def login_page(cookie_manager=None):
     st.markdown("---")
     st.caption(f"{get_db_info()}")
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Personal Financial Management (PFM) - Income, Expenses, Assets, Liabilities
+# ─────────────────────────────────────────────────────────────────────────────
+
+def ui_pfm():
+    """Personal Financial Management - Track income, expenses, assets, liabilities with P&L and Balance Sheet reporting."""
+    # Persist the current tab selection
+    st.session_state.active_main_tab = "Personal Finance"
+    
+    user_id = st.session_state.get("user_id")
+    if not user_id:
+        st.warning("Please log in to access Personal Financial Management.")
+        return
+
+    # ─────────────────────────────────────────────────────────────────
+    # CALLBACK FUNCTIONS for seamless add/delete (avoids explicit rerun)
+    # ─────────────────────────────────────────────────────────────────
+    def add_income():
+        if "pfm_income_items" not in st.session_state:
+            st.session_state.pfm_income_items = []
+        st.session_state.pfm_income_items.append({"category": "", "monthly": 0.0})
+    
+    def add_expense():
+        if "pfm_expense_items" not in st.session_state:
+            st.session_state.pfm_expense_items = []
+        st.session_state.pfm_expense_items.append({"category": "", "monthly": 0.0, "is_finance_cost": False, "is_gna": False})
+    
+    def add_real_estate():
+        if "pfm_real_estate" not in st.session_state:
+            st.session_state.pfm_real_estate = []
+        st.session_state.pfm_real_estate.append({"category": "Residential", "name": "", "qty": 1, "price": 0, "currency": "KWD", "value_kwd": 0})
+    
+    def add_share():
+        if "pfm_shares" not in st.session_state:
+            st.session_state.pfm_shares = []
+        st.session_state.pfm_shares.append({"ticker": "", "name": "", "qty": 0, "price": 0, "currency": "KWD"})
+    
+    def add_gold():
+        if "pfm_gold" not in st.session_state:
+            st.session_state.pfm_gold = []
+        st.session_state.pfm_gold.append({"category": "Bars", "name": "", "qty": 0, "price": 0, "currency": "KWD", "value_kwd": 0})
+    
+    def add_cash():
+        if "pfm_cash" not in st.session_state:
+            st.session_state.pfm_cash = []
+        st.session_state.pfm_cash.append({"category": "Bank Account", "name": "", "amount": 0, "currency": "KWD", "value_kwd": 0})
+    
+    def add_crypto():
+        if "pfm_crypto" not in st.session_state:
+            st.session_state.pfm_crypto = []
+        st.session_state.pfm_crypto.append({"name": "", "qty": 0, "price": 0, "currency": "USD", "value_kwd": 0})
+    
+    def add_other():
+        if "pfm_other_assets" not in st.session_state:
+            st.session_state.pfm_other_assets = []
+        st.session_state.pfm_other_assets.append({"category": "Other", "name": "", "value_kwd": 0})
+    
+    def add_liability():
+        if "pfm_liabilities" not in st.session_state:
+            st.session_state.pfm_liabilities = []
+        st.session_state.pfm_liabilities.append({"category": "Other", "amount_kwd": 0, "is_current": False, "is_long_term": True})
+
+    # Delete callbacks - use session state to track which item to delete
+    def delete_item(list_key: str, index: int):
+        """Generic delete function for any PFM list."""
+        if list_key in st.session_state and 0 <= index < len(st.session_state[list_key]):
+            st.session_state[list_key].pop(index)
+    st.header("💰 Personal Financial Management")
+    st.markdown("Track your complete financial picture: income, expenses, assets, and liabilities. Generate P&L statements, balance sheets, and analyze growth over time.")
+
+    # Sub-tabs for PFM sections
+    pfm_tabs = st.tabs(["📝 Data Entry", "📊 P&L Statement", "📋 Balance Sheet", "📈 Ratios & Growth"])
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # TAB 1: DATA ENTRY (Form-based to prevent refresh while typing)
+    # ═══════════════════════════════════════════════════════════════════════════
+    with pfm_tabs[0]:
+        st.subheader("📝 Financial Data Entry")
+        
+        # --- Configuration outside form (for immediate UI updates) ---
+        col_config1, col_config2, col_config3 = st.columns([1, 1, 1])
+        with col_config1:
+            snapshot_date = st.date_input("Snapshot Date", value=datetime.today(), key="pfm_snapshot_date")
+        with col_config2:
+            snapshot_notes = st.text_input("Notes", key="pfm_snapshot_notes", placeholder="e.g., Year-end snapshot 2024")
+        with col_config3:
+            shares_mode = st.radio("Shares Mode", ["Manual Entry", "Auto-Import Portfolio"], horizontal=True, key="pfm_shares_mode")
+
+        # Check for existing snapshot
+        conn = get_conn()
+        existing_snapshot = None
+        try:
+            cur = conn.cursor()
+            db_execute(cur, """
+                SELECT id, notes FROM pfm_snapshots 
+                WHERE user_id = ? AND snapshot_date = ?
+            """, (user_id, str(snapshot_date)))
+            row = cur.fetchone()
+            if row:
+                existing_snapshot = {"id": row[0], "notes": row[1]}
+        except:
+            pass
+        finally:
+            conn.close()
+
+        if existing_snapshot:
+            col_info, col_del = st.columns([4, 1])
+            with col_info:
+                st.info(f"📌 Editing existing snapshot for {snapshot_date}")
+            with col_del:
+                if st.button("🗑️ Delete Snapshot", type="secondary", key="delete_snapshot"):
+                    try:
+                        conn = get_conn()
+                        cur = conn.cursor()
+                        db_execute(cur, "DELETE FROM pfm_income_expense_items WHERE snapshot_id = ?", (existing_snapshot["id"],))
+                        db_execute(cur, "DELETE FROM pfm_asset_items WHERE snapshot_id = ?", (existing_snapshot["id"],))
+                        db_execute(cur, "DELETE FROM pfm_liability_items WHERE snapshot_id = ?", (existing_snapshot["id"],))
+                        db_execute(cur, "DELETE FROM pfm_snapshots WHERE id = ?", (existing_snapshot["id"],))
+                        conn.commit()
+                        conn.close()
+                        for key in list(st.session_state.keys()):
+                            if key.startswith("pfm_"):
+                                del st.session_state[key]
+                        st.success(f"✅ Snapshot deleted!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error: {e}")
+
+        # --- Load existing data or set defaults ---
+        default_income = [
+            {"Category": "Salary", "Monthly (KWD)": 0.0},
+            {"Category": "Rental Income", "Monthly (KWD)": 0.0},
+            {"Category": "Dividends", "Monthly (KWD)": 0.0},
+            {"Category": "Side Business", "Monthly (KWD)": 0.0},
+        ]
+        default_expense = [
+            {"Category": "Housing/Rent", "Monthly (KWD)": 0.0, "Finance Cost": False, "G&A": False},
+            {"Category": "Utilities", "Monthly (KWD)": 0.0, "Finance Cost": False, "G&A": False},
+            {"Category": "Food & Groceries", "Monthly (KWD)": 0.0, "Finance Cost": False, "G&A": False},
+            {"Category": "Transportation", "Monthly (KWD)": 0.0, "Finance Cost": False, "G&A": False},
+            {"Category": "Loan Interest", "Monthly (KWD)": 0.0, "Finance Cost": True, "G&A": False},
+        ]
+        default_real_estate = [{"Name": "", "Value (KWD)": 0.0}]
+        default_shares = [{"Ticker": "", "Name": "", "Qty": 0.0, "Price": 0.0, "Currency": "KWD"}]
+        default_gold = [{"Type": "Bars", "Grams": 0.0, "Price/Gram (KWD)": 0.0}]
+        default_cash = [{"Account": "", "Amount": 0.0, "Currency": "KWD"}]
+        default_crypto = [{"Coin": "", "Qty": 0.0, "Price (USD)": 0.0}]
+        default_liabilities = [
+            {"Category": "Credit Card", "Amount (KWD)": 0.0, "Type": "Current"},
+            {"Category": "Bank Loan", "Amount (KWD)": 0.0, "Type": "Long-term"},
+        ]
+
+        # Load from database if editing existing snapshot
+        if existing_snapshot:
+            snap_id = existing_snapshot["id"]
+            conn = get_conn()
+            cur = conn.cursor()
+            
+            # Load income
+            db_execute(cur, "SELECT category, monthly_amount FROM pfm_income_expense_items WHERE snapshot_id = ? AND kind = 'income' ORDER BY id", (snap_id,))
+            income_rows = cur.fetchall()
+            if income_rows:
+                default_income = [{"Category": r[0], "Monthly (KWD)": float(r[1])} for r in income_rows]
+            
+            # Load expenses
+            db_execute(cur, "SELECT category, monthly_amount, is_finance_cost, is_gna FROM pfm_income_expense_items WHERE snapshot_id = ? AND kind = 'expense' ORDER BY id", (snap_id,))
+            expense_rows = cur.fetchall()
+            if expense_rows:
+                default_expense = [{"Category": r[0], "Monthly (KWD)": float(r[1]), "Finance Cost": bool(r[2]), "G&A": bool(r[3])} for r in expense_rows]
+            
+            # Load assets
+            db_execute(cur, "SELECT asset_type, category, name, quantity, price, currency, value_kwd FROM pfm_asset_items WHERE snapshot_id = ? ORDER BY asset_type, id", (snap_id,))
+            asset_rows = cur.fetchall()
+            
+            re_data, shares_data, gold_data, cash_data, crypto_data = [], [], [], [], []
+            for r in asset_rows:
+                atype, cat, name, qty, price, curr, val = r
+                if atype == "real_estate":
+                    re_data.append({"Name": name or cat, "Value (KWD)": float(val or 0)})
+                elif atype == "shares":
+                    shares_data.append({"Ticker": cat, "Name": name, "Qty": float(qty or 0), "Price": float(price or 0), "Currency": curr or "KWD"})
+                elif atype == "gold":
+                    gold_data.append({"Type": cat, "Grams": float(qty or 0), "Price/Gram (KWD)": float(price or 0)})
+                elif atype == "cash":
+                    cash_data.append({"Account": name or cat, "Amount": float(qty or 0), "Currency": curr or "KWD"})
+                elif atype == "crypto":
+                    crypto_data.append({"Coin": name, "Qty": float(qty or 0), "Price (USD)": float(price or 0)})
+            
+            if re_data: default_real_estate = re_data
+            if shares_data: default_shares = shares_data
+            if gold_data: default_gold = gold_data
+            if cash_data: default_cash = cash_data
+            if crypto_data: default_crypto = crypto_data
+            
+            # Load liabilities
+            db_execute(cur, "SELECT category, amount_kwd, is_current, is_long_term FROM pfm_liability_items WHERE snapshot_id = ? ORDER BY id", (snap_id,))
+            liab_rows = cur.fetchall()
+            if liab_rows:
+                default_liabilities = [{"Category": r[0], "Amount (KWD)": float(r[1]), "Type": "Current" if r[2] else "Long-term"} for r in liab_rows]
+            
+            conn.close()
+
+        # ═══════════════════════════════════════════════════════════════════
+        # FORM: Batch all inputs to prevent refresh while typing
+        # ═══════════════════════════════════════════════════════════════════
+        with st.form("pfm_data_entry_form"):
+            # --- INCOME & EXPENSES ---
+            st.markdown("### 💵 Income & Expenses (Monthly)")
+            col_inc, col_exp = st.columns(2)
+            
+            with col_inc:
+                st.markdown("#### 📈 Income Sources")
+                income_df = st.data_editor(
+                    pd.DataFrame(default_income),
+                    num_rows="dynamic",
+                    use_container_width=True,
+                    key="pfm_income_editor",
+                    column_config={
+                        "Category": st.column_config.TextColumn(width="medium"),
+                        "Monthly (KWD)": st.column_config.NumberColumn(format="%.3f", min_value=0)
+                    }
+                )
+            
+            with col_exp:
+                st.markdown("#### 📉 Expenses")
+                expense_df = st.data_editor(
+                    pd.DataFrame(default_expense),
+                    num_rows="dynamic",
+                    use_container_width=True,
+                    key="pfm_expense_editor",
+                    column_config={
+                        "Category": st.column_config.TextColumn(width="medium"),
+                        "Monthly (KWD)": st.column_config.NumberColumn(format="%.3f", min_value=0),
+                        "Finance Cost": st.column_config.CheckboxColumn(width="small"),
+                        "G&A": st.column_config.CheckboxColumn(width="small")
+                    }
+                )
+
+            # Summary metrics
+            total_income = income_df["Monthly (KWD)"].sum() if not income_df.empty else 0
+            total_expense = expense_df["Monthly (KWD)"].sum() if not expense_df.empty else 0
+            net_monthly = total_income - total_expense
+            
+            col_m1, col_m2, col_m3 = st.columns(3)
+            with col_m1:
+                st.metric("Monthly Income", f"{total_income:,.2f} KWD")
+            with col_m2:
+                st.metric("Monthly Expenses", f"{total_expense:,.2f} KWD")
+            with col_m3:
+                st.metric("Net Monthly", f"{net_monthly:,.2f} KWD", delta=f"{(net_monthly/total_income*100) if total_income else 0:.1f}%")
+
+            st.divider()
+
+            # --- ASSETS & LIABILITIES ---
+            st.markdown("### 🏦 Assets & Liabilities")
+            
+            asset_tabs = st.tabs(["🏡 Real Estate", "📈 Shares", "🪙 Gold", "💵 Cash", "₿ Crypto", "💳 Liabilities"])
+            
+            # Real Estate
+            with asset_tabs[0]:
+                re_df = st.data_editor(
+                    pd.DataFrame(default_real_estate),
+                    num_rows="dynamic",
+                    use_container_width=True,
+                    key="pfm_re_editor",
+                    column_config={
+                        "Name": st.column_config.TextColumn(width="large"),
+                        "Value (KWD)": st.column_config.NumberColumn(format="%.3f", min_value=0)
+                    }
+                )
+                re_total = re_df["Value (KWD)"].sum() if not re_df.empty and "Value (KWD)" in re_df.columns else 0
+                st.markdown(f"**Total Real Estate:** {re_total:,.2f} KWD")
+
+            # Shares
+            with asset_tabs[1]:
+                if shares_mode == "Auto-Import Portfolio":
+                    st.info("📊 Shares will be auto-imported from your portfolio holdings at current market values.")
+                    # Calculate portfolio value
+                    try:
+                        conn = get_conn()
+                        cur = conn.cursor()
+                        db_execute(cur, """
+                            SELECT s.symbol, s.name, 
+                                   COALESCE(SUM(CASE WHEN t.txn_type='Buy' THEN t.shares ELSE 0 END) - 
+                                            SUM(CASE WHEN t.txn_type='Sell' THEN t.shares ELSE 0 END), 0) as shares,
+                                   s.current_price, s.currency
+                            FROM stocks s
+                            LEFT JOIN transactions t ON s.symbol = t.stock_symbol AND t.user_id = ?
+                            WHERE s.user_id = ?
+                            GROUP BY s.symbol, s.name, s.current_price, s.currency
+                            HAVING shares > 0
+                        """, (user_id, user_id))
+                        portfolio_rows = cur.fetchall()
+                        conn.close()
+                        
+                        if portfolio_rows:
+                            port_data = []
+                            total_port = 0.0
+                            for row in portfolio_rows:
+                                ticker, name, qty, price, curr = row
+                                qty = float(qty) if qty else 0
+                                price = float(price) if price else 0
+                                val = qty * price
+                                val_kwd = convert_to_kwd(val, curr) if curr != "KWD" else val
+                                total_port += val_kwd
+                                port_data.append({"Ticker": ticker, "Company": name, "Shares": qty, "Price": price, "Value (KWD)": val_kwd})
+                            
+                            st.dataframe(pd.DataFrame(port_data), use_container_width=True)
+                            st.markdown(f"**Total Portfolio Value:** {total_port:,.2f} KWD")
+                            shares_df = pd.DataFrame([{"auto_import": True, "value": total_port}])
+                        else:
+                            st.warning("No portfolio holdings found.")
+                            shares_df = pd.DataFrame()
+                    except Exception as e:
+                        st.error(f"Error loading portfolio: {e}")
+                        shares_df = pd.DataFrame()
+                else:
+                    shares_df = st.data_editor(
+                        pd.DataFrame(default_shares),
+                        num_rows="dynamic",
+                        use_container_width=True,
+                        key="pfm_shares_editor",
+                        column_config={
+                            "Ticker": st.column_config.TextColumn(width="small"),
+                            "Name": st.column_config.TextColumn(width="medium"),
+                            "Qty": st.column_config.NumberColumn(format="%.0f", min_value=0),
+                            "Price": st.column_config.NumberColumn(format="%.3f", min_value=0),
+                            "Currency": st.column_config.SelectboxColumn(options=["KWD", "USD", "SAR", "AED", "BHD", "OMR", "QAR"])
+                        }
+                    )
+                    if not shares_df.empty and "Qty" in shares_df.columns and "Price" in shares_df.columns:
+                        shares_df["Value"] = shares_df["Qty"] * shares_df["Price"]
+                        shares_total = shares_df["Value"].sum()
+                        st.markdown(f"**Total Shares Value:** {shares_total:,.2f}")
+
+            # Gold
+            with asset_tabs[2]:
+                gold_df = st.data_editor(
+                    pd.DataFrame(default_gold),
+                    num_rows="dynamic",
+                    use_container_width=True,
+                    key="pfm_gold_editor",
+                    column_config={
+                        "Type": st.column_config.SelectboxColumn(options=["Bars", "Coins", "Jewelry", "Other"]),
+                        "Grams": st.column_config.NumberColumn(format="%.2f", min_value=0),
+                        "Price/Gram (KWD)": st.column_config.NumberColumn(format="%.3f", min_value=0)
+                    }
+                )
+                if not gold_df.empty and "Grams" in gold_df.columns:
+                    gold_df["Value (KWD)"] = gold_df["Grams"] * gold_df["Price/Gram (KWD)"]
+                    gold_total = gold_df["Value (KWD)"].sum()
+                    st.markdown(f"**Total Gold Value:** {gold_total:,.2f} KWD")
+
+            # Cash
+            with asset_tabs[3]:
+                cash_df = st.data_editor(
+                    pd.DataFrame(default_cash),
+                    num_rows="dynamic",
+                    use_container_width=True,
+                    key="pfm_cash_editor",
+                    column_config={
+                        "Account": st.column_config.TextColumn(width="medium"),
+                        "Amount": st.column_config.NumberColumn(format="%.3f", min_value=0),
+                        "Currency": st.column_config.SelectboxColumn(options=["KWD", "USD", "SAR", "AED", "BHD", "OMR", "QAR"])
+                    }
+                )
+                cash_total = 0.0
+                if not cash_df.empty and "Amount" in cash_df.columns:
+                    for _, row in cash_df.iterrows():
+                        amt = float(row.get("Amount", 0) or 0)
+                        curr = row.get("Currency", "KWD")
+                        cash_total += convert_to_kwd(amt, curr) if curr != "KWD" else amt
+                    st.markdown(f"**Total Cash:** {cash_total:,.2f} KWD")
+
+            # Crypto
+            with asset_tabs[4]:
+                usd_rate = 0.307
+                st.caption(f"Conversion Rate: 1 USD = {usd_rate} KWD")
+                crypto_df = st.data_editor(
+                    pd.DataFrame(default_crypto),
+                    num_rows="dynamic",
+                    use_container_width=True,
+                    key="pfm_crypto_editor",
+                    column_config={
+                        "Coin": st.column_config.TextColumn(width="small"),
+                        "Qty": st.column_config.NumberColumn(format="%.6f", min_value=0),
+                        "Price (USD)": st.column_config.NumberColumn(format="%.2f", min_value=0)
+                    }
+                )
+                if not crypto_df.empty and "Qty" in crypto_df.columns:
+                    crypto_df["Value (KWD)"] = crypto_df["Qty"] * crypto_df["Price (USD)"] * usd_rate
+                    crypto_total = crypto_df["Value (KWD)"].sum()
+                    st.markdown(f"**Total Crypto:** {crypto_total:,.2f} KWD")
+
+            # Liabilities
+            with asset_tabs[5]:
+                liab_df = st.data_editor(
+                    pd.DataFrame(default_liabilities),
+                    num_rows="dynamic",
+                    use_container_width=True,
+                    key="pfm_liab_editor",
+                    column_config={
+                        "Category": st.column_config.TextColumn(width="medium"),
+                        "Amount (KWD)": st.column_config.NumberColumn(format="%.3f", min_value=0),
+                        "Type": st.column_config.SelectboxColumn(options=["Current", "Long-term"])
+                    }
+                )
+                liab_total = liab_df["Amount (KWD)"].sum() if not liab_df.empty and "Amount (KWD)" in liab_df.columns else 0
+                st.markdown(f"**Total Liabilities:** {liab_total:,.2f} KWD")
+
+            st.divider()
+            
+            # Submit button
+            submitted = st.form_submit_button("💾 Save Financial Snapshot", type="primary", use_container_width=True)
+
+        # ═══════════════════════════════════════════════════════════════════
+        # HANDLE FORM SUBMISSION (Outside the form)
+        # ═══════════════════════════════════════════════════════════════════
+        if submitted:
+            try:
+                conn = get_conn()
+                cur = conn.cursor()
+                
+                # Get or create snapshot
+                db_execute(cur, "SELECT id FROM pfm_snapshots WHERE user_id = ? AND snapshot_date = ?", (user_id, str(snapshot_date)))
+                row = cur.fetchone()
+                
+                if row:
+                    snapshot_id = row[0]
+                    # Clear existing data
+                    db_execute(cur, "DELETE FROM pfm_income_expense_items WHERE snapshot_id = ?", (snapshot_id,))
+                    db_execute(cur, "DELETE FROM pfm_asset_items WHERE snapshot_id = ?", (snapshot_id,))
+                    db_execute(cur, "DELETE FROM pfm_liability_items WHERE snapshot_id = ?", (snapshot_id,))
+                else:
+                    db_execute(cur, """
+                        INSERT INTO pfm_snapshots (user_id, snapshot_date, notes, created_at)
+                        VALUES (?, ?, ?, ?)
+                    """, (user_id, str(snapshot_date), snapshot_notes, int(time.time())))
+                    snapshot_id = cur.lastrowid
+                
+                # Save income items
+                for _, row in income_df.iterrows():
+                    cat = str(row.get("Category", "")).strip()
+                    amt = float(row.get("Monthly (KWD)", 0) or 0)
+                    if cat and amt > 0:
+                        db_execute(cur, """
+                            INSERT INTO pfm_income_expense_items (snapshot_id, user_id, kind, category, monthly_amount, is_finance_cost, is_gna)
+                            VALUES (?, ?, 'income', ?, ?, 0, 0)
+                        """, (snapshot_id, user_id, cat, amt))
+                
+                # Save expense items
+                for _, row in expense_df.iterrows():
+                    cat = str(row.get("Category", "")).strip()
+                    amt = float(row.get("Monthly (KWD)", 0) or 0)
+                    fin = 1 if row.get("Finance Cost", False) else 0
+                    gna = 1 if row.get("G&A", False) else 0
+                    if cat and amt > 0:
+                        db_execute(cur, """
+                            INSERT INTO pfm_income_expense_items (snapshot_id, user_id, kind, category, monthly_amount, is_finance_cost, is_gna)
+                            VALUES (?, ?, 'expense', ?, ?, ?, ?)
+                        """, (snapshot_id, user_id, cat, amt, fin, gna))
+                
+                # Save real estate
+                for _, row in re_df.iterrows():
+                    name = str(row.get("Name", "")).strip()
+                    val = float(row.get("Value (KWD)", 0) or 0)
+                    if val > 0:
+                        db_execute(cur, """
+                            INSERT INTO pfm_asset_items (snapshot_id, user_id, asset_type, category, name, quantity, price, currency, value_kwd)
+                            VALUES (?, ?, 'real_estate', 'Real Estate', ?, 1, ?, 'KWD', ?)
+                        """, (snapshot_id, user_id, name, val, val))
+                
+                # Save shares
+                if shares_mode == "Auto-Import Portfolio" and not shares_df.empty and "auto_import" in shares_df.columns:
+                    val = float(shares_df["value"].iloc[0])
+                    if val > 0:
+                        db_execute(cur, """
+                            INSERT INTO pfm_asset_items (snapshot_id, user_id, asset_type, category, name, quantity, price, currency, value_kwd)
+                            VALUES (?, ?, 'shares', 'Portfolio', 'Auto-imported', 1, ?, 'KWD', ?)
+                        """, (snapshot_id, user_id, val, val))
+                elif not shares_df.empty and "Ticker" in shares_df.columns:
+                    for _, row in shares_df.iterrows():
+                        ticker = str(row.get("Ticker", "")).strip()
+                        name = str(row.get("Name", "")).strip()
+                        qty = float(row.get("Qty", 0) or 0)
+                        price = float(row.get("Price", 0) or 0)
+                        curr = row.get("Currency", "KWD")
+                        val = qty * price
+                        val_kwd = convert_to_kwd(val, curr) if curr != "KWD" else val
+                        if val_kwd > 0:
+                            db_execute(cur, """
+                                INSERT INTO pfm_asset_items (snapshot_id, user_id, asset_type, category, name, quantity, price, currency, value_kwd)
+                                VALUES (?, ?, 'shares', ?, ?, ?, ?, ?, ?)
+                            """, (snapshot_id, user_id, ticker, name, qty, price, curr, val_kwd))
+                
+                # Save gold
+                if not gold_df.empty and "Grams" in gold_df.columns:
+                    for _, row in gold_df.iterrows():
+                        gtype = row.get("Type", "Bars")
+                        grams = float(row.get("Grams", 0) or 0)
+                        price = float(row.get("Price/Gram (KWD)", 0) or 0)
+                        val = grams * price
+                        if val > 0:
+                            db_execute(cur, """
+                                INSERT INTO pfm_asset_items (snapshot_id, user_id, asset_type, category, name, quantity, price, currency, value_kwd)
+                                VALUES (?, ?, 'gold', ?, '', ?, ?, 'KWD', ?)
+                            """, (snapshot_id, user_id, gtype, grams, price, val))
+                
+                # Save cash
+                if not cash_df.empty and "Amount" in cash_df.columns:
+                    for _, row in cash_df.iterrows():
+                        acc = str(row.get("Account", "")).strip()
+                        amt = float(row.get("Amount", 0) or 0)
+                        curr = row.get("Currency", "KWD")
+                        val_kwd = convert_to_kwd(amt, curr) if curr != "KWD" else amt
+                        if val_kwd > 0:
+                            db_execute(cur, """
+                                INSERT INTO pfm_asset_items (snapshot_id, user_id, asset_type, category, name, quantity, price, currency, value_kwd)
+                                VALUES (?, ?, 'cash', ?, ?, ?, 1, ?, ?)
+                            """, (snapshot_id, user_id, acc, acc, amt, curr, val_kwd))
+                
+                # Save crypto
+                if not crypto_df.empty and "Qty" in crypto_df.columns:
+                    for _, row in crypto_df.iterrows():
+                        coin = str(row.get("Coin", "")).strip()
+                        qty = float(row.get("Qty", 0) or 0)
+                        price = float(row.get("Price (USD)", 0) or 0)
+                        val_kwd = qty * price * 0.307
+                        if val_kwd > 0:
+                            db_execute(cur, """
+                                INSERT INTO pfm_asset_items (snapshot_id, user_id, asset_type, category, name, quantity, price, currency, value_kwd)
+                                VALUES (?, ?, 'crypto', '', ?, ?, ?, 'USD', ?)
+                            """, (snapshot_id, user_id, coin, qty, price, val_kwd))
+                
+                # Save liabilities
+                if not liab_df.empty and "Amount (KWD)" in liab_df.columns:
+                    for _, row in liab_df.iterrows():
+                        cat = str(row.get("Category", "")).strip()
+                        amt = float(row.get("Amount (KWD)", 0) or 0)
+                        ltype = row.get("Type", "Current")
+                        is_current = 1 if ltype == "Current" else 0
+                        is_long = 1 if ltype == "Long-term" else 0
+                        if amt > 0:
+                            db_execute(cur, """
+                                INSERT INTO pfm_liability_items (snapshot_id, user_id, category, amount_kwd, is_current, is_long_term)
+                                VALUES (?, ?, ?, ?, ?, ?)
+                            """, (snapshot_id, user_id, cat, amt, is_current, is_long))
+                
+                conn.commit()
+                conn.close()
+                
+                st.success(f"✅ Financial snapshot saved for {snapshot_date}!")
+                st.balloons()
+                time.sleep(1)
+                st.rerun()
+                
+            except Exception as e:
+                st.error(f"Error saving snapshot: {e}")
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # TAB 2: P&L STATEMENT
+    # ═══════════════════════════════════════════════════════════════════════════
+    with pfm_tabs[1]:
+        st.subheader("📊 Profit & Loss Statement")
+        
+        # Load all snapshots for user
+        conn = get_conn()
+        try:
+            cur = conn.cursor()
+            db_execute(cur, """
+                SELECT id, snapshot_date, notes FROM pfm_snapshots
+                WHERE user_id = ?
+                ORDER BY snapshot_date DESC
+            """, (user_id,))
+            snapshots = cur.fetchall()
+        except:
+            snapshots = []
+        finally:
+            conn.close()
+
+        if not snapshots:
+            st.info("No financial snapshots found. Create one in the Data Entry tab.")
+        else:
+            # Select snapshots to compare
+            snapshot_options = {f"{s[1]} - {s[2] if s[2] else 'No notes'}": s[0] for s in snapshots}
+            selected_dates = st.multiselect("Select Snapshots to Compare", list(snapshot_options.keys()), 
+                default=list(snapshot_options.keys())[:min(3, len(snapshot_options))])
+
+            if selected_dates:
+                # Build P&L for each selected snapshot
+                pnl_data = {}
+                for date_label in selected_dates:
+                    snap_id = snapshot_options[date_label]
+                    snap_date = date_label.split(" - ")[0]
+                    
+                    conn = get_conn()
+                    cur = conn.cursor()
+                    
+                    # Get income
+                    db_execute(cur, """
+                        SELECT category, monthly_amount FROM pfm_income_expense_items
+                        WHERE snapshot_id = ? AND kind = 'income'
+                    """, (snap_id,))
+                    income_rows = cur.fetchall()
+                    
+                    # Get expenses
+                    db_execute(cur, """
+                        SELECT category, monthly_amount, is_finance_cost, is_gna FROM pfm_income_expense_items
+                        WHERE snapshot_id = ? AND kind = 'expense'
+                    """, (snap_id,))
+                    expense_rows = cur.fetchall()
+                    conn.close()
+
+                    total_income = sum(r[1] for r in income_rows) * 12
+                    total_expense = sum(r[1] for r in expense_rows) * 12
+                    finance_costs = sum(r[1] for r in expense_rows if r[2]) * 12
+                    gna_costs = sum(r[1] for r in expense_rows if r[3]) * 12
+                    operating_expense = total_expense - finance_costs
+                    gross_profit = total_income - operating_expense + finance_costs
+                    operating_profit = total_income - operating_expense
+                    net_income = total_income - total_expense
+
+                    pnl_data[snap_date] = {
+                        "Total Revenue": total_income,
+                        "Operating Expenses": operating_expense,
+                        "Gross Profit": gross_profit,
+                        "G&A Expenses": gna_costs,
+                        "Operating Profit (EBIT)": operating_profit,
+                        "Finance Costs": finance_costs,
+                        "Net Income": net_income,
+                        "Net Margin %": (net_income / total_income * 100) if total_income else 0
+                    }
+
+                # Create P&L DataFrame
+                pnl_df = pd.DataFrame(pnl_data).T
+                pnl_df = pnl_df.T  # Transpose for better display
+                
+                # Format for display
+                display_df = pnl_df.copy()
+                for col in display_df.columns:
+                    display_df[col] = display_df[col].apply(lambda x: f"{x:,.2f}" if pd.notna(x) else "")
+                
+                st.markdown("#### Annual P&L Summary (KWD)")
+                render_styled_table(display_df.reset_index().rename(columns={"index": "Line Item"}), "P&L Statement")
+
+                # Show chart
+                if len(selected_dates) > 1:
+                    chart_data = pd.DataFrame({
+                        "Date": list(pnl_data.keys()),
+                        "Revenue": [pnl_data[d]["Total Revenue"] for d in pnl_data],
+                        "Net Income": [pnl_data[d]["Net Income"] for d in pnl_data]
+                    })
+                    st.line_chart(chart_data.set_index("Date"))
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # TAB 3: BALANCE SHEET
+    # ═══════════════════════════════════════════════════════════════════════════
+    with pfm_tabs[2]:
+        st.subheader("📋 Balance Sheet & Net Worth")
+
+        conn = get_conn()
+        try:
+            cur = conn.cursor()
+            db_execute(cur, """
+                SELECT id, snapshot_date, notes FROM pfm_snapshots
+                WHERE user_id = ?
+                ORDER BY snapshot_date DESC
+            """, (user_id,))
+            snapshots = cur.fetchall()
+        except:
+            snapshots = []
+        finally:
+            conn.close()
+
+        if not snapshots:
+            st.info("No financial snapshots found. Create one in the Data Entry tab.")
+        else:
+            snapshot_options = {f"{s[1]} - {s[2] if s[2] else 'No notes'}": s[0] for s in snapshots}
+            selected_dates = st.multiselect("Select Snapshots", list(snapshot_options.keys()), 
+                default=list(snapshot_options.keys())[:min(3, len(snapshot_options))], key="bs_snapshots")
+
+            if selected_dates:
+                bs_data = {}
+                for date_label in selected_dates:
+                    snap_id = snapshot_options[date_label]
+                    snap_date = date_label.split(" - ")[0]
+                    
+                    conn = get_conn()
+                    cur = conn.cursor()
+                    
+                    # Get assets by type
+                    db_execute(cur, """
+                        SELECT asset_type, SUM(value_kwd) FROM pfm_asset_items
+                        WHERE snapshot_id = ?
+                        GROUP BY asset_type
+                    """, (snap_id,))
+                    asset_rows = cur.fetchall()
+                    assets = {r[0]: float(r[1]) for r in asset_rows}
+                    
+                    # Get liabilities
+                    db_execute(cur, """
+                        SELECT SUM(CASE WHEN is_current = 1 THEN amount_kwd ELSE 0 END),
+                               SUM(CASE WHEN is_long_term = 1 THEN amount_kwd ELSE 0 END)
+                        FROM pfm_liability_items
+                        WHERE snapshot_id = ?
+                    """, (snap_id,))
+                    liab_row = cur.fetchone()
+                    current_liab = float(liab_row[0] or 0) if liab_row else 0
+                    long_term_liab = float(liab_row[1] or 0) if liab_row else 0
+                    conn.close()
+
+                    total_assets = sum(assets.values())
+                    total_liab = current_liab + long_term_liab
+                    net_worth = total_assets - total_liab
+
+                    # Cash includes cash and crypto as liquid
+                    liquid_assets = assets.get("cash", 0) + assets.get("crypto", 0)
+
+                    bs_data[snap_date] = {
+                        "Real Estate": assets.get("real_estate", 0),
+                        "Shares/Investments": assets.get("shares", 0),
+                        "Gold": assets.get("gold", 0),
+                        "Cash & Bank": assets.get("cash", 0),
+                        "Crypto": assets.get("crypto", 0),
+                        "Other Assets": assets.get("other", 0),
+                        "TOTAL ASSETS": total_assets,
+                        "---": "---",
+                        "Current Liabilities": current_liab,
+                        "Long-term Liabilities": long_term_liab,
+                        "TOTAL LIABILITIES": total_liab,
+                        "----": "----",
+                        "NET WORTH": net_worth,
+                        "Equity Ratio %": (net_worth / total_assets * 100) if total_assets else 0
+                    }
+
+                # Create Balance Sheet DataFrame
+                bs_df = pd.DataFrame(bs_data).T.T
+                display_df = bs_df.copy()
+                for col in display_df.columns:
+                    display_df[col] = display_df[col].apply(lambda x: f"{x:,.2f}" if isinstance(x, (int, float)) and x not in ["---", "----"] else x)
+                
+                st.markdown("#### Balance Sheet (KWD)")
+                render_styled_table(display_df.reset_index().rename(columns={"index": "Line Item"}), "Balance Sheet")
+
+                # Net Worth Chart
+                if len(selected_dates) > 1:
+                    nw_chart = pd.DataFrame({
+                        "Date": list(bs_data.keys()),
+                        "Net Worth": [bs_data[d]["NET WORTH"] for d in bs_data]
+                    })
+                    st.line_chart(nw_chart.set_index("Date"))
+
+                # Asset Allocation Pie for latest snapshot
+                if bs_data:
+                    latest = list(bs_data.keys())[0]
+                    asset_alloc = {
+                        "Real Estate": bs_data[latest]["Real Estate"],
+                        "Shares": bs_data[latest]["Shares/Investments"],
+                        "Gold": bs_data[latest]["Gold"],
+                        "Cash": bs_data[latest]["Cash & Bank"],
+                        "Crypto": bs_data[latest]["Crypto"],
+                        "Other": bs_data[latest]["Other Assets"]
+                    }
+                    asset_alloc = {k: v for k, v in asset_alloc.items() if v > 0}
+                    if asset_alloc:
+                        st.markdown(f"#### Asset Allocation ({latest})")
+                        alloc_df = pd.DataFrame(list(asset_alloc.items()), columns=["Asset Type", "Value (KWD)"])
+                        alloc_df["Percentage"] = alloc_df["Value (KWD)"] / alloc_df["Value (KWD)"].sum() * 100
+                        render_styled_table(alloc_df, "Asset Allocation")
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # TAB 4: RATIOS & GROWTH
+    # ═══════════════════════════════════════════════════════════════════════════
+    with pfm_tabs[3]:
+        st.subheader("📈 Financial Ratios & Growth Analysis")
+
+        conn = get_conn()
+        try:
+            cur = conn.cursor()
+            db_execute(cur, """
+                SELECT id, snapshot_date, notes FROM pfm_snapshots
+                WHERE user_id = ?
+                ORDER BY snapshot_date ASC
+            """, (user_id,))
+            snapshots = cur.fetchall()
+        except:
+            snapshots = []
+        finally:
+            conn.close()
+
+        if len(snapshots) < 1:
+            st.info("Create financial snapshots to see ratio analysis and growth trends.")
+        else:
+            # Calculate ratios for all snapshots
+            all_metrics = []
+            for snap in snapshots:
+                snap_id, snap_date, notes = snap
+                conn = get_conn()
+                cur = conn.cursor()
+                
+                # Get income/expenses
+                db_execute(cur, """
+                    SELECT kind, SUM(monthly_amount) FROM pfm_income_expense_items
+                    WHERE snapshot_id = ?
+                    GROUP BY kind
+                """, (snap_id,))
+                ie_rows = {r[0]: float(r[1]) * 12 for r in cur.fetchall()}
+                
+                # Get assets
+                db_execute(cur, """
+                    SELECT asset_type, SUM(value_kwd) FROM pfm_asset_items
+                    WHERE snapshot_id = ?
+                    GROUP BY asset_type
+                """, (snap_id,))
+                assets = {r[0]: float(r[1]) for r in cur.fetchall()}
+                
+                # Get liabilities
+                db_execute(cur, """
+                    SELECT SUM(CASE WHEN is_current = 1 THEN amount_kwd ELSE 0 END),
+                           SUM(CASE WHEN is_long_term = 1 THEN amount_kwd ELSE 0 END),
+                           SUM(amount_kwd)
+                        FROM pfm_liability_items
+                    WHERE snapshot_id = ?
+                """, (snap_id,))
+                liab_row = cur.fetchone()
+                current_liab = float(liab_row[0] or 0) if liab_row else 0
+                long_term_liab = float(liab_row[1] or 0) if liab_row else 0
+                total_liab = float(liab_row[2] or 0) if liab_row else 0
+                conn.close()
+
+                total_income = ie_rows.get("income", 0)
+                total_expense = ie_rows.get("expense", 0)
+                net_income = total_income - total_expense
+                total_assets = sum(assets.values())
+                net_worth = total_assets - total_liab
+                liquid_assets = assets.get("cash", 0) + assets.get("crypto", 0)
+
+                # Calculate ratios
+                current_ratio = liquid_assets / current_liab if current_liab > 0 else float('inf')
+                debt_to_equity = total_liab / net_worth if net_worth > 0 else float('inf')
+                debt_to_assets = total_liab / total_assets if total_assets > 0 else 0
+                roe = (net_income / net_worth * 100) if net_worth > 0 else 0
+                roa = (net_income / total_assets * 100) if total_assets > 0 else 0
+                savings_rate = (net_income / total_income * 100) if total_income > 0 else 0
+
+                all_metrics.append({
+                    "Date": str(snap_date),
+                    "Total Income": total_income,
+                    "Total Expenses": total_expense,
+                    "Net Income": net_income,
+                    "Total Assets": total_assets,
+                    "Total Liabilities": total_liab,
+                    "Net Worth": net_worth,
+                    "Current Ratio": current_ratio if current_ratio != float('inf') else 999,
+                    "Debt/Equity": debt_to_equity if debt_to_equity != float('inf') else 999,
+                    "Debt/Assets %": debt_to_assets * 100,
+                    "ROE %": roe,
+                    "ROA %": roa,
+                    "Savings Rate %": savings_rate
+                })
+
+            metrics_df = pd.DataFrame(all_metrics)
+            
+            # Display ratios table
+            st.markdown("#### Key Financial Ratios")
+            ratio_cols = ["Date", "Current Ratio", "Debt/Equity", "Debt/Assets %", "ROE %", "ROA %", "Savings Rate %"]
+            ratio_display = metrics_df[ratio_cols].copy()
+            for col in ratio_cols[1:]:
+                ratio_display[col] = ratio_display[col].apply(lambda x: f"{x:.2f}" if x < 999 else "∞")
+            render_styled_table(ratio_display, "Financial Ratios")
+
+            # Growth Analysis
+            if len(all_metrics) >= 2:
+                st.markdown("#### Year-over-Year Growth")
+                growth_data = []
+                for i in range(1, len(all_metrics)):
+                    prev = all_metrics[i-1]
+                    curr = all_metrics[i]
+                    
+                    def calc_growth(curr_val, prev_val):
+                        if prev_val == 0:
+                            return 0 if curr_val == 0 else 100
+                        return ((curr_val - prev_val) / abs(prev_val)) * 100
+                    
+                    growth_data.append({
+                        "Period": f"{prev['Date']} → {curr['Date']}",
+                        "Income Growth %": calc_growth(curr["Total Income"], prev["Total Income"]),
+                        "Expense Growth %": calc_growth(curr["Total Expenses"], prev["Total Expenses"]),
+                        "Net Income Growth %": calc_growth(curr["Net Income"], prev["Net Income"]),
+                        "Asset Growth %": calc_growth(curr["Total Assets"], prev["Total Assets"]),
+                        "Net Worth Growth %": calc_growth(curr["Net Worth"], prev["Net Worth"])
+                    })
+
+                growth_df = pd.DataFrame(growth_data)
+                display_growth = growth_df.copy()
+                for col in display_growth.columns[1:]:
+                    display_growth[col] = display_growth[col].apply(lambda x: f"{x:+.1f}%")
+                render_styled_table(display_growth, "Growth Analysis")
+
+                # Growth Charts
+                st.markdown("#### Trends Over Time")
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.line_chart(metrics_df.set_index("Date")[["Total Income", "Total Expenses", "Net Income"]])
+                with col2:
+                    st.line_chart(metrics_df.set_index("Date")[["Total Assets", "Total Liabilities", "Net Worth"]])
+
+            # Quick Health Check
+            st.markdown("---")
+            st.markdown("#### 🏥 Financial Health Check")
+            if all_metrics:
+                latest = all_metrics[-1]
+                
+                checks = []
+                # Emergency fund check (3-6 months expenses in liquid assets)
+                monthly_expense = latest["Total Expenses"] / 12
+                emergency_months = liquid_assets / monthly_expense if monthly_expense > 0 else 0
+                if emergency_months >= 6:
+                    checks.append(("✅", "Emergency Fund", f"{emergency_months:.1f} months of expenses covered"))
+                elif emergency_months >= 3:
+                    checks.append(("⚠️", "Emergency Fund", f"{emergency_months:.1f} months - aim for 6 months"))
+                else:
+                    checks.append(("❌", "Emergency Fund", f"Only {emergency_months:.1f} months - build to 3-6 months"))
+
+                # Savings rate
+                if latest["Savings Rate %"] >= 20:
+                    checks.append(("✅", "Savings Rate", f"{latest['Savings Rate %']:.1f}% - Excellent!"))
+                elif latest["Savings Rate %"] >= 10:
+                    checks.append(("⚠️", "Savings Rate", f"{latest['Savings Rate %']:.1f}% - Good, aim for 20%+"))
+                else:
+                    checks.append(("❌", "Savings Rate", f"{latest['Savings Rate %']:.1f}% - Try to increase savings"))
+
+                # Debt ratio
+                debt_ratio = latest["Debt/Assets %"]
+                if debt_ratio <= 30:
+                    checks.append(("✅", "Debt Level", f"{debt_ratio:.1f}% of assets - Healthy"))
+                elif debt_ratio <= 50:
+                    checks.append(("⚠️", "Debt Level", f"{debt_ratio:.1f}% of assets - Moderate"))
+                else:
+                    checks.append(("❌", "Debt Level", f"{debt_ratio:.1f}% of assets - High, focus on debt reduction"))
+
+                for icon, label, msg in checks:
+                    st.markdown(f"{icon} **{label}:** {msg}")
+
 def main():
     # --- TEMPORARY FIX: Run this once to fix existing prices ---
     try:
@@ -10966,20 +11979,26 @@ def main():
         Click "🔄 Fetch All Prices" in Portfolio Analysis to update stock prices.
         """)
 
-    tabs = st.tabs(
-        [
-            "Overview",
-            "Add Cash Deposit",
-            "Add Transactions",
-            "Portfolio Analysis",
-            "Peer Analysis",
-            "Trading Section",
-            "Portfolio Tracker",
-            "Dividends Tracker",
-            "Planner",
-            "Backup & Restore"
-        ]
-    )
+    tab_names = [
+        "Overview",
+        "Add Cash Deposit",
+        "Add Transactions",
+        "Portfolio Analysis",
+        "Peer Analysis",
+        "Trading Section",
+        "Portfolio Tracker",
+        "Dividends Tracker",
+        "Planner",
+        "Backup & Restore",
+        "Personal Finance"
+    ]
+    
+    # Use default parameter to persist tab selection (Streamlit 1.42+)
+    default_tab = st.session_state.get("active_main_tab", "Overview")
+    if default_tab not in tab_names:
+        default_tab = "Overview"
+    
+    tabs = st.tabs(tab_names, default=default_tab)
 
     with tabs[0]:
         ui_overview()
@@ -11010,6 +12029,9 @@ def main():
         
     with tabs[9]:
         ui_backup_restore()
+
+    with tabs[10]:
+        ui_pfm()
 
     st.caption(f"{get_db_info()} | UI: Streamlit")
 
