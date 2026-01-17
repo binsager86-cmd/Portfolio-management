@@ -6400,128 +6400,99 @@ def ui_portfolio_analysis():
         if st.button("🔄 Fetch All Prices", key="fetch_all_portfolio", use_container_width=True):
             user_id = st.session_state.get('user_id')
             if not user_id:
-                st.error("Please log in to fetch prices.")
+                st.error("Please log in.")
             else:
-                # Only fetch prices for stocks the user is currently holding (shares > 0)
                 try:
-                    stocks_df = query_df("""
-                        SELECT t.stock_symbol as symbol, SUM(
-                            CASE 
-                                WHEN t.txn_type IN ('Buy', 'Bonus', 'Dividend Reinvestment') THEN COALESCE(t.shares, 0) + COALESCE(t.bonus_shares, 0)
-                                WHEN t.txn_type = 'Sell' THEN -COALESCE(t.shares, 0)
-                                ELSE 0
-                            END
-                        ) as total_shares
-                        FROM transactions t
-                        WHERE t.user_id = ?
-                        GROUP BY t.stock_symbol
-                        HAVING SUM(
-                            CASE 
-                                WHEN t.txn_type IN ('Buy', 'Bonus', 'Dividend Reinvestment') THEN COALESCE(t.shares, 0) + COALESCE(t.bonus_shares, 0)
-                                WHEN t.txn_type = 'Sell' THEN -COALESCE(t.shares, 0)
-                                ELSE 0
-                            END
-                        ) > 0
-                        ORDER BY t.stock_symbol ASC
-                    """, (user_id,))
-                except Exception as e:
-                    st.error(f"SQL Error fetching stocks: {e}")
-                    print(f"SQL ERROR in ui_portfolio_analysis: {e}")
-                    stocks_df = pd.DataFrame()
+                    # 1. Fetch Symbol AND Currency from DB
+                    symbols_df = query_df("SELECT symbol, currency FROM stocks WHERE user_id = ?", (user_id,))
+                except Exception:
+                    symbols_df = pd.DataFrame()
                 
-                if stocks_df.empty:
-                    st.info("No stocks currently held in portfolio to update.")
+                if symbols_df.empty:
+                    st.info("No stocks found.")
                 else:
-                    symbols = stocks_df["symbol"].tolist()
+                    # Map Yahoo Ticker -> {DB Symbol, DB Currency}
+                    ticker_map = {}
                     
-                    # Check if yfinance is available
+                    for _, row in symbols_df.iterrows():
+                        db_sym = str(row['symbol']).strip().upper()
+                        # Default to KWD if currency is missing/null
+                        ccy = str(row.get('currency', 'KWD') or 'KWD').strip().upper()
+                        
+                        # Convert to yfinance ticker format
+                        if db_sym.endswith('.KW'):
+                            yf_sym = db_sym
+                        elif ccy == 'KWD' and '.' not in db_sym:
+                            # FORCE .KW suffix for KWD stocks
+                            yf_sym = f"{db_sym}.KW"
+                        else:
+                            yf_sym = db_sym
+                            
+                        ticker_map[yf_sym] = {'symbol': db_sym, 'currency': ccy}
+
+                    unique_yf_tickers = list(ticker_map.keys())
+                    
                     if not YFINANCE_AVAILABLE:
-                        st.error(f"⚠️ yfinance not available: {YFINANCE_ERROR}")
-                        st.info("Please install yfinance: pip install yfinance")
+                        st.error("yfinance not installed.")
                     else:
-                        st.info(f"Fetching prices for {len(symbols)} stocks...")
-                        
-                        # OPTIMIZED: Batch fetch using yf.download() - ~1-2 seconds total vs 1-2 seconds PER stock
-                        import yfinance as yf
-                        
-                        # Convert symbols to yfinance format
-                        unique_yf_tickers = []
-                        symbol_to_yf = {}  # Map original symbol to yfinance ticker
-                        
-                        for sym in symbols:
-                            # Normalize symbol for yfinance
-                            if sym.endswith('.KW'):
-                                yf_ticker = sym  # Kuwait stocks already have .KW
-                            elif '.' not in sym:
-                                # Check if it's a Kuwait stock (common patterns)
-                                yf_ticker = f"{sym}.KW"  # Default to Kuwait
-                            else:
-                                yf_ticker = sym
-                            unique_yf_tickers.append(yf_ticker)
-                            symbol_to_yf[sym] = yf_ticker
-                        
-                        progress_bar = st.progress(0, text="Downloading prices...")
-                        start_time = time.time()
+                        st.info(f"🚀 Batch fetching {len(unique_yf_tickers)} stocks...")
+                        progress = st.progress(0)
                         
                         try:
-                            # Batch download all tickers at once
-                            batch_data = yf.download(
-                                unique_yf_tickers,
-                                period="5d",  # Get 5 days to ensure we have recent data
-                                group_by='ticker',
-                                threads=True,
-                                progress=False
-                            )
+                            import yfinance as yf
                             
-                            progress_bar.progress(50, text="Processing prices...")
+                            # 2. Batch Download
+                            batch_data = yf.download(
+                                unique_yf_tickers, period="5d", group_by='ticker', threads=True, progress=False
+                            )
                             
                             conn = get_conn()
                             cur = conn.cursor()
-                            updated = 0
-                            skipped = 0
-                            failed_symbols = []
+                            success_count = 0
                             success_details = []
+                            failed_symbols = []
                             
-                            for sym in symbols:
-                                yf_ticker = symbol_to_yf[sym]
+                            # 3. Process & Update
+                            for i, yf_tick in enumerate(unique_yf_tickers):
+                                stock_info = ticker_map[yf_tick]
+                                db_symbol = stock_info['symbol']
+                                db_ccy = stock_info['currency']
                                 price = None
                                 
                                 try:
+                                    # Safe Data Access
                                     if len(unique_yf_tickers) == 1:
                                         # Single ticker - batch_data has different structure
                                         if 'Close' in batch_data.columns and not batch_data['Close'].empty:
                                             price = float(batch_data['Close'].dropna().iloc[-1])
                                     else:
                                         # Multiple tickers - access by ticker name
-                                        if yf_ticker in batch_data.columns.get_level_values(0):
-                                            ticker_data = batch_data[yf_ticker]
-                                            if 'Close' in ticker_data.columns and not ticker_data['Close'].dropna().empty:
-                                                price = float(ticker_data['Close'].dropna().iloc[-1])
-                                except Exception as e:
-                                    pass
-                                
-                                if price and price > 0:
-                                    try:
-                                        db_execute(cur, "UPDATE stocks SET current_price = ? WHERE symbol = ? AND user_id = ?", 
-                                                  (float(price), sym, user_id))
-                                        updated += 1
-                                        success_details.append(f"{sym} = {price:.3f}")
-                                    except Exception as e:
-                                        skipped += 1
-                                        failed_symbols.append(f"{sym} (DB error)")
-                                else:
-                                    skipped += 1
-                                    failed_symbols.append(sym)
-                            
+                                        if yf_tick in batch_data.columns.get_level_values(0):
+                                            df_tick = batch_data[yf_tick]
+                                            if 'Close' in df_tick.columns and not df_tick['Close'].dropna().empty:
+                                                price = float(df_tick['Close'].dropna().iloc[-1])
+                                    
+                                    # === CRITICAL FIX ===
+                                    # If DB says KWD but price is huge (>50), it is in Fils.
+                                    # Divide by 1000 to fix.
+                                    if price and db_ccy == 'KWD' and price > 50:
+                                        price = price / 1000.0
+                                            
+                                    if price and price > 0:
+                                        db_execute(cur, "UPDATE stocks SET current_price = ? WHERE symbol = ? AND user_id = ?", (price, db_symbol, user_id))
+                                        success_count += 1
+                                        success_details.append(f"{db_symbol} = {price:.3f} {db_ccy}")
+                                    else:
+                                        failed_symbols.append(db_symbol)
+                                except Exception:
+                                    failed_symbols.append(db_symbol)
+                                progress.progress((i + 1) / len(unique_yf_tickers))
+
                             conn.commit()
                             conn.close()
+                            progress.empty()
                             
-                            elapsed = time.time() - start_time
-                            progress_bar.progress(100, text=f"Done in {elapsed:.1f}s!")
-                            time.sleep(0.5)
-                            progress_bar.empty()
-                            
-                            st.success(f"✅ Prices updated: {updated:,} | ⚠️ Skipped: {skipped:,} | ⏱️ {elapsed:.1f}s")
+                            st.success(f"✅ Updated {success_count} stocks.")
                             
                             if success_details:
                                 with st.expander("✓ Successfully fetched prices"):
@@ -6532,34 +6503,11 @@ def ui_portfolio_analysis():
                                 with st.expander("⚠️ View skipped symbols"):
                                     st.write(", ".join(failed_symbols))
                             
-                        except Exception as e:
-                            progress_bar.empty()
-                            st.error(f"Batch fetch failed: {e}")
-                            st.info("Falling back to individual fetch...")
-                            
-                            # Fallback to individual fetch if batch fails
-                            conn = get_conn()
-                            cur = conn.cursor()
-                            updated = 0
-                            skipped = 0
-                            
-                            for sym in symbols:
-                                price, _ = fetch_price_yfinance(sym)
-                                if price and price > 0:
-                                    db_execute(cur, "UPDATE stocks SET current_price = ? WHERE symbol = ? AND user_id = ?", 
-                                              (float(price), sym, user_id))
-                                    updated += 1
-                                else:
-                                    skipped += 1
-                            
-                            conn.commit()
-                            conn.close()
-                            st.success(f"✅ Updated: {updated} | Skipped: {skipped}")
-                        
-                        try:
+                            time.sleep(1)
                             st.rerun()
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            progress.empty()
+                            st.error(f"Batch fetch failed: {e}")
 
     st.divider()
 
@@ -10773,6 +10721,20 @@ def login_page(cookie_manager=None):
     st.caption(f"{get_db_info()}")
 
 def main():
+    # --- TEMPORARY FIX: Run this once to fix existing prices ---
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        # Find KWD stocks with prices > 50 (impossible for KWD, implies Fils)
+        db_execute(cur, "UPDATE stocks SET current_price = current_price / 1000.0 WHERE currency = 'KWD' AND current_price > 50")
+        if cur.rowcount > 0:
+            st.toast(f"🔧 Auto-repaired {cur.rowcount} stock prices from Fils to KWD!", icon="✅")
+            conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"Fix failed: {e}")
+    # -----------------------------------------------------------
+    
     # Initialize database schema (handles both SQLite and PostgreSQL)
     try:
         init_db()
