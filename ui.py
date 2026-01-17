@@ -1505,7 +1505,8 @@ def init_db():
         finally:
             conn.close()
     
-    migrate_transaction_type_constraint()
+    # NOTE: Migration disabled for performance - only needed once
+    # migrate_transaction_type_constraint()
     
     # Portfolio tracker snapshots
     conn = get_conn()
@@ -6967,15 +6968,14 @@ def ui_portfolio_tracker():
                 ]
                 new_deposits_kwd = new_deposits_df["amount_in_kwd"].sum()
             
-            # If no previous snapshot exists, we fall back to total sum of all deposits up to today
-            # UPDATE: User requested to take value from Overview page (Total Cash Deposits)
-            # We prioritize the calculated total_deposits_kwd from cash_deposits table
-            if total_deposits_kwd > 0:
-                accumulated_cash = total_deposits_kwd
-            elif prev_snap.empty:
-                accumulated_cash = total_deposits_kwd
-            else:
-                accumulated_cash = prev_accumulated + new_deposits_kwd
+            # Robust Logic: Always sum from the cash_deposits table
+            # This ensures accuracy even if intermediate snapshots are deleted
+            acc_cash_query = query_df(
+                "SELECT SUM(amount) as total FROM cash_deposits WHERE user_id = ? AND deposit_date <= ? AND include_in_analysis = 1",
+                (user_id, today_str)
+            )
+            acc_val = acc_cash_query.iloc[0]['total'] if not acc_cash_query.empty else None
+            accumulated_cash = float(acc_val) if pd.notna(acc_val) else 0.0
             
             # 4. Calculate Metrics
             daily_movement = live_portfolio_value - prev_value if prev_value > 0 else 0.0
@@ -7849,125 +7849,6 @@ def ui_dividends_tracker():
                 file_name=f"bonus_shares_{date.today()}.csv",
                 mime="text/csv"
             )
-
-
-
-def render_trading_styled_table(df):
-    """
-    Renders the Trading Table using the same UI as Peer Analysis.
-    """
-    is_dark = st.session_state.get("theme", "light") == "dark"
-    
-    # --- Theme Colors (Matches Peer Analysis) ---
-    if is_dark:
-        c_bg_card = "rgba(17, 24, 39, 0.6)"
-        c_border = "#1f2937"
-        c_header_bg = "rgba(31, 41, 55, 0.5)"
-        c_text_p = "#ffffff"
-        c_hover = "rgba(31, 41, 55, 0.3)"
-        c_accent = "#22d3ee"
-        c_pos = "#34d399"
-        c_neg = "#fb7185"
-    else:
-        c_bg_card = "rgba(255, 255, 255, 0.8)"
-        c_border = "#e5e7eb"
-        c_header_bg = "#f9fafb"
-        c_text_p = "#111827"
-        c_hover = "rgba(243, 244, 246, 0.8)"
-        c_accent = "#2563eb"
-        c_pos = "#16a34a"
-        c_neg = "#dc2626"
-
-    css = f"""
-    <style>
-    .st-styled-table-wrap {{
-        background-color: {c_bg_card};
-        border: 1px solid {c_border};
-        border-radius: 1rem;
-        backdrop-filter: blur(4px);
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-        overflow: hidden;
-        margin-bottom: 1rem;
-        font-family: ui-sans-serif, system-ui, sans-serif;
-    }}
-    .st-styled-table-scroll {{ overflow-x: auto; }}
-    .st-styled-table {{ width: 100%; border-collapse: collapse; font-size: 0.85rem; }}
-    .st-styled-table th {{
-        padding: 0.75rem 1rem;
-        text-align: left;
-        font-weight: 600;
-        color: {c_text_p};
-        background-color: {c_header_bg};
-        border-bottom: 1px solid {c_border};
-        white-space: nowrap;
-    }}
-    .st-styled-table td {{
-        padding: 0.6rem 1rem;
-        color: {c_text_p};
-        border-bottom: 1px solid {c_border};
-        white-space: nowrap;
-    }}
-    .st-styled-table tr:hover td {{ background-color: {c_hover}; }}
-    
-    .st-text-pos {{ color: {c_pos}; font-weight: 600; }}
-    .st-text-neg {{ color: {c_neg}; font-weight: 600; }}
-    .st-text-accent {{ color: {c_accent}; font-weight: 500; }}
-    .st-text-muted {{ opacity: 0.6; }}
-    </style>
-    """
-    
-    display_cols = [c for c in df.columns if not c.startswith('_')]
-    
-    html = f"""
-    <div class="st-styled-table-wrap">
-        <div class="st-styled-table-scroll">
-            <table class="st-styled-table">
-                <thead>
-                    <tr>
-    """
-    for col in display_cols:
-        html += f"<th>{col}</th>"
-    html += "</tr></thead><tbody>"
-    
-    for _, row in df.iterrows():
-        html += "<tr>"
-        for col in display_cols:
-            val = row[col]
-            display_val = str(val)
-            class_name = ""
-            
-            # Formatting
-            if pd.isna(val) or val is None or val == "":
-                display_val = "-"
-                class_name = "st-text-muted"
-            elif isinstance(val, (int, float)):
-                if "Date" in col:
-                     pass # Assuming already formatted or captured by string conversion
-                elif "Quantity" in col or "Bonus" in col:
-                     display_val = f"{val:,.0f}"
-                elif "Profit %" in col:
-                     display_val = f"{val:.2f}%"
-                     if val > 0: class_name = "st-text-pos"
-                     elif val < 0: class_name = "st-text-neg"
-                elif "Profit" in col:  # Profit Amount
-                     display_val = f"{val:,.3f}"
-                     if val > 0: class_name = "st-text-pos"
-                     elif val < 0: class_name = "st-text-neg"
-                else: # Prices, Values
-                     display_val = f"{val:,.3f}"
-            
-            # Specific Column Styling
-            if col == "Status":
-                if str(val) == "Realized": class_name = "st-text-muted"
-                else: class_name = "st-text-accent"
-            if col == "Stock":
-                class_name = "st-text-accent" # Bold/Blue for ticker
-                
-            html += f'<td class="{class_name}">{display_val}</td>'
-        html += "</tr>"
-        
-    html += "</tbody></table></div></div>"
-    st.markdown(css + html, unsafe_allow_html=True)
 
 
 def ui_trading_section():
@@ -9086,7 +8967,7 @@ def ui_trading_section():
                  st.rerun()
 
     if view_mode == "📊 Read View":
-        render_trading_styled_table(final_df)
+        render_styled_table(final_df, highlight_logic=True)
         st.caption("ℹ️ Switch to **Edit Mode** to add, modify, or delete trades.")
         st.divider()
     else:
@@ -10179,8 +10060,8 @@ def calculate_peer_metrics(hist, info, financials):
 # =========================
 def render_styled_table(df: pd.DataFrame, highlight_logic: bool = True) -> None:
     """
-    Renders a Streamlit dataframe using custom HTML/CSS to match a specific React/Tailwind aesthetic.
-    Supports Dark/Light mode based on st.session_state.theme.
+    Unified renderer for DataFrames with Tailwind-like CSS.
+    Safe against XSS, optimized for speed, and robust column handling.
     
     Args:
         df: DataFrame to render as a styled HTML table.
@@ -10193,208 +10074,116 @@ def render_styled_table(df: pd.DataFrame, highlight_logic: bool = True) -> None:
     Returns:
         None. Renders the table directly via st.markdown.
     """
-    # (A) Empty / None DataFrame handling
     if df is None or df.empty:
         st.info("No data to display.")
         return
-    
-    is_dark = st.session_state.get("theme", "light") == "dark"
-    
-    # --- Theme Colors (Extracted from React Component) ---
-    if is_dark:
-        # Dark Mode Palette
-        c_bg_card = "rgba(17, 24, 39, 0.6)"   # bg-gray-900/60
-        c_border = "#1f2937"                  # border-gray-800
-        c_header_bg = "rgba(31, 41, 55, 0.5)" # bg-gray-800/50
-        c_text_p = "#ffffff"                  # text-white
-        c_text_s = "#9ca3af"                  # text-gray-400
-        c_hover = "rgba(31, 41, 55, 0.3)"     # hover:bg-gray-800/30
-        c_accent = "#22d3ee"                  # text-cyan-400
-        c_pos = "#34d399"                     # text-emerald-400
-        c_neg = "#fb7185"                     # text-rose-400
-        c_muted = "#6b7280"                   # text-gray-500
-    else:
-        # Light Mode Palette
-        c_bg_card = "rgba(255, 255, 255, 0.8)" # bg-white/80
-        c_border = "#e5e7eb"                   # border-gray-200
-        c_header_bg = "#f9fafb"                # bg-gray-50
-        c_text_p = "#111827"                   # text-gray-900
-        c_text_s = "#4b5563"                   # text-gray-600
-        c_hover = "rgba(243, 244, 246, 0.8)"   # hover:bg-gray-100/80
-        c_accent = "#2563eb"                   # text-blue-600
-        c_pos = "#16a34a"                      # text-green-600
-        c_neg = "#dc2626"                      # text-red-600
-        c_muted = "#9ca3af"                    # text-gray-400
 
-    # --- CSS Injection ---
+    is_dark = st.session_state.get("theme", "light") == "dark"
+
+    # Theme configuration (compact)
+    c_bg_card = "rgba(17, 24, 39, 0.6)" if is_dark else "rgba(255, 255, 255, 0.8)"
+    c_border = "#1f2937" if is_dark else "#e5e7eb"
+    c_header_bg = "rgba(31, 41, 55, 0.5)" if is_dark else "#f9fafb"
+    c_text_p = "#ffffff" if is_dark else "#111827"
+    c_hover = "rgba(31, 41, 55, 0.3)" if is_dark else "rgba(243, 244, 246, 0.8)"
+    c_pos = "#34d399" if is_dark else "#16a34a"
+    c_neg = "#fb7185" if is_dark else "#dc2626"
+    c_accent = "#22d3ee" if is_dark else "#2563eb"
+    c_muted = "rgba(156, 163, 175, 0.6)"
+
     css = f"""
     <style>
     .univ-table-wrap {{
         background-color: {c_bg_card};
         border: 1px solid {c_border};
-        border-radius: 1rem; /* rounded-2xl */
-        backdrop-filter: blur(4px); /* backdrop-blur-sm */
-        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05); /* shadow-2xl-ish */
+        border-radius: 12px;
         overflow: hidden;
-        margin-bottom: 1.5rem;
-        font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        margin-bottom: 1rem;
+        box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
+        font-family: ui-sans-serif, system-ui, sans-serif;
     }}
-    .univ-table-scroll {{
-        overflow-x: auto;
-    }}
-    .univ-table {{
-        width: 100%;
-        border-collapse: collapse;
-        font-size: 0.875rem; /* text-sm */
-        table-layout: fixed; /* Force even column distribution */
-    }}
+    .univ-table-scroll {{ overflow-x: auto; }}
+    .univ-table {{ width: 100%; border-collapse: collapse; font-size: 0.85rem; }}
     .univ-table th {{
-        text-align: center;
-        padding: 1rem 0.5rem;
-        font-weight: 600;
-        color: {c_text_p};
-        background-color: {c_header_bg};
-        border-bottom: 1px solid {c_border};
-        white-space: normal; /* Allow wrap */
-        word-wrap: break-word; 
-    }}
-    .univ-table th:first-child {{
-        text-align: left;
-        padding-left: 1.5rem;
+        text-align: left; padding: 12px 16px; background: {c_header_bg};
+        color: {c_text_p}; font-weight: 600; border-bottom: 1px solid {c_border};
+        white-space: nowrap;
     }}
     .univ-table td {{
-        padding: 1rem 0.5rem;
-        color: {c_text_p};
-        border-bottom: 1px solid {c_border};
-        text-align: center;
-        transition: background-color 0.2s;
-        white-space: normal;
-        word-wrap: break-word;
+        padding: 10px 16px; color: {c_text_p}; border-bottom: 1px solid {c_border};
+        white-space: nowrap;
     }}
-    .univ-table td:first-child {{
-        text-align: left;
-        padding-left: 1.5rem;
-        font-weight: 600; /* mimic symbol bold */
-        color: {c_text_p}; 
-    }}
-    .univ-table tr:last-child td {{
-        border-bottom: none;
-    }}
-    .univ-table tr:hover td {{
-        background-color: {c_hover};
-    }}
-    
-    /* Utility Classes for Colors */
-    .t-pos {{ color: {c_pos}; font-weight: 600; }}
-    .t-neg {{ color: {c_neg}; font-weight: 600; }}
-    .t-accent {{ color: {c_accent}; }}
-    .t-muted {{ color: {c_muted}; }}
-    .t-secondary {{ color: {c_text_s}; }}
+    .univ-table tr:hover td {{ background-color: {c_hover}; }}
+    .t-pos {{ color: {c_pos} !important; font-weight: 600; }}
+    .t-neg {{ color: {c_neg} !important; font-weight: 600; }}
+    .t-accent {{ color: {c_accent} !important; font-weight: 500; }}
+    .t-muted {{ color: {c_muted} !important; }}
     </style>
     """
-    
-    # --- HTML Construction using list buffer ---
-    html_parts = []
-    
-    # Header
-    html_parts.append('<div class="univ-table-wrap">')
-    html_parts.append('<div class="univ-table-scroll">')
-    html_parts.append('<table class="univ-table">')
-    html_parts.append('<thead><tr>')
-    
-    # First column header (for index/Metric)
-    html_parts.append('<th>Metric</th>')
-    
-    # Column headers - escape HTML
+
+    # Build HTML list
+    html_out = [
+        '<div class="univ-table-wrap"><div class="univ-table-scroll">',
+        '<table class="univ-table"><thead><tr>',
+    ]
+
     for col in df.columns:
-        escaped_col = html.escape(str(col))
-        html_parts.append(f'<th>{escaped_col}</th>')
-    
-    html_parts.append('</tr></thead>')
-    html_parts.append('<tbody>')
-    
-    # Define highlight keywords for numeric sign coloring
-    numeric_highlight_keywords = ("Profit", "%", "Change", "Gain", "Yield")
-    
-    # Body - use itertuples for performance
-    # We need the index, so we iterate with enumerate on index
-    for row_idx, row_data in enumerate(df.itertuples(index=True, name=None)):
-        idx = row_data[0]  # First element is the index
-        row_values = row_data[1:]  # Rest are column values
-        
-        escaped_idx = html.escape(str(idx))
-        html_parts.append(f'<tr><td>{escaped_idx}</td>')
-        
-        for col_idx, col in enumerate(df.columns):
-            val = row_values[col_idx]
-            col_str = str(col)
+        html_out.append(f"<th>{html.escape(str(col))}</th>")
+    html_out.append("</tr></thead><tbody>")
+
+    # Use index=False for speed, but access by integer index to avoid attribute naming issues
+    for row in df.itertuples(index=False):
+        html_out.append("<tr>")
+        for col_idx, col_name in enumerate(df.columns):
+            # Access tuple by index: Faster and safer than getattr logic
+            val = row[col_idx]
             
-            # (E) Handle NaN/None cleanly
-            if pd.isna(val):
+            cls = ""
+            display_val = val
+
+            # Treat NaN/None as empty string
+            if pd.isna(display_val):
                 display_val = ""
-                cls = ""
-            else:
-                display_val = str(val)
-                cls = ""
-            
-            if highlight_logic and display_val:
-                # (G) Apply special case for Current Price / Sale Price first
-                if col_str in ("Current Price", "Sale Price"):
-                    # Check if value is 0 or 0.0
+
+            # Special case for price fields being 0
+            if col_name in ("Current Price", "Sale Price") and (display_val == 0 or display_val == 0.0):
+                display_val = "-"
+                cls = "t-muted"
+
+            if highlight_logic and display_val != "-":
+                sval = str(display_val)
+
+                if col_name == "Status":
+                    if sval == "Realized":
+                        cls = "t-muted"
+                    elif sval == "Unrealized":
+                        cls = "t-accent"
+
+                elif col_name == "Stock":
+                    cls = "t-accent"
+
+                elif any(k in str(col_name) for k in ["Profit", "%", "Change", "Gain", "Yield"]):
                     try:
-                        num_val = float(val) if not isinstance(val, str) else float(val.replace(",", "").replace("$", "").replace("KWD", "").strip())
-                        if num_val == 0:
-                            display_val = "-"
+                        clean_val = float(
+                            sval.replace("%", "").replace(",", "").replace("x", "")
+                        )
+                        if clean_val > 0:
+                            cls = "t-pos"
+                        elif clean_val < 0:
+                            cls = "t-neg"
+                        else:
                             cls = "t-muted"
                     except (ValueError, TypeError):
                         pass
-                
-                # Status column: Realized → muted, Unrealized → accent
-                elif col_str == "Status":
-                    if display_val == "Realized":
-                        cls = "t-muted"
-                    elif display_val == "Unrealized":
-                        cls = "t-accent"
-                
-                # Stock column: accent
-                elif col_str == "Stock":
-                    cls = "t-accent"
-                
-                # Columns with Profit, %, Change, Gain, Yield → numeric sign coloring
-                elif any(kw in col_str for kw in numeric_highlight_keywords):
-                    # Don't override if already set (Current Price/Sale Price zero case)
-                    if not cls:
-                        try:
-                            # Try to parse numeric value for sign detection
-                            clean_val = display_val.replace(",", "").replace("%", "").replace("$", "").replace("KWD", "").strip()
-                            num = float(clean_val)
-                            if num > 0:
-                                cls = "t-pos"
-                            elif num < 0:
-                                cls = "t-neg"
-                            else:
-                                cls = "t-muted"
-                        except (ValueError, TypeError):
-                            pass
-                
-                # Fallback: check for % in display value
-                elif "%" in display_val and not cls:
-                    if "-" in display_val:
-                        cls = "t-neg"
-                    else:
-                        cls = "t-pos"
-            
-            # (C) Escape HTML in display value
-            escaped_val = html.escape(display_val)
-            html_parts.append(f'<td class="{cls}">{escaped_val}</td>')
-        
-        html_parts.append('</tr>')
-    
-    html_parts.append('</tbody></table></div></div>')
-    
-    # Join and render
-    html_str = "".join(html_parts)
-    st.markdown(css + html_str, unsafe_allow_html=True)
+
+            html_out.append(
+                f'<td class="{cls}">{html.escape(str(display_val))}</td>'
+            )
+        html_out.append("</tr>")
+
+    html_out.append("</tbody></table></div></div>")
+
+    st.markdown(css + "".join(html_out), unsafe_allow_html=True)
 
 
 # =========================
