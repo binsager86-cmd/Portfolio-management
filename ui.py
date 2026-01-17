@@ -5741,278 +5741,278 @@ def ui_backup_restore():
                             
                             # STEP 2: Restore Stocks (must be first - other tables reference stocks)
                             if 'stocks' in preview_data:
-                            progress.progress(15, text="📈 Restoring stocks...")
-                            uploaded_file.seek(0)  # Reset file pointer
-                            df = pd.read_excel(uploaded_file, sheet_name='stocks')
-                            stocks_imported = 0
-                            stocks_updated = 0
-                            for _, row in df.iterrows():
-                                try:
-                                    symbol = safe_str(row.get('symbol'))
-                                    if not symbol:
-                                        continue
-                                    
-                                    # Handle both 'name' (SQLite) and 'company_name' (PostgreSQL) columns
-                                    stock_name = safe_str(row.get('name')) or safe_str(row.get('company_name')) or symbol
-                                    
-                                    # Check if exists
-                                    existing = query_df("SELECT id FROM stocks WHERE symbol = ? AND user_id = ?", (symbol, user_id))
-                                    if existing.empty:
-                                        # INSERT new stock - use simpler column set that works for both schemas
+                                progress.progress(15, text="📈 Restoring stocks...")
+                                uploaded_file.seek(0)  # Reset file pointer
+                                df = pd.read_excel(uploaded_file, sheet_name='stocks')
+                                stocks_imported = 0
+                                stocks_updated = 0
+                                for _, row in df.iterrows():
+                                    try:
+                                        symbol = safe_str(row.get('symbol'))
+                                        if not symbol:
+                                            continue
+                                        
+                                        # Handle both 'name' (SQLite) and 'company_name' (PostgreSQL) columns
+                                        stock_name = safe_str(row.get('name')) or safe_str(row.get('company_name')) or symbol
+                                        
+                                        # Check if exists
+                                        existing = query_df("SELECT id FROM stocks WHERE symbol = ? AND user_id = ?", (symbol, user_id))
+                                        if existing.empty:
+                                            # INSERT new stock - use simpler column set that works for both schemas
+                                            db_execute(cur, """
+                                                INSERT INTO stocks (user_id, symbol, name, portfolio, currency, current_price)
+                                                VALUES (?, ?, ?, ?, ?, ?)
+                                            """, (
+                                                user_id, symbol, stock_name,
+                                                safe_str(row.get('portfolio'), 'KFH'),
+                                                safe_str(row.get('currency'), 'KWD'),
+                                                safe_float(row.get('current_price'))
+                                            ))
+                                            stocks_imported += 1
+                                        else:
+                                            # UPDATE existing stock with backup data
+                                            db_execute(cur, """
+                                                UPDATE stocks SET 
+                                                    name = ?, portfolio = ?, currency = ?, current_price = ?
+                                                WHERE symbol = ? AND user_id = ?
+                                            """, (
+                                                stock_name,
+                                                safe_str(row.get('portfolio'), 'KFH'),
+                                                safe_str(row.get('currency'), 'KWD'),
+                                                safe_float(row.get('current_price')),
+                                                symbol, user_id
+                                            ))
+                                            stocks_updated += 1
+                                        imported += 1
+                                    except Exception as e:
+                                        errors += 1
+                                        error_details.append(f"Stock {row.get('symbol')}: {e}")
+                                conn.commit()
+                                error_details.append(f"Stocks: {stocks_imported} new, {stocks_updated} updated")
+                        
+                            # STEP 3: Restore Transactions (includes dividends, bonus shares)
+                            if 'transactions' in preview_data:
+                                progress.progress(35, text="💳 Restoring transactions...")
+                                uploaded_file.seek(0)  # Reset file pointer
+                                df = pd.read_excel(uploaded_file, sheet_name='transactions')
+                                txn_count = 0
+                                txn_errors = 0
+                                for idx, row in df.iterrows():
+                                    try:
+                                        stock_sym = safe_str(row.get('stock_symbol'))
+                                        txn_date = safe_date(row.get('txn_date'))
+                                        txn_type = safe_str(row.get('txn_type'), 'Buy')
+                                        
+                                        if not stock_sym:
+                                            txn_errors += 1
+                                            error_details.append(f"Transaction row {idx}: Missing stock_symbol")
+                                            continue
+                                        
                                         db_execute(cur, """
-                                            INSERT INTO stocks (user_id, symbol, name, portfolio, currency, current_price)
-                                            VALUES (?, ?, ?, ?, ?, ?)
+                                            INSERT INTO transactions 
+                                            (user_id, portfolio, stock_symbol, txn_date, txn_type, 
+                                             shares, purchase_cost, sell_value, cash_dividend, 
+                                             bonus_shares, reinvested_dividend, fees, broker,
+                                             reference, notes, category, price_override, planned_cum_shares, created_at)
+                                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                                         """, (
-                                            user_id, symbol, stock_name,
+                                            user_id,
                                             safe_str(row.get('portfolio'), 'KFH'),
-                                            safe_str(row.get('currency'), 'KWD'),
-                                            safe_float(row.get('current_price'))
-                                        ))
-                                        stocks_imported += 1
-                                    else:
-                                        # UPDATE existing stock with backup data
-                                        db_execute(cur, """
-                                            UPDATE stocks SET 
-                                                name = ?, portfolio = ?, currency = ?, current_price = ?
-                                            WHERE symbol = ? AND user_id = ?
-                                        """, (
-                                            stock_name,
-                                            safe_str(row.get('portfolio'), 'KFH'),
-                                            safe_str(row.get('currency'), 'KWD'),
-                                            safe_float(row.get('current_price')),
-                                            symbol, user_id
-                                        ))
-                                        stocks_updated += 1
-                                    imported += 1
-                                except Exception as e:
-                                    errors += 1
-                                    error_details.append(f"Stock {row.get('symbol')}: {e}")
-                            conn.commit()
-                            error_details.append(f"Stocks: {stocks_imported} new, {stocks_updated} updated")
-                        
-                        # STEP 3: Restore Transactions (includes dividends, bonus shares)
-                        if 'transactions' in preview_data:
-                            progress.progress(35, text="💳 Restoring transactions...")
-                            uploaded_file.seek(0)  # Reset file pointer
-                            df = pd.read_excel(uploaded_file, sheet_name='transactions')
-                            txn_count = 0
-                            txn_errors = 0
-                            for idx, row in df.iterrows():
-                                try:
-                                    stock_sym = safe_str(row.get('stock_symbol'))
-                                    txn_date = safe_date(row.get('txn_date'))
-                                    txn_type = safe_str(row.get('txn_type'), 'Buy')
-                                    
-                                    if not stock_sym:
-                                        txn_errors += 1
-                                        error_details.append(f"Transaction row {idx}: Missing stock_symbol")
-                                        continue
-                                    
-                                    db_execute(cur, """
-                                        INSERT INTO transactions 
-                                        (user_id, portfolio, stock_symbol, txn_date, txn_type, 
-                                         shares, purchase_cost, sell_value, cash_dividend, 
-                                         bonus_shares, reinvested_dividend, fees, broker,
-                                         reference, notes, category, price_override, planned_cum_shares, created_at)
-                                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                    """, (
-                                        user_id,
-                                        safe_str(row.get('portfolio'), 'KFH'),
-                                        stock_sym,
-                                        txn_date,
-                                        txn_type,
-                                        safe_float(row.get('shares')),
-                                        safe_float(row.get('purchase_cost')),
-                                        safe_float(row.get('sell_value')),
-                                        safe_float(row.get('cash_dividend')),
-                                        safe_float(row.get('bonus_shares')),
-                                        safe_float(row.get('reinvested_dividend')),
-                                        safe_float(row.get('fees')),
-                                        safe_str(row.get('broker')),
-                                        safe_str(row.get('reference')),
-                                        safe_str(row.get('notes')),
-                                        safe_str(row.get('category'), 'portfolio'),
-                                        safe_float(row.get('price_override')) if pd.notna(row.get('price_override')) else None,
-                                        safe_float(row.get('planned_cum_shares')) if pd.notna(row.get('planned_cum_shares')) else None,
-                                        int(time.time())
-                                    ))
-                                    imported += 1
-                                    txn_count += 1
-                                except Exception as e:
-                                    errors += 1
-                                    txn_errors += 1
-                                    error_details.append(f"Transaction row {idx} ({row.get('stock_symbol')}): {str(e)[:100]}")
-                            conn.commit()
-                            error_details.append(f"Transactions: {txn_count} imported, {txn_errors} errors")
-                        
-                        # STEP 4: Restore Cash Deposits
-                        if 'cash_deposits' in preview_data:
-                            progress.progress(50, text="💵 Restoring cash deposits...")
-                            uploaded_file.seek(0)  # Reset file pointer
-                            df = pd.read_excel(uploaded_file, sheet_name='cash_deposits')
-                            cash_count = 0
-                            for _, row in df.iterrows():
-                                try:
-                                    # Handle different column naming conventions
-                                    # Old schema: bank_name, description, comments
-                                    # New schema: source, notes
-                                    source_val = (
-                                        safe_str(row.get('source')) or 
-                                        safe_str(row.get('bank_name')) or 
-                                        ''
-                                    )
-                                    notes_val = (
-                                        safe_str(row.get('notes')) or 
-                                        safe_str(row.get('description')) or 
-                                        safe_str(row.get('comments')) or 
-                                        ''
-                                    )
-                                    
-                                    db_execute(cur, """
-                                        INSERT INTO cash_deposits 
-                                        (user_id, portfolio, amount, currency, deposit_date, 
-                                         source, notes, include_in_analysis, created_at)
-                                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                    """, (
-                                        user_id,
-                                        safe_str(row.get('portfolio'), 'KFH'),
-                                        safe_float(row.get('amount')),
-                                        safe_str(row.get('currency'), 'KWD'),
-                                        safe_date(row.get('deposit_date')),
-                                        source_val,
-                                        notes_val,
-                                        int(safe_float(row.get('include_in_analysis'), 1)),
-                                        int(time.time())
-                                    ))
-                                    imported += 1
-                                    cash_count += 1
-                                except Exception as e:
-                                    errors += 1
-                                    error_details.append(f"Cash deposit: {e}")
-                            conn.commit()
-                            error_details.append(f"Cash Deposits: {cash_count} imported")
-                        
-                        # STEP 5: Restore Portfolio Cash Balances
-                        if 'portfolio_cash' in preview_data:
-                            progress.progress(65, text="💰 Restoring cash balances...")
-                            uploaded_file.seek(0)  # Reset file pointer
-                            df = pd.read_excel(uploaded_file, sheet_name='portfolio_cash')
-                            for _, row in df.iterrows():
-                                try:
-                                    portfolio = safe_str(row.get('portfolio'))
-                                    existing = query_df("SELECT id FROM portfolio_cash WHERE portfolio = ? AND user_id = ?", (portfolio, user_id))
-                                    if existing.empty:
-                                        db_execute(cur, """
-                                            INSERT INTO portfolio_cash (user_id, portfolio, balance, currency, last_updated)
-                                            VALUES (?, ?, ?, ?, ?)
-                                        """, (
-                                            user_id, portfolio,
-                                            safe_float(row.get('balance')),
-                                            safe_str(row.get('currency'), 'KWD'),
-                                            int(time.time())
-                                        ))
-                                    else:
-                                        db_execute(cur, """
-                                            UPDATE portfolio_cash SET balance = ?, currency = ?, last_updated = ?
-                                            WHERE portfolio = ? AND user_id = ?
-                                        """, (
-                                            safe_float(row.get('balance')),
-                                            safe_str(row.get('currency'), 'KWD'),
-                                            int(time.time()),
-                                            portfolio, user_id
-                                        ))
-                                    imported += 1
-                                except Exception as e:
-                                    errors += 1
-                            conn.commit()
-                        
-                        # STEP 6: Restore Trading History
-                        if 'trading_history' in preview_data:
-                            progress.progress(80, text="📊 Restoring trading history...")
-                            uploaded_file.seek(0)  # Reset file pointer
-                            df = pd.read_excel(uploaded_file, sheet_name='trading_history')
-                            for _, row in df.iterrows():
-                                try:
-                                    db_execute(cur, """
-                                        INSERT INTO trading_history 
-                                        (user_id, symbol, trade_date, trade_type, quantity, 
-                                         price, total_value, notes, created_at)
-                                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                    """, (
-                                        user_id,
-                                        safe_str(row.get('symbol')),
-                                        safe_date(row.get('trade_date')),
-                                        safe_str(row.get('trade_type'), 'Buy'),
-                                        safe_float(row.get('quantity')),
-                                        safe_float(row.get('price')),
-                                        safe_float(row.get('total_value')),
-                                        safe_str(row.get('notes')),
-                                        int(time.time())
-                                    ))
-                                    imported += 1
-                                except Exception as e:
-                                    errors += 1
-                            conn.commit()
-                        
-                        # STEP 7: Restore Portfolio Snapshots
-                        if 'portfolio_snapshots' in preview_data:
-                            progress.progress(92, text="📉 Restoring portfolio snapshots...")
-                            uploaded_file.seek(0)  # Reset file pointer
-                            df = pd.read_excel(uploaded_file, sheet_name='portfolio_snapshots')
-                            snap_count = 0
-                            for _, row in df.iterrows():
-                                try:
-                                    snap_date = safe_date(row.get('snapshot_date'))
-                                    # Check for existing (unique per user+date)
-                                    existing = query_df("SELECT id FROM portfolio_snapshots WHERE snapshot_date = ? AND user_id = ?", (snap_date, user_id))
-                                    if existing.empty:
-                                        db_execute(cur, """
-                                            INSERT INTO portfolio_snapshots 
-                                            (user_id, snapshot_date, portfolio_value, daily_movement,
-                                             beginning_difference, deposit_cash, accumulated_cash,
-                                             net_gain, change_percent, roi_percent, created_at)
-                                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                        """, (
-                                            user_id, snap_date,
-                                            safe_float(row.get('portfolio_value')),
-                                            safe_float(row.get('daily_movement')),
-                                            safe_float(row.get('beginning_difference')),
-                                            safe_float(row.get('deposit_cash')),
-                                            safe_float(row.get('accumulated_cash')),
-                                            safe_float(row.get('net_gain')),
-                                            safe_float(row.get('change_percent')),
-                                            safe_float(row.get('roi_percent')),
+                                            stock_sym,
+                                            txn_date,
+                                            txn_type,
+                                            safe_float(row.get('shares')),
+                                            safe_float(row.get('purchase_cost')),
+                                            safe_float(row.get('sell_value')),
+                                            safe_float(row.get('cash_dividend')),
+                                            safe_float(row.get('bonus_shares')),
+                                            safe_float(row.get('reinvested_dividend')),
+                                            safe_float(row.get('fees')),
+                                            safe_str(row.get('broker')),
+                                            safe_str(row.get('reference')),
+                                            safe_str(row.get('notes')),
+                                            safe_str(row.get('category'), 'portfolio'),
+                                            safe_float(row.get('price_override')) if pd.notna(row.get('price_override')) else None,
+                                            safe_float(row.get('planned_cum_shares')) if pd.notna(row.get('planned_cum_shares')) else None,
                                             int(time.time())
                                         ))
                                         imported += 1
-                                        snap_count += 1
-                                except Exception as e:
-                                    errors += 1
-                                    error_details.append(f"Snapshot {snap_date}: {e}")
-                            conn.commit()
-                            error_details.append(f"Portfolio Snapshots: {snap_count} imported")
+                                        txn_count += 1
+                                    except Exception as e:
+                                        errors += 1
+                                        txn_errors += 1
+                                        error_details.append(f"Transaction row {idx} ({row.get('stock_symbol')}): {str(e)[:100]}")
+                                conn.commit()
+                                error_details.append(f"Transactions: {txn_count} imported, {txn_errors} errors")
                         
-                        progress.progress(100, text="✅ Complete!")
-                        conn.close()
-                        
-                        # Show results with details
-                        st.success(f"✅ **Restore completed! {imported:,} total records processed.**")
-                        
-                        # Show details breakdown
-                        with st.expander("📋 View restore details", expanded=True):
-                            for detail in error_details:
-                                if "imported" in detail or "new" in detail or "updated" in detail:
-                                    st.info(detail)
-                                elif errors > 0:
-                                    st.warning(detail)
-                        
-                        if errors > 0:
-                            st.warning(f"⚠️ {errors:,} records skipped (likely duplicates or invalid data)")
-                        
-                        st.balloons()
-                        time.sleep(2)
-                        st.rerun()
-                        
+                            # STEP 4: Restore Cash Deposits
+                            if 'cash_deposits' in preview_data:
+                                progress.progress(50, text="💵 Restoring cash deposits...")
+                                uploaded_file.seek(0)  # Reset file pointer
+                                df = pd.read_excel(uploaded_file, sheet_name='cash_deposits')
+                                cash_count = 0
+                                for _, row in df.iterrows():
+                                    try:
+                                        # Handle different column naming conventions
+                                        # Old schema: bank_name, description, comments
+                                        # New schema: source, notes
+                                        source_val = (
+                                            safe_str(row.get('source')) or 
+                                            safe_str(row.get('bank_name')) or 
+                                            ''
+                                        )
+                                        notes_val = (
+                                            safe_str(row.get('notes')) or 
+                                            safe_str(row.get('description')) or 
+                                            safe_str(row.get('comments')) or 
+                                            ''
+                                        )
+                                        
+                                        db_execute(cur, """
+                                            INSERT INTO cash_deposits 
+                                            (user_id, portfolio, amount, currency, deposit_date, 
+                                             source, notes, include_in_analysis, created_at)
+                                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                        """, (
+                                            user_id,
+                                            safe_str(row.get('portfolio'), 'KFH'),
+                                            safe_float(row.get('amount')),
+                                            safe_str(row.get('currency'), 'KWD'),
+                                            safe_date(row.get('deposit_date')),
+                                            source_val,
+                                            notes_val,
+                                            int(safe_float(row.get('include_in_analysis'), 1)),
+                                            int(time.time())
+                                        ))
+                                        imported += 1
+                                        cash_count += 1
+                                    except Exception as e:
+                                        errors += 1
+                                        error_details.append(f"Cash deposit: {e}")
+                                conn.commit()
+                                error_details.append(f"Cash Deposits: {cash_count} imported")
+                            
+                            # STEP 5: Restore Portfolio Cash Balances
+                            if 'portfolio_cash' in preview_data:
+                                progress.progress(65, text="💰 Restoring cash balances...")
+                                uploaded_file.seek(0)  # Reset file pointer
+                                df = pd.read_excel(uploaded_file, sheet_name='portfolio_cash')
+                                for _, row in df.iterrows():
+                                    try:
+                                        portfolio = safe_str(row.get('portfolio'))
+                                        existing = query_df("SELECT id FROM portfolio_cash WHERE portfolio = ? AND user_id = ?", (portfolio, user_id))
+                                        if existing.empty:
+                                            db_execute(cur, """
+                                                INSERT INTO portfolio_cash (user_id, portfolio, balance, currency, last_updated)
+                                                VALUES (?, ?, ?, ?, ?)
+                                            """, (
+                                                user_id, portfolio,
+                                                safe_float(row.get('balance')),
+                                                safe_str(row.get('currency'), 'KWD'),
+                                                int(time.time())
+                                            ))
+                                        else:
+                                            db_execute(cur, """
+                                                UPDATE portfolio_cash SET balance = ?, currency = ?, last_updated = ?
+                                                WHERE portfolio = ? AND user_id = ?
+                                            """, (
+                                                safe_float(row.get('balance')),
+                                                safe_str(row.get('currency'), 'KWD'),
+                                                int(time.time()),
+                                                portfolio, user_id
+                                            ))
+                                        imported += 1
+                                    except Exception as e:
+                                        errors += 1
+                                conn.commit()
+                            
+                            # STEP 6: Restore Trading History
+                            if 'trading_history' in preview_data:
+                                progress.progress(80, text="📊 Restoring trading history...")
+                                uploaded_file.seek(0)  # Reset file pointer
+                                df = pd.read_excel(uploaded_file, sheet_name='trading_history')
+                                for _, row in df.iterrows():
+                                    try:
+                                        db_execute(cur, """
+                                            INSERT INTO trading_history 
+                                            (user_id, symbol, trade_date, trade_type, quantity, 
+                                             price, total_value, notes, created_at)
+                                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                        """, (
+                                            user_id,
+                                            safe_str(row.get('symbol')),
+                                            safe_date(row.get('trade_date')),
+                                            safe_str(row.get('trade_type'), 'Buy'),
+                                            safe_float(row.get('quantity')),
+                                            safe_float(row.get('price')),
+                                            safe_float(row.get('total_value')),
+                                            safe_str(row.get('notes')),
+                                            int(time.time())
+                                        ))
+                                        imported += 1
+                                    except Exception as e:
+                                        errors += 1
+                                conn.commit()
+                            
+                            # STEP 7: Restore Portfolio Snapshots
+                            if 'portfolio_snapshots' in preview_data:
+                                progress.progress(92, text="📉 Restoring portfolio snapshots...")
+                                uploaded_file.seek(0)  # Reset file pointer
+                                df = pd.read_excel(uploaded_file, sheet_name='portfolio_snapshots')
+                                snap_count = 0
+                                for _, row in df.iterrows():
+                                    try:
+                                        snap_date = safe_date(row.get('snapshot_date'))
+                                        # Check for existing (unique per user+date)
+                                        existing = query_df("SELECT id FROM portfolio_snapshots WHERE snapshot_date = ? AND user_id = ?", (snap_date, user_id))
+                                        if existing.empty:
+                                            db_execute(cur, """
+                                                INSERT INTO portfolio_snapshots 
+                                                (user_id, snapshot_date, portfolio_value, daily_movement,
+                                                 beginning_difference, deposit_cash, accumulated_cash,
+                                                 net_gain, change_percent, roi_percent, created_at)
+                                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                            """, (
+                                                user_id, snap_date,
+                                                safe_float(row.get('portfolio_value')),
+                                                safe_float(row.get('daily_movement')),
+                                                safe_float(row.get('beginning_difference')),
+                                                safe_float(row.get('deposit_cash')),
+                                                safe_float(row.get('accumulated_cash')),
+                                                safe_float(row.get('net_gain')),
+                                                safe_float(row.get('change_percent')),
+                                                safe_float(row.get('roi_percent')),
+                                                int(time.time())
+                                            ))
+                                            imported += 1
+                                            snap_count += 1
+                                    except Exception as e:
+                                        errors += 1
+                                        error_details.append(f"Snapshot {snap_date}: {e}")
+                                conn.commit()
+                                error_details.append(f"Portfolio Snapshots: {snap_count} imported")
+                            
+                            progress.progress(100, text="✅ Complete!")
+                            conn.close()
+                            
+                            # Show results with details
+                            st.success(f"✅ **Restore completed! {imported:,} total records processed.**")
+                            
+                            # Show details breakdown
+                            with st.expander("📋 View restore details", expanded=True):
+                                for detail in error_details:
+                                    if "imported" in detail or "new" in detail or "updated" in detail:
+                                        st.info(detail)
+                                    elif errors > 0:
+                                        st.warning(detail)
+                            
+                            if errors > 0:
+                                st.warning(f"⚠️ {errors:,} records skipped (likely duplicates or invalid data)")
+                            
+                            st.balloons()
+                            time.sleep(2)
+                            st.rerun()
+                            
                         except Exception as e:
                             conn.rollback()
                             conn.close()
