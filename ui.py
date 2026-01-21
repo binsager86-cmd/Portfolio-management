@@ -434,6 +434,16 @@ def db_execute(cur, sql: str, params: tuple = ()):
     return execute_with_cursor(None, cur, sql, params)
 
 
+def convert_sql_placeholders(sql: str) -> str:
+    """Convert ? placeholders to %s for PostgreSQL compatibility.
+    
+    Use this for pd.read_sql_query() which doesn't use db_execute().
+    """
+    if USE_POSTGRES:
+        return sql.replace("?", "%s")
+    return sql
+
+
 # =========================
 # AUTH HELPER FUNCTIONS
 # =========================
@@ -8632,7 +8642,7 @@ def ui_trading_section():
             ORDER BY t.txn_date, t.stock_symbol, t.txn_type
         """
         df = pd.read_sql_query(
-            query,
+            convert_sql_placeholders(query),
             conn,
             params=(user_id, start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d"))
         )
@@ -8653,7 +8663,7 @@ def ui_trading_section():
             WHERE t.user_id = ?
             ORDER BY t.txn_date, t.stock_symbol, t.txn_type
         """
-        df = pd.read_sql_query(query, conn, params=(user_id,))
+        df = pd.read_sql_query(convert_sql_placeholders(query), conn, params=(user_id,))
     
     conn.close()
     
@@ -8668,7 +8678,7 @@ def ui_trading_section():
         conn2 = get_conn()
         user_id = st.session_state.get('user_id', 1)
         date_range_query = "SELECT MIN(txn_date) as min_date, MAX(txn_date) as max_date FROM trading_history WHERE user_id = ?"
-        date_df = pd.read_sql_query(date_range_query, conn2, params=(user_id,))
+        date_df = pd.read_sql_query(convert_sql_placeholders(date_range_query), conn2, params=(user_id,))
         conn2.close()
         
         if not date_df.empty and date_df['min_date'].iloc[0]:
