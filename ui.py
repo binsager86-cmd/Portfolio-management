@@ -1647,16 +1647,29 @@ def init_db():
     print("✅ PFM tables created.")
     
     # ============================================
-    # FIX NULL USER_IDs (after restore or legacy data import)
+    # FIX NULL/DEFAULT USER_IDs (after restore or legacy data import)
     # ============================================
     conn = get_conn()
     cur = conn.cursor()
     try:
-        # Fix NULL user_ids by assigning to first active user (typically user_id = 2 for main account)
-        # First, find the main user (lowest id > 0 that has real data, or just pick the first)
-        cur.execute("SELECT id FROM users WHERE id > 0 ORDER BY id LIMIT 1")
+        # Fix NULL/default user_ids by assigning to first active user with real data
+        # First, find the main user (user with most transactions, typically user_id = 2)
+        cur.execute("""
+            SELECT user_id, COUNT(*) as cnt 
+            FROM transactions 
+            WHERE user_id > 1 
+            GROUP BY user_id 
+            ORDER BY cnt DESC 
+            LIMIT 1
+        """)
         row = cur.fetchone()
-        default_user_id = row[0] if row else 1
+        if row:
+            default_user_id = row[0]
+        else:
+            # Fallback: find first user > 1
+            cur.execute("SELECT id FROM users WHERE id > 1 ORDER BY id LIMIT 1")
+            row = cur.fetchone()
+            default_user_id = row[0] if row else 2
         
         # Fix cash_deposits with NULL user_id
         cur.execute("UPDATE cash_deposits SET user_id = ? WHERE user_id IS NULL", (default_user_id,))
@@ -1674,15 +1687,27 @@ def init_db():
         cur.execute("UPDATE trading_history SET user_id = ? WHERE user_id IS NULL", (default_user_id,))
         fixed_trading = cur.rowcount
         
-        # Fix portfolio_snapshots with NULL user_id
+        # Fix portfolio_snapshots with NULL user_id OR default user_id=1 when main user is different
         cur.execute("UPDATE portfolio_snapshots SET user_id = ? WHERE user_id IS NULL", (default_user_id,))
         fixed_snapshots = cur.rowcount
+        
+        # Also migrate user_id=1 to main user if main user exists and has data
+        if default_user_id > 1:
+            cur.execute("SELECT COUNT(*) FROM portfolio_snapshots WHERE user_id = 1")
+            old_user_count = cur.fetchone()[0]
+            cur.execute("SELECT COUNT(*) FROM portfolio_snapshots WHERE user_id = ?", (default_user_id,))
+            new_user_count = cur.fetchone()[0]
+            
+            # If user_id=1 has snapshots but main user doesn't, migrate them
+            if old_user_count > 0 and new_user_count == 0:
+                cur.execute("UPDATE portfolio_snapshots SET user_id = ? WHERE user_id = 1", (default_user_id,))
+                fixed_snapshots += cur.rowcount
         
         conn.commit()
         
         total_fixed = fixed_cash + fixed_txn + fixed_stocks + fixed_trading + fixed_snapshots
         if total_fixed > 0:
-            print(f"✅ Fixed {total_fixed} records with NULL user_id (assigned to user {default_user_id})")
+            print(f"✅ Fixed {total_fixed} records with NULL/default user_id (assigned to user {default_user_id})")
     except Exception as e:
         print(f"⚠️ User ID fix skipped: {e}")
     finally:
@@ -9806,7 +9831,9 @@ def ui_overview():
             WHERE deposit_date IS NOT NULL
             AND amount > 0
             AND deposit_date > '1971-01-01'
-            """
+            AND user_id = ?
+            """,
+            (user_id,)
         )
     except Exception:
         cash_deposits_for_mwrr = pd.DataFrame(columns=['date', 'amount', 'type'])
@@ -9823,7 +9850,9 @@ def ui_overview():
             WHERE COALESCE(cash_dividend, 0) > 0
             AND txn_date IS NOT NULL
             AND txn_date > '1971-01-01'
-            """
+            AND user_id = ?
+            """,
+            (user_id,)
         )
     except Exception:
         cash_dividends_only = pd.DataFrame(columns=['date', 'amount', 'type'])
@@ -9847,7 +9876,9 @@ def ui_overview():
                    'DIVIDEND' as type 
             FROM transactions 
             WHERE (COALESCE(cash_dividend, 0) + COALESCE(reinvested_dividend, 0)) > 0
-            """
+            AND user_id = ?
+            """,
+            (user_id,)
         )
     except Exception:
         all_dividends = pd.DataFrame(columns=['date', 'amount', 'type'])
@@ -9861,8 +9892,10 @@ def ui_overview():
                    sell_value as amount,
                    'WITHDRAWAL' as type
             FROM transactions
-            WHERE txn_type = 'Withdrawal' OR category = 'FLOW_OUT'
-            """
+            WHERE (txn_type = 'Withdrawal' OR category = 'FLOW_OUT')
+            AND user_id = ?
+            """,
+            (user_id,)
         )
     except Exception:
         withdrawals = pd.DataFrame(columns=['date', 'amount', 'type'])
@@ -9876,8 +9909,10 @@ def ui_overview():
                    purchase_cost as amount,
                    'DEPOSIT' as type
             FROM transactions
-            WHERE txn_type = 'Deposit' OR category = 'FLOW_IN'
-            """
+            WHERE (txn_type = 'Deposit' OR category = 'FLOW_IN')
+            AND user_id = ?
+            """,
+            (user_id,)
         )
     except Exception:
         ledger_deposits = pd.DataFrame(columns=['date', 'amount', 'type'])
