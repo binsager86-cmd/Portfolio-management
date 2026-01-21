@@ -439,7 +439,7 @@ def convert_sql_placeholders(sql: str) -> str:
     
     Use this for pd.read_sql_query() which doesn't use db_execute().
     """
-    if USE_POSTGRES:
+    if is_postgres():
         return sql.replace("?", "%s")
     return sql
 
