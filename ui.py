@@ -1368,35 +1368,35 @@ def init_db():
             default_user_id = row[0] if row else 2
         
         # Fix cash_deposits with NULL user_id
-        cur.execute("UPDATE cash_deposits SET user_id = ? WHERE user_id IS NULL", (default_user_id,))
+        db_execute(cur, "UPDATE cash_deposits SET user_id = ? WHERE user_id IS NULL", (default_user_id,))
         fixed_cash = cur.rowcount
         
         # Fix transactions with NULL user_id
-        cur.execute("UPDATE transactions SET user_id = ? WHERE user_id IS NULL", (default_user_id,))
+        db_execute(cur, "UPDATE transactions SET user_id = ? WHERE user_id IS NULL", (default_user_id,))
         fixed_txn = cur.rowcount
         
         # Fix stocks with NULL user_id  
-        cur.execute("UPDATE stocks SET user_id = ? WHERE user_id IS NULL", (default_user_id,))
+        db_execute(cur, "UPDATE stocks SET user_id = ? WHERE user_id IS NULL", (default_user_id,))
         fixed_stocks = cur.rowcount
         
         # Fix trading_history with NULL user_id
-        cur.execute("UPDATE trading_history SET user_id = ? WHERE user_id IS NULL", (default_user_id,))
+        db_execute(cur, "UPDATE trading_history SET user_id = ? WHERE user_id IS NULL", (default_user_id,))
         fixed_trading = cur.rowcount
         
         # Fix portfolio_snapshots with NULL user_id OR default user_id=1 when main user is different
-        cur.execute("UPDATE portfolio_snapshots SET user_id = ? WHERE user_id IS NULL", (default_user_id,))
+        db_execute(cur, "UPDATE portfolio_snapshots SET user_id = ? WHERE user_id IS NULL", (default_user_id,))
         fixed_snapshots = cur.rowcount
         
         # Also migrate user_id=1 to main user if main user exists and has data
         if default_user_id > 1:
             cur.execute("SELECT COUNT(*) FROM portfolio_snapshots WHERE user_id = 1")
             old_user_count = cur.fetchone()[0]
-            cur.execute("SELECT COUNT(*) FROM portfolio_snapshots WHERE user_id = ?", (default_user_id,))
+            db_execute(cur, "SELECT COUNT(*) FROM portfolio_snapshots WHERE user_id = ?", (default_user_id,))
             new_user_count = cur.fetchone()[0]
             
             # If user_id=1 has snapshots but main user doesn't, migrate them
             if old_user_count > 0 and new_user_count == 0:
-                cur.execute("UPDATE portfolio_snapshots SET user_id = ? WHERE user_id = 1", (default_user_id,))
+                db_execute(cur, "UPDATE portfolio_snapshots SET user_id = ? WHERE user_id = 1", (default_user_id,))
                 fixed_snapshots += cur.rowcount
         
         conn.commit()
@@ -7841,7 +7841,7 @@ def ui_trading_section():
                         total_sell_value = sale_price * quantity if is_closed else 0
                         
                         # Insert Buy
-                        cur.execute("""
+                        db_execute(cur, """
                             INSERT INTO trading_history 
                             (stock_symbol, txn_date, txn_type, purchase_cost, sell_value, shares, 
                              cash_dividend, bonus_shares, created_at, user_id)
@@ -7850,7 +7850,7 @@ def ui_trading_section():
                         
                         # Insert Sell if applicable
                         if is_closed:
-                            cur.execute("""
+                            db_execute(cur, """
                                 INSERT INTO trading_history 
                                 (stock_symbol, txn_date, txn_type, purchase_cost, sell_value, shares, 
                                  cash_dividend, bonus_shares, created_at, user_id)
@@ -7894,7 +7894,7 @@ def ui_trading_section():
                     user_id = st.session_state.get('user_id', 1)
                     
                     # Find and remove duplicate Buy transactions for current user
-                    cur.execute("""
+                    db_execute(cur, """
                         DELETE FROM trading_history 
                         WHERE id NOT IN (
                             SELECT MIN(id) 
@@ -7906,7 +7906,7 @@ def ui_trading_section():
                     buy_dupes = cur.rowcount
                     
                     # Find and remove duplicate Sell transactions for current user
-                    cur.execute("""
+                    db_execute(cur, """
                         DELETE FROM trading_history 
                         WHERE id NOT IN (
                             SELECT MIN(id) 
@@ -8418,7 +8418,7 @@ def ui_trading_section():
                                     )
                                 
                                 # Insert Buy transaction (always)
-                                cur.execute("""
+                                db_execute(cur, """
                                     INSERT INTO trading_history 
                                     (stock_symbol, txn_date, txn_type, purchase_cost, sell_value, shares, 
                                      cash_dividend, bonus_shares, created_at, user_id)
@@ -8428,7 +8428,7 @@ def ui_trading_section():
                                 
                                 # Insert Sell transaction only if sale date exists
                                 if has_sale:
-                                    cur.execute("""
+                                    db_execute(cur, """
                                         INSERT INTO trading_history 
                                         (stock_symbol, txn_date, txn_type, purchase_cost, sell_value, shares, 
                                          cash_dividend, bonus_shares, created_at, user_id)
@@ -8450,7 +8450,7 @@ def ui_trading_section():
                         conn2 = get_conn()
                         cur2 = conn2.cursor()
                         user_id = st.session_state.get('user_id', 1)
-                        cur2.execute("SELECT COUNT(*) FROM trading_history WHERE user_id = ?", (user_id,))
+                        db_execute(cur2, "SELECT COUNT(*) FROM trading_history WHERE user_id = ?", (user_id,))
                         transactions_after = cur2.fetchone()[0]
                         conn2.close()
                         
@@ -9060,7 +9060,7 @@ def ui_trading_section():
                     if pd.notna(buy_id):
                         buy_id = int(buy_id)
                         # Update Buy
-                        cur.execute("""
+                        db_execute(cur, """
                             UPDATE trading_history
                             SET stock_symbol = ?, txn_date = ?, shares = ?, purchase_cost = ?
                             WHERE id = ?
@@ -9093,7 +9093,7 @@ def ui_trading_section():
                     else:
                         # Insert Buy
                         user_id = st.session_state.get('user_id', 1)
-                        cur.execute("""
+                        db_execute(cur, """
                             INSERT INTO trading_history (stock_symbol, txn_date, txn_type, shares, purchase_cost, created_at, user_id)
                             VALUES (?, ?, 'Buy', ?, ?, ?, ?)
                         """, (symbol, p_date, qty, p_cost, int(time.time()), user_id))
@@ -9101,7 +9101,7 @@ def ui_trading_section():
                         # If Realized, Insert Sell
                         if is_realized:
                             sell_val = s_price * qty
-                            cur.execute("""
+                            db_execute(cur, """
                                 INSERT INTO trading_history (stock_symbol, txn_date, txn_type, shares, sell_value, created_at, user_id)
                                 VALUES (?, ?, 'Sell', ?, ?, ?, ?)
                             """, (symbol, s_date, qty, sell_val, int(time.time()), user_id))
