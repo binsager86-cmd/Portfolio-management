@@ -8691,8 +8691,13 @@ def ui_trading_section():
     unrealized_positions = []  # Open positions without sell
     all_tickers_for_fetch = set()
     
+    # Guard: Check if DataFrame is valid before processing
+    if df is None or df.empty or "Stock" not in df.columns:
+        st.info("📭 No trading data available yet. Please add transactions first.")
+        return
+    
     # Process by Stock to pair transactions
-    for stock in df['Stock'].unique():
+    for stock in sorted(df["Stock"].dropna().unique()):
         stock_df = df[df['Stock'] == stock].sort_values('txn_date').reset_index(drop=True)
         
         buys = stock_df[stock_df['txn_type'] == 'Buy'].copy()
