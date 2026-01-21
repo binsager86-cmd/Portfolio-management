@@ -7844,18 +7844,18 @@ def ui_trading_section():
                         cur.execute("""
                             INSERT INTO trading_history 
                             (stock_symbol, txn_date, txn_type, purchase_cost, sell_value, shares, 
-                             cash_dividend, bonus_shares, created_at)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """, (stock_symbol, purchase_date.strftime("%Y-%m-%d"), 'Buy', total_purchase_cost, 0, quantity, 0, 0, int(time.time())))
+                             cash_dividend, bonus_shares, created_at, user_id)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """, (stock_symbol, purchase_date.strftime("%Y-%m-%d"), 'Buy', total_purchase_cost, 0, quantity, 0, 0, int(time.time()), user_id))
                         
                         # Insert Sell if applicable
                         if is_closed:
                             cur.execute("""
                                 INSERT INTO trading_history 
                                 (stock_symbol, txn_date, txn_type, purchase_cost, sell_value, shares, 
-                                 cash_dividend, bonus_shares, created_at)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                            """, (stock_symbol, sale_date.strftime("%Y-%m-%d"), 'Sell', 0, total_sell_value, quantity, cash_div, bonus_shares, int(time.time())))
+                                 cash_dividend, bonus_shares, created_at, user_id)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            """, (stock_symbol, sale_date.strftime("%Y-%m-%d"), 'Sell', 0, total_sell_value, quantity, cash_div, bonus_shares, int(time.time()), user_id))
                             st.success(f"✅ Added closed trade for {stock_symbol} (Buy + Sell)")
                         else:
                             st.success(f"✅ Added open position for {stock_symbol} (Buy only)")
@@ -8170,6 +8170,7 @@ def ui_trading_section():
                     st.success(f"✅ Validation passed! All {len(df)} rows are valid.")
                     st.write(f"**Preview** ({len(df):,} rows from sheet '{sheet}'):")
                     st.dataframe(df, use_container_width=True, height=300)
+                    proceed_with_errors = False  # Initialize for valid data path
                 
                 if st.button("✅ Import Trading Data", key="import_trades") or proceed_with_errors:
                     imported = 0
@@ -8398,9 +8399,9 @@ def ui_trading_section():
                                     db_execute(cur, """
                                         INSERT INTO trading_history 
                                         (stock_symbol, txn_date, txn_type, purchase_cost, sell_value, shares, 
-                                         cash_dividend, bonus_shares, created_at)
-                                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                    """, (stock, sale_date, 'Sell', 0, sell_value, quantity, cash_div, bonus_shares, int(time.time())))
+                                         cash_dividend, bonus_shares, created_at, user_id)
+                                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                    """, (stock, sale_date, 'Sell', 0, sell_value, quantity, cash_div, bonus_shares, int(time.time()), user_id))
                                     
                                     imported += 1
                                     success_rows.append(f"Row {row_num}: {stock} - Added sell transaction only (buy already exists)")
@@ -8420,9 +8421,9 @@ def ui_trading_section():
                                 cur.execute("""
                                     INSERT INTO trading_history 
                                     (stock_symbol, txn_date, txn_type, purchase_cost, sell_value, shares, 
-                                     cash_dividend, bonus_shares, created_at)
-                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                """, (stock, purchase_date, 'Buy', purchase_cost, 0, quantity, 0, 0, int(time.time())))
+                                     cash_dividend, bonus_shares, created_at, user_id)
+                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                """, (stock, purchase_date, 'Buy', purchase_cost, 0, quantity, 0, 0, int(time.time()), user_id))
                                 buy_count += 1
                                 
                                 # Insert Sell transaction only if sale date exists
@@ -8430,9 +8431,9 @@ def ui_trading_section():
                                     cur.execute("""
                                         INSERT INTO trading_history 
                                         (stock_symbol, txn_date, txn_type, purchase_cost, sell_value, shares, 
-                                         cash_dividend, bonus_shares, created_at)
-                                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                    """, (stock, sale_date, 'Sell', 0, sell_value, quantity, cash_div, bonus_shares, int(time.time())))
+                                         cash_dividend, bonus_shares, created_at, user_id)
+                                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                    """, (stock, sale_date, 'Sell', 0, sell_value, quantity, cash_div, bonus_shares, int(time.time()), user_id))
                                     sell_count += 1
                                 
                                 imported += 1
@@ -8627,13 +8628,13 @@ def ui_trading_section():
                 t.bonus_shares as "Bonus shares",
                 t.notes
             FROM trading_history t
-            WHERE t.txn_date BETWEEN ? AND ?
+            WHERE t.user_id = ? AND t.txn_date BETWEEN ? AND ?
             ORDER BY t.txn_date, t.stock_symbol, t.txn_type
         """
         df = pd.read_sql_query(
             query,
             conn,
-            params=(start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d"))
+            params=(user_id, start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d"))
         )
     else:
         query = """
@@ -8649,9 +8650,10 @@ def ui_trading_section():
                 t.bonus_shares as "Bonus shares",
                 t.notes
             FROM trading_history t
+            WHERE t.user_id = ?
             ORDER BY t.txn_date, t.stock_symbol, t.txn_type
         """
-        df = pd.read_sql_query(query, conn)
+        df = pd.read_sql_query(query, conn, params=(user_id,))
     
     conn.close()
     
@@ -9075,10 +9077,11 @@ def ui_trading_section():
                                 """, (symbol, s_date, qty, sell_val, int(sell_id)))
                             else:
                                 # Insert NEW Sell (Transition to Realized)
+                                user_id = st.session_state.get('user_id', 1)
                                 db_execute(cur, """
-                                    INSERT INTO trading_history (stock_symbol, txn_date, txn_type, shares, sell_value, created_at)
-                                    VALUES (?, ?, 'Sell', ?, ?, ?)
-                                """, (symbol, s_date, qty, sell_val, int(time.time())))
+                                    INSERT INTO trading_history (stock_symbol, txn_date, txn_type, shares, sell_value, created_at, user_id)
+                                    VALUES (?, ?, 'Sell', ?, ?, ?, ?)
+                                """, (symbol, s_date, qty, sell_val, int(time.time()), user_id))
                         else:
                             # Transferred to Unrealized: Delete potential sell record
                             if pd.notna(sell_id):
@@ -9089,18 +9092,19 @@ def ui_trading_section():
                     # -- NEW RECORD (INSERT) --
                     else:
                         # Insert Buy
+                        user_id = st.session_state.get('user_id', 1)
                         cur.execute("""
-                            INSERT INTO trading_history (stock_symbol, txn_date, txn_type, shares, purchase_cost, created_at)
-                            VALUES (?, ?, 'Buy', ?, ?, ?)
-                        """, (symbol, p_date, qty, p_cost, int(time.time())))
+                            INSERT INTO trading_history (stock_symbol, txn_date, txn_type, shares, purchase_cost, created_at, user_id)
+                            VALUES (?, ?, 'Buy', ?, ?, ?, ?)
+                        """, (symbol, p_date, qty, p_cost, int(time.time()), user_id))
                         
                         # If Realized, Insert Sell
                         if is_realized:
                             sell_val = s_price * qty
                             cur.execute("""
-                                INSERT INTO trading_history (stock_symbol, txn_date, txn_type, shares, sell_value, created_at)
-                                VALUES (?, ?, 'Sell', ?, ?, ?)
-                            """, (symbol, s_date, qty, sell_val, int(time.time())))
+                                INSERT INTO trading_history (stock_symbol, txn_date, txn_type, shares, sell_value, created_at, user_id)
+                                VALUES (?, ?, 'Sell', ?, ?, ?, ?)
+                            """, (symbol, s_date, qty, sell_val, int(time.time()), user_id))
                         
                         changes_count += 1
                 
@@ -9262,6 +9266,12 @@ def ui_overview():
         (user_id,)
     )
     
+    # Get previous day's snapshot for daily movement calculation
+    previous_snapshot = query_df(
+        "SELECT portfolio_value, snapshot_date FROM portfolio_snapshots WHERE user_id = ? ORDER BY snapshot_date DESC LIMIT 1 OFFSET 1",
+        (user_id,)
+    )
+    
     # Calculate LIVE portfolio value from current prices and holdings
     live_stock_value = 0.0
     num_stocks = 0
@@ -9319,6 +9329,33 @@ def ui_overview():
         )
         total_dividends_kwd = all_dividends["amount_in_kwd"].sum()
     
+    # Calculate Realized Profit (from Sell transactions)
+    realized_profit_kwd = 0.0
+    realized_query = query_df("""
+        SELECT 
+            t.sell_value, 
+            t.purchase_cost,
+            t.shares,
+            COALESCE(s.currency, 'KWD') as currency
+        FROM transactions t
+        LEFT JOIN stocks s ON t.stock_symbol = s.symbol AND s.user_id = t.user_id
+        WHERE t.txn_type = 'Sell' AND t.user_id = ? AND COALESCE(t.category, 'portfolio') = 'portfolio'
+    """, (user_id,))
+    
+    if not realized_query.empty:
+        for _, row in realized_query.iterrows():
+            sell_val = safe_float(row.get('sell_value', 0), 0)
+            buy_cost = safe_float(row.get('purchase_cost', 0), 0)
+            profit = sell_val - buy_cost
+            realized_profit_kwd += convert_to_kwd(profit, row.get('currency', 'KWD'))
+    
+    # Calculate Unrealized Profit (current holdings)
+    unrealized_profit_kwd = 0.0
+    for port_name in PORTFOLIO_CCY.keys():
+        df_port = build_portfolio_table(port_name)
+        if not df_port.empty and 'Unrealized P/L' in df_port.columns:
+            for _, row in df_port.iterrows():
+                unrealized_profit_kwd += convert_to_kwd(row['Unrealized P/L'], row['Currency'])
     
     # Get total transactions
     user_id = st.session_state.get('user_id', 1)
@@ -9412,7 +9449,19 @@ def ui_overview():
     </style>
     """, unsafe_allow_html=True)
 
-    col1, col2, col3, col4 = st.columns(4)
+    # Calculate daily movement
+    daily_change_value = 0.0
+    daily_change_pct = 0.0
+    daily_change_available = False
+    
+    if not previous_snapshot.empty:
+        prev_value = previous_snapshot['portfolio_value'].iloc[0]
+        if prev_value and prev_value > 0:
+            daily_change_value = live_portfolio_value - prev_value
+            daily_change_pct = (daily_change_value / prev_value) * 100
+            daily_change_available = True
+
+    col1, col2, col3, col4, col5 = st.columns(5)
     
     with col1:
         # Show breakdown: Stocks + Cash
@@ -9458,6 +9507,68 @@ def ui_overview():
             <div class="ov-title">📊 Total Stocks</div>
             <div class="ov-value">{num_stocks}</div>
             <div class="ov-sub">{num_txns} transactions</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col5:
+        if daily_change_available:
+            delta_class = "ov-delta-pos" if daily_change_value >= 0 else "ov-delta-neg"
+            delta_sign = "+" if daily_change_value >= 0 else ""
+            arrow = "▲" if daily_change_value >= 0 else "▼"
+            
+            st.markdown(f"""
+            <div class="ov-card">
+                <div class="ov-title">📅 Daily Movement</div>
+                <div class="ov-value"><span class="{delta_class}">{delta_sign}{fmt_money_plain(abs(daily_change_value), 2)}</span> <span class="ov-currency">KWD</span></div>
+                <div class="ov-sub">
+                    <span class="{delta_class}">{arrow} {delta_sign}{daily_change_pct:.2f}%</span> vs yesterday
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.markdown(f"""
+            <div class="ov-card">
+                <div class="ov-title">📅 Daily Movement</div>
+                <div class="ov-value">N/A</div>
+                <div class="ov-sub">Need 2+ snapshots</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+    # Second row: Realized & Unrealized Profit
+    st.write("")  # Spacer
+    col_r1, col_r2, col_r3 = st.columns(3)
+    
+    with col_r1:
+        realized_class = "ov-delta-pos" if realized_profit_kwd >= 0 else "ov-delta-neg"
+        realized_sign = "+" if realized_profit_kwd >= 0 else ""
+        st.markdown(f"""
+        <div class="ov-card">
+            <div class="ov-title">💵 Realized Profit</div>
+            <div class="ov-value"><span class="{realized_class}">{realized_sign}{fmt_money_plain(realized_profit_kwd, 2)}</span> <span class="ov-currency">KWD</span></div>
+            <div class="ov-sub">From closed positions</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col_r2:
+        unrealized_class = "ov-delta-pos" if unrealized_profit_kwd >= 0 else "ov-delta-neg"
+        unrealized_sign = "+" if unrealized_profit_kwd >= 0 else ""
+        st.markdown(f"""
+        <div class="ov-card">
+            <div class="ov-title">📊 Unrealized Profit</div>
+            <div class="ov-value"><span class="{unrealized_class}">{unrealized_sign}{fmt_money_plain(unrealized_profit_kwd, 2)}</span> <span class="ov-currency">KWD</span></div>
+            <div class="ov-sub">Current holdings</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col_r3:
+        total_profit = realized_profit_kwd + unrealized_profit_kwd + total_dividends_kwd
+        total_class = "ov-delta-pos" if total_profit >= 0 else "ov-delta-neg"
+        total_sign = "+" if total_profit >= 0 else ""
+        st.markdown(f"""
+        <div class="ov-card">
+            <div class="ov-title">🏆 Total Profit (incl. Dividends)</div>
+            <div class="ov-value"><span class="{total_class}">{total_sign}{fmt_money_plain(total_profit, 2)}</span> <span class="ov-currency">KWD</span></div>
+            <div class="ov-sub">Dividends: {fmt_money_plain(total_dividends_kwd, 2)} KWD</div>
         </div>
         """, unsafe_allow_html=True)
 
