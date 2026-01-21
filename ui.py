@@ -2107,8 +2107,10 @@ class PortfolioCalculator:
             return None  # Did not converge to valid solution
             
         except Exception as e:
-            # Don't show error in UI unless debugging
-            # st.error(f"MWRR calculation error: {e}")
+            # Log error for debugging
+            import traceback
+            print(f"MWRR calculation error: {e}")
+            traceback.print_exc()
             return None
     
     @staticmethod
@@ -9991,6 +9993,13 @@ def ui_overview():
     twr = calc.calculate_twr(portfolio_history, cash_flows_twr)
     
     # Calculate MWRR (uses only cash dividends - reinvested are not cash flows)
+    # Debug: log key values
+    _mwrr_debug = {
+        'cash_flows_mwrr_count': len(cash_flows_mwrr),
+        'current_portfolio_value': current_portfolio_value,
+        'inception_date': str(inception_date),
+        'user_id': user_id
+    }
     mwrr = calc.calculate_mwrr(cash_flows_mwrr, current_portfolio_value, inception_date)
     
     # Calculate CAGR using ONLY initial investment (excludes impact of additional deposits)
@@ -10034,13 +10043,13 @@ def ui_overview():
             st.caption("Based on actual cash deposits & dividends")
         else:
             st.metric("💵 Money-Weighted Return (IRR)", "N/A")
-            # Diagnostic message
+            # Diagnostic message with debug info
             if cash_flows_mwrr.empty:
-                st.caption("⚠️ No cash deposits found - add deposits in 'Cash Deposits' tab")
+                st.caption(f"⚠️ No cash deposits found for user_id={user_id}")
             elif current_portfolio_value <= 0:
-                st.caption("⚠️ No current portfolio value available")
+                st.caption(f"⚠️ No current portfolio value (history rows: {len(portfolio_history)})")
             else:
-                st.caption("⚠️ Need valid cash deposits and current portfolio value")
+                st.caption(f"⚠️ Calculation failed (cf:{len(cash_flows_mwrr)}, val:{current_portfolio_value:.0f})")
     
     with col3:
         if cagr is not None:
@@ -10058,6 +10067,18 @@ def ui_overview():
         else:
             st.metric("📊 CAGR", "N/A")
             st.caption("Insufficient data")
+
+    # DEBUG: Show MWRR calculation details (can remove later)
+    with st.expander("🔧 MWRR Debug Info", expanded=False):
+        st.write(f"**User ID:** {user_id}")
+        st.write(f"**Portfolio History Rows:** {len(portfolio_history)}")
+        st.write(f"**Cash Flows for MWRR:** {len(cash_flows_mwrr)}")
+        st.write(f"**Current Portfolio Value:** {current_portfolio_value:.2f}")
+        st.write(f"**Inception Date:** {inception_date}")
+        st.write(f"**MWRR Result:** {mwrr}")
+        if not cash_flows_mwrr.empty:
+            st.write("**Cash Flow Sample (first 5):**")
+            st.dataframe(cash_flows_mwrr.head(5))
 
     st.divider()
     st.subheader("📉 Valuation Drift")
