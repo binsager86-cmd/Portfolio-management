@@ -776,14 +776,20 @@ def hash_password(password: str) -> str:
         return password
 
 def check_password(password: str, hashed: str) -> bool:
-    """Check a password against a hash."""
+    """Check a password against a hash. No plain text fallback for security."""
     try:
         import bcrypt
         # checkpw raises ValueError if hashed is not a valid salt/hash
-        return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
-    except (ImportError, ValueError):
-        # Fallback for plain text passwords or missing library
-        return password == hashed
+        if not hashed or not isinstance(hashed, (str, bytes)):
+            return False
+        
+        # Ensure hashed is bytes
+        if isinstance(hashed, str):
+            hashed_bytes = hashed.encode('utf-8')
+        else:
+            hashed_bytes = hashed
+            
+        return bcrypt.checkpw(password.encode('utf-8'), hashed_bytes)
     except Exception:
         return False
 
@@ -2350,7 +2356,10 @@ def compute_holdings_avg_cost(tx: pd.DataFrame):
 
 
 def build_portfolio_table(portfolio_name: str):
+    """Build portfolio table with optimized bulk transaction fetch (N+1 fix)."""
     user_id = st.session_state.get('user_id')
+    
+    # 1. Bulk Fetch Stocks for this portfolio
     stocks = query_df(
         """
         SELECT
@@ -2369,30 +2378,41 @@ def build_portfolio_table(portfolio_name: str):
     if stocks.empty:
         return pd.DataFrame()
 
+    # 2. Bulk Fetch All Transactions for this user (Performance Optimization)
+    # Fetch once instead of per-stock query (eliminates N+1 problem)
+    all_txs = query_df(
+        """
+        SELECT
+            id, stock_symbol, txn_date, txn_type,
+            purchase_cost, sell_value, shares,
+            bonus_shares, cash_dividend,
+            price_override, planned_cum_shares,
+            reinvested_dividend, fees,
+            broker, reference, notes, created_at
+        FROM transactions
+        WHERE user_id = ? AND COALESCE(category, 'portfolio') = 'portfolio'
+        ORDER BY txn_date ASC, created_at ASC, id ASC
+        """,
+        (user_id,)
+    )
+
     rows = []
     for _, srow in stocks.iterrows():
         sym = srow["symbol"]
         cp = safe_float(srow["current_price"], 0.0)
 
-        tx = query_df(
-            """
-            SELECT
-                id, stock_symbol, txn_date, txn_type,
-                purchase_cost, sell_value, shares,
-                bonus_shares, cash_dividend,
-                price_override, planned_cum_shares,
-                reinvested_dividend, fees,
-                broker, reference, notes, created_at
-            FROM transactions
-            WHERE stock_symbol = ? AND COALESCE(category, 'portfolio') = 'portfolio' AND user_id = ?
-            ORDER BY txn_date ASC, created_at ASC, id ASC
-            """,
-            (sym, user_id),
-        )
+        # Filter transactions in memory (Fast - no DB round-trip)
+        tx = all_txs[all_txs['stock_symbol'] == sym].copy()
 
+        # Calculate metrics (business logic preserved)
         h = compute_holdings_avg_cost(tx)
 
         qty = h["shares"]
+        
+        # Skip empty positions early for performance
+        if qty <= 0.001 and h["cost_basis"] <= 0.001 and h["cash_div"] <= 0.001:
+            continue
+
         total_cost = h["cost_basis"]
         avg_cost = (total_cost / qty) if qty > 0 else 0.0
 
@@ -2401,22 +2421,15 @@ def build_portfolio_table(portfolio_name: str):
         unreal = mkt_value - total_cost
 
         cash_div = h["cash_div"]
-        bonus_sh = h["bonus_shares"]  # keep for disclosure, but DO NOT value it
-
-        # Dividend yield on cost (historical)
-        yield_pct = (cash_div / total_cost) if total_cost > 0 else 0.0
-
-        # CFA total return (KD) for open position: (Market Value + Cash Dividends) - Total Cost
-        total_pnl = (mkt_value + cash_div) - total_cost
-        
-        # Total return % on cost
-        pnl_pct = (total_pnl / total_cost) if total_cost > 0 else 0.0
-        
+        bonus_sh = h["bonus_shares"]
         reinv_div = h["reinv"]
 
-        # Show the stock `name` first (if present) then the `symbol` so edits to the name
-        # fully replace the visible company label in the UI.
+        yield_pct = (cash_div / total_cost) if total_cost > 0 else 0.0
+        total_pnl = (mkt_value + cash_div) - total_cost
+        pnl_pct = (total_pnl / total_cost) if total_cost > 0 else 0.0
+        
         display_name = srow.get('name') if srow.get('name') else sym
+        
         rows.append({
             "Company": f"{display_name} - {sym}".strip(),
             "Symbol": sym,
@@ -2437,21 +2450,13 @@ def build_portfolio_table(portfolio_name: str):
 
     df = pd.DataFrame(rows)
     
-    # Filter out stocks with zero cost AND zero shares
-    # Use epsilon (0.001) to handle floating point residuals and effectively zero positions
     if not df.empty:
-        df = df[
-            (df["Total Cost"].abs() > 0.001) | 
-            (df["Shares Qty"].abs() > 0.001)
-        ]
-
-    # weights + weighted yield
-    total_cost_sum = float(df["Total Cost"].sum()) if not df.empty else 0.0
-    df["Weight by Cost"] = df["Total Cost"].apply(lambda x: (x / total_cost_sum) if total_cost_sum > 0 else 0.0)
-    df["Weighted Dividend Yield on Cost"] = df["Dividend Yield on Cost %"] * df["Weight by Cost"]
-
-    # sort like your excel (largest weight first)
-    df = df.sort_values(["Total Cost"], ascending=[False]).reset_index(drop=True)
+        # Calculate weights
+        total_cost_sum = float(df["Total Cost"].sum())
+        df["Weight by Cost"] = df["Total Cost"].apply(lambda x: (x / total_cost_sum) if total_cost_sum > 0 else 0.0)
+        df["Weighted Dividend Yield on Cost"] = df["Dividend Yield on Cost %"] * df["Weight by Cost"]
+        df = df.sort_values(["Total Cost"], ascending=[False]).reset_index(drop=True)
+        
     return df
 
 
@@ -11101,7 +11106,7 @@ def ui_pfm():
                     pd.DataFrame(default_income),
                     num_rows="dynamic",
                     use_container_width=True,
-                    key="pfm_income_editor",
+                    key=f"pfm_inc_{snapshot_date}",
                     column_config={
                         "Category": st.column_config.TextColumn(width="medium"),
                         "Monthly (KWD)": st.column_config.NumberColumn(format="%.3f", min_value=0)
@@ -11114,7 +11119,7 @@ def ui_pfm():
                     pd.DataFrame(default_expense),
                     num_rows="dynamic",
                     use_container_width=True,
-                    key="pfm_expense_editor",
+                    key=f"pfm_exp_{snapshot_date}",
                     column_config={
                         "Category": st.column_config.TextColumn(width="medium"),
                         "Monthly (KWD)": st.column_config.NumberColumn(format="%.3f", min_value=0),
@@ -11149,7 +11154,7 @@ def ui_pfm():
                     pd.DataFrame(default_real_estate),
                     num_rows="dynamic",
                     use_container_width=True,
-                    key="pfm_re_editor",
+                    key=f"pfm_re_{snapshot_date}",
                     column_config={
                         "Name": st.column_config.TextColumn(width="large"),
                         "Value (KWD)": st.column_config.NumberColumn(format="%.3f", min_value=0)
@@ -11206,7 +11211,7 @@ def ui_pfm():
                         pd.DataFrame(default_shares),
                         num_rows="dynamic",
                         use_container_width=True,
-                        key="pfm_shares_editor",
+                        key=f"pfm_shares_{snapshot_date}",
                         column_config={
                             "Ticker": st.column_config.TextColumn(width="small"),
                             "Name": st.column_config.TextColumn(width="medium"),
@@ -11226,7 +11231,7 @@ def ui_pfm():
                     pd.DataFrame(default_gold),
                     num_rows="dynamic",
                     use_container_width=True,
-                    key="pfm_gold_editor",
+                    key=f"pfm_gold_{snapshot_date}",
                     column_config={
                         "Type": st.column_config.SelectboxColumn(options=["Bars", "Coins", "Jewelry", "Other"]),
                         "Grams": st.column_config.NumberColumn(format="%.2f", min_value=0),
@@ -11244,7 +11249,7 @@ def ui_pfm():
                     pd.DataFrame(default_cash),
                     num_rows="dynamic",
                     use_container_width=True,
-                    key="pfm_cash_editor",
+                    key=f"pfm_cash_{snapshot_date}",
                     column_config={
                         "Account": st.column_config.TextColumn(width="medium"),
                         "Amount": st.column_config.NumberColumn(format="%.3f", min_value=0),
@@ -11267,7 +11272,7 @@ def ui_pfm():
                     pd.DataFrame(default_crypto),
                     num_rows="dynamic",
                     use_container_width=True,
-                    key="pfm_crypto_editor",
+                    key=f"pfm_crypto_{snapshot_date}",
                     column_config={
                         "Coin": st.column_config.TextColumn(width="small"),
                         "Qty": st.column_config.NumberColumn(format="%.6f", min_value=0),
@@ -11285,7 +11290,7 @@ def ui_pfm():
                     pd.DataFrame(default_liabilities),
                     num_rows="dynamic",
                     use_container_width=True,
-                    key="pfm_liab_editor",
+                    key=f"pfm_liab_{snapshot_date}",
                     column_config={
                         "Category": st.column_config.TextColumn(width="medium"),
                         "Amount (KWD)": st.column_config.NumberColumn(format="%.3f", min_value=0),
@@ -11830,20 +11835,6 @@ def ui_pfm():
                     st.markdown(f"{icon} **{label}:** {msg}")
 
 def main():
-    # --- TEMPORARY FIX: Run this once to fix existing prices ---
-    try:
-        conn = get_conn()
-        cur = conn.cursor()
-        # Find KWD stocks with prices > 50 (impossible for KWD, implies Fils)
-        db_execute(cur, "UPDATE stocks SET current_price = current_price / 1000.0 WHERE currency = 'KWD' AND current_price > 50")
-        if cur.rowcount > 0:
-            st.toast(f"🔧 Auto-repaired {cur.rowcount} stock prices from Fils to KWD!", icon="✅")
-            conn.commit()
-        conn.close()
-    except Exception as e:
-        print(f"Fix failed: {e}")
-    # -----------------------------------------------------------
-    
     # Initialize database schema (handles both SQLite and PostgreSQL)
     try:
         init_db()
@@ -12089,12 +12080,8 @@ def main():
         "Personal Finance"
     ]
     
-    # Use default parameter to persist tab selection (Streamlit 1.42+)
-    default_tab = st.session_state.get("active_main_tab", "Overview")
-    if default_tab not in tab_names:
-        default_tab = "Overview"
-    
-    tabs = st.tabs(tab_names, default=default_tab)
+    # Create tabs (compatible with all Streamlit versions)
+    tabs = st.tabs(tab_names)
 
     with tabs[0]:
         ui_overview()
