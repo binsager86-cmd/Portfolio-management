@@ -8363,7 +8363,7 @@ def ui_trading_section():
                                 
                                 # Check for duplicates with STRICT matching (stock, date, quantity, cost)
                                 user_id = st.session_state.get('user_id', 1)
-                                cur.execute("""
+                                db_execute(cur, """
                                     SELECT id FROM trading_history 
                                     WHERE stock_symbol = ? AND txn_date = ? AND txn_type = 'Buy' 
                                     AND shares = ? AND purchase_cost = ? AND user_id = ?
@@ -8376,7 +8376,7 @@ def ui_trading_section():
                                 sell_exists = False
                                 existing_sell = None
                                 if has_sale:
-                                    cur.execute("""
+                                    db_execute(cur, """
                                         SELECT id FROM trading_history 
                                         WHERE stock_symbol = ? AND txn_date = ? AND txn_type = 'Sell' 
                                         AND shares = ? AND sell_value = ? AND user_id = ?
