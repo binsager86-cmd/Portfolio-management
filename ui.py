@@ -1647,6 +1647,30 @@ def init_db():
     print("✅ PFM tables created.")
     
     # ============================================
+    # DATABASE INDEXES FOR PERFORMANCE
+    # ============================================
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        # Index on user_id for fast filtering (critical for multi-user queries)
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_txn_user ON transactions(user_id)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_stocks_user ON stocks(user_id)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_snapshots_user ON portfolio_snapshots(user_id)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_cash_deposits_user ON cash_deposits(user_id)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_trading_history_user ON trading_history(user_id)")
+        
+        # Composite indexes for common query patterns
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_txn_user_symbol ON transactions(user_id, stock_symbol)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_snapshots_user_date ON portfolio_snapshots(user_id, snapshot_date)")
+        
+        conn.commit()
+        print("✅ Database indexes created for performance.")
+    except Exception as e:
+        print(f"⚠️ Index creation skipped: {e}")
+    finally:
+        conn.close()
+    
+    # ============================================
     # FIX NULL/DEFAULT USER_IDs (after restore or legacy data import)
     # ============================================
     conn = get_conn()
