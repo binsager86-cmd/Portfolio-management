@@ -8667,6 +8667,27 @@ def ui_trading_section():
     
     conn.close()
     
+    # --- Normalize Stock column and add safety check ---
+    if df is None:
+        st.info("📭 No trading data available yet. Please add transactions first.")
+        return
+
+    # Try to normalize any variant of 'stock' / 'stock_symbol' to 'Stock'
+    lower_map = {c.lower(): c for c in df.columns}
+
+    # If there is a lowercase 'stock' column but not exact 'Stock', rename it
+    if "stock" in lower_map and "Stock" not in df.columns:
+        df.rename(columns={lower_map["stock"]: "Stock"}, inplace=True)
+
+    # Or if we only have stock_symbol, normalize that
+    if "stock_symbol" in lower_map and "Stock" not in df.columns:
+        df.rename(columns={lower_map["stock_symbol"]: "Stock"}, inplace=True)
+
+    # Final safety check – if still no 'Stock', show an error instead of crashing
+    if "Stock" not in df.columns:
+        st.error(f"Internal error: expected a 'Stock' column in trading data, but found columns: {list(df.columns)}")
+        return
+    
     if df.empty:
         if apply_filter:
             st.warning(f"⚠️ No trades found between {start_date.strftime('%Y-%m-%d')} and {end_date.strftime('%Y-%m-%d')}.")
