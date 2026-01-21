@@ -11,6 +11,14 @@ except ImportError:
 
 import bcrypt
 
+# Import centralized stock data and helpers
+from stock_data import (
+    KUWAIT_STOCKS, US_STOCKS,
+    normalize_kwd_price,
+    get_kuwait_stock_options, get_us_stock_options,
+    parse_stock_selection, parse_kuwait_stock_selection
+)
+
 try:
     import extra_streamlit_components as stx
 except ImportError:
@@ -226,343 +234,7 @@ def get_pe_ratios(items):
     return results
 
 
-# Kuwait Stock Exchange - COMPLETE listing with Yahoo Finance tickers
-# All publicly traded companies on Boursa Kuwait (150+ stocks)
-KUWAIT_STOCKS = [
-    # BANKS (Banking Sector)
-    {"symbol": "ABK", "name": "Al Ahli Bank of Kuwait", "yf_ticker": "ABK.KW"},
-    {"symbol": "BOUBYAN", "name": "Boubyan Bank", "yf_ticker": "BOUBYAN.KW"},
-    {"symbol": "BPCC", "name": "Boubyan Petrochemical Company", "yf_ticker": "BPCC.KW"},
-    {"symbol": "BURGAN", "name": "Burgan Bank", "yf_ticker": "BURGAN.KW"},
-    {"symbol": "CBK", "name": "Commercial Bank of Kuwait", "yf_ticker": "CBK.KW"},
-    {"symbol": "GULF", "name": "Gulf Bank", "yf_ticker": "GULF.KW"},
-    {"symbol": "KFH", "name": "Kuwait Finance House", "yf_ticker": "KFH.KW"},
-    {"symbol": "KIB", "name": "Kuwait International Bank", "yf_ticker": "KIB.KW"},
-    {"symbol": "NBK", "name": "National Bank of Kuwait", "yf_ticker": "NBK.KW"},
-    {"symbol": "WARBAH", "name": "Warba Bank", "yf_ticker": "WARBAH.KW"},
-    
-    # INVESTMENT COMPANIES
-    {"symbol": "AAYAN", "name": "Aayan Leasing and Investment", "yf_ticker": "AAYAN.KW"},
-    {"symbol": "ADEEM", "name": "Adeem Investment Company", "yf_ticker": "ADEEM.KW"},
-    {"symbol": "AJIAL", "name": "Ajial Real Estate Entertainment", "yf_ticker": "AJIAL.KW"},
-    {"symbol": "ALABRAR", "name": "Al Abrar Holding Company", "yf_ticker": "ALABRAR.KW"},
-    {"symbol": "ALAMAN", "name": "Al-Aman Investment", "yf_ticker": "ALAMAN.KW"},
-    {"symbol": "ALEQTISAD", "name": "Al-Eqtisad Al-Islami Holding", "yf_ticker": "ALEQTISAD.KW"},
-    {"symbol": "ALIMTIAZ", "name": "Al Imtiaz Investment Group", "yf_ticker": "ALIMTIAZ.KW"},
-    {"symbol": "ALSAFAT", "name": "Alsafat Investment Company", "yf_ticker": "ALSAFAT.KW"},
-    {"symbol": "AMAR", "name": "Amar Finance and Leasing", "yf_ticker": "AMAR.KW"},
-    {"symbol": "BAYAN", "name": "Bayan Investment Company", "yf_ticker": "BAYAN.KW"},
-    {"symbol": "BUKHAMSEEN", "name": "Noor Financial Investment", "yf_ticker": "BUKHAMSEEN.KW"},
-    {"symbol": "CAPM", "name": "Capital Management House", "yf_ticker": "CAPM.KW"},
-    {"symbol": "COAST", "name": "Coast Investment & Development", "yf_ticker": "COAST.KW"},
-    {"symbol": "DIKKAN", "name": "Al Dikkan Trading Company", "yf_ticker": "DIKKAN.KW"},
-    {"symbol": "GFH", "name": "GFH Financial Group", "yf_ticker": "GFH.KW"},
-    {"symbol": "INOVEST", "name": "Inovest", "yf_ticker": "INOVEST.KW"},
-    {"symbol": "ITHMAAR", "name": "Ithmaar Holding", "yf_ticker": "ITHMAAR.KW"},
-    {"symbol": "KAMCO", "name": "KAMCO Investment Company", "yf_ticker": "KAMCO.KW"},
-    {"symbol": "KIPCO", "name": "Kuwait Projects Company (Holding)", "yf_ticker": "KIPCO.KW"},
-    {"symbol": "KMEFIC", "name": "Kuwait and Middle East Financial Investment", "yf_ticker": "KMEFIC.KW"},
-    {"symbol": "MARKAZ", "name": "Kuwait Financial Centre (Markaz)", "yf_ticker": "MARKAZ.KW"},
-    {"symbol": "MASHAER", "name": "Mashaer Holding Company", "yf_ticker": "MASHAER.KW"},
-    {"symbol": "MUNTAZAH", "name": "Al-Muntazah United Company", "yf_ticker": "MUNTAZAH.KW"},
-    {"symbol": "NIH", "name": "National International Holding", "yf_ticker": "NIH.KW"},
-    {"symbol": "ORIENT", "name": "Orient Insurance Company", "yf_ticker": "ORIENT.KW"},
-    {"symbol": "QURAIN", "name": "Qurain Petrochemical Industries", "yf_ticker": "QURAIN.KW"},
-    {"symbol": "SECURITIES", "name": "Kuwait Securities House", "yf_ticker": "SECURITIES.KW"},
-    {"symbol": "SUNDOS", "name": "Al-Sundos Holding Company", "yf_ticker": "SUNDOS.KW"},
-    {"symbol": "TIJARA", "name": "Tijara & Real Estate Investment", "yf_ticker": "TIJARA.KW"},
-    
-    # REAL ESTATE
-    {"symbol": "ALARGAN", "name": "Al Argan International Real Estate", "yf_ticker": "ALARGAN.KW"},
-    {"symbol": "ALDEERA", "name": "Al Deera Holding", "yf_ticker": "ALDEERA.KW"},
-    {"symbol": "ALMUDON", "name": "Almudon International Group", "yf_ticker": "ALMUDON.KW"},
-    {"symbol": "ALRAYA", "name": "Al-Raya Holding Company", "yf_ticker": "ALRAYA.KW"},
-    {"symbol": "ARKAN", "name": "Arkan Al-Kuwait Real Estate", "yf_ticker": "ARKAN.KW"},
-    {"symbol": "AQAR", "name": "Aqar Real Estate Investments", "yf_ticker": "AQAR.KW"},
-    {"symbol": "BURG", "name": "Al Burg Real Estate Company", "yf_ticker": "BURG.KW"},
-    {"symbol": "DAR", "name": "Dar Al-Thuraya Real Estate", "yf_ticker": "DAR.KW"},
-    {"symbol": "ENMAA", "name": "Enmaa Real Estate Company", "yf_ticker": "ENMAA.KW"},
-    {"symbol": "FIRSTDUBAI", "name": "First Dubai Real Estate Development", "yf_ticker": "FIRSTDUBAI.KW"},
-    {"symbol": "IFA", "name": "IFA Hotels & Resorts", "yf_ticker": "IFA.KW"},
-    {"symbol": "KRE", "name": "Kuwait Real Estate Company", "yf_ticker": "KRE.KW"},
-    {"symbol": "MABANEE", "name": "Mabanee Company", "yf_ticker": "MABANEE.KW"},
-    {"symbol": "MANAZEL", "name": "Manazel Holding Company", "yf_ticker": "MANAZEL.KW"},
-    {"symbol": "MASAKEN", "name": "Masaken Real Estate Company", "yf_ticker": "MASAKEN.KW"},
-    {"symbol": "MAZAYA", "name": "Mazaya Holding Company", "yf_ticker": "MAZAYA.KW"},
-    {"symbol": "MUNSHAAT", "name": "Munshaat Real Estate Projects", "yf_ticker": "MUNSHAAT.KW"},
-    {"symbol": "RAWASI", "name": "Rawasi Holding Company", "yf_ticker": "RAWASI.KW"},
-    {"symbol": "REAL", "name": "Al-Enma'a Real Estate Company", "yf_ticker": "REAL.KW"},
-    {"symbol": "SANAM", "name": "Sanam Real Estate Company", "yf_ticker": "SANAM.KW"},
-    {"symbol": "SOKOUK", "name": "Al-Soor Fuel Marketing Company", "yf_ticker": "SOKOUK.KW"},
-    {"symbol": "TAMDEEN", "name": "Tamdeen Real Estate Company", "yf_ticker": "TAMDEEN.KW"},
-    {"symbol": "URC", "name": "United Real Estate Company", "yf_ticker": "URC.KW"},
-    {"symbol": "VIVA", "name": "National Real Estate Company", "yf_ticker": "VIVA.KW"},
-    
-    # INDUSTRIAL
-    {"symbol": "ACICO", "name": "ACICO Industries", "yf_ticker": "ACICO.KW"},
-    {"symbol": "AGLTY", "name": "Agility Public Warehousing", "yf_ticker": "AGLTY.KW"},
-    {"symbol": "ALAFCO", "name": "Aviation Lease and Finance Company", "yf_ticker": "ALAFCO.KW"},
-    {"symbol": "ANWAR", "name": "Anwar Al-Qurain Holding Company", "yf_ticker": "ANWAR.KW"},
-    {"symbol": "CEMENT", "name": "Hilal Cement Company", "yf_ticker": "CEMENT.KW"},
-    {"symbol": "EQUIPMENT", "name": "Al-Ahleia Contracting & Equipment", "yf_ticker": "EQUIPMENT.KW"},
-    {"symbol": "GIC", "name": "Gulf Investment Corporation", "yf_ticker": "GIC.KW"},
-    {"symbol": "GULFCABLES", "name": "Gulf Cables & Electrical Industries", "yf_ticker": "GULFCABLES.KW"},
-    {"symbol": "HEAVY", "name": "Heavy Engineering Industries", "yf_ticker": "HEAVY.KW"},
-    {"symbol": "KCC", "name": "Kuwait Cement Company", "yf_ticker": "KCC.KW"},
-    {"symbol": "KGL", "name": "Kuwait & Gulf Link Transport", "yf_ticker": "KGL.KW"},
-    {"symbol": "KSCC", "name": "Kuwait Supply Company", "yf_ticker": "KSCC.KW"},
-    {"symbol": "NIC", "name": "National Industries Company", "yf_ticker": "NIC.KW"},
-    {"symbol": "NPCC", "name": "National Petroleum Construction", "yf_ticker": "NPCC.KW"},
-    {"symbol": "PIC", "name": "Petrochemical Industries Company", "yf_ticker": "PIC.KW"},
-    {"symbol": "SAFWAN", "name": "Safwan Trading & Contracting", "yf_ticker": "SAFWAN.KW"},
-    {"symbol": "SALBOOKH", "name": "Salbookh Trading Company", "yf_ticker": "SALBOOKH.KW"},
-    {"symbol": "UNICAP", "name": "United Fisheries of Kuwait", "yf_ticker": "UNICAP.KW"},
-    
-    # SERVICES (Consumer & Technology)
-    {"symbol": "ABYAR", "name": "Abyar Real Estate Development", "yf_ticker": "ABYAR.KW"},
-    {"symbol": "ALGHANIM", "name": "Alghanim Industries", "yf_ticker": "ALGHANIM.KW"},
-    {"symbol": "ALMAHA", "name": "Al Maha Petroleum Marketing", "yf_ticker": "ALMAHA.KW"},
-    {"symbol": "ALRAI", "name": "Al Rai Media Group", "yf_ticker": "ALRAI.KW"},
-    {"symbol": "AUTOMATED", "name": "Automated Systems Company", "yf_ticker": "AUTOMATED.KW"},
-    {"symbol": "BMTC", "name": "Bee'ah Tanmiah", "yf_ticker": "BMTC.KW"},
-    {"symbol": "BOURSA", "name": "Boursa Kuwait Securities", "yf_ticker": "BOURSA.KW"},
-    {"symbol": "CLEANUP", "name": "Cleanup Kuwait Holding", "yf_ticker": "CLEANUP.KW"},
-    {"symbol": "HUMANSOFT", "name": "Humansoft Holding", "yf_ticker": "HUMANSOFT.KW"},
-    {"symbol": "HUM", "name": "Humansoft Holding (Alternative)", "yf_ticker": "HUM.KW"},
-    {"symbol": "LOGISTICS", "name": "Kuwait Logistics Company", "yf_ticker": "LOGISTICS.KW"},
-    {"symbol": "METAHOLDING", "name": "Meta Holding Company", "yf_ticker": "METAHOLDING.KW"},
-    {"symbol": "OOREDOO", "name": "Ooredoo Kuwait (NMTC)", "yf_ticker": "OOREDOO.KW"},
-    {"symbol": "SAMAHIJ", "name": "Al-Samahij United Company", "yf_ticker": "SAMAHIJ.KW"},
-    {"symbol": "SEMAA", "name": "Shuwaikh Educational Holding", "yf_ticker": "SEMAA.KW"},
-    {"symbol": "STC", "name": "Kuwait Telecommunications Company (stc)", "yf_ticker": "STC.KW"},
-    {"symbol": "TAALEEM", "name": "Taaleem Holdings", "yf_ticker": "TAALEEM.KW"},
-    {"symbol": "WETHAQ", "name": "Wethaq Takaful Insurance", "yf_ticker": "WETHAQ.KW"},
-    {"symbol": "ZAIN", "name": "Mobile Telecommunications Company (Zain)", "yf_ticker": "ZAIN.KW"},
-    
-    # INSURANCE
-    {"symbol": "ALAHLEIA", "name": "Al Ahleia Insurance", "yf_ticker": "ALAHLEIA.KW"},
-    {"symbol": "ALKHALEEJ", "name": "Alkhaleej Takaful Insurance", "yf_ticker": "ALKHALEEJ.KW"},
-    {"symbol": "AMAN", "name": "Aman Insurance Company", "yf_ticker": "AMAN.KW"},
-    {"symbol": "ARIG", "name": "Al Ahlia Insurance Company", "yf_ticker": "ARIG.KW"},
-    {"symbol": "GIG", "name": "Gulf Insurance Group", "yf_ticker": "GIG.KW"},
-    {"symbol": "GULFINS", "name": "Gulf Insurance Group", "yf_ticker": "GULFINS.KW"},
-    {"symbol": "KIC", "name": "Kuwait Insurance Company", "yf_ticker": "KIC.KW"},
-    {"symbol": "KIRE", "name": "Kuwait Reinsurance Company", "yf_ticker": "KIRE.KW"},
-    {"symbol": "WARBAAINS", "name": "Warba Insurance Company", "yf_ticker": "WARBAAINS.KW"},
-    
-    # FOOD & CONSUMER GOODS
-    {"symbol": "AMERICANA", "name": "Americana Kuwait (KFIC)", "yf_ticker": "AMERICANA.KW"},
-    {"symbol": "ANFAL", "name": "Al Anfal International Catering", "yf_ticker": "ANFAL.KW"},
-    {"symbol": "DANAH", "name": "Al-Danah Catering Services", "yf_ticker": "DANAH.KW"},
-    {"symbol": "FOODCO", "name": "Kuwait Food Company", "yf_ticker": "FOODCO.KW"},
-    {"symbol": "KFIC", "name": "Kuwait Food Company (Americana)", "yf_ticker": "KFIC.KW"},
-    {"symbol": "KPP", "name": "Kuwait Portland Cement", "yf_ticker": "KPP.KW"},
-    {"symbol": "LIVESTOCK", "name": "Livestock Transport & Trading", "yf_ticker": "LIVESTOCK.KW"},
-    {"symbol": "MEZZAN", "name": "Mezzan Holding", "yf_ticker": "MEZZAN.KW"},
-    {"symbol": "PALMS", "name": "Palms Agro Production", "yf_ticker": "PALMS.KW"},
-    {"symbol": "SHUAIBA", "name": "Shuaiba Industrial Company", "yf_ticker": "SHUAIBA.KW"},
-    {"symbol": "WIDAM", "name": "Widam Food Company", "yf_ticker": "WIDAM.KW"},
-    
-    # HEALTHCARE & PHARMA
-    {"symbol": "ALANWAR", "name": "Alanwar Holding Company", "yf_ticker": "ALANWAR.KW"},
-    {"symbol": "HEALTH", "name": "Kuwait Health Assurance Hospital", "yf_ticker": "HEALTH.KW"},
-    {"symbol": "MEDIC", "name": "International Medical Group", "yf_ticker": "MEDIC.KW"},
-    {"symbol": "YIACO", "name": "YIACO Medical Company", "yf_ticker": "YIACO.KW"},
-    
-    # OTHERS & HOLDING COMPANIES
-    {"symbol": "ALEID", "name": "Al-Eid Holding Company", "yf_ticker": "ALEID.KW"},
-    {"symbol": "ALMANAR", "name": "Al Manar Financing & Leasing", "yf_ticker": "ALMANAR.KW"},
-    {"symbol": "ARABI", "name": "Al-Arabi Holding Group", "yf_ticker": "ARABI.KW"},
-    {"symbol": "CREDIT", "name": "Credit Rating & Collection", "yf_ticker": "CREDIT.KW"},
-    {"symbol": "DULAIMI", "name": "Al-Dulaimi Trading & Contracting", "yf_ticker": "DULAIMI.KW"},
-    {"symbol": "ENERGY", "name": "Energy House Holding", "yf_ticker": "ENERGY.KW"},
-    {"symbol": "ESTITMAR", "name": "International Financial Advisors (Estitmar)", "yf_ticker": "ESTITMAR.KW"},
-    {"symbol": "FAWAZ", "name": "Fawaz Abdulaziz Al-Hokair & Co", "yf_ticker": "FAWAZ.KW"},
-    {"symbol": "INJAZZAT", "name": "Injazzat Real Estate Development", "yf_ticker": "INJAZZAT.KW"},
-    {"symbol": "SHARE", "name": "Shareholding Company", "yf_ticker": "SHARE.KW"},
-    {"symbol": "TAMKEEN", "name": "Tamkeen Leasing Company", "yf_ticker": "TAMKEEN.KW"},
-    {"symbol": "TASLEEM", "name": "Al Tasleem Holding Company", "yf_ticker": "TASLEEM.KW"},
-]
-
-# US Market - Popular stocks (S&P 500, NASDAQ, etc.)
-US_STOCKS = [
-    # TECHNOLOGY (Big Tech)
-    {"symbol": "AAPL", "name": "Apple Inc.", "yf_ticker": "AAPL"},
-    {"symbol": "MSFT", "name": "Microsoft Corporation", "yf_ticker": "MSFT"},
-    {"symbol": "GOOGL", "name": "Alphabet Inc. Class A", "yf_ticker": "GOOGL"},
-    {"symbol": "GOOG", "name": "Alphabet Inc. Class C", "yf_ticker": "GOOG"},
-    {"symbol": "AMZN", "name": "Amazon.com Inc.", "yf_ticker": "AMZN"},
-    {"symbol": "META", "name": "Meta Platforms Inc.", "yf_ticker": "META"},
-    {"symbol": "NVDA", "name": "NVIDIA Corporation", "yf_ticker": "NVDA"},
-    {"symbol": "TSLA", "name": "Tesla Inc.", "yf_ticker": "TSLA"},
-    {"symbol": "AMD", "name": "Advanced Micro Devices Inc.", "yf_ticker": "AMD"},
-    {"symbol": "INTC", "name": "Intel Corporation", "yf_ticker": "INTC"},
-    {"symbol": "CRM", "name": "Salesforce Inc.", "yf_ticker": "CRM"},
-    {"symbol": "ORCL", "name": "Oracle Corporation", "yf_ticker": "ORCL"},
-    {"symbol": "CSCO", "name": "Cisco Systems Inc.", "yf_ticker": "CSCO"},
-    {"symbol": "ADBE", "name": "Adobe Inc.", "yf_ticker": "ADBE"},
-    {"symbol": "IBM", "name": "International Business Machines", "yf_ticker": "IBM"},
-    {"symbol": "QCOM", "name": "QUALCOMM Incorporated", "yf_ticker": "QCOM"},
-    {"symbol": "TXN", "name": "Texas Instruments Inc.", "yf_ticker": "TXN"},
-    {"symbol": "AVGO", "name": "Broadcom Inc.", "yf_ticker": "AVGO"},
-    {"symbol": "NOW", "name": "ServiceNow Inc.", "yf_ticker": "NOW"},
-    {"symbol": "SHOP", "name": "Shopify Inc.", "yf_ticker": "SHOP"},
-    {"symbol": "SQ", "name": "Block Inc.", "yf_ticker": "SQ"},
-    {"symbol": "PYPL", "name": "PayPal Holdings Inc.", "yf_ticker": "PYPL"},
-    {"symbol": "UBER", "name": "Uber Technologies Inc.", "yf_ticker": "UBER"},
-    {"symbol": "ABNB", "name": "Airbnb Inc.", "yf_ticker": "ABNB"},
-    {"symbol": "SNOW", "name": "Snowflake Inc.", "yf_ticker": "SNOW"},
-    {"symbol": "PLTR", "name": "Palantir Technologies Inc.", "yf_ticker": "PLTR"},
-    {"symbol": "NET", "name": "Cloudflare Inc.", "yf_ticker": "NET"},
-    {"symbol": "CRWD", "name": "CrowdStrike Holdings Inc.", "yf_ticker": "CRWD"},
-    {"symbol": "ZS", "name": "Zscaler Inc.", "yf_ticker": "ZS"},
-    {"symbol": "DDOG", "name": "Datadog Inc.", "yf_ticker": "DDOG"},
-    
-    # FINANCIALS
-    {"symbol": "JPM", "name": "JPMorgan Chase & Co.", "yf_ticker": "JPM"},
-    {"symbol": "BAC", "name": "Bank of America Corporation", "yf_ticker": "BAC"},
-    {"symbol": "WFC", "name": "Wells Fargo & Company", "yf_ticker": "WFC"},
-    {"symbol": "GS", "name": "Goldman Sachs Group Inc.", "yf_ticker": "GS"},
-    {"symbol": "MS", "name": "Morgan Stanley", "yf_ticker": "MS"},
-    {"symbol": "C", "name": "Citigroup Inc.", "yf_ticker": "C"},
-    {"symbol": "USB", "name": "U.S. Bancorp", "yf_ticker": "USB"},
-    {"symbol": "AXP", "name": "American Express Company", "yf_ticker": "AXP"},
-    {"symbol": "V", "name": "Visa Inc.", "yf_ticker": "V"},
-    {"symbol": "MA", "name": "Mastercard Incorporated", "yf_ticker": "MA"},
-    {"symbol": "BRK-B", "name": "Berkshire Hathaway Inc. Class B", "yf_ticker": "BRK-B"},
-    {"symbol": "BLK", "name": "BlackRock Inc.", "yf_ticker": "BLK"},
-    {"symbol": "SCHW", "name": "Charles Schwab Corporation", "yf_ticker": "SCHW"},
-    {"symbol": "COF", "name": "Capital One Financial Corp.", "yf_ticker": "COF"},
-    
-    # HEALTHCARE
-    {"symbol": "JNJ", "name": "Johnson & Johnson", "yf_ticker": "JNJ"},
-    {"symbol": "UNH", "name": "UnitedHealth Group Inc.", "yf_ticker": "UNH"},
-    {"symbol": "PFE", "name": "Pfizer Inc.", "yf_ticker": "PFE"},
-    {"symbol": "ABBV", "name": "AbbVie Inc.", "yf_ticker": "ABBV"},
-    {"symbol": "MRK", "name": "Merck & Co. Inc.", "yf_ticker": "MRK"},
-    {"symbol": "LLY", "name": "Eli Lilly and Company", "yf_ticker": "LLY"},
-    {"symbol": "TMO", "name": "Thermo Fisher Scientific Inc.", "yf_ticker": "TMO"},
-    {"symbol": "ABT", "name": "Abbott Laboratories", "yf_ticker": "ABT"},
-    {"symbol": "BMY", "name": "Bristol-Myers Squibb Company", "yf_ticker": "BMY"},
-    {"symbol": "AMGN", "name": "Amgen Inc.", "yf_ticker": "AMGN"},
-    {"symbol": "GILD", "name": "Gilead Sciences Inc.", "yf_ticker": "GILD"},
-    {"symbol": "MRNA", "name": "Moderna Inc.", "yf_ticker": "MRNA"},
-    {"symbol": "CVS", "name": "CVS Health Corporation", "yf_ticker": "CVS"},
-    
-    # CONSUMER DISCRETIONARY
-    {"symbol": "HD", "name": "The Home Depot Inc.", "yf_ticker": "HD"},
-    {"symbol": "MCD", "name": "McDonald's Corporation", "yf_ticker": "MCD"},
-    {"symbol": "NKE", "name": "Nike Inc.", "yf_ticker": "NKE"},
-    {"symbol": "SBUX", "name": "Starbucks Corporation", "yf_ticker": "SBUX"},
-    {"symbol": "LOW", "name": "Lowe's Companies Inc.", "yf_ticker": "LOW"},
-    {"symbol": "TGT", "name": "Target Corporation", "yf_ticker": "TGT"},
-    {"symbol": "COST", "name": "Costco Wholesale Corporation", "yf_ticker": "COST"},
-    {"symbol": "WMT", "name": "Walmart Inc.", "yf_ticker": "WMT"},
-    {"symbol": "DIS", "name": "The Walt Disney Company", "yf_ticker": "DIS"},
-    {"symbol": "NFLX", "name": "Netflix Inc.", "yf_ticker": "NFLX"},
-    {"symbol": "BKNG", "name": "Booking Holdings Inc.", "yf_ticker": "BKNG"},
-    {"symbol": "CMG", "name": "Chipotle Mexican Grill Inc.", "yf_ticker": "CMG"},
-    
-    # CONSUMER STAPLES
-    {"symbol": "PG", "name": "Procter & Gamble Company", "yf_ticker": "PG"},
-    {"symbol": "KO", "name": "The Coca-Cola Company", "yf_ticker": "KO"},
-    {"symbol": "PEP", "name": "PepsiCo Inc.", "yf_ticker": "PEP"},
-    {"symbol": "PM", "name": "Philip Morris International", "yf_ticker": "PM"},
-    {"symbol": "MO", "name": "Altria Group Inc.", "yf_ticker": "MO"},
-    {"symbol": "MDLZ", "name": "Mondelez International Inc.", "yf_ticker": "MDLZ"},
-    {"symbol": "CL", "name": "Colgate-Palmolive Company", "yf_ticker": "CL"},
-    
-    # INDUSTRIALS
-    {"symbol": "BA", "name": "The Boeing Company", "yf_ticker": "BA"},
-    {"symbol": "CAT", "name": "Caterpillar Inc.", "yf_ticker": "CAT"},
-    {"symbol": "GE", "name": "General Electric Company", "yf_ticker": "GE"},
-    {"symbol": "HON", "name": "Honeywell International Inc.", "yf_ticker": "HON"},
-    {"symbol": "UPS", "name": "United Parcel Service Inc.", "yf_ticker": "UPS"},
-    {"symbol": "FDX", "name": "FedEx Corporation", "yf_ticker": "FDX"},
-    {"symbol": "LMT", "name": "Lockheed Martin Corporation", "yf_ticker": "LMT"},
-    {"symbol": "RTX", "name": "RTX Corporation", "yf_ticker": "RTX"},
-    {"symbol": "DE", "name": "Deere & Company", "yf_ticker": "DE"},
-    {"symbol": "MMM", "name": "3M Company", "yf_ticker": "MMM"},
-    
-    # ENERGY
-    {"symbol": "XOM", "name": "Exxon Mobil Corporation", "yf_ticker": "XOM"},
-    {"symbol": "CVX", "name": "Chevron Corporation", "yf_ticker": "CVX"},
-    {"symbol": "COP", "name": "ConocoPhillips", "yf_ticker": "COP"},
-    {"symbol": "SLB", "name": "Schlumberger Limited", "yf_ticker": "SLB"},
-    {"symbol": "EOG", "name": "EOG Resources Inc.", "yf_ticker": "EOG"},
-    {"symbol": "OXY", "name": "Occidental Petroleum Corporation", "yf_ticker": "OXY"},
-    
-    # COMMUNICATION SERVICES
-    {"symbol": "T", "name": "AT&T Inc.", "yf_ticker": "T"},
-    {"symbol": "VZ", "name": "Verizon Communications Inc.", "yf_ticker": "VZ"},
-    {"symbol": "TMUS", "name": "T-Mobile US Inc.", "yf_ticker": "TMUS"},
-    {"symbol": "CMCSA", "name": "Comcast Corporation", "yf_ticker": "CMCSA"},
-    
-    # UTILITIES & REAL ESTATE
-    {"symbol": "NEE", "name": "NextEra Energy Inc.", "yf_ticker": "NEE"},
-    {"symbol": "DUK", "name": "Duke Energy Corporation", "yf_ticker": "DUK"},
-    {"symbol": "SO", "name": "Southern Company", "yf_ticker": "SO"},
-    {"symbol": "AMT", "name": "American Tower Corporation", "yf_ticker": "AMT"},
-    {"symbol": "PLD", "name": "Prologis Inc.", "yf_ticker": "PLD"},
-    {"symbol": "SPG", "name": "Simon Property Group Inc.", "yf_ticker": "SPG"},
-    
-    # ETFs (Popular Index Funds)
-    {"symbol": "SPY", "name": "SPDR S&P 500 ETF Trust", "yf_ticker": "SPY"},
-    {"symbol": "QQQ", "name": "Invesco QQQ Trust (NASDAQ-100)", "yf_ticker": "QQQ"},
-    {"symbol": "IWM", "name": "iShares Russell 2000 ETF", "yf_ticker": "IWM"},
-    {"symbol": "DIA", "name": "SPDR Dow Jones Industrial Average ETF", "yf_ticker": "DIA"},
-    {"symbol": "VTI", "name": "Vanguard Total Stock Market ETF", "yf_ticker": "VTI"},
-    {"symbol": "VOO", "name": "Vanguard S&P 500 ETF", "yf_ticker": "VOO"},
-    {"symbol": "VGT", "name": "Vanguard Information Technology ETF", "yf_ticker": "VGT"},
-    {"symbol": "ARKK", "name": "ARK Innovation ETF", "yf_ticker": "ARKK"},
-    {"symbol": "XLF", "name": "Financial Select Sector SPDR Fund", "yf_ticker": "XLF"},
-    {"symbol": "XLK", "name": "Technology Select Sector SPDR Fund", "yf_ticker": "XLK"},
-]
-
-def get_kuwait_stock_options():
-    """Return formatted list of Kuwait stocks for selectbox."""
-    options = ["-- Select from Kuwait Stock List --"] + [
-        f"{stock['symbol']} - {stock['name']}" for stock in KUWAIT_STOCKS
-    ]
-    return options
-
-def get_us_stock_options():
-    """Return formatted list of US stocks for selectbox."""
-    options = ["-- Select from US Stock List --"] + [
-        f"{stock['symbol']} - {stock['name']}" for stock in US_STOCKS
-    ]
-    return options
-
-def parse_stock_selection(selection: str, market: str = "Kuwait"):
-    """Parse selected stock to extract symbol, name, and Yahoo Finance ticker."""
-    placeholder = "-- Select from Kuwait Stock List --" if market == "Kuwait" else "-- Select from US Stock List --"
-    if selection == placeholder or not selection:
-        return None, None, None
-    
-    parts = selection.split(" - ", 1)
-    if len(parts) == 2:
-        symbol = parts[0].strip()
-        name = parts[1].strip()
-        stock_list = KUWAIT_STOCKS if market == "Kuwait" else US_STOCKS
-        for stock in stock_list:
-            if stock["symbol"] == symbol:
-                return symbol, name, stock["yf_ticker"]
-    return None, None, None
-
-def parse_kuwait_stock_selection(selection: str):
-    """Parse selected stock to extract symbol, name, and Yahoo Finance ticker."""
-    if selection == "-- Select from Kuwait Stock List --" or not selection:
-        return None, None, None
-    
-    parts = selection.split(" - ", 1)
-    if len(parts) == 2:
-        symbol = parts[0].strip()
-        name = parts[1].strip()
-        # Find the stock in KUWAIT_STOCKS to get yf_ticker
-        for stock in KUWAIT_STOCKS:
-            if stock["symbol"] == symbol:
-                return symbol, name, stock["yf_ticker"]
-    return None, None, None
+# Stock data and helper functions imported from stock_data.py
 
 def normalize_tv_key(exchange: str, symbol: str) -> str:
     """Normalize TradingView exchange:symbol key."""
@@ -912,9 +584,9 @@ def fetch_price_yfinance(symbol: str, max_retries: int = 3):
                             price = float(last_close)
                         
                         if price > 0:
-                            # Kuwait stocks: divide by 1000 (fils to KWD)
+                            # Kuwait stocks: normalize Fils to KWD
                             if is_kuwait_stock:
-                                price = price / 1000.0
+                                price = normalize_kwd_price(price, 'KWD')
                             return float(price), variant
                         
             except Exception as e:
@@ -5842,6 +5514,28 @@ def ui_backup_restore():
             )
             
             st.info("💡 **Tip:** Store this file safely. You can restore from it anytime using the 'Restore from Backup' tab.")
+            
+            # === Database File Backup ===
+            st.divider()
+            st.markdown("### 🗄️ Full Database Backup")
+            st.caption("Download the raw SQLite database file. Useful for migration, full system recovery, or advanced debugging.")
+            
+            try:
+                db_path = "portfolio.db"
+                with open(db_path, "rb") as fp:
+                    db_timestamp = datetime.now().strftime('%Y%m%d_%H%M')
+                    st.download_button(
+                        label="⬇️ Download portfolio.db",
+                        data=fp.read(),
+                        file_name=f"portfolio_backup_{db_timestamp}.db",
+                        mime="application/x-sqlite3",
+                        use_container_width=True
+                    )
+                st.caption("⚠️ **Note:** This is your complete database. Handle with care - it contains all user data.")
+            except FileNotFoundError:
+                st.warning("Database file not found. You may be using an external database configuration.")
+            except Exception as e:
+                st.warning(f"Unable to read database file: {e}")
     
     # =====================================================
     # TAB 2: RESTORE
@@ -6693,11 +6387,9 @@ def ui_portfolio_analysis():
                                             if 'Close' in df_tick.columns and not df_tick['Close'].dropna().empty:
                                                 price = float(df_tick['Close'].dropna().iloc[-1])
                                     
-                                    # === CRITICAL FIX ===
-                                    # If DB says KWD but price is huge (>50), it is in Fils.
-                                    # Divide by 1000 to fix.
-                                    if price and db_ccy == 'KWD' and price > 50:
-                                        price = price / 1000.0
+                                    # Normalize Kuwait prices (Fils to KWD)
+                                    if price and db_ccy == 'KWD':
+                                        price = normalize_kwd_price(price, db_ccy)
                                             
                                     if price and price > 0:
                                         db_execute(cur, "UPDATE stocks SET current_price = ? WHERE symbol = ? AND user_id = ?", (price, db_symbol, user_id))
@@ -9088,8 +8780,9 @@ def ui_trading_section():
                             # Apply /1000 Logic for Kuwait stocks (assuming .KW suffix)
                             raw_val = float(val)
                             t = valid_tickers[0]
-                            if t.endswith('.KW') and raw_val > 50: # Simple heuristic: if price > 50 likely in fils not KWD
-                                raw_val = raw_val / 1000.0
+                            # Normalize Kuwait stock prices (Fils to KWD)
+                            if t.endswith('.KW'):
+                                raw_val = normalize_kwd_price(raw_val, 'KWD')
                             live_prices[t] = raw_val
                         else:
                             # data is DataFrame, columns are tickers
@@ -9099,9 +8792,9 @@ def ui_trading_section():
                                     val = last_row[t]
                                     if pd.notna(val):
                                         raw_val = float(val)
-                                        # Apply /1000 Logic for Kuwait stocks
-                                        if t.endswith('.KW') and raw_val > 50:
-                                             raw_val = raw_val / 1000.0
+                                        # Normalize Kuwait stock prices (Fils to KWD)
+                                        if t.endswith('.KW'):
+                                            raw_val = normalize_kwd_price(raw_val, 'KWD')
                                         live_prices[t] = raw_val
                 except Exception as e:
                     # Fallback or silent fail
@@ -11914,7 +11607,32 @@ def ui_pfm():
                 for icon, label, msg in checks:
                     st.markdown(f"{icon} **{label}:** {msg}")
 
+
+# Google Analytics Tracking Code
+GOOGLE_ANALYTICS_CODE = """
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-B5N8PQ6JXB"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'G-B5N8PQ6JXB');
+</script>
+"""
+
+
+def inject_google_analytics():
+    """Inject Google Analytics tracking code into the Streamlit app."""
+    import streamlit.components.v1 as components
+    components.html(GOOGLE_ANALYTICS_CODE, height=0, width=0)
+
+
 def main():
+    # Inject Google Analytics (runs once per session)
+    if 'ga_injected' not in st.session_state:
+        inject_google_analytics()
+        st.session_state['ga_injected'] = True
+    
     # Initialize database schema (handles both SQLite and PostgreSQL)
     try:
         init_db()
