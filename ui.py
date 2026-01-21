@@ -2746,133 +2746,187 @@ def ui_cash_deposits():
         
         uploaded_file = st.file_uploader("Choose an Excel file", type=["xlsx"], key="cash_deposits_excel")
         
-        if uploaded_file:
-            if st.button("Upload Deposits", type="primary"):
-                try:
-                    df = pd.read_excel(uploaded_file, sheet_name=0)
+        if uploaded_file is not None:
+            try:
+                # Read and preview the file
+                df = pd.read_excel(uploaded_file, sheet_name=0)
+                
+                # Normalize column names
+                df.columns = [str(c).strip().lower().replace(" ", "_") for c in df.columns]
+                
+                # Validate required columns
+                required_cols = ["deposit_date", "amount"]
+                missing = [c for c in required_cols if c not in df.columns]
+                
+                if missing:
+                    st.error(f"❌ Missing required columns: {', '.join(missing)}")
+                    st.info("Required columns: deposit_date, amount. Optional: currency, portfolio, include_in_analysis, bank_name, description, comments")
+                else:
+                    # Show preview
+                    st.markdown("#### 📋 Preview (first 10 rows)")
+                    st.dataframe(df.head(10), use_container_width=True)
+                    st.info(f"📊 Found **{len(df):,}** deposits to import")
                     
-                    # Normalize column names
-                    df.columns = [c.strip().lower().replace(" ", "_") for c in df.columns]
-                    
-                    # Validate required columns
-                    required_cols = ["deposit_date", "amount", "currency", "portfolio", "include_in_analysis"]
-                    missing = [c for c in required_cols if c not in df.columns]
-                    if missing:
-                        st.error(f"Missing required columns: {', '.join(missing)}")
-                    else:
-                        # Add default values for optional columns
-                        if "bank_name" not in df.columns:
-                            df["bank_name"] = "N/A"
-                        if "description" not in df.columns:
-                            df["description"] = ""
-                        if "comments" not in df.columns:
-                            df["comments"] = ""
-                        
-                        success_count = 0
-                        error_count = 0
-                        in_analysis_count = 0
-                        record_only_count = 0
-                        
-                        for idx, row in df.iterrows():
-                            try:
-                                deposit_date_val = row["deposit_date"]
-                                if isinstance(deposit_date_val, str):
-                                    deposit_date_str = deposit_date_val
-                                else:
-                                    deposit_date_str = pd.to_datetime(deposit_date_val).strftime("%Y-%m-%d")
-                                
-                                amount_val = float(row["amount"])
-                                currency_val = str(row["currency"]).strip().upper()
-                                portfolio_val = str(row["portfolio"]).strip()
-                                bank_name_val = str(row.get("bank_name", "N/A")).strip()
-                                description_val = str(row.get("description", "")).strip()
-                                comments_val = str(row.get("comments", "")).strip()
-                                
-                                # Parse include_in_analysis column
-                                include_val = str(row["include_in_analysis"]).strip().lower()
-                                include_in_analysis = include_val in ["yes", "y", "true", "1", "portfolio"]
-                                
-                                if include_in_analysis:
-                                    in_analysis_count += 1
-                                else:
-                                    record_only_count += 1
-                                
-                                # Insert into database
-                                exec_sql(
-                                    """
-                                    INSERT INTO cash_deposits (portfolio, bank_name, deposit_date, amount, currency, description, comments, include_in_analysis, created_at)
-                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                    """,
-                                    (
-                                        portfolio_val,
-                                        bank_name_val,
-                                        deposit_date_str,
-                                        amount_val,
-                                        currency_val,
-                                        description_val,
-                                        comments_val,
-                                        1 if include_in_analysis else 0,
-                                        int(time.time()),
-                                    ),
-                                )
-                                
-                                # Sync to portfolio_snapshots if include_in_analysis is True
-                                if include_in_analysis:
-                                    existing = query_df("SELECT * FROM portfolio_snapshots WHERE snapshot_date = ? AND user_id = ?", (deposit_date_str, user_id))
+                    # Import button
+                    col_btn1, col_btn2 = st.columns([1, 3])
+                    with col_btn1:
+                        if st.button("✅ Import All Deposits", type="primary", use_container_width=True):
+                            # Process the upload
+                            success_count = 0
+                            error_count = 0
+                            in_analysis_count = 0
+                            record_only_count = 0
+                            error_messages = []
+                            
+                            # Add default values for optional columns
+                            if "currency" not in df.columns:
+                                df["currency"] = "KWD"
+                            if "portfolio" not in df.columns:
+                                df["portfolio"] = "KFH"
+                            if "include_in_analysis" not in df.columns:
+                                df["include_in_analysis"] = "Yes"
+                            if "bank_name" not in df.columns:
+                                df["bank_name"] = "N/A"
+                            if "description" not in df.columns:
+                                df["description"] = ""
+                            if "comments" not in df.columns:
+                                df["comments"] = ""
+                            
+                            progress_bar = st.progress(0, text="Importing deposits...")
+                            
+                            for idx, row in df.iterrows():
+                                try:
+                                    # Parse deposit date
+                                    deposit_date_val = row["deposit_date"]
+                                    if pd.isna(deposit_date_val):
+                                        raise ValueError("deposit_date is empty")
                                     
-                                    if not existing.empty:
-                                        exec_sql(
-                                            "UPDATE portfolio_snapshots SET deposit_cash = deposit_cash + ? WHERE snapshot_date = ? AND user_id = ?",
-                                            (amount_val, deposit_date_str, user_id)
-                                        )
+                                    if isinstance(deposit_date_val, str):
+                                        deposit_date_str = deposit_date_val.strip()
                                     else:
-                                        prev_snap = query_df(
-                                            "SELECT accumulated_cash FROM portfolio_snapshots WHERE snapshot_date < ? AND user_id = ? ORDER BY snapshot_date DESC LIMIT 1",
+                                        deposit_date_str = pd.to_datetime(deposit_date_val).strftime("%Y-%m-%d")
+                                    
+                                    # Parse amount
+                                    amount_val = row["amount"]
+                                    if pd.isna(amount_val):
+                                        raise ValueError("amount is empty")
+                                    amount_val = float(amount_val)
+                                    
+                                    # Parse other fields with defaults
+                                    currency_val = str(row.get("currency", "KWD")).strip().upper() if pd.notna(row.get("currency")) else "KWD"
+                                    portfolio_val = str(row.get("portfolio", "KFH")).strip() if pd.notna(row.get("portfolio")) else "KFH"
+                                    bank_name_val = str(row.get("bank_name", "N/A")).strip() if pd.notna(row.get("bank_name")) else "N/A"
+                                    description_val = str(row.get("description", "")).strip() if pd.notna(row.get("description")) else ""
+                                    comments_val = str(row.get("comments", "")).strip() if pd.notna(row.get("comments")) else ""
+                                    
+                                    # Parse include_in_analysis
+                                    include_raw = row.get("include_in_analysis", "Yes")
+                                    if pd.isna(include_raw):
+                                        include_in_analysis = True
+                                    else:
+                                        include_val = str(include_raw).strip().lower()
+                                        include_in_analysis = include_val in ["yes", "y", "true", "1", "portfolio"]
+                                    
+                                    if include_in_analysis:
+                                        in_analysis_count += 1
+                                    else:
+                                        record_only_count += 1
+                                    
+                                    # Insert into database with user_id
+                                    exec_sql(
+                                        """
+                                        INSERT INTO cash_deposits 
+                                        (user_id, portfolio, bank_name, deposit_date, amount, currency, description, comments, include_in_analysis, created_at)
+                                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                        """,
+                                        (
+                                            user_id,
+                                            portfolio_val,
+                                            bank_name_val,
+                                            deposit_date_str,
+                                            amount_val,
+                                            currency_val,
+                                            description_val,
+                                            comments_val,
+                                            1 if include_in_analysis else 0,
+                                            int(time.time()),
+                                        ),
+                                    )
+                                    
+                                    # Sync to portfolio_snapshots if include_in_analysis is True
+                                    if include_in_analysis:
+                                        existing = query_df(
+                                            "SELECT * FROM portfolio_snapshots WHERE snapshot_date = ? AND user_id = ?", 
                                             (deposit_date_str, user_id)
                                         )
                                         
-                                        if not prev_snap.empty:
-                                            prev_acc = prev_snap["accumulated_cash"].iloc[0]
-                                            accumulated_cash = (float(prev_acc) if pd.notna(prev_acc) else 0) + amount_val
+                                        if not existing.empty:
+                                            exec_sql(
+                                                "UPDATE portfolio_snapshots SET deposit_cash = deposit_cash + ? WHERE snapshot_date = ? AND user_id = ?",
+                                                (amount_val, deposit_date_str, user_id)
+                                            )
                                         else:
-                                            accumulated_cash = amount_val
-                                        
-                                        net_gain = 0 - accumulated_cash
-                                        roi_percent = 0
-                                        
-                                        exec_sql(
-                                            """
-                                            INSERT INTO portfolio_snapshots 
-                                            (snapshot_date, portfolio_value, daily_movement, beginning_difference, 
-                                             deposit_cash, accumulated_cash, net_gain, change_percent, roi_percent, created_at)
-                                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                            """,
-                                            (deposit_date_str, 0, 0, 0, amount_val, accumulated_cash, net_gain, 0, roi_percent, int(time.time()))
-                                        )
+                                            prev_snap = query_df(
+                                                "SELECT accumulated_cash FROM portfolio_snapshots WHERE snapshot_date < ? AND user_id = ? ORDER BY snapshot_date DESC LIMIT 1",
+                                                (deposit_date_str, user_id)
+                                            )
+                                            
+                                            if not prev_snap.empty:
+                                                prev_acc = prev_snap["accumulated_cash"].iloc[0]
+                                                accumulated_cash = (float(prev_acc) if pd.notna(prev_acc) else 0) + amount_val
+                                            else:
+                                                accumulated_cash = amount_val
+                                            
+                                            net_gain = 0 - accumulated_cash
+                                            
+                                            exec_sql(
+                                                """
+                                                INSERT INTO portfolio_snapshots 
+                                                (user_id, snapshot_date, portfolio_value, daily_movement, beginning_difference, 
+                                                 deposit_cash, accumulated_cash, net_gain, change_percent, roi_percent, created_at)
+                                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                                """,
+                                                (user_id, deposit_date_str, 0, 0, 0, amount_val, accumulated_cash, net_gain, 0, 0, int(time.time()))
+                                            )
+                                    
+                                    success_count += 1
+                                    
+                                except Exception as e:
+                                    error_count += 1
+                                    error_messages.append(f"Row {idx + 2}: {str(e)[:80]}")
                                 
-                                success_count += 1
-                            except Exception as e:
-                                error_count += 1
-                                st.warning(f"Row {idx + 1} failed: {e}")
-                        
-                        if success_count > 0:
-                            status_msg = f"✅ Successfully imported {success_count} deposits!"
-                            if in_analysis_count > 0:
-                                status_msg += f" ({in_analysis_count} added to portfolio analysis"
+                                # Update progress
+                                progress_bar.progress((idx + 1) / len(df), text=f"Importing... {idx + 1}/{len(df)}")
+                            
+                            progress_bar.empty()
+                            
+                            # Show results
+                            if success_count > 0:
+                                status_parts = [f"✅ Successfully imported **{success_count:,}** deposits!"]
+                                if in_analysis_count > 0:
+                                    status_parts.append(f"📊 {in_analysis_count:,} added to portfolio analysis")
                                 if record_only_count > 0:
-                                    status_msg += f", {record_only_count} as records only)"
-                                else:
-                                    status_msg += ")"
-                            elif record_only_count > 0:
-                                status_msg += f" ({record_only_count} saved as records only)"
-                            st.success(status_msg)
-                        if error_count > 0:
-                            st.error(f"❌ {error_count} deposits failed to import.")
+                                    status_parts.append(f"📝 {record_only_count:,} saved as records only")
+                                st.success(" | ".join(status_parts))
+                            
+                            if error_count > 0:
+                                st.error(f"❌ {error_count:,} deposits failed to import.")
+                                with st.expander("View Error Details"):
+                                    for msg in error_messages[:20]:  # Show first 20 errors
+                                        st.text(msg)
+                                    if len(error_messages) > 20:
+                                        st.text(f"... and {len(error_messages) - 20} more errors")
+                            
+                            if success_count > 0:
+                                time.sleep(1)
+                                st.rerun()
+                    
+                    with col_btn2:
+                        st.caption("This will import all deposits from the uploaded file.")
                         
-                        st.rerun()
-                        
-                except Exception as e:
-                    st.error(f"Error reading Excel file: {e}")
+            except Exception as e:
+                st.error(f"❌ Error reading Excel file: {e}")
+                st.info("Please ensure the file is a valid Excel file (.xlsx) with the correct column names.")
 
 
     st.divider()
