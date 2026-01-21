@@ -1641,6 +1641,48 @@ def init_db():
     print("✅ PFM tables created.")
     
     # ============================================
+    # FIX NULL USER_IDs (after restore or legacy data import)
+    # ============================================
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        # Fix NULL user_ids by assigning to first active user (typically user_id = 2 for main account)
+        # First, find the main user (lowest id > 0 that has real data, or just pick the first)
+        cur.execute("SELECT id FROM users WHERE id > 0 ORDER BY id LIMIT 1")
+        row = cur.fetchone()
+        default_user_id = row[0] if row else 1
+        
+        # Fix cash_deposits with NULL user_id
+        cur.execute("UPDATE cash_deposits SET user_id = ? WHERE user_id IS NULL", (default_user_id,))
+        fixed_cash = cur.rowcount
+        
+        # Fix transactions with NULL user_id
+        cur.execute("UPDATE transactions SET user_id = ? WHERE user_id IS NULL", (default_user_id,))
+        fixed_txn = cur.rowcount
+        
+        # Fix stocks with NULL user_id  
+        cur.execute("UPDATE stocks SET user_id = ? WHERE user_id IS NULL", (default_user_id,))
+        fixed_stocks = cur.rowcount
+        
+        # Fix trading_history with NULL user_id
+        cur.execute("UPDATE trading_history SET user_id = ? WHERE user_id IS NULL", (default_user_id,))
+        fixed_trading = cur.rowcount
+        
+        # Fix portfolio_snapshots with NULL user_id
+        cur.execute("UPDATE portfolio_snapshots SET user_id = ? WHERE user_id IS NULL", (default_user_id,))
+        fixed_snapshots = cur.rowcount
+        
+        conn.commit()
+        
+        total_fixed = fixed_cash + fixed_txn + fixed_stocks + fixed_trading + fixed_snapshots
+        if total_fixed > 0:
+            print(f"✅ Fixed {total_fixed} records with NULL user_id (assigned to user {default_user_id})")
+    except Exception as e:
+        print(f"⚠️ User ID fix skipped: {e}")
+    finally:
+        conn.close()
+    
+    # ============================================
     # STEP 3: VERIFICATION
     # ============================================
     print("✅ Step 3: Database initialized. Users table verified.")
