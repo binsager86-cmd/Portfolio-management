@@ -8672,6 +8672,9 @@ def ui_trading_section():
         st.info("📭 No trading data available yet. Please add transactions first.")
         return
 
+    # DEBUG: Show actual column names from database
+    # st.caption(f"DEBUG: df.columns = {list(df.columns)}")
+    
     # Try to normalize any variant of 'stock' / 'stock_symbol' to 'Stock'
     lower_map = {c.lower(): c for c in df.columns}
 
