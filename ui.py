@@ -7714,20 +7714,23 @@ def ui_dividends_tracker():
         st.dataframe(all_transactions)
         st.write("**Column names available:**", list(all_transactions.columns) if not all_transactions.empty else "No data")
     
-    # Query dividend data
+    # Query dividend data - include id for deletion
     dividends_df = query_df("""
         SELECT 
+            id,
             stock_symbol,
             txn_date,
             COALESCE(cash_dividend, 0) as cash_dividend,
             COALESCE(bonus_shares, 0) as bonus_shares,
             COALESCE(reinvested_dividend, 0) as reinvested_dividend
         FROM transactions
-        WHERE COALESCE(cash_dividend, 0) > 0 
+        WHERE user_id = ? AND (
+            COALESCE(cash_dividend, 0) > 0 
            OR COALESCE(bonus_shares, 0) > 0
            OR COALESCE(reinvested_dividend, 0) > 0
+        )
         ORDER BY stock_symbol, txn_date
-    """)
+    """, (user_id,))
     
     if dividends_df.empty:
         st.info("📊 No dividend data yet. Add transactions with cash dividends or bonus shares.")
@@ -7775,6 +7778,73 @@ def ui_dividends_tracker():
     
     with tab1:
         st.subheader("All Dividend Transactions")
+        
+        # Delete functionality
+        with st.expander("🗑️ Delete Dividend Record", expanded=False):
+            st.warning("⚠️ Deleting a dividend record will permanently remove it from the database.")
+            
+            # Create options for deletion dropdown
+            if not dividends_df.empty:
+                delete_options = []
+                for _, row in dividends_df.iterrows():
+                    div_type = []
+                    if row['cash_dividend'] > 0:
+                        div_type.append(f"Cash: {row['cash_dividend']:.3f}")
+                    if row['bonus_shares'] > 0:
+                        div_type.append(f"Bonus: {row['bonus_shares']:.0f}")
+                    if row['reinvested_dividend'] > 0:
+                        div_type.append(f"Reinvested: {row['reinvested_dividend']:.3f}")
+                    div_info = " | ".join(div_type) if div_type else "No dividend data"
+                    label = f"{row['stock_symbol']} - {row['txn_date']} - {div_info}"
+                    delete_options.append((row['id'], label))
+                
+                selected_delete = st.selectbox(
+                    "Select dividend record to delete:",
+                    options=delete_options,
+                    format_func=lambda x: x[1],
+                    key="div_delete_select"
+                )
+                
+                col_del1, col_del2 = st.columns([1, 3])
+                with col_del1:
+                    if st.button("🗑️ Delete Permanently", type="primary", use_container_width=True):
+                        if selected_delete:
+                            try:
+                                record_id = selected_delete[0]
+                                # Clear only dividend fields, don't delete the transaction if it has other data
+                                conn = get_conn()
+                                cur = conn.cursor()
+                                
+                                # Check if this transaction has shares (Buy/Sell) - if so, only clear dividend fields
+                                db_execute(cur, "SELECT shares, purchase_cost, sell_value FROM transactions WHERE id = ? AND user_id = ?", (record_id, user_id))
+                                row = cur.fetchone()
+                                
+                                if row and (row[0] > 0 or row[1] > 0 or row[2] > 0):
+                                    # Has share data - only clear dividend fields
+                                    db_execute(cur, """
+                                        UPDATE transactions 
+                                        SET cash_dividend = 0, bonus_shares = 0, reinvested_dividend = 0 
+                                        WHERE id = ? AND user_id = ?
+                                    """, (record_id, user_id))
+                                    conn.commit()
+                                    st.success("✅ Dividend data cleared from transaction (shares preserved).")
+                                else:
+                                    # No share data - delete entire record
+                                    db_execute(cur, "DELETE FROM transactions WHERE id = ? AND user_id = ?", (record_id, user_id))
+                                    conn.commit()
+                                    st.success("✅ Dividend record deleted permanently.")
+                                
+                                conn.close()
+                                time.sleep(0.5)
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Error deleting: {e}")
+                with col_del2:
+                    st.caption("This will permanently remove the selected dividend record.")
+            else:
+                st.info("No dividend records to delete.")
+        
+        st.divider()
         
         # Display all dividends with date
         display_df = dividends_df.copy()
