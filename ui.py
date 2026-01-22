@@ -8689,19 +8689,29 @@ def ui_trading_section():
     # Show explanation
     st.info(f"ℹ️ **Note:** The database stores Buy and Sell as separate transactions. A closed trade = 1 Buy + 1 Sell = 2 database records. The table below shows them combined as single trades.")
     
-    # Build query based on filter
+    # Build query based on filter - use raw column names for cross-platform compatibility
+    # Column renaming done via pandas after loading (SQL aliases don't work reliably on all platforms)
+    column_renames = {
+        'stock_symbol': 'Stock',
+        'shares': 'Quantity',
+        'purchase_cost': 'Price cost',
+        'sell_value': 'Sale price',
+        'cash_dividend': 'cash Div',
+        'bonus_shares': 'Bonus shares'
+    }
+    
     if apply_filter:
         query = """
             SELECT 
                 t.id,
-                t.stock_symbol as Stock,
+                t.stock_symbol,
                 t.txn_date,
                 t.txn_type,
-                t.shares as Quantity,
-                t.purchase_cost as "Price cost",
-                t.sell_value as "Sale price",
-                t.cash_dividend as "cash Div",
-                t.bonus_shares as "Bonus shares",
+                t.shares,
+                t.purchase_cost,
+                t.sell_value,
+                t.cash_dividend,
+                t.bonus_shares,
                 t.notes
             FROM trading_history t
             WHERE t.user_id = ? AND t.txn_date BETWEEN ? AND ?
@@ -8716,20 +8726,23 @@ def ui_trading_section():
         query = """
             SELECT 
                 t.id,
-                t.stock_symbol as Stock,
+                t.stock_symbol,
                 t.txn_date,
                 t.txn_type,
-                t.shares as Quantity,
-                t.purchase_cost as "Price cost",
-                t.sell_value as "Sale price",
-                t.cash_dividend as "cash Div",
-                t.bonus_shares as "Bonus shares",
+                t.shares,
+                t.purchase_cost,
+                t.sell_value,
+                t.cash_dividend,
+                t.bonus_shares,
                 t.notes
             FROM trading_history t
             WHERE t.user_id = ?
             ORDER BY t.txn_date, t.stock_symbol, t.txn_type
         """
         df = pd.read_sql_query(convert_sql_placeholders(query), conn, params=(user_id,))
+    
+    # Rename columns using pandas for cross-platform compatibility
+    df = df.rename(columns=column_renames)
     
     conn.close()
     
@@ -10269,15 +10282,14 @@ def ui_overview():
     try:
         withdrawals = query_df(
             """
-            SELECT txn_date as date,
-                   sell_value as amount,
-                   'WITHDRAWAL' as type
+            SELECT txn_date, sell_value, 'WITHDRAWAL' as type
             FROM transactions
             WHERE (txn_type = 'Withdrawal' OR category = 'FLOW_OUT')
             AND user_id = ?
             """,
             (user_id,)
         )
+        withdrawals = withdrawals.rename(columns={'txn_date': 'date', 'sell_value': 'amount'})
     except Exception:
         withdrawals = pd.DataFrame(columns=['date', 'amount', 'type'])
     
@@ -10286,15 +10298,14 @@ def ui_overview():
     try:
         ledger_deposits = query_df(
             """
-            SELECT txn_date as date,
-                   purchase_cost as amount,
-                   'DEPOSIT' as type
+            SELECT txn_date, purchase_cost, 'DEPOSIT' as type
             FROM transactions
             WHERE (txn_type = 'Deposit' OR category = 'FLOW_IN')
             AND user_id = ?
             """,
             (user_id,)
         )
+        ledger_deposits = ledger_deposits.rename(columns={'txn_date': 'date', 'purchase_cost': 'amount'})
     except Exception:
         ledger_deposits = pd.DataFrame(columns=['date', 'amount', 'type'])
 
@@ -13058,9 +13069,9 @@ def get_full_financial_context(user_id):
         try:
             div_df = pd.read_sql_query(
                 convert_sql_placeholders("""
-                    SELECT t.stock_symbol as Stock, t.txn_date as Date, 
-                           t.cash_dividend as Cash_Dividend, t.bonus_shares as Bonus_Shares,
-                           COALESCE(s.currency, 'KWD') as Currency
+                    SELECT t.stock_symbol, t.txn_date, 
+                           t.cash_dividend, t.bonus_shares,
+                           COALESCE(s.currency, 'KWD') as currency
                     FROM transactions t
                     LEFT JOIN stocks s ON t.stock_symbol = s.symbol AND s.user_id = t.user_id
                     WHERE t.user_id = ? AND (t.cash_dividend > 0 OR t.bonus_shares > 0)
@@ -13069,6 +13080,11 @@ def get_full_financial_context(user_id):
                 conn,
                 params=(user_id,)
             )
+            div_df = div_df.rename(columns={
+                'stock_symbol': 'Stock', 'txn_date': 'Date',
+                'cash_dividend': 'Cash_Dividend', 'bonus_shares': 'Bonus_Shares',
+                'currency': 'Currency'
+            })
             
             if not div_df.empty:
                 total_cash_div = 0.0
