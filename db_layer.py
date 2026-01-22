@@ -243,8 +243,16 @@ def get_connection():
                 if not url or not url.strip():
                     raise ValueError("DATABASE_URL is empty or not configured")
                 conn = psycopg2.connect(url)
+                # Explicitly set search_path to public schema to avoid InvalidSchemaName errors
+                with conn.cursor() as cur:
+                    cur.execute("SET search_path TO public")
+                conn.commit()
             else:
                 conn = psycopg2.connect(**DB_CONFIG)
+                # Explicitly set search_path to public schema
+                with conn.cursor() as cur:
+                    cur.execute("SET search_path TO public")
+                conn.commit()
         else:
             conn = sqlite3.connect(DB_CONFIG['path'], check_same_thread=False)
         yield conn
@@ -280,9 +288,14 @@ def get_conn():
             url = DB_CONFIG['url']
             if not url or not url.strip():
                 raise ValueError("DATABASE_URL is empty or not configured")
-            return psycopg2.connect(url)
+            conn = psycopg2.connect(url)
         else:
-            return psycopg2.connect(**DB_CONFIG)
+            conn = psycopg2.connect(**DB_CONFIG)
+        # Explicitly set search_path to public schema to avoid InvalidSchemaName errors
+        with conn.cursor() as cur:
+            cur.execute("SET search_path TO public")
+        conn.commit()
+        return conn
     else:
         return sqlite3.connect(DB_CONFIG['path'], check_same_thread=False)
 
