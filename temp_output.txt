@@ -1,0 +1,607 @@
+﻿.\.venv\Scripts\python.exe : --- Logging error ---
+At line:1 char:1
++ .\.venv\Scripts\python.exe auto_price_scheduler.py --run-now 2>&1 | O ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (--- Logging error ---:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+Traceback (most recent call last):
+  File "C:\Users\Sager\anaconda3\Lib\logging\__init__.py", line 1113, in emit
+    stream.write(msg + self.terminator)
+  File "C:\Users\Sager\anaconda3\Lib\encodings\cp1256.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\U0001f504' in position 29: character maps to <undefined>
+Call stack:
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 701, in <module>
+    main()
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 695, in main
+    logger.info("\U0001f504 Running price update job immediately (--run-now)")
+Message: '\U0001f504 Running price update job immediately (--run-now)'
+Arguments: ()
+2026-01-22 12:49:37 | INFO | ============================================================
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Sager\anaconda3\Lib\logging\__init__.py", line 1113, in emit
+    stream.write(msg + self.terminator)
+  File "C:\Users\Sager\anaconda3\Lib\encodings\cp1256.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\U0001f680' in position 29: character maps to <undefined>
+Call stack:
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 701, in <module>
+    main()
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 696, in main
+    run_price_update_job()
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 468, in run_price_update_job
+    logger.info(f"\U0001f680 AUTO PRICE UPDATE JOB STARTED")
+Message: '\U0001f680 AUTO PRICE UPDATE JOB STARTED'
+Arguments: ()
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Sager\anaconda3\Lib\logging\__init__.py", line 1113, in emit
+    stream.write(msg + self.terminator)
+  File "C:\Users\Sager\anaconda3\Lib\encodings\cp1256.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\U0001f4c5' in position 29: character maps to <undefined>
+Call stack:
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 701, in <module>
+    main()
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 696, in main
+    run_price_update_job()
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 469, in run_price_update_job
+    logger.info(f"\U0001f4c5 Date: {today_str}")
+Message: '\U0001f4c5 Date: 2026-01-22'
+Arguments: ()
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Sager\anaconda3\Lib\logging\__init__.py", line 1113, in emit
+    stream.write(msg + self.terminator)
+  File "C:\Users\Sager\anaconda3\Lib\encodings\cp1256.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\U0001f550' in position 29: character maps to <undefined>
+Call stack:
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 701, in <module>
+    main()
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 696, in main
+    run_price_update_job()
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 470, in run_price_update_job
+    logger.info(f"\U0001f550 Kuwait Time: {kuwait_now.strftime('%H:%M:%S')}")
+Message: '\U0001f550 Kuwait Time: 12:49:37'
+Arguments: ()
+2026-01-22 12:49:37 | INFO | ============================================================
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Sager\anaconda3\Lib\logging\__init__.py", line 1113, in emit
+    stream.write(msg + self.terminator)
+  File "C:\Users\Sager\anaconda3\Lib\encodings\cp1256.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\U0001f4b1' in position 29: character maps to <undefined>
+Call stack:
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 701, in <module>
+    main()
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 696, in main
+    run_price_update_job()
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 480, in run_price_update_job
+    logger.info(f"\U0001f4b1 USD/KWD Rate: {usd_kwd_rate:.4f}")
+Message: '\U0001f4b1 USD/KWD Rate: 0.3074'
+Arguments: ()
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Sager\anaconda3\Lib\logging\__init__.py", line 1113, in emit
+    stream.write(msg + self.terminator)
+  File "C:\Users\Sager\anaconda3\Lib\encodings\cp1256.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\U0001f465' in position 29: character maps to <undefined>
+Call stack:
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 701, in <module>
+    main()
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 696, in main
+    run_price_update_job()
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 488, in run_price_update_job
+    logger.info(f"\U0001f465 Found {len(users)} user(s)")
+Message: '\U0001f465 Found 4 user(s)'
+Arguments: ()
+2026-01-22 12:49:39 | INFO | 
+--- Processing User: sager alsager (ID: 1) ---
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Sager\anaconda3\Lib\logging\__init__.py", line 1113, in emit
+    stream.write(msg + self.terminator)
+  File "C:\Users\Sager\anaconda3\Lib\encodings\cp1256.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\U0001f4ca' in position 31: character maps to <undefined>
+Call stack:
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 701, in <module>
+    main()
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 696, in main
+    run_price_update_job()
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 505, in run_price_update_job
+    logger.info(f"  \U0001f4ca Found {len(stocks)} stock(s)")
+Message: '  \U0001f4ca Found 4 stock(s)'
+Arguments: ()
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Sager\anaconda3\Lib\logging\__init__.py", line 1113, in emit
+    stream.write(msg + self.terminator)
+  File "C:\Users\Sager\anaconda3\Lib\encodings\cp1256.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2705' in position 33: character maps to <undefined>
+Call stack:
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 701, in <module>
+    main()
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 696, in main
+    run_price_update_job()
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 533, in run_price_update_job
+    logger.info(f"    \u2705 {symbol}: {price:.4f} {currency} ({used_ticker})")
+Message: '    \u2705 GFH.KW: 0.1850 KWD (GFH.KW)'
+Arguments: ()
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Sager\anaconda3\Lib\logging\__init__.py", line 1113, in emit
+    stream.write(msg + self.terminator)
+  File "C:\Users\Sager\anaconda3\Lib\encodings\cp1256.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2705' in position 33: character maps to <undefined>
+Call stack:
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 701, in <module>
+    main()
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 696, in main
+    run_price_update_job()
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 533, in run_price_update_job
+    logger.info(f"    \u2705 {symbol}: {price:.4f} {currency} ({used_ticker})")
+Message: '    \u2705 KRE.KW: 0.3780 KWD (KRE.KW)'
+Arguments: ()
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Sager\anaconda3\Lib\logging\__init__.py", line 1113, in emit
+    stream.write(msg + self.terminator)
+  File "C:\Users\Sager\anaconda3\Lib\encodings\cp1256.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2705' in position 33: character maps to <undefined>
+Call stack:
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 701, in <module>
+    main()
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 696, in main
+    run_price_update_job()
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 533, in run_price_update_job
+    logger.info(f"    \u2705 {symbol}: {price:.4f} {currency} ({used_ticker})")
+Message: '    \u2705 NIH.KW: 0.1300 KWD (NIH.KW)'
+Arguments: ()
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Sager\anaconda3\Lib\logging\__init__.py", line 1113, in emit
+    stream.write(msg + self.terminator)
+  File "C:\Users\Sager\anaconda3\Lib\encodings\cp1256.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2705' in position 33: character maps to <undefined>
+Call stack:
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 701, in <module>
+    main()
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 696, in main
+    run_price_update_job()
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 533, in run_price_update_job
+    logger.info(f"    \u2705 {symbol}: {price:.4f} {currency} ({used_ticker})")
+Message: '    \u2705 SANAM.KW: 0.2220 KWD (SANAM.KW)'
+Arguments: ()
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Sager\anaconda3\Lib\logging\__init__.py", line 1113, in emit
+    stream.write(msg + self.terminator)
+  File "C:\Users\Sager\anaconda3\Lib\encodings\cp1256.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\U0001f4c8' in position 31: character maps to <undefined>
+Call stack:
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 701, in <module>
+    main()
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 696, in main
+    run_price_update_job()
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 549, in run_price_update_job
+    logger.info(f"  \U0001f4c8 Updated {updated_count}/{len(stocks)} prices")
+Message: '  \U0001f4c8 Updated 4/4 prices'
+Arguments: ()
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Sager\anaconda3\Lib\logging\__init__.py", line 1113, in emit
+    stream.write(msg + self.terminator)
+  File "C:\Users\Sager\anaconda3\Lib\encodings\cp1256.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\U0001f4b0' in position 31: character maps to <undefined>
+Call stack:
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 701, in <module>
+    main()
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 696, in main
+    run_price_update_job()
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 550, in run_price_update_job
+    logger.info(f"  \U0001f4b0 Portfolio Value: {portfolio_value:,.2f} KWD")
+Message: '  \U0001f4b0 Portfolio Value: 73,732.29 KWD'
+Arguments: ()
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Sager\anaconda3\Lib\logging\__init__.py", line 1113, in emit
+    stream.write(msg + self.terminator)
+  File "C:\Users\Sager\anaconda3\Lib\encodings\cp1256.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\U0001f4be' in position 31: character maps to <undefined>
+Call stack:
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 701, in <module>
+    main()
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 696, in main
+    run_price_update_job()
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 586, in run_price_update_job
+    logger.info(f"  \U0001f4be Snapshot saved for {today_str}")
+Message: '  \U0001f4be Snapshot saved for 2026-01-22'
+Arguments: ()
+2026-01-22 12:49:42 | INFO | 
+--- Processing User: binsager.86@gmail.com (ID: 2) ---
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Sager\anaconda3\Lib\logging\__init__.py", line 1113, in emit
+    stream.write(msg + self.terminator)
+  File "C:\Users\Sager\anaconda3\Lib\encodings\cp1256.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\U0001f4ca' in position 31: character maps to <undefined>
+Call stack:
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 701, in <module>
+    main()
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 696, in main
+    run_price_update_job()
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 505, in run_price_update_job
+    logger.info(f"  \U0001f4ca Found {len(stocks)} stock(s)")
+Message: '  \U0001f4ca Found 11 stock(s)'
+Arguments: ()
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Sager\anaconda3\Lib\logging\__init__.py", line 1113, in emit
+    stream.write(msg + self.terminator)
+  File "C:\Users\Sager\anaconda3\Lib\encodings\cp1256.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2705' in position 33: character maps to <undefined>
+Call stack:
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 701, in <module>
+    main()
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 696, in main
+    run_price_update_job()
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 533, in run_price_update_job
+    logger.info(f"    \u2705 {symbol}: {price:.4f} {currency} ({used_ticker})")
+Message: '    \u2705 KFH: 0.8230 KWD (KFH.KW)'
+Arguments: ()
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"Quote not found for symbol: HUMANSOFT"}}}
+$HUMANSOFT: possibly delisted; no price data found  (period=5d) (Yahoo error = "No data found, symbol may be delisted")
+
+1 Failed download:
+['HUMANSOFT']: possibly delisted; no price data found  (period=5d) (Yahoo error = "No data found, symbol may be delisted")
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"Quote not found for symbol: HUMANSOFT"}}}
+$HUMANSOFT: possibly delisted; no price data found  (period=5d) (Yahoo error = "No data found, symbol may be delisted")
+
+1 Failed download:
+['HUMANSOFT']: possibly delisted; no price data found  (period=5d) (Yahoo error = "No data found, symbol may be delisted")
+$HUMANSOFT: possibly delisted; no price data found  (period=5d) (Yahoo error = "No data found, symbol may be delisted")
+
+1 Failed download:
+['HUMANSOFT']: possibly delisted; no price data found  (period=5d) (Yahoo error = "No data found, symbol may be delisted")
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Sager\anaconda3\Lib\logging\__init__.py", line 1113, in emit
+    stream.write(msg + self.terminator)
+  File "C:\Users\Sager\anaconda3\Lib\encodings\cp1256.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2705' in position 33: character maps to <undefined>
+Call stack:
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 701, in <module>
+    main()
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 696, in main
+    run_price_update_job()
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 533, in run_price_update_job
+    logger.info(f"    \u2705 {symbol}: {price:.4f} {currency} ({used_ticker})")
+Message: '    \u2705 HUMANSOFT: 2.6450 KWD (HUMANSOFT.KW)'
+Arguments: ()
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Sager\anaconda3\Lib\logging\__init__.py", line 1113, in emit
+    stream.write(msg + self.terminator)
+  File "C:\Users\Sager\anaconda3\Lib\encodings\cp1256.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2705' in position 33: character maps to <undefined>
+Call stack:
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 701, in <module>
+    main()
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 696, in main
+    run_price_update_job()
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 533, in run_price_update_job
+    logger.info(f"    \u2705 {symbol}: {price:.4f} {currency} ({used_ticker})")
+Message: '    \u2705 SANAM: 0.2220 KWD (SANAM.KW)'
+Arguments: ()
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Sager\anaconda3\Lib\logging\__init__.py", line 1113, in emit
+    stream.write(msg + self.terminator)
+  File "C:\Users\Sager\anaconda3\Lib\encodings\cp1256.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2705' in position 33: character maps to <undefined>
+Call stack:
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 701, in <module>
+    main()
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 696, in main
+    run_price_update_job()
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 533, in run_price_update_job
+    logger.info(f"    \u2705 {symbol}: {price:.4f} {currency} ({used_ticker})")
+Message: '    \u2705 NIH: 0.1300 KWD (NIH.KW)'
+Arguments: ()
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Sager\anaconda3\Lib\logging\__init__.py", line 1113, in emit
+    stream.write(msg + self.terminator)
+  File "C:\Users\Sager\anaconda3\Lib\encodings\cp1256.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2705' in position 33: character maps to <undefined>
+Call stack:
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 701, in <module>
+    main()
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 696, in main
+    run_price_update_job()
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 533, in run_price_update_job
+    logger.info(f"    \u2705 {symbol}: {price:.4f} {currency} ({used_ticker})")
+Message: '    \u2705 GFH: 0.1850 KWD (GFH.KW)'
+Arguments: ()
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Sager\anaconda3\Lib\logging\__init__.py", line 1113, in emit
+    stream.write(msg + self.terminator)
+  File "C:\Users\Sager\anaconda3\Lib\encodings\cp1256.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2705' in position 33: character maps to <undefined>
+Call stack:
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 701, in <module>
+    main()
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 696, in main
+    run_price_update_job()
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 533, in run_price_update_job
+    logger.info(f"    \u2705 {symbol}: {price:.4f} {currency} ({used_ticker})")
+Message: '    \u2705 KRE: 0.3780 KWD (KRE.KW)'
+Arguments: ()
+$INCY.KW: possibly delisted; no price data found  (period=5d) (Yahoo error = "No data found, symbol may be delisted")
+
+1 Failed download:
+['INCY.KW']: possibly delisted; no price data found  (period=5d) (Yahoo error = "No data found, symbol may be delisted")
+$INCY.KW: possibly delisted; no price data found  (period=5d) (Yahoo error = "No data found, symbol may be delisted")
+
+1 Failed download:
+['INCY.KW']: possibly delisted; no price data found  (period=5d) (Yahoo error = "No data found, symbol may be delisted")
+$INCY.KW: possibly delisted; no price data found  (period=5d) (Yahoo error = "No data found, symbol may be delisted")
+
+1 Failed download:
+['INCY.KW']: possibly delisted; no price data found  (period=5d) (Yahoo error = "No data found, symbol may be delisted")
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Sager\anaconda3\Lib\logging\__init__.py", line 1113, in emit
+    stream.write(msg + self.terminator)
+  File "C:\Users\Sager\anaconda3\Lib\encodings\cp1256.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode characters in position 36-37: character maps to <undefined>
+Call stack:
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 701, in <module>
+    main()
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 696, in main
+    run_price_update_job()
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 545, in run_price_update_job
+    logger.warning(f"    \u26a0\ufe0f {symbol}: Using cached price {old_price:.4f}")
+Message: '    \u26a0\ufe0f INCY: Using cached price 104.9400'
+Arguments: ()
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Sager\anaconda3\Lib\logging\__init__.py", line 1113, in emit
+    stream.write(msg + self.terminator)
+  File "C:\Users\Sager\anaconda3\Lib\encodings\cp1256.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2705' in position 33: character maps to <undefined>
+Call stack:
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 701, in <module>
+    main()
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 696, in main
+    run_price_update_job()
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 533, in run_price_update_job
+    logger.info(f"    \u2705 {symbol}: {price:.4f} {currency} ({used_ticker})")
+Message: '    \u2705 GFH.KW: 0.1850 KWD (GFH.KW)'
+Arguments: ()
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Sager\anaconda3\Lib\logging\__init__.py", line 1113, in emit
+    stream.write(msg + self.terminator)
+  File "C:\Users\Sager\anaconda3\Lib\encodings\cp1256.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2705' in position 33: character maps to <undefined>
+Call stack:
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 701, in <module>
+    main()
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 696, in main
+    run_price_update_job()
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 533, in run_price_update_job
+    logger.info(f"    \u2705 {symbol}: {price:.4f} {currency} ({used_ticker})")
+Message: '    \u2705 KRE.KW: 0.3780 KWD (KRE.KW)'
+Arguments: ()
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Sager\anaconda3\Lib\logging\__init__.py", line 1113, in emit
+    stream.write(msg + self.terminator)
+  File "C:\Users\Sager\anaconda3\Lib\encodings\cp1256.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2705' in position 33: character maps to <undefined>
+Call stack:
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 701, in <module>
+    main()
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 696, in main
+    run_price_update_job()
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 533, in run_price_update_job
+    logger.info(f"    \u2705 {symbol}: {price:.4f} {currency} ({used_ticker})")
+Message: '    \u2705 NIH.KW: 0.1300 KWD (NIH.KW)'
+Arguments: ()
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Sager\anaconda3\Lib\logging\__init__.py", line 1113, in emit
+    stream.write(msg + self.terminator)
+  File "C:\Users\Sager\anaconda3\Lib\encodings\cp1256.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2705' in position 33: character maps to <undefined>
+Call stack:
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 701, in <module>
+    main()
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 696, in main
+    run_price_update_job()
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 533, in run_price_update_job
+    logger.info(f"    \u2705 {symbol}: {price:.4f} {currency} ({used_ticker})")
+Message: '    \u2705 SANAM.KW: 0.2220 KWD (SANAM.KW)'
+Arguments: ()
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Sager\anaconda3\Lib\logging\__init__.py", line 1113, in emit
+    stream.write(msg + self.terminator)
+  File "C:\Users\Sager\anaconda3\Lib\encodings\cp1256.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\U0001f4c8' in position 31: character maps to <undefined>
+Call stack:
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 701, in <module>
+    main()
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 696, in main
+    run_price_update_job()
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 549, in run_price_update_job
+    logger.info(f"  \U0001f4c8 Updated {updated_count}/{len(stocks)} prices")
+Message: '  \U0001f4c8 Updated 10/11 prices'
+Arguments: ()
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Sager\anaconda3\Lib\logging\__init__.py", line 1113, in emit
+    stream.write(msg + self.terminator)
+  File "C:\Users\Sager\anaconda3\Lib\encodings\cp1256.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\U0001f4b0' in position 31: character maps to <undefined>
+Call stack:
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 701, in <module>
+    main()
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 696, in main
+    run_price_update_job()
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 550, in run_price_update_job
+    logger.info(f"  \U0001f4b0 Portfolio Value: {portfolio_value:,.2f} KWD")
+Message: '  \U0001f4b0 Portfolio Value: 220,266.81 KWD'
+Arguments: ()
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Sager\anaconda3\Lib\logging\__init__.py", line 1113, in emit
+    stream.write(msg + self.terminator)
+  File "C:\Users\Sager\anaconda3\Lib\encodings\cp1256.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\U0001f4be' in position 31: character maps to <undefined>
+Call stack:
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 701, in <module>
+    main()
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 696, in main
+    run_price_update_job()
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 586, in run_price_update_job
+    logger.info(f"  \U0001f4be Snapshot saved for {today_str}")
+Message: '  \U0001f4be Snapshot saved for 2026-01-22'
+Arguments: ()
+2026-01-22 12:50:02 | INFO | 
+--- Processing User: test_user_1767863199 (ID: 3) ---
+2026-01-22 12:50:02 | INFO |   No stocks found for user test_user_1767863199
+2026-01-22 12:50:02 | INFO | 
+--- Processing User: testupload@123.com (ID: 4) ---
+2026-01-22 12:50:02 | INFO |   No stocks found for user testupload@123.com
+2026-01-22 12:50:02 | INFO | 
+============================================================
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Sager\anaconda3\Lib\logging\__init__.py", line 1113, in emit
+    stream.write(msg + self.terminator)
+  File "C:\Users\Sager\anaconda3\Lib\encodings\cp1256.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2705' in position 29: character maps to <undefined>
+Call stack:
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 701, in <module>
+    main()
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 696, in main
+    run_price_update_job()
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 592, in run_price_update_job
+    logger.info(f"\u2705 JOB COMPLETED")
+Message: '\u2705 JOB COMPLETED'
+Arguments: ()
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Sager\anaconda3\Lib\logging\__init__.py", line 1113, in emit
+    stream.write(msg + self.terminator)
+  File "C:\Users\Sager\anaconda3\Lib\encodings\cp1256.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\U0001f4ca' in position 32: character maps to <undefined>
+Call stack:
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 701, in <module>
+    main()
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 696, in main
+    run_price_update_job()
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 593, in run_price_update_job
+    logger.info(f"   \U0001f4ca Stocks Updated: {total_stocks_updated}")
+Message: '   \U0001f4ca Stocks Updated: 14'
+Arguments: ()
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Sager\anaconda3\Lib\logging\__init__.py", line 1113, in emit
+    stream.write(msg + self.terminator)
+2026-01-22 12:50:02 | INFO | ============================================================
+
+  File "C:\Users\Sager\anaconda3\Lib\encodings\cp1256.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\U0001f4be' in position 32: character maps to <undefined>
+Call stack:
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 701, in <module>
+    main()
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 696, in main
+    run_price_update_job()
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 594, in run_price_update_job
+    logger.info(f"   \U0001f4be Snapshots Saved: {total_snapshots_saved}")
+Message: '   \U0001f4be Snapshots Saved: 2'
+Arguments: ()
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Sager\anaconda3\Lib\logging\__init__.py", line 1113, in emit
+    stream.write(msg + self.terminator)
+  File "C:\Users\Sager\anaconda3\Lib\encodings\cp1256.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode characters in position 32-33: character maps to <undefined>
+Call stack:
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 701, in <module>
+    main()
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 696, in main
+    run_price_update_job()
+  File "C:\Users\Sager\OneDrive\Desktop\portfolio_app\auto_price_scheduler.py", line 595, in run_price_update_job
+    logger.info(f"   \u23f1\ufe0f Finished at: {datetime.now(KUWAIT_TZ).strftime('%H:%M:%S')} Kuwait Time")
+Message: '   \u23f1\ufe0f Finished at: 12:50:02 Kuwait Time'
+Arguments: ()

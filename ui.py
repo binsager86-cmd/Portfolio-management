@@ -735,6 +735,7 @@ def init_db():
             add_column_if_missing(tbl, "user_id", "INTEGER DEFAULT 1")
         add_column_if_missing("users", "email", "TEXT")
         add_column_if_missing("users", "name", "TEXT")
+        add_column_if_missing("users", "gemini_api_key", "TEXT")
         add_column_if_missing("cash_deposits", "portfolio", "TEXT DEFAULT 'KFH'")
         add_column_if_missing("cash_deposits", "include_in_analysis", "INTEGER DEFAULT 1")
         add_column_if_missing("cash_deposits", "currency", "TEXT DEFAULT 'KWD'")
@@ -781,6 +782,7 @@ def init_db():
     # Add missing columns to users (backwards compatibility)
     add_column_if_missing("users", "email", "TEXT")
     add_column_if_missing("users", "name", "TEXT")
+    add_column_if_missing("users", "gemini_api_key", "TEXT")
 
     # ============================================
     # STEP 2: CREATE DEPENDENT TABLES (after users)
@@ -5311,7 +5313,7 @@ def ui_backup_restore():
             'transactions': safe_query("SELECT * FROM transactions WHERE user_id = ? ORDER BY txn_date DESC", (user_id,)),
             'cash_deposits': safe_query("SELECT * FROM cash_deposits WHERE user_id = ? ORDER BY deposit_date DESC", (user_id,)),
             'portfolio_cash': safe_query("SELECT * FROM portfolio_cash WHERE user_id = ?", (user_id,)),
-            'trading_history': safe_query("SELECT * FROM trading_history WHERE user_id = ? ORDER BY trade_date DESC", (user_id,)),
+            'trading_history': safe_query("SELECT * FROM trading_history WHERE user_id = ? ORDER BY txn_date DESC", (user_id,)),
             # Include only current user's portfolio_snapshots
             'portfolio_snapshots': safe_query(
                 "SELECT * FROM portfolio_snapshots WHERE user_id = ? ORDER BY snapshot_date DESC", 
@@ -6586,19 +6588,22 @@ def ui_portfolio_analysis():
         mv_change_pct = ((overall_total_mv - overall_total_cost) / overall_total_cost * 100)
         unreal_change_pct = (overall_total_unreal / overall_total_cost * 100)
         
-        col1, col2, col3, col4, col5, col6 = st.columns(6)
+        col1, col2, col3, col4, col5, col6, col7 = st.columns(7)
         with col1:
             kpi_card("Total Cost", fmt_money(overall_total_cost, "KWD"))
         with col2:
-            # Modified to show Total Value (Equity + Cash)
-            kpi_card("Total Value", fmt_money(overall_total_value, "KWD"), f"Cash: {fmt_money(_overall_cash_kwd, 'KWD')}")
+            # Stock Holdings Value (Equity Only - excluding cash)
+            kpi_card("Stock Holdings", fmt_money(overall_total_mv, "KWD"), f"▲ {mv_change_pct:.2f}%")
         with col3:
-            kpi_card("Unrealized P/L", fmt_money(overall_total_unreal, "KWD"), f"▲ {unreal_change_pct:.2f}%")
+            # Total Value (Equity + Cash)
+            kpi_card("Total Portfolio", fmt_money(overall_total_value, "KWD"), f"Cash: {fmt_money(_overall_cash_kwd, 'KWD')}")
         with col4:
-            kpi_card("Cash Dividends", fmt_money(overall_total_cash_div, "KWD"))
+            kpi_card("Unrealized P/L", fmt_money(overall_total_unreal, "KWD"), f"▲ {unreal_change_pct:.2f}%")
         with col5:
-            kpi_card("Total PNL", fmt_money(overall_total_pnl, "KWD"), f"▲ {overall_total_pnl_pct:.2%}")
+            kpi_card("Cash Dividends", fmt_money(overall_total_cash_div, "KWD"))
         with col6:
+            kpi_card("Total PNL", fmt_money(overall_total_pnl, "KWD"), f"▲ {overall_total_pnl_pct:.2%}")
+        with col7:
             kpi_card("PNL %", pct(overall_total_pnl_pct))
         
         st.caption(f"💰 Dividend Yield on Cost (overall) = {pct(overall_dividend_yield)} | All values in KWD. USA portfolio converted at USD→KWD rate: {st.session_state.usd_to_kwd:.6f}")
@@ -6777,6 +6782,36 @@ def ui_portfolio_analysis():
     st.info(f"💱 USD → KWD conversion rate: **{st.session_state.usd_to_kwd:.6f}**")
     render_portfolio_section("USA Portfolio", usa_df, fx_usdkwd=fx_usdkwd, show_title=False, portfolio_ccy="USD")
     
+    # USA Portfolio - KWD Equivalent Card
+    if not usa_df.empty:
+        usa_cost_usd = float(usa_df["Total Cost"].sum())
+        usa_mv_usd = float(usa_df["Market Value"].sum())
+        usa_unreal_usd = float(usa_df["Unrealized P/L"].sum())
+        usa_cash_div_usd = float(usa_df["Cash Dividends"].sum())
+        usa_pnl_usd = float(usa_df["Total PNL"].sum())
+        
+        # Convert to KWD
+        fx_rate = st.session_state.usd_to_kwd
+        usa_cost_kwd = usa_cost_usd * fx_rate
+        usa_mv_kwd = usa_mv_usd * fx_rate
+        usa_unreal_kwd = usa_unreal_usd * fx_rate
+        usa_cash_div_kwd = usa_cash_div_usd * fx_rate
+        usa_pnl_kwd = usa_pnl_usd * fx_rate
+        
+        st.markdown("#### 🇰🇼 USD Portfolio in KWD Equivalent")
+        col1, col2, col3, col4, col5 = st.columns(5)
+        with col1:
+            kpi_card("Total Cost (KWD)", fmt_money(usa_cost_kwd, "KWD"))
+        with col2:
+            kpi_card("Market Value (KWD)", fmt_money(usa_mv_kwd, "KWD"))
+        with col3:
+            kpi_card("Unrealized P/L (KWD)", fmt_money(usa_unreal_kwd, "KWD"))
+        with col4:
+            kpi_card("Cash Dividends (KWD)", fmt_money(usa_cash_div_kwd, "KWD"))
+        with col5:
+            usa_pnl_pct = (usa_pnl_usd / usa_cost_usd) if usa_cost_usd > 0 else 0.0
+            kpi_card("Total PNL (KWD)", fmt_money(usa_pnl_kwd, "KWD"), f"{usa_pnl_pct:.2%}")
+    
     # Footer
     st.markdown("""
     <div class="portfolio-footer">
@@ -6844,13 +6879,23 @@ def ui_portfolio_tracker():
     # === SAVE TODAY'S SNAPSHOT ===
     if save_snapshot_btn:
         with st.spinner("Calculating live portfolio value..."):
-            # 1. Calculate LIVE portfolio value
-            live_portfolio_value = 0.0
+            # 1. Calculate LIVE portfolio value (Stock Market Values)
+            live_stock_value = 0.0
             for port_name in PORTFOLIO_CCY.keys():
                 df_port = build_portfolio_table(port_name)
                 if not df_port.empty:
                     for _, row in df_port.iterrows():
-                        live_portfolio_value += convert_to_kwd(row['Market Value'], row['Currency'])
+                        live_stock_value += convert_to_kwd(row['Market Value'], row['Currency'])
+            
+            # 1b. Add Manual Cash from portfolio_cash table (matching Overview tab)
+            manual_cash_kwd = 0.0
+            cash_recs = query_df("SELECT balance, currency FROM portfolio_cash WHERE user_id=?", (user_id,))
+            if not cash_recs.empty:
+                for _, cr in cash_recs.iterrows():
+                    manual_cash_kwd += convert_to_kwd(cr["balance"], cr["currency"])
+            
+            # Total Portfolio Value = Stocks + Cash
+            live_portfolio_value = live_stock_value + manual_cash_kwd
             
             # 2. Calculate Accumulated Cash (Total Deposits)
             all_deposits = query_df("SELECT amount, currency, include_in_analysis, deposit_date FROM cash_deposits WHERE user_id = ?", (user_id,))
@@ -6905,14 +6950,35 @@ def ui_portfolio_tracker():
                 ]
                 new_deposits_kwd = new_deposits_df["amount_in_kwd"].sum()
             
-            # Robust Logic: Always sum from the cash_deposits table
-            # This ensures accuracy even if intermediate snapshots are deleted
-            acc_cash_query = query_df(
-                "SELECT SUM(amount) as total FROM cash_deposits WHERE user_id = ? AND deposit_date <= ? AND include_in_analysis = 1",
-                (user_id, today_str)
+            # --- FIX: CARRY FORWARD LOGIC ---
+            # 1. Get the accumulated cash from the MOST RECENT previous snapshot
+            prev_accumulated = 0.0
+            prev_date_str = "1970-01-01"
+            
+            if not prev_snap.empty:
+                val = prev_snap.iloc[0]["accumulated_cash"]
+                prev_date_str = prev_snap.iloc[0]["snapshot_date"]
+                if pd.notna(val):
+                    prev_accumulated = float(val)
+
+            # 2. Get ONLY new deposits made AFTER the previous snapshot up to TODAY
+            new_deposits_query = query_df(
+                """
+                SELECT SUM(amount) as total 
+                FROM cash_deposits 
+                WHERE user_id = ? 
+                AND deposit_date > ? 
+                AND deposit_date <= ? 
+                AND include_in_analysis = 1
+                """,
+                (user_id, prev_date_str, today_str)
             )
-            acc_val = acc_cash_query.iloc[0]['total'] if not acc_cash_query.empty else None
-            accumulated_cash = float(acc_val) if pd.notna(acc_val) else 0.0
+            
+            new_cash_in = new_deposits_query.iloc[0]['total'] if not new_deposits_query.empty and pd.notna(new_deposits_query.iloc[0]['total']) else 0.0
+            
+            # 3. Final Total = Previous + New
+            accumulated_cash = prev_accumulated + new_cash_in
+            # -------------------------------
             
             # 4. Calculate Metrics
             daily_movement = live_portfolio_value - prev_value if prev_value > 0 else 0.0
@@ -9187,14 +9253,305 @@ def ui_trading_section():
 # =========================
 # OVERVIEW TAB
 # =========================
-@st.cache_data(ttl=3600)
+
+# CBK Rate Cache - Global variable for in-memory caching
+_cbk_rate_cache = {
+    'rate': None,
+    'fetched_date': None,
+    'source': None  # 'cbk_api', 'config', 'db_cache', 'default'
+}
+
+def _init_cbk_rate_table():
+    """Initialize the CBK rate cache table in the database."""
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        db_execute(cur, """
+            CREATE TABLE IF NOT EXISTS cbk_rate_cache (
+                id INTEGER PRIMARY KEY,
+                rate REAL NOT NULL,
+                fetched_date TEXT NOT NULL,
+                source TEXT NOT NULL,
+                created_at INTEGER DEFAULT (strftime('%s', 'now'))
+            )
+        """)
+        conn.commit()
+    except Exception as e:
+        print(f"Error creating cbk_rate_cache table: {e}")
+    finally:
+        conn.close()
+
+def _fetch_cbk_rate_from_api():
+    """
+    Attempt to fetch the CBK discount rate from official sources.
+    Returns: (rate: float, success: bool)
+    """
+    import requests
+    from bs4 import BeautifulSoup
+    
+    # Primary source: Central Bank of Kuwait official website
+    # The CBK publishes the discount rate on their statistics page
+    cbk_urls = [
+        "https://www.cbk.gov.kw/en/statistics-and-publications/statistics/interest-rates",
+        "https://www.cbk.gov.kw/en/statistics-and-publications/statistics",
+    ]
+    
+    for url in cbk_urls:
+        try:
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            }
+            response = requests.get(url, headers=headers, timeout=10)
+            
+            if response.status_code == 200:
+                soup = BeautifulSoup(response.text, 'html.parser')
+                
+                # Look for discount rate in various formats
+                text = soup.get_text().lower()
+                
+                # Pattern matching for discount rate
+                import re
+                patterns = [
+                    r'discount\s*rate[:\s]*(\d+\.?\d*)\s*%',
+                    r'cbk\s*discount[:\s]*(\d+\.?\d*)\s*%',
+                    r'policy\s*rate[:\s]*(\d+\.?\d*)\s*%',
+                    r'base\s*rate[:\s]*(\d+\.?\d*)\s*%',
+                ]
+                
+                for pattern in patterns:
+                    match = re.search(pattern, text)
+                    if match:
+                        rate = float(match.group(1)) / 100  # Convert percentage to decimal
+                        if 0.01 <= rate <= 0.20:  # Sanity check: 1% to 20%
+                            return rate, True
+                            
+        except requests.RequestException as e:
+            print(f"CBK API request failed for {url}: {e}")
+        except Exception as e:
+            print(f"Error parsing CBK response: {e}")
+    
+    # Secondary source: Try to get from financial data APIs
+    try:
+        # Try World Bank API for Kuwait interest rates
+        wb_url = "https://api.worldbank.org/v2/country/kwt/indicator/FR.INR.DPST?format=json&per_page=1&mrv=1"
+        response = requests.get(wb_url, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            if len(data) > 1 and data[1]:
+                rate_value = data[1][0].get('value')
+                if rate_value and 0.5 <= rate_value <= 20:  # Sanity check
+                    return rate_value / 100, True
+    except Exception as e:
+        print(f"World Bank API failed: {e}")
+    
+    return None, False
+
+def _get_cbk_rate_from_config():
+    """
+    Get CBK rate from configuration sources.
+    Checks: environment variable, Streamlit secrets, or .env file.
+    Returns: (rate: float or None, found: bool)
+    """
+    import os
+    
+    # 1. Check environment variable
+    env_rate = os.environ.get('CBK_RISK_FREE_RATE')
+    if env_rate:
+        try:
+            rate = float(env_rate)
+            # Handle both decimal (0.0425) and percentage (4.25) formats
+            if rate > 1:
+                rate = rate / 100
+            return rate, True
+        except ValueError:
+            pass
+    
+    # 2. Check Streamlit secrets
+    try:
+        if hasattr(st, 'secrets') and 'CBK_RISK_FREE_RATE' in st.secrets:
+            rate = float(st.secrets['CBK_RISK_FREE_RATE'])
+            if rate > 1:
+                rate = rate / 100
+            return rate, True
+    except Exception:
+        pass
+    
+    # 3. Check database for config setting
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        db_execute(cur, "SELECT rate FROM cbk_rate_cache ORDER BY created_at DESC LIMIT 1")
+        row = cur.fetchone()
+        conn.close()
+        if row and row[0]:
+            return float(row[0]), True
+    except Exception:
+        pass
+    
+    return None, False
+
+def _get_cbk_rate_from_db_cache():
+    """
+    Get the last successfully fetched CBK rate from database cache.
+    Returns: (rate: float, fetched_date: str, source: str) or (None, None, None)
+    """
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        db_execute(cur, """
+            SELECT rate, fetched_date, source 
+            FROM cbk_rate_cache 
+            ORDER BY created_at DESC LIMIT 1
+        """)
+        row = cur.fetchone()
+        conn.close()
+        if row:
+            return float(row[0]), row[1], row[2]
+    except Exception as e:
+        print(f"Error reading CBK rate from cache: {e}")
+    
+    return None, None, None
+
+def _save_cbk_rate_to_cache(rate, source):
+    """Save the CBK rate to database cache."""
+    from datetime import datetime
+    
+    try:
+        _init_cbk_rate_table()
+        conn = get_conn()
+        cur = conn.cursor()
+        
+        fetched_date = datetime.now().strftime('%Y-%m-%d')
+        
+        db_execute(cur, """
+            INSERT INTO cbk_rate_cache (rate, fetched_date, source)
+            VALUES (?, ?, ?)
+        """, (rate, fetched_date, source))
+        conn.commit()
+        conn.close()
+        
+        # Update global cache
+        _cbk_rate_cache['rate'] = rate
+        _cbk_rate_cache['fetched_date'] = fetched_date
+        _cbk_rate_cache['source'] = source
+        
+    except Exception as e:
+        print(f"Error saving CBK rate to cache: {e}")
+
+def get_cbk_risk_free_rate(force_refresh=False):
+    """
+    Get the Central Bank of Kuwait risk-free rate dynamically.
+    
+    Priority order:
+    1. In-memory cache (if < 24 hours old and not force_refresh)
+    2. Fetch from CBK official website/API
+    3. Fall back to config value (env var, secrets, or db setting)
+    4. Fall back to database cache (last known good value)
+    5. Return None if all sources fail
+    
+    Returns: dict with keys:
+        - 'rate': float (e.g., 0.0425) or None
+        - 'rate_percent': float (e.g., 4.25) or None
+        - 'source': str ('cbk_api', 'config', 'db_cache', 'default', 'unavailable')
+        - 'fetched_date': str (YYYY-MM-DD) or None
+        - 'is_stale': bool (True if using cached/fallback value)
+        - 'warning': str or None
+    """
+    from datetime import datetime, timedelta
+    
+    global _cbk_rate_cache
+    
+    result = {
+        'rate': None,
+        'rate_percent': None,
+        'source': 'unavailable',
+        'fetched_date': None,
+        'is_stale': False,
+        'warning': None
+    }
+    
+    # Initialize the cache table
+    _init_cbk_rate_table()
+    
+    # Check in-memory cache first (unless force refresh)
+    if not force_refresh and _cbk_rate_cache['rate'] is not None:
+        if _cbk_rate_cache['fetched_date']:
+            try:
+                cached_date = datetime.strptime(_cbk_rate_cache['fetched_date'], '%Y-%m-%d')
+                if datetime.now() - cached_date < timedelta(hours=24):
+                    result['rate'] = _cbk_rate_cache['rate']
+                    result['rate_percent'] = _cbk_rate_cache['rate'] * 100
+                    result['source'] = _cbk_rate_cache['source']
+                    result['fetched_date'] = _cbk_rate_cache['fetched_date']
+                    result['is_stale'] = _cbk_rate_cache['source'] != 'cbk_api'
+                    return result
+            except ValueError:
+                pass
+    
+    # Try primary source: CBK API
+    try:
+        rate, success = _fetch_cbk_rate_from_api()
+        if success and rate is not None:
+            _save_cbk_rate_to_cache(rate, 'cbk_api')
+            result['rate'] = rate
+            result['rate_percent'] = rate * 100
+            result['source'] = 'cbk_api'
+            result['fetched_date'] = datetime.now().strftime('%Y-%m-%d')
+            result['is_stale'] = False
+            return result
+    except Exception as e:
+        print(f"CBK API fetch error: {e}")
+    
+    # Try config fallback
+    config_rate, config_found = _get_cbk_rate_from_config()
+    if config_found and config_rate is not None:
+        _save_cbk_rate_to_cache(config_rate, 'config')
+        result['rate'] = config_rate
+        result['rate_percent'] = config_rate * 100
+        result['source'] = 'config'
+        result['fetched_date'] = datetime.now().strftime('%Y-%m-%d')
+        result['is_stale'] = True
+        result['warning'] = "Using configured rate (CBK fetch unavailable)"
+        return result
+    
+    # Try database cache fallback
+    cached_rate, cached_date, cached_source = _get_cbk_rate_from_db_cache()
+    if cached_rate is not None:
+        _cbk_rate_cache['rate'] = cached_rate
+        _cbk_rate_cache['fetched_date'] = cached_date
+        _cbk_rate_cache['source'] = 'db_cache'
+        
+        result['rate'] = cached_rate
+        result['rate_percent'] = cached_rate * 100
+        result['source'] = 'db_cache'
+        result['fetched_date'] = cached_date
+        result['is_stale'] = True
+        result['warning'] = f"Using last known CBK rate (updated on {cached_date})"
+        return result
+    
+    # Final fallback: default value with warning
+    default_rate = 0.0425  # Last known CBK rate as of 2024
+    result['rate'] = default_rate
+    result['rate_percent'] = default_rate * 100
+    result['source'] = 'default'
+    result['fetched_date'] = None
+    result['is_stale'] = True
+    result['warning'] = "Using default CBK rate (4.25%) - please configure CBK_RISK_FREE_RATE"
+    
+    # Save default to cache so it persists
+    _save_cbk_rate_to_cache(default_rate, 'default')
+    
+    return result
+
 def get_risk_free_rate():
-    """Return Kuwait Central Bank Discount Rate as risk-free rate."""
-    # As of 2024/2025, CBK Discount Rate is approx 4.25%
-    # Since there is no direct Yahoo Finance ticker for CBK rate, we use a fixed constant.
-    # Users can update this manually if the rate changes.
-    cbk_rate = 0.0425 
-    return cbk_rate
+    """
+    Legacy wrapper for backward compatibility.
+    Returns just the rate value as a float.
+    """
+    cbk_data = get_cbk_risk_free_rate()
+    if cbk_data['rate'] is not None:
+        return cbk_data['rate']
+    return 0.0425  # Fallback
 
 def calculate_sharpe_ratio(rf_rate):
     """Calculate Sharpe Ratio based on portfolio snapshots."""
@@ -9290,6 +9647,83 @@ def calculate_sortino_ratio(rf_rate):
     
     return sortino
 
+def calculate_trading_realized_profit(user_id):
+    """
+    Calculate realized profit from trading_history table.
+    Uses FIFO matching of Buy/Sell pairs (same logic as Trading Section).
+    Returns profit in original currency (KWD for Kuwait stocks, USD for US stocks).
+    """
+    conn = get_conn()
+    try:
+        query = """
+            SELECT 
+                t.id,
+                t.stock_symbol as Stock,
+                t.txn_date,
+                t.txn_type,
+                t.shares as Quantity,
+                t.purchase_cost as price_cost,
+                t.sell_value as sale_price
+            FROM trading_history t
+            WHERE t.user_id = ?
+            ORDER BY t.txn_date, t.stock_symbol, t.txn_type
+        """
+        df = pd.read_sql_query(convert_sql_placeholders(query), conn, params=(user_id,))
+    except Exception:
+        df = pd.DataFrame()
+    finally:
+        conn.close()
+    
+    if df.empty:
+        return 0.0
+    
+    total_realized = 0.0
+    
+    # Process by Stock to pair transactions
+    for stock in df["Stock"].dropna().unique():
+        stock_df = df[df['Stock'] == stock].sort_values('txn_date').reset_index(drop=True)
+        
+        buys = stock_df[stock_df['txn_type'] == 'Buy'].copy()
+        sells = stock_df[stock_df['txn_type'] == 'Sell'].copy()
+        
+        matched_buy_ids = set()
+        matched_sell_ids = set()
+        
+        # Match Sells to Buys (FIFO)
+        for _, sell in sells.iterrows():
+            if sell['id'] in matched_sell_ids:
+                continue
+            
+            # Find matching buy with same quantity
+            matching_buys = buys[
+                (buys['Quantity'] == sell['Quantity']) & 
+                (~buys['id'].isin(matched_buy_ids)) &
+                (buys['txn_date'] <= sell['txn_date'])
+            ]
+            
+            if not matching_buys.empty:
+                buy = matching_buys.iloc[-1]  # Most recent buy before sell
+                matched_buy_ids.add(buy['id'])
+                matched_sell_ids.add(sell['id'])
+                
+                # Calculate profit: sale_price - price_cost (already total values)
+                sell_val = safe_float(sell['sale_price'], 0)
+                buy_cost = safe_float(buy['price_cost'], 0)
+                profit = sell_val - buy_cost
+                
+                # Determine currency from stock suffix
+                currency = 'KWD'
+                if isinstance(stock, str):
+                    if stock.endswith('.KW'):
+                        currency = 'KWD'
+                    elif not stock.endswith('.'):
+                        currency = 'USD'  # US stocks don't have suffix
+                
+                # Convert to KWD
+                total_realized += convert_to_kwd(profit, currency)
+    
+    return total_realized
+
 def ui_overview():
     st.header("📊 Portfolio Overview")
     
@@ -9363,8 +9797,8 @@ def ui_overview():
         )
         total_dividends_kwd = all_dividends["amount_in_kwd"].sum()
     
-    # Calculate Realized Profit (from Sell transactions)
-    realized_profit_kwd = 0.0
+    # Calculate Realized Profit (from Sell transactions - Portfolio)
+    portfolio_realized_kwd = 0.0
     realized_query = query_df("""
         SELECT 
             t.sell_value, 
@@ -9381,7 +9815,13 @@ def ui_overview():
             sell_val = safe_float(row.get('sell_value', 0), 0)
             buy_cost = safe_float(row.get('purchase_cost', 0), 0)
             profit = sell_val - buy_cost
-            realized_profit_kwd += convert_to_kwd(profit, row.get('currency', 'KWD'))
+            portfolio_realized_kwd += convert_to_kwd(profit, row.get('currency', 'KWD'))
+    
+    # Calculate Realized Profit from Trading Section (trading_history table)
+    trading_realized_kwd = calculate_trading_realized_profit(user_id)
+    
+    # Total Realized Profit = Portfolio + Trading
+    realized_profit_kwd = portfolio_realized_kwd + trading_realized_kwd
     
     # Calculate Unrealized Profit (current holdings)
     unrealized_profit_kwd = 0.0
@@ -9396,12 +9836,26 @@ def ui_overview():
     total_txns = query_df("SELECT COUNT(*) as count FROM transactions WHERE user_id = ?", (user_id,))
     num_txns = total_txns["count"].iloc[0] if not total_txns.empty else 0
     
-    # Calculate Sharpe Ratio
-    rf_rate = get_risk_free_rate()
-    sharpe_ratio = calculate_sharpe_ratio(rf_rate)
+    # Get CBK Risk-Free Rate dynamically
+    cbk_rate_data = get_cbk_risk_free_rate()
+    rf_rate = cbk_rate_data['rate'] if cbk_rate_data['rate'] is not None else 0.0425
+    rf_rate_percent = cbk_rate_data['rate_percent'] if cbk_rate_data['rate_percent'] is not None else 4.25
+    cbk_rate_source = cbk_rate_data['source']
+    cbk_rate_warning = cbk_rate_data.get('warning')
+    cbk_rate_date = cbk_rate_data.get('fetched_date')
+    cbk_rate_is_stale = cbk_rate_data.get('is_stale', False)
     
-    # Calculate Sortino Ratio (Using Kuwait Rate as requested)
-    sortino_ratio = calculate_sortino_ratio(rf_rate)
+    # Calculate Sharpe Ratio (only if rate available)
+    sharpe_ratio = None
+    sortino_ratio = None
+    sharpe_sortino_error = None
+    
+    if cbk_rate_data['rate'] is not None:
+        sharpe_ratio = calculate_sharpe_ratio(rf_rate)
+        # Calculate Sortino Ratio (Using Kuwait Rate as requested)
+        sortino_ratio = calculate_sortino_ratio(rf_rate)
+    else:
+        sharpe_sortino_error = "CBK rate unavailable - cannot calculate risk-adjusted metrics"
     
     # Determine colors based on user-selected theme (Matching ui_portfolio_analysis)
     if st.session_state.theme == "dark":
@@ -9575,11 +10029,13 @@ def ui_overview():
     with col_r1:
         realized_class = "ov-delta-pos" if realized_profit_kwd >= 0 else "ov-delta-neg"
         realized_sign = "+" if realized_profit_kwd >= 0 else ""
+        # Show breakdown: Portfolio + Trading
+        breakdown_text = f"Portfolio: {fmt_money_plain(portfolio_realized_kwd, 1)} | Trading: {fmt_money_plain(trading_realized_kwd, 1)}"
         st.markdown(f"""
         <div class="ov-card">
             <div class="ov-title">💵 Realized Profit</div>
             <div class="ov-value"><span class="{realized_class}">{realized_sign}{fmt_money_plain(realized_profit_kwd, 2)}</span> <span class="ov-currency">KWD</span></div>
-            <div class="ov-sub">From closed positions</div>
+            <div class="ov-sub">{breakdown_text}</div>
         </div>
         """, unsafe_allow_html=True)
     
@@ -9610,6 +10066,48 @@ def ui_overview():
 
     st.subheader("⚡ Risk Adjusted Performance")
     
+    # CBK Rate Status Row with Refresh Button
+    rate_col1, rate_col2 = st.columns([3, 1])
+    with rate_col1:
+        # Display CBK rate source info
+        source_icons = {
+            'cbk_api': '🌐',
+            'config': '⚙️',
+            'db_cache': '💾',
+            'default': '⚠️',
+            'unavailable': '❌'
+        }
+        source_labels = {
+            'cbk_api': 'Live from CBK',
+            'config': 'Configured Value',
+            'db_cache': 'Cached Value',
+            'default': 'Default Value',
+            'unavailable': 'Unavailable'
+        }
+        source_icon = source_icons.get(cbk_rate_source, '❓')
+        source_label = source_labels.get(cbk_rate_source, 'Unknown')
+        
+        if cbk_rate_is_stale and cbk_rate_warning:
+            st.caption(f"{source_icon} Risk-Free Rate (CBK): **{rf_rate_percent:.2f}%** — *{cbk_rate_warning}*")
+        elif cbk_rate_date:
+            st.caption(f"{source_icon} Risk-Free Rate (CBK): **{rf_rate_percent:.2f}%** — {source_label} (as of {cbk_rate_date})")
+        else:
+            st.caption(f"{source_icon} Risk-Free Rate (CBK): **{rf_rate_percent:.2f}%** — {source_label}")
+    
+    with rate_col2:
+        if st.button("🔄 Refresh CBK Rate", key="refresh_cbk_rate", help="Fetch latest rate from Central Bank of Kuwait"):
+            with st.spinner("Fetching CBK rate..."):
+                refreshed_data = get_cbk_risk_free_rate(force_refresh=True)
+                if refreshed_data['rate'] is not None:
+                    st.success(f"Rate updated: {refreshed_data['rate_percent']:.2f}% ({refreshed_data['source']})")
+                    st.rerun()
+                else:
+                    st.error("Could not fetch CBK rate. Using fallback value.")
+    
+    # Show error if rate unavailable
+    if sharpe_sortino_error:
+        st.warning(sharpe_sortino_error)
+    
     r_col1, r_col2, r_col3, r_col4 = st.columns(4)
     
     with r_col1:
@@ -9622,19 +10120,25 @@ def ui_overview():
             else:
                 sr_color = "#ef4444" # Red
             
+            # Build subtitle with stale indicator
+            sr_subtitle = f"Risk-Free (CBK): {rf_rate_percent:.2f}%"
+            if cbk_rate_is_stale:
+                sr_subtitle += " ⚠️"
+            
             st.markdown(f"""
             <div class="ov-card">
                 <div class="ov-title">Sharpe Ratio</div>
                 <div class="ov-value" style="color: {sr_color};">{sr_val:.2f}</div>
-                <div class="ov-sub">Risk-Free (CBK): {rf_rate*100:.2f}%</div>
+                <div class="ov-sub">{sr_subtitle}</div>
             </div>
             """, unsafe_allow_html=True)
         else:
+            error_msg = "Need more data" if not sharpe_sortino_error else "Rate unavailable"
             st.markdown(f"""
             <div class="ov-card">
                 <div class="ov-title">Sharpe Ratio</div>
                 <div class="ov-value">N/A</div>
-                <div class="ov-sub">Need more data</div>
+                <div class="ov-sub">{error_msg}</div>
             </div>
             """, unsafe_allow_html=True)
     
@@ -9648,19 +10152,25 @@ def ui_overview():
             else:
                 so_color = "#f97316" # Orange (Risky)
             
+            # Build subtitle with stale indicator
+            so_subtitle = f"Risk-Free (CBK): {rf_rate_percent:.2f}%"
+            if cbk_rate_is_stale:
+                so_subtitle += " ⚠️"
+            
             st.markdown(f"""
             <div class="ov-card">
                 <div class="ov-title">Sortino Ratio</div>
                 <div class="ov-value" style="color: {so_color};">{so_val:.2f}</div>
-                <div class="ov-sub">Risk-Free (CBK): {rf_rate*100:.2f}%</div>
+                <div class="ov-sub">{so_subtitle}</div>
             </div>
             """, unsafe_allow_html=True)
         else:
+            error_msg = "Need more data" if not sharpe_sortino_error else "Rate unavailable"
             st.markdown(f"""
             <div class="ov-card">
                 <div class="ov-title">Sortino Ratio</div>
                 <div class="ov-value">N/A</div>
-                <div class="ov-sub">Need more data</div>
+                <div class="ov-sub">{error_msg}</div>
             </div>
             """, unsafe_allow_html=True)
 
@@ -10023,6 +10533,228 @@ def ui_overview():
             <div class="ov-sub">Divs / Deposits</div>
         </div>
         """, unsafe_allow_html=True)
+
+    st.divider()
+    
+    # ==========================================
+    # 🤖 AI ANALYST WIDGET (Embedded in Overview)
+    # ==========================================
+    with st.expander("🤖 AI Financial Intelligence & Reporting", expanded=False):
+        st.caption("Generate professional insights and PDF reports based on your current portfolio overview.")
+
+        # 1. API Key Check
+        # Check for key in Session or DB
+        if "gemini_api_key" not in st.session_state or not st.session_state.gemini_api_key:
+            conn = get_conn()
+            cur = conn.cursor()
+            db_execute(cur, "SELECT gemini_api_key FROM users WHERE id = ?", (user_id,))
+            res = cur.fetchone()
+            conn.close()
+            if res and res[0]:
+                st.session_state.gemini_api_key = res[0]
+
+        api_key = st.text_input(
+            "Google Gemini API Key", 
+            type="password", 
+            value=st.session_state.get("gemini_api_key", ""),
+            help="Get free key: https://aistudio.google.com/app/apikey",
+            key="overview_ai_key"
+        )
+
+        if api_key:
+            st.session_state.gemini_api_key = api_key
+            # Save to DB if changed
+            try:
+                conn = get_conn()
+                cur = conn.cursor()
+                db_execute(cur, "UPDATE users SET gemini_api_key = ? WHERE id = ?", (api_key, user_id))
+                conn.commit()
+                conn.close()
+            except Exception as e:
+                pass  # Silent save
+            
+            try:
+                import google.generativeai as genai
+                genai.configure(api_key=api_key)
+            except ImportError:
+                st.error("Library missing: pip install google-generativeai")
+                st.stop()
+
+            # 2. Prompt Library
+            prompts = {
+                "🧠 Portfolio Recommendations": [
+                    "Analyze my portfolio and recommend what to Buy, Hold, or Sell.",
+                    "What are the top risks in my portfolio right now?",
+                    "Suggest rebalancing actions for better returns & lower risk.",
+                    "Tell me which stock is dragging down my performance.",
+                    "If I want a safer portfolio, what should I adjust?"
+                ],
+                "📊 Benchmark & Comparison": [
+                    "Compare my portfolio performance vs Kuwait market (Boursa).",
+                    "Compare my portfolio vs S&P 500 / NASDAQ.",
+                    "Compare my portfolio to an ideal diversified portfolio.",
+                    "How does my return compare to a professional fund manager?"
+                ],
+                "💰 Income & Dividends": [
+                    "Predict my dividends for the next 12 months.",
+                    "Show me how to maximize my annual dividend income.",
+                    "How close am I to financial independence using dividends?"
+                ],
+                "📈 Growth Forecast": [
+                    "Project my portfolio value in 1, 3, 5 years.",
+                    "If I invest 500 KWD monthly, what will my net worth become?"
+                ],
+                "🧩 Investor Strategy": [
+                    "Analyze my portfolio using Warren Buffett principles.",
+                    "Analyze my portfolio using Charlie Munger's mental models.",
+                    "Evaluate my portfolio the way Peter Lynch would.",
+                    "Explain my portfolio as if I am a value investor.",
+                    "Explain my portfolio as if I am a growth investor."
+                ],
+                "🧠 AI Financial Coaching": [
+                    "Am I on track to reach 1,000,000 KWD in net worth?",
+                    "Identify my bad trading habits and how to fix them.",
+                    "Tell me the weaknesses in my portfolio."
+                ],
+                "📄 Professional Reports": [
+                    "Create a monthly portfolio report.",
+                    "Create a risk report for my portfolio.",
+                    "Create a Warren Buffett-style commentary on my portfolio."
+                ],
+                "⚡ Stock Specific": [
+                    "Analyze my largest holding and give a recommendation.",
+                    "Tell me if my entry prices were good."
+                ]
+            }
+
+            c_nav, c_main = st.columns([1, 2])
+
+            with c_nav:
+                st.markdown("### 📚 Analysis Type")
+                selected_category = st.selectbox("Select Category", list(prompts.keys()), key="ov_ai_cat")
+                selected_prompt = st.radio("Choose Analysis:", prompts[selected_category], label_visibility="collapsed", key="ov_ai_radio")
+
+            with c_main:
+                st.markdown("### 💬 Your Inquiry")
+                custom_query = st.text_area(
+                    "Selected Prompt (or type your own):", 
+                    value=selected_prompt,
+                    height=100,
+                    key="ov_ai_input"
+                )
+                
+                generate = st.button("🚀 Run Analysis & Generate Report", type="primary", use_container_width=True, key="ov_ai_btn")
+
+            # 3. Generation Logic
+            if generate:
+                # STRICT USER CHECK
+                if not user_id:
+                    st.error("You must be logged in to analyze data.")
+                    st.stop()
+                
+                # Fetch comprehensive user data
+                context_data = get_full_financial_context(user_id)
+                
+                # Check if context has errors
+                if context_data.startswith("ERROR") or context_data.startswith("CRITICAL"):
+                    st.error(context_data)
+                    st.stop()
+                
+                # DEBUG: Show the user exactly what data is being sent to AI
+                with st.expander("👁️ View Your Data Sent to AI (Debug)", expanded=False):
+                    st.info("This is the exact financial data the AI will analyze:")
+                    st.text_area("Context Payload", context_data, height=400, disabled=True)
+                    st.caption(f"Data size: {len(context_data):,} characters")
+
+                with st.spinner("🤖 Analyzing your financial data..."):
+                    try:
+                        # Construct intelligent prompt based on query type
+                        query_lower = custom_query.lower()
+                        
+                        # Determine focus area based on query
+                        focus_instructions = ""
+                        if any(word in query_lower for word in ['dividend', 'income', 'yield']):
+                            focus_instructions = "Focus especially on Section 3 (DIVIDENDS RECEIVED) for this analysis."
+                        elif any(word in query_lower for word in ['trade', 'trading', 'realized', 'profit']):
+                            focus_instructions = "Focus especially on Sections 4-5 (TRADING HISTORY) for this analysis."
+                        elif any(word in query_lower for word in ['net worth', 'assets', 'liabilities', 'debt']):
+                            focus_instructions = "Focus especially on Section 6 (PERSONAL FINANCE) for this analysis."
+                        elif any(word in query_lower for word in ['performance', 'roi', 'return', 'growth']):
+                            focus_instructions = "Focus especially on Section 7 (PERFORMANCE SUMMARY) for this analysis."
+                        elif any(word in query_lower for word in ['hold', 'portfolio', 'stock', 'position']):
+                            focus_instructions = "Focus especially on Section 1 (STOCK PORTFOLIOS) for this analysis."
+                        
+                        full_prompt = f"""
+You are a Senior CFO and Financial Analyst providing personalized advice.
+
+**USER'S QUESTION:** "{custom_query}"
+
+**IMPORTANT:** The following is the USER'S ACTUAL SAVED FINANCIAL DATA. Use ONLY this data for your analysis.
+Do NOT make up numbers, stocks, or transactions that are not in this data.
+
+---
+{context_data}
+---
+
+**ANALYSIS INSTRUCTIONS:**
+1. {focus_instructions if focus_instructions else "Analyze all relevant sections based on the user's question."}
+2. Reference SPECIFIC numbers, stocks, and dates from the data above.
+3. If asked about something not in the data, clearly state "This data is not available in your records."
+4. All monetary values should be in KWD (Kuwaiti Dinar) unless the data specifies USD.
+5. Provide actionable recommendations based on the actual data.
+6. Format your response with:
+   - **Bold** for key numbers and metrics
+   - Bullet points for recommendations
+   - Clear section headers
+
+If the data shows "No active stock holdings" or empty sections, acknowledge this and provide guidance on next steps.
+"""
+
+                        # Safe Cascading Call to AI
+                        analysis_text, used_model = generate_content_safe(full_prompt)
+                        
+                        st.session_state['overview_ai_analysis'] = analysis_text
+                        st.success(f"✅ Analysis generated using: {used_model}")
+                        
+                    except Exception as e:
+                        import google.generativeai as genai
+                        error_msg = str(e)
+                        
+                        st.error(f"❌ All AI models failed.")
+                        
+                        with st.expander("🔧 Troubleshooting Info", expanded=True):
+                            st.write(f"**Library Version:** {genai.__version__}")
+                            st.code(error_msg, language="text")
+                            
+                            if "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg:
+                                st.warning("💡 **All models hit rate limits.** Wait 1-2 minutes and try again.")
+                            elif "404" in error_msg:
+                                st.warning("💡 **Models not found.** Your API key may not have access to these models.")
+                            else:
+                                st.info("💡 **Fix:** Check your API key is valid. Try: `pip install -U google-generativeai`")
+
+            # 4. Result & Export
+            if 'overview_ai_analysis' in st.session_state:
+                st.divider()
+                st.markdown("### 📄 Analyst Report")
+                st.markdown(st.session_state['overview_ai_analysis'])
+                
+                # PDF Generation
+                pdf_data = create_pdf_report(st.session_state['overview_ai_analysis'])
+                
+                if pdf_data:
+                    st.download_button(
+                        label="⬇️ Download Report as PDF",
+                        data=pdf_data,
+                        file_name=f"Portfolio_Report_{datetime.now().strftime('%Y%m%d')}.pdf",
+                        mime="application/pdf",
+                        key="ov_ai_pdf"
+                    )
+                else:
+                    st.info("PDF export requires: pip install reportlab")
+        else:
+            st.info("🔑 Please enter API Key to enable AI features.")
+            st.markdown("[👉 Get Free API Key](https://aistudio.google.com/app/apikey)")
 
 
 # =========================
@@ -11770,6 +12502,764 @@ def inject_google_analytics():
     """Inject Google Analytics tracking code into the Streamlit app."""
     import streamlit.components.v1 as components
     components.html(GOOGLE_ANALYTICS_CODE, height=0, width=0)
+
+
+# =========================
+# AI ANALYST HELPER FUNCTIONS
+# =========================
+def get_pfm_history(user_id):
+    """Retrieves PFM snapshot history for a user, returns dict keyed by date."""
+    history = {}
+    
+    # Get all snapshots for user
+    snapshots = query_df("""
+        SELECT id, snapshot_date, notes 
+        FROM pfm_snapshots 
+        WHERE user_id = ? 
+        ORDER BY snapshot_date DESC
+    """, (user_id,))
+    
+    if snapshots.empty:
+        return history
+    
+    for _, snap in snapshots.iterrows():
+        snap_id = snap['id']
+        snap_date = str(snap['snapshot_date'])
+        
+        # Get income items
+        income = query_df("""
+            SELECT category, monthly_amount 
+            FROM pfm_income_expense_items 
+            WHERE snapshot_id = ? AND kind = 'income'
+        """, (snap_id,))
+        
+        # Get expense items
+        expense = query_df("""
+            SELECT category, monthly_amount, is_finance_cost, is_gna 
+            FROM pfm_income_expense_items 
+            WHERE snapshot_id = ? AND kind = 'expense'
+        """, (snap_id,))
+        
+        # Get assets
+        assets = query_df("""
+            SELECT asset_type, asset_name, value_kwd, currency 
+            FROM pfm_assets 
+            WHERE snapshot_id = ?
+        """, (snap_id,))
+        
+        # Get liabilities
+        liabilities = query_df("""
+            SELECT liability_type, name, amount_kwd, currency 
+            FROM pfm_liabilities 
+            WHERE snapshot_id = ?
+        """, (snap_id,))
+        
+        history[snap_date] = {
+            'id': snap_id,
+            'notes': snap['notes'],
+            'income': income,
+            'expense': expense,
+            'assets': assets,
+            'liabilities': liabilities
+        }
+    
+    return history
+
+
+def generate_content_safe(prompt):
+    """
+    Cascading Retry System for Google Gemini Free Tier.
+    Tries each hardcoded stable model until one works.
+    Returns: (response_text, model_name) on success, or raises Exception on total failure.
+    """
+    import google.generativeai as genai
+    
+    # HARDCODED STABLE MODELS - These are known to work on Free Tier
+    # Order matters: Most reliable first
+    models_to_try = [
+        "gemini-1.5-flash",      # Classic stable - highest chance
+        "gemini-2.0-flash",      # Standard 2.0
+        "gemini-flash-latest",   # Production alias
+        "gemini-1.5-pro",        # Pro fallback (lower rate limit)
+        "gemini-1.0-pro",        # Legacy stable
+    ]
+    
+    last_error = None
+    tried_models = []
+    
+    for model_name in models_to_try:
+        try:
+            model = genai.GenerativeModel(model_name)
+            response = model.generate_content(prompt)
+            # Success!
+            return response.text, model_name
+            
+        except Exception as e:
+            err_str = str(e)
+            tried_models.append(f"{model_name}: {err_str[:50]}")
+            last_error = e
+            
+            # If it's a rate limit (429), don't try more - wait is needed
+            if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+                # Still try next model - it might have separate quota
+                continue
+            # If it's 404 (model not found), try next
+            elif "404" in err_str or "not found" in err_str.lower():
+                continue
+            # Other errors - try next model anyway
+            else:
+                continue
+    
+    # All models failed
+    error_summary = "\n".join(tried_models)
+    raise Exception(f"All models failed. Tried:\n{error_summary}\n\nLast error: {last_error}")
+
+
+def render_embedded_ai(context_data=None, role_desc="Senior Investment Analyst", key_prefix="embedded_ai", title="🤖 AI Investment Advisor", auto_fetch_data=True):
+    """
+    Reusable AI widget with strict user_id check, debug view, and comprehensive analysis.
+    
+    Args:
+        context_data: Pre-fetched financial context string (optional if auto_fetch_data=True)
+        role_desc: The AI persona description (e.g., "Senior CFO", "Portfolio Analyst")
+        key_prefix: Unique prefix for widget keys to avoid conflicts
+        title: Widget title for the expander
+        auto_fetch_data: If True, automatically fetches user's financial data
+    """
+    with st.expander(title, expanded=False):
+        st.caption("AI-powered investment analysis with Buy/Hold/Sell recommendations")
+        
+        # 1. User ID Check
+        user_id = st.session_state.get('user_id')
+        if not user_id:
+            st.error("Please log in to use AI analysis.")
+            return
+        
+        # 2. API Key Check
+        if "gemini_api_key" not in st.session_state or not st.session_state.gemini_api_key:
+            conn = get_conn()
+            cur = conn.cursor()
+            db_execute(cur, "SELECT gemini_api_key FROM users WHERE id = ?", (user_id,))
+            res = cur.fetchone()
+            conn.close()
+            if res and res[0]:
+                st.session_state.gemini_api_key = res[0]
+        
+        api_key = st.text_input(
+            "Google Gemini API Key",
+            type="password",
+            value=st.session_state.get("gemini_api_key", ""),
+            help="Get free key: https://aistudio.google.com/app/apikey",
+            key=f"{key_prefix}_api_key"
+        )
+        
+        if not api_key:
+            st.info("🔑 Please enter API Key to enable AI features.")
+            st.markdown("[👉 Get Free API Key](https://aistudio.google.com/app/apikey)")
+            return
+        
+        # Save API key
+        st.session_state.gemini_api_key = api_key
+        try:
+            conn = get_conn()
+            cur = conn.cursor()
+            db_execute(cur, "UPDATE users SET gemini_api_key = ? WHERE id = ?", (api_key, user_id))
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass
+        
+        try:
+            import google.generativeai as genai
+            genai.configure(api_key=api_key)
+        except ImportError:
+            st.error("Library missing: pip install google-generativeai")
+            return
+        
+        # 3. Quick prompts + Query Input
+        st.markdown("**Quick Analysis Options:**")
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("📈 Portfolio Analysis", key=f"{key_prefix}_quick_portfolio", use_container_width=True):
+                st.session_state[f"{key_prefix}_query"] = "Provide a comprehensive portfolio analysis with Buy/Hold/Sell recommendations for each stock."
+        with col2:
+            if st.button("⚠️ Risk Assessment", key=f"{key_prefix}_quick_risk", use_container_width=True):
+                st.session_state[f"{key_prefix}_query"] = "Analyze the risk level of my portfolio and suggest risk reduction strategies."
+        
+        col3, col4 = st.columns(2)
+        with col3:
+            if st.button("💰 Dividend Analysis", key=f"{key_prefix}_quick_div", use_container_width=True):
+                st.session_state[f"{key_prefix}_query"] = "Analyze my dividend income and recommend stocks for better dividend yield."
+        with col4:
+            if st.button("🎯 Investment Strategy", key=f"{key_prefix}_quick_strategy", use_container_width=True):
+                st.session_state[f"{key_prefix}_query"] = "Based on my portfolio, suggest an optimal investment strategy with specific actions."
+        
+        custom_query = st.text_area(
+            "Your Question:",
+            value=st.session_state.get(f"{key_prefix}_query", ""),
+            placeholder="e.g., Analyze my portfolio risk, should I buy more of stock X, what is my net gain...",
+            height=80,
+            key=f"{key_prefix}_query_input"
+        )
+        
+        run_btn = st.button("🚀 Generate Detailed Report", type="primary", use_container_width=True, key=f"{key_prefix}_run")
+        
+        # 4. Execution
+        if run_btn:
+            if not custom_query.strip():
+                st.warning("Please enter a question or select a quick option.")
+                return
+            
+            # Fetch user's financial data if not provided or auto_fetch enabled
+            if auto_fetch_data or not context_data:
+                context_data = get_full_financial_context(user_id)
+            
+            # Check for errors
+            if context_data.startswith("ERROR") or context_data.startswith("CRITICAL"):
+                st.error(context_data)
+                return
+            
+            # DEBUG: Show what data is being sent to AI
+            with st.expander("👁️ View Your Data Sent to AI (Debug)", expanded=False):
+                st.info("This is your saved financial data the AI will analyze:")
+                st.text_area("Your Financial Data", context_data, height=300, disabled=True, key=f"{key_prefix}_context_view")
+                st.caption(f"📊 Data size: {len(context_data):,} characters")
+            
+            with st.spinner("🤖 Generating detailed investment report..."):
+                try:
+                    # Build comprehensive professional prompt
+                    full_prompt = f"""
+You are a {role_desc} at a top-tier investment firm. You provide detailed, professional financial analysis and recommendations.
+
+**CLIENT'S QUESTION:** "{custom_query}"
+
+============================================================
+THE CLIENT'S ACTUAL FINANCIAL DATA (ANALYZE ONLY THIS DATA):
+============================================================
+{context_data}
+============================================================
+
+**CRITICAL ANALYSIS REQUIREMENTS:**
+
+1. **DATA ACCURACY**: 
+   - Use ONLY the numbers and values from the data above
+   - Reference SPECIFIC stock symbols, prices, and dates from the data
+   - If information is missing, clearly state: "This data is not available in your records"
+   - DO NOT invent or assume any data not explicitly provided
+
+2. **DETAILED REPORT FORMAT** (Provide ALL sections):
+
+   **SECTION A: EXECUTIVE SUMMARY**
+   - 3-5 bullet points summarizing key findings
+   - Overall portfolio health score (1-10)
+   - Primary recommendations
+
+   **SECTION B: PORTFOLIO ANALYSIS BY STOCK**
+   For EACH stock in the portfolio, provide:
+   - Stock Symbol & Name
+   - Current Position: [Shares], [Avg Cost], [Current Price], [Market Value]
+   - Performance: [P/L Amount], [P/L Percentage]
+   - **RECOMMENDATION: 🟢 BUY / 🟡 HOLD / 🔴 SELL**
+   - Reasoning for recommendation (2-3 sentences)
+
+   **SECTION C: RISK ANALYSIS**
+   - Diversification Assessment (Industry/Sector concentration)
+   - Volatility Assessment (based on P/L swings)
+   - Risk Level: LOW / MEDIUM / HIGH
+   - Specific risk factors identified
+
+   **SECTION D: FINANCIAL METRICS**
+   - Total Portfolio Value (exact number from data)
+   - Total Cost Basis (amount invested)
+   - Unrealized P/L (with percentage)
+   - Realized P/L (from completed trades)
+   - Total Net Gain/Loss (Unrealized + Realized)
+   - ROI Percentage
+   - Dividend Income (if applicable)
+
+   **SECTION E: ACTIONABLE RECOMMENDATIONS**
+   - Top 3 specific actions the investor should take
+   - Stocks to consider buying (if any)
+   - Stocks to consider selling (if any)
+   - Portfolio rebalancing suggestions
+   - Cash allocation advice
+
+   **SECTION F: ANSWER TO CLIENT'S SPECIFIC QUESTION**
+   - Directly address the question asked: "{custom_query}"
+   - Provide specific numbers from the data
+   - Give clear, actionable advice
+
+3. **FORMATTING RULES:**
+   - Use **bold** for all monetary amounts
+   - Use 🟢 for positive/good items, 🔴 for negative/concern items
+   - Use bullet points for lists
+   - Use tables where appropriate for comparisons
+   - Currency: Use KWD (Kuwaiti Dinar) unless USD is specified
+   - Round numbers to 3 decimal places for KWD
+
+4. **PROFESSIONAL STANDARDS:**
+   - Be specific, not vague
+   - Provide reasoning for every recommendation
+   - Consider both short-term and long-term perspectives
+   - Include risk warnings where appropriate
+   - Be honest about limitations in the data
+
+Generate the comprehensive report now:
+"""
+                    
+                    response_text, used_model = generate_content_safe(full_prompt)
+                    
+                    st.session_state[f"{key_prefix}_result"] = response_text
+                    st.session_state[f"{key_prefix}_model"] = used_model
+                    st.success(f"✅ Detailed report generated (Model: {used_model})")
+                
+                except Exception as e:
+                    st.error(f"AI Error: {e}")
+        
+        # 5. Display Result
+        if f"{key_prefix}_result" in st.session_state:
+            st.divider()
+            st.markdown("### 📄 Investment Analysis Report")
+            if f"{key_prefix}_model" in st.session_state:
+                st.caption(f"Generated using: {st.session_state[f'{key_prefix}_model']}")
+            st.markdown(st.session_state[f"{key_prefix}_result"])
+            
+            # Download option
+            if st.download_button(
+                label="📥 Download Report as Text",
+                data=st.session_state[f"{key_prefix}_result"],
+                file_name=f"investment_report_{datetime.now().strftime('%Y%m%d_%H%M')}.txt",
+                mime="text/plain",
+                key=f"{key_prefix}_download"
+            ):
+                st.success("Report downloaded!")
+
+
+def get_full_financial_context(user_id):
+    """
+    Aggregates comprehensive financial data STRICTLY for the provided user_id.
+    All values are clearly labeled for AI interpretation.
+    """
+    import sqlite3
+    import pandas as pd
+    from datetime import datetime, timedelta
+    
+    if not user_id:
+        return "ERROR: No user logged in."
+
+    context_parts = []
+    context_parts.append("=" * 60)
+    context_parts.append(f"📊 FINANCIAL DATA REPORT")
+    context_parts.append(f"User ID: {user_id}")
+    context_parts.append(f"Report Date: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    context_parts.append("=" * 60)
+
+    try:
+        # Verify session matches
+        current_sess_id = st.session_state.get('user_id')
+        if current_sess_id != user_id:
+            return "ERROR: Session User ID mismatch."
+
+        conn = get_conn()
+        
+        # ========================================
+        # SECTION 1: CURRENT STOCK HOLDINGS
+        # ========================================
+        holdings_data = []
+        total_cost_basis = 0.0
+        total_market_value = 0.0
+        total_unrealized_pnl = 0.0
+        
+        for p_name in ["KFH", "BBYN", "USA"]:
+            try:
+                df = build_portfolio_table(p_name)
+                if not df.empty and "Symbol" in df.columns:
+                    active_df = df[df['Shares Qty'] > 0.001] if 'Shares Qty' in df.columns else df
+                    if not active_df.empty:
+                        for _, r in active_df.iterrows():
+                            symbol = r.get('Symbol', 'Unknown')
+                            shares = safe_float(r.get('Shares Qty', 0), 0)
+                            avg_cost = safe_float(r.get('Avg Cost', 0), 0)
+                            market_price = safe_float(r.get('Market Price', 0), 0)
+                            market_value = safe_float(r.get('Market Value', 0), 0)
+                            unrealized_pnl = safe_float(r.get('Unrealized P/L', 0), 0)
+                            pnl_pct = safe_float(r.get('PNL %', 0), 0)
+                            currency = r.get('Currency', 'KWD')
+                            cost_basis = shares * avg_cost
+                            
+                            # Convert to KWD for totals
+                            market_value_kwd = convert_to_kwd(market_value, currency)
+                            unrealized_pnl_kwd = convert_to_kwd(unrealized_pnl, currency)
+                            cost_basis_kwd = convert_to_kwd(cost_basis, currency)
+                            
+                            total_cost_basis += cost_basis_kwd
+                            total_market_value += market_value_kwd
+                            total_unrealized_pnl += unrealized_pnl_kwd
+                            
+                            holdings_data.append({
+                                'Portfolio': p_name,
+                                'Stock Symbol': symbol,
+                                'Shares Owned': shares,
+                                'Average Cost Per Share': avg_cost,
+                                'Current Market Price': market_price,
+                                'Total Cost Basis': cost_basis,
+                                'Current Market Value': market_value,
+                                'Unrealized Profit/Loss': unrealized_pnl,
+                                'Return Percentage': pnl_pct,
+                                'Currency': currency
+                            })
+            except Exception as e:
+                print(f"Error reading portfolio {p_name}: {e}")
+
+        if holdings_data:
+            context_parts.append("\n" + "=" * 60)
+            context_parts.append("SECTION 1: CURRENT STOCK HOLDINGS")
+            context_parts.append("=" * 60)
+            context_parts.append(f"\nSUMMARY METRICS:")
+            context_parts.append(f"  • Number of Stocks Held: {len(holdings_data)}")
+            context_parts.append(f"  • Total Cost Basis (Amount Invested): {total_cost_basis:,.3f} KWD")
+            context_parts.append(f"  • Total Current Market Value: {total_market_value:,.3f} KWD")
+            context_parts.append(f"  • Total Unrealized Profit/Loss: {total_unrealized_pnl:,.3f} KWD")
+            if total_cost_basis > 0:
+                overall_return_pct = ((total_market_value - total_cost_basis) / total_cost_basis) * 100
+                context_parts.append(f"  • Overall Portfolio Return: {overall_return_pct:.2f}%")
+            
+            context_parts.append("\nDETAILED HOLDINGS:")
+            for h in holdings_data:
+                context_parts.append(f"\n  [{h['Stock Symbol']}] - Portfolio: {h['Portfolio']}")
+                context_parts.append(f"    Shares Owned: {h['Shares Owned']:,.0f}")
+                context_parts.append(f"    Average Cost Per Share: {h['Average Cost Per Share']:.4f} {h['Currency']}")
+                context_parts.append(f"    Current Market Price: {h['Current Market Price']:.4f} {h['Currency']}")
+                context_parts.append(f"    Total Cost Basis: {h['Total Cost Basis']:,.3f} {h['Currency']}")
+                context_parts.append(f"    Current Market Value: {h['Current Market Value']:,.3f} {h['Currency']}")
+                context_parts.append(f"    Unrealized Profit/Loss: {h['Unrealized Profit/Loss']:,.3f} {h['Currency']}")
+                context_parts.append(f"    Return Percentage: {h['Return Percentage']:.2f}%")
+        else:
+            context_parts.append("\n" + "=" * 60)
+            context_parts.append("SECTION 1: CURRENT STOCK HOLDINGS")
+            context_parts.append("=" * 60)
+            context_parts.append("\n⚠️ USER HAS NO ACTIVE STOCK HOLDINGS")
+
+        # ========================================
+        # SECTION 2: REALIZED PROFITS (Closed Trades)
+        # ========================================
+        context_parts.append("\n" + "=" * 60)
+        context_parts.append("SECTION 2: REALIZED PROFITS (COMPLETED TRADES)")
+        context_parts.append("=" * 60)
+        
+        try:
+            # From main transactions table (portfolio sells)
+            sell_df = pd.read_sql_query(
+                convert_sql_placeholders("""
+                    SELECT stock_symbol, txn_date, shares, purchase_cost, sell_value,
+                           (sell_value - purchase_cost) as profit
+                    FROM transactions 
+                    WHERE user_id = ? AND txn_type = 'Sell' AND sell_value > 0
+                    ORDER BY txn_date DESC
+                """),
+                conn,
+                params=(user_id,)
+            )
+            
+            portfolio_realized = 0.0
+            if not sell_df.empty:
+                portfolio_realized = sell_df['profit'].sum()
+                context_parts.append(f"\nPORTFOLIO REALIZED PROFIT: {portfolio_realized:,.3f} KWD")
+                context_parts.append("\nRecent Closed Trades:")
+                for _, row in sell_df.head(10).iterrows():
+                    profit = safe_float(row['profit'], 0)
+                    context_parts.append(f"  • {row['stock_symbol']}: Sold {row['shares']:,.0f} shares on {row['txn_date']}")
+                    context_parts.append(f"    Cost: {row['purchase_cost']:,.3f} | Sold For: {row['sell_value']:,.3f} | Profit: {profit:,.3f} KWD")
+            else:
+                context_parts.append("\nNo portfolio sell transactions recorded.")
+            
+            # From trading_history table - Use CORRECT FIFO matching
+            # NOTE: The trading section has OPEN positions (buys not yet sold)
+            # We must only count CLOSED trades where buy + sell are matched
+            trading_realized = calculate_trading_realized_profit(user_id)
+            total_dividends_trading = 0.0
+            
+            # Get dividends from trading
+            div_query = pd.read_sql_query(
+                convert_sql_placeholders("SELECT SUM(cash_dividend) as div_total FROM trading_history WHERE user_id = ?"),
+                conn,
+                params=(user_id,)
+            )
+            if not div_query.empty and div_query['div_total'].iloc[0]:
+                total_dividends_trading = div_query['div_total'].iloc[0]
+            
+            if trading_realized != 0 or total_dividends_trading > 0:
+                context_parts.append(f"\nTRADING SECTION REALIZED PROFIT: {trading_realized:,.3f} KWD")
+                context_parts.append(f"  • (Calculated from matched buy/sell pairs only)")
+                context_parts.append(f"  • Trading Dividends Received: {total_dividends_trading:,.3f} KWD")
+                
+                # Show open positions (not yet closed)
+                open_cost = 0.0
+                buys_df = pd.read_sql_query(
+                    convert_sql_placeholders("""
+                        SELECT stock_symbol, SUM(shares) as total_shares, SUM(purchase_cost) as total_cost
+                        FROM trading_history 
+                        WHERE user_id = ? AND txn_type = 'Buy'
+                        GROUP BY stock_symbol
+                    """),
+                    conn,
+                    params=(user_id,)
+                )
+                sells_df = pd.read_sql_query(
+                    convert_sql_placeholders("""
+                        SELECT stock_symbol, SUM(shares) as total_shares
+                        FROM trading_history 
+                        WHERE user_id = ? AND txn_type = 'Sell'
+                        GROUP BY stock_symbol
+                    """),
+                    conn,
+                    params=(user_id,)
+                )
+                
+                sells_dict = {r['stock_symbol']: r['total_shares'] for _, r in sells_df.iterrows()} if not sells_df.empty else {}
+                
+                context_parts.append("\n  OPEN TRADING POSITIONS (Not Yet Sold):")
+                for _, buy_row in buys_df.iterrows():
+                    stock = buy_row['stock_symbol']
+                    bought = buy_row['total_shares']
+                    sold = sells_dict.get(stock, 0)
+                    remaining = bought - sold
+                    if remaining > 0:
+                        avg_cost = buy_row['total_cost'] / bought if bought > 0 else 0
+                        position_cost = remaining * avg_cost
+                        open_cost += position_cost
+                        context_parts.append(f"    • {stock}: {remaining:.0f} shares open (Cost: {position_cost:,.3f} KWD)")
+                
+                if open_cost > 0:
+                    context_parts.append(f"  Total Open Position Cost: {open_cost:,.3f} KWD (UNREALIZED)")
+            else:
+                context_parts.append("\nNo trading transactions with realized profits.")
+            
+            total_realized = portfolio_realized + trading_realized
+            context_parts.append(f"\n** TOTAL REALIZED PROFIT: {total_realized:,.3f} KWD **")
+            
+        except Exception as e:
+            context_parts.append(f"\nError calculating realized profits: {e}")
+
+        # ========================================
+        # SECTION 3: DIVIDENDS RECEIVED
+        # ========================================
+        context_parts.append("\n" + "=" * 60)
+        context_parts.append("SECTION 3: DIVIDENDS & BONUS SHARES")
+        context_parts.append("=" * 60)
+        
+        try:
+            div_df = pd.read_sql_query(
+                convert_sql_placeholders("""
+                    SELECT t.stock_symbol as Stock, t.txn_date as Date, 
+                           t.cash_dividend as Cash_Dividend, t.bonus_shares as Bonus_Shares,
+                           COALESCE(s.currency, 'KWD') as Currency
+                    FROM transactions t
+                    LEFT JOIN stocks s ON t.stock_symbol = s.symbol AND s.user_id = t.user_id
+                    WHERE t.user_id = ? AND (t.cash_dividend > 0 OR t.bonus_shares > 0)
+                    ORDER BY t.txn_date DESC
+                """),
+                conn,
+                params=(user_id,)
+            )
+            
+            if not div_df.empty:
+                total_cash_div = 0.0
+                for _, row in div_df.iterrows():
+                    total_cash_div += convert_to_kwd(safe_float(row['Cash_Dividend'], 0), row['Currency'])
+                total_bonus = div_df['Bonus_Shares'].sum()
+                
+                context_parts.append(f"\nDIVIDEND SUMMARY:")
+                context_parts.append(f"  • Total Cash Dividends Received: {total_cash_div:,.3f} KWD")
+                context_parts.append(f"  • Total Bonus Shares Received: {total_bonus:,.0f} shares")
+                
+                context_parts.append("\nDividend History:")
+                for _, row in div_df.head(15).iterrows():
+                    if row['Cash_Dividend'] > 0:
+                        context_parts.append(f"  • {row['Stock']}: Cash Dividend of {row['Cash_Dividend']:,.3f} {row['Currency']} on {row['Date']}")
+                    if row['Bonus_Shares'] > 0:
+                        context_parts.append(f"  • {row['Stock']}: Bonus Shares of {row['Bonus_Shares']:,.0f} on {row['Date']}")
+            else:
+                context_parts.append("\n⚠️ No dividends or bonus shares recorded.")
+        except Exception as e:
+            context_parts.append(f"\nError reading dividends: {e}")
+
+        # ========================================
+        # SECTION 4: CASH DEPOSITS & BALANCES
+        # ========================================
+        context_parts.append("\n" + "=" * 60)
+        context_parts.append("SECTION 4: CASH DEPOSITS & AVAILABLE FUNDS")
+        context_parts.append("=" * 60)
+        
+        try:
+            deposits_df = pd.read_sql_query(
+                convert_sql_placeholders(
+                    "SELECT deposit_date, amount, currency, bank_name FROM cash_deposits WHERE user_id = ? ORDER BY deposit_date DESC"
+                ),
+                conn,
+                params=(user_id,)
+            )
+            
+            total_deposits_kwd = 0.0
+            if not deposits_df.empty:
+                for _, row in deposits_df.iterrows():
+                    total_deposits_kwd += convert_to_kwd(safe_float(row['amount'], 0), row.get('currency', 'KWD'))
+                
+                context_parts.append(f"\nTOTAL CASH DEPOSITED: {total_deposits_kwd:,.3f} KWD")
+                context_parts.append("\nRecent Deposits:")
+                for _, row in deposits_df.head(10).iterrows():
+                    context_parts.append(f"  • {row['deposit_date']}: {row['amount']:,.3f} {row['currency']} to {row['bank_name']}")
+            else:
+                total_deposits_kwd = 0.0
+                context_parts.append("\n⚠️ No cash deposits recorded.")
+            
+            # Cash Balance
+            cash_df = pd.read_sql_query(
+                convert_sql_placeholders("SELECT balance, currency FROM portfolio_cash WHERE user_id = ?"),
+                conn,
+                params=(user_id,)
+            )
+            cash_balance_kwd = 0.0
+            if not cash_df.empty:
+                for _, row in cash_df.iterrows():
+                    cash_balance_kwd += convert_to_kwd(safe_float(row['balance'], 0), row['currency'])
+                context_parts.append(f"\nAVAILABLE CASH BALANCE: {cash_balance_kwd:,.3f} KWD")
+        except Exception as e:
+            total_deposits_kwd = 0.0
+            cash_balance_kwd = 0.0
+            context_parts.append(f"\nError reading cash data: {e}")
+
+        # ========================================
+        # SECTION 5: PERSONAL FINANCE (PFM)
+        # ========================================
+        context_parts.append("\n" + "=" * 60)
+        context_parts.append("SECTION 5: PERSONAL FINANCE OVERVIEW")
+        context_parts.append("=" * 60)
+        
+        try:
+            history = get_pfm_history(user_id)
+            if history:
+                latest_date = sorted(history.keys())[-1]
+                snap = history[latest_date]
+                
+                inc = snap['income']['monthly_amount'].sum() if not snap['income'].empty else 0
+                exp = snap['expense']['monthly_amount'].sum() if not snap['expense'].empty else 0
+                assets = snap['assets']['value_kwd'].sum() if not snap['assets'].empty else 0
+                liabs = snap['liabilities']['amount_kwd'].sum() if not snap['liabilities'].empty else 0
+                net_worth = assets - liabs
+                monthly_savings = inc - exp
+                savings_rate = (monthly_savings / inc * 100) if inc > 0 else 0
+                
+                context_parts.append(f"\nLatest PFM Snapshot Date: {latest_date}")
+                context_parts.append(f"\nNET WORTH CALCULATION:")
+                context_parts.append(f"  • Total Assets: {assets:,.3f} KWD")
+                context_parts.append(f"  • Total Liabilities (Debt): {liabs:,.3f} KWD")
+                context_parts.append(f"  • NET WORTH: {net_worth:,.3f} KWD")
+                context_parts.append(f"\nMONTHLY CASH FLOW:")
+                context_parts.append(f"  • Monthly Income: {inc:,.3f} KWD")
+                context_parts.append(f"  • Monthly Expenses: {exp:,.3f} KWD")
+                context_parts.append(f"  • Monthly Savings: {monthly_savings:,.3f} KWD")
+                context_parts.append(f"  • Savings Rate: {savings_rate:.1f}%")
+                
+                if not snap['assets'].empty:
+                    context_parts.append("\nASSET BREAKDOWN:")
+                    for _, row in snap['assets'].groupby('asset_type')['value_kwd'].sum().reset_index().iterrows():
+                        context_parts.append(f"  • {row['asset_type']}: {row['value_kwd']:,.3f} KWD")
+                
+                if not snap['liabilities'].empty:
+                    context_parts.append("\nLIABILITY BREAKDOWN:")
+                    for _, row in snap['liabilities'].groupby('liability_type')['amount_kwd'].sum().reset_index().iterrows():
+                        context_parts.append(f"  • {row['liability_type']}: {row['amount_kwd']:,.3f} KWD")
+            else:
+                context_parts.append("\n⚠️ No Personal Finance data recorded.")
+        except Exception as e:
+            context_parts.append(f"\nError reading PFM data: {e}")
+
+        # ========================================
+        # SECTION 6: PERFORMANCE SUMMARY
+        # ========================================
+        context_parts.append("\n" + "=" * 60)
+        context_parts.append("SECTION 6: OVERALL PERFORMANCE SUMMARY")
+        context_parts.append("=" * 60)
+        
+        try:
+            combined_pnl = total_unrealized_pnl + total_realized
+            total_portfolio_value = total_market_value + cash_balance_kwd
+            
+            context_parts.append(f"\nPORTFOLIO VALUE BREAKDOWN:")
+            context_parts.append(f"  • Stock Holdings Value: {total_market_value:,.3f} KWD")
+            context_parts.append(f"  • Cash Balance: {cash_balance_kwd:,.3f} KWD")
+            context_parts.append(f"  • TOTAL PORTFOLIO VALUE: {total_portfolio_value:,.3f} KWD")
+            
+            context_parts.append(f"\nPROFIT/LOSS SUMMARY:")
+            context_parts.append(f"  • Unrealized P/L (Open Positions): {total_unrealized_pnl:,.3f} KWD")
+            context_parts.append(f"  • Realized P/L (Closed Trades): {total_realized:,.3f} KWD")
+            context_parts.append(f"  • COMBINED TOTAL P/L: {combined_pnl:,.3f} KWD")
+            
+            # Calculate ROI
+            if total_deposits_kwd > 0:
+                roi = ((total_portfolio_value - total_deposits_kwd) / total_deposits_kwd) * 100
+                context_parts.append(f"\nRETURN ON INVESTMENT:")
+                context_parts.append(f"  • Total Deposited: {total_deposits_kwd:,.3f} KWD")
+                context_parts.append(f"  • Current Value: {total_portfolio_value:,.3f} KWD")
+                context_parts.append(f"  • Net Gain/Loss: {(total_portfolio_value - total_deposits_kwd):,.3f} KWD")
+                context_parts.append(f"  • ROI Percentage: {roi:.2f}%")
+            
+        except Exception as e:
+            context_parts.append(f"\nError calculating performance: {e}")
+
+        conn.close()
+        context_parts.append("\n" + "=" * 60)
+        context_parts.append("END OF FINANCIAL DATA REPORT")
+        context_parts.append("=" * 60)
+
+    except Exception as e:
+        return f"CRITICAL ERROR generating context: {str(e)}"
+
+    return "\n".join(context_parts)
+
+
+def create_pdf_report(analysis_text):
+    """Generates a PDF report from the AI analysis."""
+    try:
+        from reportlab.lib.pagesizes import letter
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib import colors
+    except ImportError:
+        # Return None if reportlab not available
+        return None
+    
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter)
+    styles = getSampleStyleSheet()
+    story = []
+
+    # Title
+    title_style = styles['Title']
+    story.append(Paragraph("Financial Intelligence Report", title_style))
+    story.append(Paragraph(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}", styles['Normal']))
+    story.append(Spacer(1, 12))
+
+    # Content - Handle basic formatting
+    style_body = ParagraphStyle('Body', parent=styles['BodyText'], leading=14, spaceAfter=10)
+    
+    # Split by newlines and create paragraphs
+    for line in analysis_text.split('\n'):
+        if line.strip():
+            # Basic clean up of markdown bolding for PDF
+            clean_line = line.replace('**', '')
+            clean_line = clean_line.replace('###', '').replace('##', '').replace('#', '')
+            # Escape XML characters
+            clean_line = clean_line.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+            try:
+                story.append(Paragraph(clean_line, style_body))
+            except:
+                story.append(Paragraph(line.replace('&', '').replace('<', '').replace('>', ''), style_body))
+                
+    doc.build(story)
+    buffer.seek(0)
+    return buffer
 
 
 def main():
