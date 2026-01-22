@@ -518,12 +518,12 @@ def get_user_from_token(token: str) -> Optional[dict]:
         # Clean expired sessions occasionally
         if np.random.random() < 0.1:
             try:
-                conn.execute("DELETE FROM user_sessions WHERE expires_at < ?", (now,))
+                db_execute(cur, "DELETE FROM user_sessions WHERE expires_at < ?", (now,))
                 conn.commit()
             except Exception:
                 pass
             
-        cur.execute("""
+        db_execute(cur, """
             SELECT u.id, u.username, sess.expires_at 
             FROM user_sessions sess
             JOIN users u ON sess.user_id = u.id
@@ -544,7 +544,8 @@ def get_user_from_token(token: str) -> Optional[dict]:
 def delete_session_token(token: str):
     """Delete a specific session token."""
     conn = get_conn()
-    conn.execute("DELETE FROM user_sessions WHERE token = ?", (token,))
+    cur = conn.cursor()
+    db_execute(cur, "DELETE FROM user_sessions WHERE token = ?", (token,))
     conn.commit()
     conn.close()
 
@@ -7244,15 +7245,13 @@ def ui_portfolio_tracker():
                         if records_to_insert:
                             conn = get_conn()
                             cur = conn.cursor()
-                            cur.executemany(
-                                """
+                            sql = convert_sql_placeholders("""
                                 INSERT INTO portfolio_snapshots 
                                 (user_id, snapshot_date, portfolio_value, daily_movement, beginning_difference, 
                                  deposit_cash, accumulated_cash, net_gain, change_percent, roi_percent, created_at)
                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                """,
-                                records_to_insert
-                            )
+                            """)
+                            cur.executemany(sql, records_to_insert)
                             conn.commit()
                             conn.close()
                             
@@ -7690,15 +7689,13 @@ def ui_portfolio_tracker():
                     int(time.time()) # Update created_at or keep original? Let's update to show it was modified
                 ))
             
-            cur.executemany(
-                """
+            sql = convert_sql_placeholders("""
                 INSERT INTO portfolio_snapshots 
                 (user_id, snapshot_date, portfolio_value, daily_movement, beginning_difference, 
                  deposit_cash, accumulated_cash, net_gain, change_percent, roi_percent, created_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                records
-            )
+            """)
+            cur.executemany(sql, records)
             conn.commit()
             conn.close()
             
@@ -11582,7 +11579,9 @@ def login_page(cookie_manager=None):
             
             if btn_reset:
                 conn = get_conn()
-                res = conn.execute("SELECT id FROM users WHERE email=? OR username=?", (email_reset, email_reset)).fetchone()
+                cur = conn.cursor()
+                db_execute(cur, "SELECT id FROM users WHERE email=? OR username=?", (email_reset, email_reset))
+                res = cur.fetchone()
                 conn.close()
                 if res:
                     # Generate OTP
@@ -11591,9 +11590,10 @@ def login_page(cookie_manager=None):
                     exp_time = int(time.time()) + 900 # 15 mins
                     
                     conn = get_conn()
+                    cur = conn.cursor()
                     # Clean old OTPs
-                    conn.execute("DELETE FROM password_resets WHERE email=?", (email_reset,))
-                    conn.execute("INSERT INTO password_resets (email, otp, expires_at, created_at) VALUES (?, ?, ?, ?)",
+                    db_execute(cur, "DELETE FROM password_resets WHERE email=?", (email_reset,))
+                    db_execute(cur, "INSERT INTO password_resets (email, otp, expires_at, created_at) VALUES (?, ?, ?, ?)",
                                 (email_reset, otp_code, exp_time, int(time.time())))
                     conn.commit()
                     conn.close()
@@ -11625,14 +11625,16 @@ def login_page(cookie_manager=None):
                     now = int(time.time())
                     
                     conn = get_conn()
+                    cur = conn.cursor()
                     # Verify OTP
-                    row = conn.execute("SELECT otp FROM password_resets WHERE email=? AND expires_at > ?", (target_email, now)).fetchone()
+                    db_execute(cur, "SELECT otp FROM password_resets WHERE email=? AND expires_at > ?", (target_email, now))
+                    row = cur.fetchone()
                     
                     if row and row[0] == otp_input:
                         # Success - Update Password
                         new_hash = hash_password(new_pass_1)
-                        conn.execute("UPDATE users SET password_hash=? WHERE email=? OR username=?", (new_hash, target_email, target_email))
-                        conn.execute("DELETE FROM password_resets WHERE email=?", (target_email,))
+                        db_execute(cur, "UPDATE users SET password_hash=? WHERE email=? OR username=?", (new_hash, target_email, target_email))
+                        db_execute(cur, "DELETE FROM password_resets WHERE email=?", (target_email,))
                         conn.commit()
                         conn.close()
                         st.session_state.auth_mode = "login"
@@ -13719,7 +13721,8 @@ def main():
                 user_id = st.session_state.get('user_id')
                 if user_id:
                     conn = get_conn()
-                    conn.execute("DELETE FROM user_sessions WHERE user_id = ?", (user_id,))
+                    cur = conn.cursor()
+                    db_execute(cur, "DELETE FROM user_sessions WHERE user_id = ?", (user_id,))
                     conn.commit()
                     conn.close()
             except Exception as e:
