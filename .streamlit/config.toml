@@ -1,6 +1,7 @@
 [server]
+# Always run on port 8501
 headless = true
-port = 8502
+port = 8501
 address = "127.0.0.1"
 enableCORS = false
 enableXsrfProtection = false
@@ -8,7 +9,7 @@ enableXsrfProtection = false
 [browser]
 gatherUsageStats = false
 serverAddress = "127.0.0.1"
-serverPort = 8502
+serverPort = 8501
 
 [theme]
 primaryColor = "#667eea"
