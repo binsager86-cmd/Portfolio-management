@@ -13528,6 +13528,13 @@ def main():
         inject_google_analytics()
         st.session_state['ga_injected'] = True
     
+    # Initialize database schemas (PostgreSQL only - prevents InvalidSchemaName errors)
+    try:
+        from db_layer import init_db_schemas
+        init_db_schemas()
+    except Exception as e:
+        print(f"Schema init note: {e}")
+    
     # Initialize database schema (handles both SQLite and PostgreSQL)
     try:
         init_db()
