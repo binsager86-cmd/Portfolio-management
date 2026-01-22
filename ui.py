@@ -3214,8 +3214,23 @@ def ui_transactions():
             
             restore_file = st.file_uploader("Upload Backup Excel", type=['xlsx'], key="restore_uploader")
             
+            # Import mode selection
+            import_mode = st.radio(
+                "Import Mode:",
+                ["🔄 Merge (Skip Duplicates)", "🗑️ Delete All & Replace"],
+                index=0,
+                key="import_mode",
+                help="Merge: Adds new records, skips duplicates. Delete All: Removes ALL existing transactions before importing."
+            )
+            
             if restore_file:
-                if st.button("⚡ Restore / Import Data", type="primary", use_container_width=True):
+                if import_mode == "🗑️ Delete All & Replace":
+                    st.warning("⚠️ **WARNING:** This will DELETE ALL your existing transactions before importing!")
+                    confirm_delete = st.checkbox("I understand this will permanently delete all my existing transactions", key="confirm_full_replace")
+                else:
+                    confirm_delete = True  # No confirmation needed for merge
+                
+                if st.button("⚡ Restore / Import Data", type="primary", use_container_width=True, disabled=(import_mode == "🗑️ Delete All & Replace" and not confirm_delete)):
                     try:
                         restore_df = pd.read_excel(restore_file)
                         
@@ -3226,9 +3241,19 @@ def ui_transactions():
                         else:
                             conn = get_conn()
                             cur = conn.cursor()
+                            user_id = st.session_state.get('user_id', 1)
                             restored_count = 0
                             skipped_count = 0
                             new_stocks = 0
+                            deleted_count = 0
+                            
+                            # DELETE ALL MODE: Clear existing transactions first
+                            if import_mode == "🗑️ Delete All & Replace":
+                                db_execute(cur, "SELECT COUNT(*) FROM transactions WHERE user_id = ?", (user_id,))
+                                deleted_count = cur.fetchone()[0]
+                                db_execute(cur, "DELETE FROM transactions WHERE user_id = ?", (user_id,))
+                                conn.commit()
+                                st.info(f"🗑️ Deleted {deleted_count:,} existing transactions.")
                             
                             progress_bar = st.progress(0, text="Restoring data...")
                             
@@ -3239,7 +3264,6 @@ def ui_transactions():
                                     progress_bar.progress((idx + 1) / total_rows, text=f"Processing row {idx+1}/{total_rows}")
 
                                 symbol = str(row['stock_symbol']).strip().upper()
-                                user_id = st.session_state.get('user_id', 1)
                                 
                                 # 1. Ensure Stock Exists for this user
                                 db_execute(cur, "SELECT id FROM stocks WHERE symbol = ? AND user_id = ?", (symbol, user_id))
@@ -3268,31 +3292,38 @@ def ui_transactions():
                                 t_notes = str(row.get('notes', '') or '')
                                 t_created = int(row.get('created_at', time.time()) or time.time())
                                 
-                                # 3. Check Duplicate (Strict content match, ignoring ID)
-                                cur.execute("""
-                                    SELECT id FROM transactions 
-                                    WHERE stock_symbol=? AND txn_date=? AND txn_type=? 
-                                    AND shares=? AND purchase_cost=? AND sell_value=? AND user_id=?
-                                """, (symbol, t_date, t_type, t_shares, t_cost, t_sell, user_id))
-                                
-                                if cur.fetchone():
-                                    skipped_count += 1
-                                else:
+                                # 3. Check Duplicate (only in Merge mode)
+                                if import_mode == "🔄 Merge (Skip Duplicates)":
                                     cur.execute("""
-                                        INSERT INTO transactions 
-                                        (stock_symbol, txn_date, txn_type, category, shares, purchase_cost, 
-                                         sell_value, cash_dividend, reinvested_dividend, bonus_shares, 
-                                         fees, broker, reference, notes, created_at, user_id)
-                                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                    """, (symbol, t_date, t_type, t_cat, t_shares, t_cost, t_sell, 
-                                          t_div, t_reinv, t_bonus, t_fees, t_broker, t_ref, t_notes, t_created, user_id))
-                                    restored_count += 1
+                                        SELECT id FROM transactions 
+                                        WHERE stock_symbol=? AND txn_date=? AND txn_type=? 
+                                        AND shares=? AND purchase_cost=? AND sell_value=? AND user_id=?
+                                    """, (symbol, t_date, t_type, t_shares, t_cost, t_sell, user_id))
+                                    
+                                    if cur.fetchone():
+                                        skipped_count += 1
+                                        continue
+                                
+                                # 4. Insert record
+                                cur.execute("""
+                                    INSERT INTO transactions 
+                                    (stock_symbol, txn_date, txn_type, category, shares, purchase_cost, 
+                                     sell_value, cash_dividend, reinvested_dividend, bonus_shares, 
+                                     fees, broker, reference, notes, created_at, user_id)
+                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                """, (symbol, t_date, t_type, t_cat, t_shares, t_cost, t_sell, 
+                                      t_div, t_reinv, t_bonus, t_fees, t_broker, t_ref, t_notes, t_created, user_id))
+                                restored_count += 1
                             
                             conn.commit()
                             conn.close()
                             progress_bar.empty()
                             
-                            st.success(f"✅ Restoration Complete: {restored_count:,} imported, {skipped_count:,} skipped (duplicates).")
+                            if import_mode == "🗑️ Delete All & Replace":
+                                st.success(f"✅ Full Replace Complete: Deleted {deleted_count:,}, imported {restored_count:,} records.")
+                            else:
+                                st.success(f"✅ Merge Complete: {restored_count:,} imported, {skipped_count:,} skipped (duplicates).")
+                            
                             if new_stocks > 0:
                                 st.info(f"🆕 Created {new_stocks:,} missing stock entries.")
                             
