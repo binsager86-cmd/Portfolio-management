@@ -426,10 +426,22 @@ def get_db_info():
         return f"📁 SQLite ({e})"
 
 
+# --- DATABASE PERFORMANCE OPTIMIZATION ---
+@st.cache_resource(ttl=3600, show_spinner=False)
+def get_cached_connection():
+    """
+    Establishes a persistent connection to the DB.
+    Uses st.cache_resource to avoid reconnecting on every interaction.
+    """
+    from db_layer import get_conn
+    return get_conn()
+
 def db_execute(cur, sql: str, params: tuple = ()):
     """Execute SQL with automatic ? to %s conversion for PostgreSQL.
     
     Use this wrapper instead of cur.execute() to ensure cross-database compatibility.
+    Note: For write operations, we use the cursor passed in.
+    For reads using cached connection, use get_cached_connection().
     """
     return execute_with_cursor(None, cur, sql, params)
 
@@ -1422,9 +1434,38 @@ def init_db():
         conn.close()
     
     # ============================================
-    # STEP 3: VERIFICATION
+    # STEP 3: PERFORMANCE INDEXES
     # ============================================
-    print("✅ Step 3: Database initialized. Users table verified.")
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        # Create indexes for faster lookups
+        if is_postgres():
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_transactions_user ON transactions(user_id);")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_stocks_user ON stocks(user_id);")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_trading_history_user ON trading_history(user_id);")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_snapshots_user ON portfolio_snapshots(user_id);")
+        else:
+            # SQLite syntax
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_transactions_user ON transactions(user_id);")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_stocks_user ON stocks(user_id);")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_trading_history_user ON trading_history(user_id);")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_snapshots_user ON portfolio_snapshots(user_id);")
+        conn.commit()
+        print("✅ Performance indexes created.")
+    except Exception as e:
+        print(f"Index creation note: {e}")
+    finally:
+        conn.close()
+    
+    # ============================================
+    # STEP 4: VERIFICATION
+    # ============================================
+    print("✅ Step 4: Database initialized. Users table verified.")
     print("🔧 All tables created successfully.")
     
     # ============================================
@@ -11529,9 +11570,18 @@ def login_page(cookie_manager=None):
                                     expires = datetime.now() + timedelta(days=session_days)
                                     # Store token in cookie
                                     cookie_manager.set("portfolio_session", token, expires_at=expires)
+                                    
+                                    # FIX: Slight delay to ensure browser saves cookie, then force reload
+                                    import time as time_module
+                                    with st.spinner("Logging in..."):
+                                        time_module.sleep(0.5)
+                                    st.rerun()
                                 except Exception as ce:
                                     print(f"Session Token Error: {ce}")
-
+                            else:
+                                st.rerun()
+                            
+                            # Fallback rerun if cookie_manager block didn't trigger
                             st.rerun()
                         else:
                             st.error("❌ Invalid email or password.")
