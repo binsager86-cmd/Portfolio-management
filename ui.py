@@ -9886,6 +9886,103 @@ def calculate_trading_realized_profit(user_id):
     
     return total_realized
 
+
+def calculate_total_cash_dividends(user_id, debug=False):
+    """
+    Calculate total CASH dividends received (properly filtered).
+    
+    This function ONLY counts:
+    - Actual cash dividends from transactions.cash_dividend field
+    - Properly filtered by user_id
+    - Converted to KWD
+    
+    This function EXCLUDES:
+    - Bonus shares (they are share-based, not cash)
+    - Reinvested dividends (they are converted to shares)
+    - Buy transactions (capital, not income)
+    - Deposits (capital inflow, not dividend income)
+    - Realized profit from sells (capital gains, not dividend income)
+    
+    Returns:
+        tuple: (total_dividends_kwd, dividend_count, debug_df or None)
+    """
+    # Query cash dividends from transactions table
+    # We join with stocks to get currency for each stock
+    dividends_df = query_df("""
+        SELECT 
+            t.id,
+            t.stock_symbol,
+            t.txn_date,
+            t.txn_type,
+            t.cash_dividend,
+            t.bonus_shares,
+            t.reinvested_dividend,
+            COALESCE(s.currency, 'KWD') as currency,
+            t.portfolio
+        FROM transactions t
+        LEFT JOIN stocks s ON t.stock_symbol = s.symbol AND s.user_id = t.user_id
+        WHERE t.user_id = ? 
+          AND t.cash_dividend > 0
+        ORDER BY t.txn_date DESC
+    """, (user_id,))
+    
+    # Also check trading_history for dividends
+    trading_dividends_df = query_df("""
+        SELECT 
+            t.id,
+            t.stock_symbol,
+            t.txn_date,
+            t.txn_type,
+            t.cash_dividend,
+            t.bonus_shares,
+            COALESCE(s.currency, 'KWD') as currency
+        FROM trading_history t
+        LEFT JOIN stocks s ON t.stock_symbol = s.symbol AND s.user_id = t.user_id
+        WHERE t.user_id = ?
+          AND t.cash_dividend > 0
+        ORDER BY t.txn_date DESC
+    """, (user_id,))
+    
+    total_dividends_kwd = 0.0
+    dividend_count = 0
+    
+    # Process transactions table dividends
+    if not dividends_df.empty:
+        dividends_df["amount_in_kwd"] = dividends_df.apply(
+            lambda row: convert_to_kwd(safe_float(row["cash_dividend"], 0), row.get("currency", "KWD")),
+            axis=1
+        )
+        total_dividends_kwd += dividends_df["amount_in_kwd"].sum()
+        dividend_count += len(dividends_df)
+    
+    # Process trading_history dividends (if any)
+    if not trading_dividends_df.empty:
+        trading_dividends_df["amount_in_kwd"] = trading_dividends_df.apply(
+            lambda row: convert_to_kwd(safe_float(row["cash_dividend"], 0), row.get("currency", "KWD")),
+            axis=1
+        )
+        total_dividends_kwd += trading_dividends_df["amount_in_kwd"].sum()
+        dividend_count += len(trading_dividends_df)
+    
+    # Debug output
+    debug_df = None
+    if debug:
+        print(f"DEBUG – Dividend rows used (transactions): {len(dividends_df)}")
+        print(f"DEBUG – Dividend rows used (trading): {len(trading_dividends_df)}")
+        print(f"DEBUG – Total cash dividends: {total_dividends_kwd:.2f} KWD")
+        if not dividends_df.empty:
+            print("Sample from transactions:")
+            print(dividends_df[['stock_symbol', 'txn_date', 'cash_dividend', 'currency', 'amount_in_kwd']].tail(5))
+        if not trading_dividends_df.empty:
+            print("Sample from trading_history:")
+            print(trading_dividends_df[['stock_symbol', 'txn_date', 'cash_dividend', 'currency', 'amount_in_kwd']].tail(5))
+        
+        # Combine for debug
+        debug_df = pd.concat([dividends_df, trading_dividends_df], ignore_index=True) if not trading_dividends_df.empty else dividends_df
+    
+    return total_dividends_kwd, dividend_count, debug_df
+
+
 def ui_overview():
     st.header("📊 Portfolio Overview")
     
@@ -9943,21 +10040,8 @@ def ui_overview():
         total_deposits_kwd = 0
         deposits_in_analysis = 0
     
-    # Get total cash dividends (converted to KWD)
-    all_dividends = query_df("""
-        SELECT t.cash_dividend, COALESCE(s.currency, 'KWD') as currency
-        FROM transactions t
-        LEFT JOIN stocks s ON t.stock_symbol = s.symbol
-        WHERE t.cash_dividend > 0
-    """)
-    
-    total_dividends_kwd = 0.0
-    if not all_dividends.empty:
-        all_dividends["amount_in_kwd"] = all_dividends.apply(
-            lambda row: convert_to_kwd(row["cash_dividend"], row["currency"]),
-            axis=1
-        )
-        total_dividends_kwd = all_dividends["amount_in_kwd"].sum()
+    # Get total cash dividends (properly calculated - excludes bonus shares, reinvested, etc.)
+    total_dividends_kwd, dividend_count, _ = calculate_total_cash_dividends(user_id, debug=False)
     
     # Calculate Realized Profit (from Sell transactions - Portfolio)
     portfolio_realized_kwd = 0.0
@@ -10216,11 +10300,13 @@ def ui_overview():
         total_profit = realized_profit_kwd + unrealized_profit_kwd + total_dividends_kwd
         total_class = "ov-delta-pos" if total_profit >= 0 else "ov-delta-neg"
         total_sign = "+" if total_profit >= 0 else ""
+        # Show dividend count for transparency
+        div_info = f"Dividends: {fmt_money_plain(total_dividends_kwd, 2)} KWD ({dividend_count} records)"
         st.markdown(f"""
         <div class="ov-card">
             <div class="ov-title">🏆 Total Profit (incl. Dividends)</div>
             <div class="ov-value"><span class="{total_class}">{total_sign}{fmt_money_plain(total_profit, 2)}</span> <span class="ov-currency">KWD</span></div>
-            <div class="ov-sub">Dividends: {fmt_money_plain(total_dividends_kwd, 2)} KWD</div>
+            <div class="ov-sub">{div_info}</div>
         </div>
         """, unsafe_allow_html=True)
 
