@@ -170,18 +170,29 @@ def init_db_config():
             database_url = database_url.replace("postgres://", "postgresql://", 1)
         
         # Remove any 'options' parameter that might specify an invalid schema
-        # Heroku sometimes adds options=-c search_path=<schema> which can cause InvalidSchemaName
-        if 'options=' in database_url or 'options%3D' in database_url:
-            from urllib.parse import urlparse, parse_qs, urlencode, urlunparse, unquote
+        # Heroku/DigitalOcean sometimes add options=-c search_path=<schema> which causes InvalidSchemaName
+        # Handle both URL-encoded (%3D) and plain (=) versions
+        from urllib.parse import urlparse, parse_qs, urlencode, urlunparse, unquote
+        
+        try:
             parsed = urlparse(database_url)
             query_params = parse_qs(parsed.query)
-            # Remove 'options' if it exists
+            
+            # Remove 'options' from query parameters
+            modified = False
             if 'options' in query_params:
                 del query_params['options']
-            # Rebuild URL without options
-            new_query = urlencode(query_params, doseq=True)
-            database_url = urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, new_query, parsed.fragment))
-            print("⚠️ Removed 'options' parameter from DATABASE_URL to avoid schema issues")
+                modified = True
+            
+            # Also check for sslmode and other params that might cause issues
+            # Keep sslmode but ensure it's valid
+            
+            if modified:
+                new_query = urlencode(query_params, doseq=True)
+                database_url = urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, new_query, parsed.fragment))
+                print("⚠️ Removed 'options' parameter from DATABASE_URL to avoid schema issues")
+        except Exception as e:
+            print(f"⚠️ Could not parse DATABASE_URL for cleanup: {e}")
         
         if database_url.startswith("postgresql://"):
             DB_TYPE = 'postgres'
@@ -257,31 +268,28 @@ def get_connection():
                 if not url or not url.strip():
                     raise ValueError("DATABASE_URL is empty or not configured")
                 
-                # Remove any options parameter that might specify an invalid schema
-                # Heroku sometimes adds options=-c search_path=<schema> which can cause InvalidSchemaName
-                if 'options=' in url:
-                    # Parse and remove options parameter
-                    from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
-                    parsed = urlparse(url)
-                    query_params = parse_qs(parsed.query)
-                    # Remove 'options' if it exists
-                    if 'options' in query_params:
-                        del query_params['options']
-                    # Rebuild URL without options
-                    new_query = urlencode(query_params, doseq=True)
-                    url = urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, new_query, parsed.fragment))
+                # Parse the URL and remove any options parameter, then add our own
+                from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
+                parsed = urlparse(url)
+                query_params = parse_qs(parsed.query)
                 
-                conn = psycopg2.connect(url)
-                # Explicitly set search_path to public schema to avoid InvalidSchemaName errors
-                with conn.cursor() as cur:
-                    cur.execute("SET search_path TO public")
-                conn.commit()
+                # Remove existing 'options' to avoid schema conflicts
+                if 'options' in query_params:
+                    del query_params['options']
+                
+                # Add our own options to force public schema
+                query_params['options'] = ['-c search_path=public']
+                
+                # Rebuild URL with our options
+                new_query = urlencode(query_params, doseq=True)
+                clean_url = urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, new_query, parsed.fragment))
+                
+                conn = psycopg2.connect(clean_url)
             else:
-                conn = psycopg2.connect(**DB_CONFIG)
-                # Explicitly set search_path to public schema
-                with conn.cursor() as cur:
-                    cur.execute("SET search_path TO public")
-                conn.commit()
+                # Connect with explicit options for public schema
+                config_with_options = DB_CONFIG.copy()
+                config_with_options['options'] = '-c search_path=public'
+                conn = psycopg2.connect(**config_with_options)
         else:
             conn = sqlite3.connect(DB_CONFIG['path'], check_same_thread=False)
         yield conn
@@ -318,23 +326,28 @@ def get_conn():
             if not url or not url.strip():
                 raise ValueError("DATABASE_URL is empty or not configured")
             
-            # Remove any options parameter that might specify an invalid schema
-            if 'options=' in url:
-                from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
-                parsed = urlparse(url)
-                query_params = parse_qs(parsed.query)
-                if 'options' in query_params:
-                    del query_params['options']
-                new_query = urlencode(query_params, doseq=True)
-                url = urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, new_query, parsed.fragment))
+            # Parse the URL and remove any options parameter, then add our own
+            from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
+            parsed = urlparse(url)
+            query_params = parse_qs(parsed.query)
             
-            conn = psycopg2.connect(url)
+            # Remove existing 'options' to avoid schema conflicts
+            if 'options' in query_params:
+                del query_params['options']
+            
+            # Add our own options to force public schema
+            query_params['options'] = ['-c search_path=public']
+            
+            # Rebuild URL with our options
+            new_query = urlencode(query_params, doseq=True)
+            clean_url = urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, new_query, parsed.fragment))
+            
+            conn = psycopg2.connect(clean_url)
         else:
-            conn = psycopg2.connect(**DB_CONFIG)
-        # Explicitly set search_path to public schema to avoid InvalidSchemaName errors
-        with conn.cursor() as cur:
-            cur.execute("SET search_path TO public")
-        conn.commit()
+            # Connect with explicit options for public schema
+            config_with_options = DB_CONFIG.copy()
+            config_with_options['options'] = '-c search_path=public'
+            conn = psycopg2.connect(**config_with_options)
         return conn
     else:
         return sqlite3.connect(DB_CONFIG['path'], check_same_thread=False)
