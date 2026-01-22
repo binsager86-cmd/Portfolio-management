@@ -9658,17 +9658,24 @@ def calculate_trading_realized_profit(user_id):
         query = """
             SELECT 
                 t.id,
-                t.stock_symbol as Stock,
+                t.stock_symbol,
                 t.txn_date,
                 t.txn_type,
-                t.shares as Quantity,
-                t.purchase_cost as price_cost,
-                t.sell_value as sale_price
+                t.shares,
+                t.purchase_cost,
+                t.sell_value
             FROM trading_history t
             WHERE t.user_id = ?
             ORDER BY t.txn_date, t.stock_symbol, t.txn_type
         """
         df = pd.read_sql_query(convert_sql_placeholders(query), conn, params=(user_id,))
+        # Rename columns for consistency
+        df = df.rename(columns={
+            'stock_symbol': 'Stock',
+            'shares': 'Quantity',
+            'purchase_cost': 'price_cost',
+            'sell_value': 'sale_price'
+        })
     except Exception:
         df = pd.DataFrame()
     finally:
