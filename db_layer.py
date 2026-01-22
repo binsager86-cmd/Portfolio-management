@@ -169,6 +169,20 @@ def init_db_config():
         if database_url.startswith("postgres://"):
             database_url = database_url.replace("postgres://", "postgresql://", 1)
         
+        # Remove any 'options' parameter that might specify an invalid schema
+        # Heroku sometimes adds options=-c search_path=<schema> which can cause InvalidSchemaName
+        if 'options=' in database_url or 'options%3D' in database_url:
+            from urllib.parse import urlparse, parse_qs, urlencode, urlunparse, unquote
+            parsed = urlparse(database_url)
+            query_params = parse_qs(parsed.query)
+            # Remove 'options' if it exists
+            if 'options' in query_params:
+                del query_params['options']
+            # Rebuild URL without options
+            new_query = urlencode(query_params, doseq=True)
+            database_url = urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, new_query, parsed.fragment))
+            print("⚠️ Removed 'options' parameter from DATABASE_URL to avoid schema issues")
+        
         if database_url.startswith("postgresql://"):
             DB_TYPE = 'postgres'
             DB_CONFIG = {'url': database_url}
@@ -242,6 +256,21 @@ def get_connection():
                 url = DB_CONFIG['url']
                 if not url or not url.strip():
                     raise ValueError("DATABASE_URL is empty or not configured")
+                
+                # Remove any options parameter that might specify an invalid schema
+                # Heroku sometimes adds options=-c search_path=<schema> which can cause InvalidSchemaName
+                if 'options=' in url:
+                    # Parse and remove options parameter
+                    from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
+                    parsed = urlparse(url)
+                    query_params = parse_qs(parsed.query)
+                    # Remove 'options' if it exists
+                    if 'options' in query_params:
+                        del query_params['options']
+                    # Rebuild URL without options
+                    new_query = urlencode(query_params, doseq=True)
+                    url = urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, new_query, parsed.fragment))
+                
                 conn = psycopg2.connect(url)
                 # Explicitly set search_path to public schema to avoid InvalidSchemaName errors
                 with conn.cursor() as cur:
@@ -288,6 +317,17 @@ def get_conn():
             url = DB_CONFIG['url']
             if not url or not url.strip():
                 raise ValueError("DATABASE_URL is empty or not configured")
+            
+            # Remove any options parameter that might specify an invalid schema
+            if 'options=' in url:
+                from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
+                parsed = urlparse(url)
+                query_params = parse_qs(parsed.query)
+                if 'options' in query_params:
+                    del query_params['options']
+                new_query = urlencode(query_params, doseq=True)
+                url = urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, new_query, parsed.fragment))
+            
             conn = psycopg2.connect(url)
         else:
             conn = psycopg2.connect(**DB_CONFIG)
@@ -637,6 +677,28 @@ def init_postgres_schema():
         
         conn.commit()
         print("✅ PostgreSQL schema initialized")
+
+
+def init_db_schemas():
+    """
+    Ensure required database schemas exist.
+    This prevents InvalidSchemaName errors when queries reference non-existent schemas.
+    Currently, all tables use the 'public' schema, but this ensures it's set correctly.
+    """
+    if DB_TYPE != 'postgres':
+        return  # SQLite doesn't use schemas
+    
+    try:
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                # Ensure public schema exists (it usually does by default, but be safe)
+                cur.execute("CREATE SCHEMA IF NOT EXISTS public;")
+                # Set search_path to public
+                cur.execute("SET search_path TO public;")
+            conn.commit()
+        print("✅ Database schemas verified")
+    except Exception as e:
+        print(f"⚠️ Schema initialization note: {e}")
 
 
 # Export database type for checking
