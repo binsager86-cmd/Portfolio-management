@@ -3,6 +3,11 @@ import sqlite3
 import time
 import uuid
 import html
+import warnings
+
+# Suppress Pandas/SQLAlchemy warnings
+warnings.filterwarnings('ignore', category=UserWarning, module='pandas')
+
 try:
     import pandas as pd
     from datetime import date, datetime, timedelta # Added for peer analysis
@@ -13755,9 +13760,13 @@ def main():
 
     # Initialize Cookie Manager (Global)
     cookie_manager = None
+    cookies_data = None  # CRITICAL FIX: Single fetch variable
+    
     if stx:
         try:
             cookie_manager = stx.CookieManager(key="portfolio_auth_v3")
+            # --- CRITICAL FIX: Fetch cookies ONCE here ---
+            cookies_data = cookie_manager.get_all()
         except Exception as e:
             print(f"Cookie manager init error: {e}")
 
@@ -13782,12 +13791,10 @@ def main():
         
         if cookie_manager:
             try:
-                all_cookies = cookie_manager.get_all()
-                # all_cookies is None if component hasn't rendered yet
-                # all_cookies is {} (empty dict) if rendered but no cookies
-                if all_cookies is not None:
+                # Use the already fetched cookies_data variable
+                if cookies_data is not None:
                     cookies_loaded = True
-                    session_token = all_cookies.get("portfolio_session")
+                    session_token = cookies_data.get("portfolio_session")
                     if session_token:
                         user_info = get_user_from_token(session_token)
                         if user_info:
@@ -13819,13 +13826,11 @@ def main():
     # COOKIE-BASED USER PREFERENCES
     # =============================
     # Load user preferences from cookies (theme, privacy mode, etc.)
-    def load_user_preferences():
-        """Load user preferences from cookies into session state."""
-        if not cookie_manager:
+    def load_user_preferences(all_cookies):
+        """Load user preferences using pre-fetched cookies."""
+        if not all_cookies:
             return
         try:
-            all_cookies = cookie_manager.get_all() or {}
-            
             # Theme preference
             saved_theme = all_cookies.get("portfolio_theme")
             if saved_theme and "theme" not in st.session_state:
@@ -13853,8 +13858,8 @@ def main():
         except Exception as e:
             print(f"Error saving preference {key}: {e}")
     
-    # Load preferences on page load
-    load_user_preferences()
+    # Load preferences on page load using pre-fetched cookies_data
+    load_user_preferences(cookies_data or {})
 
     # --- THEME TOGGLE ---
     if "theme" not in st.session_state:
