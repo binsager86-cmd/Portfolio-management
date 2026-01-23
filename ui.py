@@ -428,13 +428,22 @@ def get_db_info():
 
 # --- DATABASE PERFORMANCE OPTIMIZATION ---
 @st.cache_resource(ttl=3600, show_spinner=False)
+def get_db_connection_pool():
+    """
+    Creates a PERSISTENT database connection that stays open across reruns.
+    This eliminates the 300ms-1s SSL handshake latency on every click.
+    Uses st.cache_resource to keep the connection alive globally.
+    """
+    from db_layer import get_conn as _db_get_conn
+    return _db_get_conn()
+
 def get_cached_connection():
-    """
-    Establishes a persistent connection to the DB.
-    Uses st.cache_resource to avoid reconnecting on every interaction.
-    """
-    from db_layer import get_conn
-    return get_conn()
+    """Wrapper to use the cached connection pool."""
+    return get_db_connection_pool()
+
+def get_conn():
+    """Local wrapper to use persistent cached connection."""
+    return get_db_connection_pool()
 
 def db_execute(cur, sql: str, params: tuple = ()):
     """Execute SQL with automatic ? to %s conversion for PostgreSQL.
@@ -2132,6 +2141,7 @@ def compute_holdings_avg_cost(tx: pd.DataFrame):
     }
 
 
+@st.cache_data(ttl=60, show_spinner=False)  # Cache result for 60 seconds for instant refresh
 def build_portfolio_table(portfolio_name: str):
     """Build portfolio table with optimized bulk transaction fetch (N+1 fix)."""
     user_id = st.session_state.get('user_id')
@@ -2827,6 +2837,7 @@ def ui_cash_deposits():
                 db_execute(cur, "DELETE FROM cash_deposits WHERE user_id = ?", (user_id,))
                 conn.commit()
                 conn.close()
+                st.cache_data.clear()  # Clear cache to show updated data
                 st.session_state.confirm_delete_all = False
                 st.rerun()
         
@@ -3009,6 +3020,7 @@ def ui_cash_deposits():
                             db_execute(cur, "DELETE FROM cash_deposits WHERE id = ?", (deposit_id,))
                             conn.commit()
                             conn.close()
+                            st.cache_data.clear()  # Clear cache to show updated data
                             st.rerun()
                 
                 st.divider()
@@ -3319,6 +3331,7 @@ def ui_transactions():
                             conn.commit()
                             conn.close()
                             progress_bar.empty()
+                            st.cache_data.clear()  # Clear cache to show updated data
                             
                             if import_mode == "🗑️ Delete All & Replace":
                                 st.success(f"✅ Full Replace Complete: Deleted {deleted_count:,}, imported {restored_count:,} records.")
@@ -3549,6 +3562,7 @@ def ui_transactions():
                     
                     # Clear confirmation state
                     del st.session_state['confirm_delete_stock']
+                    st.cache_data.clear()  # Clear cache to show updated data
                     
                     st.success(f"✅ Deleted {selected_symbol} and {txn_deleted:,} transactions")
                     time.sleep(2)
@@ -3754,6 +3768,7 @@ def ui_transactions():
                             st.write(errors[:10])
                         
                         if imported > 0:
+                            st.cache_data.clear()  # Clear cache to show updated data
                             st.success(f"✅ Imported {imported:,} transactions for {selected_symbol}")
                             time.sleep(1)
                             st.rerun()
@@ -7130,6 +7145,7 @@ def ui_portfolio_tracker():
                 )
                 st.success(f"✅ Saved new snapshot for {today_str}")
             
+            st.cache_data.clear()  # Clear cache to show updated data
             time.sleep(1)
             st.rerun()
 
@@ -8094,6 +8110,7 @@ def ui_trading_section():
                         
                         conn.commit()
                         conn.close()
+                        st.cache_data.clear()  # Clear cache to show updated data
                         time.sleep(1)
                         st.rerun()
                         
@@ -12793,6 +12810,7 @@ def inject_google_analytics():
 # =========================
 # AI ANALYST HELPER FUNCTIONS
 # =========================
+@st.cache_data(ttl=60, show_spinner=False)  # Cache result for 60 seconds for instant refresh
 def get_pfm_history(user_id):
     """Retrieves PFM snapshot history for a user, returns dict keyed by date."""
     history = {}
@@ -13657,19 +13675,22 @@ def main():
         inject_google_analytics()
         st.session_state['ga_injected'] = True
     
-    # Initialize database schemas (PostgreSQL only - prevents InvalidSchemaName errors)
-    try:
-        from db_layer import init_db_schemas
-        init_db_schemas()
-    except Exception as e:
-        print(f"Schema init note: {e}")
-    
-    # Initialize database schema (handles both SQLite and PostgreSQL)
-    try:
-        init_db()
-    except Exception as e:
-        st.error(f"Database Initialization Error: {e}")
-        print(f"DB Init Error: {e}")
+    # Performance Optimization: Only run DB initialization once per user session
+    if "db_initialized" not in st.session_state:
+        # Initialize database schemas (PostgreSQL only - prevents InvalidSchemaName errors)
+        try:
+            from db_layer import init_db_schemas
+            init_db_schemas()
+        except Exception as e:
+            print(f"Schema init note: {e}")
+        
+        # Initialize database schema (handles both SQLite and PostgreSQL)
+        try:
+            init_db()
+            st.session_state.db_initialized = True
+        except Exception as e:
+            st.error(f"Database Initialization Error: {e}")
+            print(f"DB Init Error: {e}")
 
     # Initialize Cookie Manager (Global)
     cookie_manager = None
