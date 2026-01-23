@@ -796,6 +796,35 @@ def fetch_price_tradingview_by_tv_symbol(tv_exchange: str, tv_symbol: str, sessi
 def init_db():
     """Initialize database schema. Handles both SQLite and PostgreSQL."""
     
+    # ============================================
+    # QUICK CHECK: Skip if already initialized
+    # ============================================
+    # This prevents re-running migrations/indexes on every restart
+    try:
+        if is_postgres():
+            # For PostgreSQL, check if users table exists
+            from db_layer import query_val
+            result = query_val("SELECT 1 FROM information_schema.tables WHERE table_name = 'users' LIMIT 1")
+            if result:
+                _log_startup("PostgreSQL DB already initialized - skipping full setup")
+                # Still ensure critical columns exist (fast operation)
+                for tbl in ["stocks", "transactions", "trading_history", "portfolio_cash", "cash_deposits"]:
+                    add_column_if_missing(tbl, "user_id", "INTEGER DEFAULT 1")
+                return
+        else:
+            # For SQLite, check sqlite_master
+            conn = get_conn()
+            cur = conn.cursor()
+            cur.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='users'")
+            if cur.fetchone():
+                conn.close()
+                _log_startup("SQLite DB already initialized - skipping full setup")
+                return
+            conn.close()
+    except Exception as e:
+        print(f"DB init check note: {e}")
+        # Continue with full initialization if check fails
+    
     # If PostgreSQL, schema is already created by db_layer.init_postgres_schema()
     if is_postgres():
         print("🐘 Using PostgreSQL - schema already initialized")
@@ -13730,13 +13759,72 @@ def main():
         inject_google_analytics()
         st.session_state['ga_injected'] = True
     
+    # Initialize Cookie Manager FIRST (needed for session restore)
+    cookie_manager = None
+    cookies_data = None  # CRITICAL FIX: Single fetch variable
+    
+    if stx:
+        try:
+            cookie_manager = stx.CookieManager(key="portfolio_auth_v3")
+            # --- CRITICAL FIX: Fetch cookies ONCE here ---
+            cookies_data = cookie_manager.get_all()
+        except Exception as e:
+            print(f"Cookie manager init error: {e}")
+
+    # =============================
+    # FAST SESSION CHECK (BEFORE DB INIT)
+    # =============================
+    # Check if already logged in (fastest path)
+    if st.session_state.get('logged_in'):
+        pass  # Continue to main app
+    else:
+        # Try to restore session from cookie
+        restored = False
+        cookies_loaded = False  # Track if cookies have actually loaded
+        
+        if cookie_manager:
+            try:
+                # Use the already fetched cookies_data variable
+                if cookies_data is not None:
+                    cookies_loaded = True
+                    session_token = cookies_data.get("portfolio_session")
+                    if session_token:
+                        # NOTE: get_user_from_token requires DB - but it handles errors gracefully
+                        user_info = get_user_from_token(session_token)
+                        if user_info:
+                            st.session_state.logged_in = True
+                            st.session_state.user_id = user_info["id"]
+                            st.session_state.username = user_info["username"]
+                            restored = True
+                        else:
+                            # Token invalid - clean up silently
+                            try:
+                                cookie_manager.delete("portfolio_session")
+                            except:
+                                pass
+            except Exception as e:
+                print(f"Session restore error: {e}")
+        
+        # If cookies haven't loaded yet, rerun to let them load
+        # Only rerun if we haven't checked AND cookies aren't loaded yet
+        if not cookies_loaded and not st.session_state.get('_auth_checked'):
+            st.session_state._auth_checked = True
+            st.rerun()
+        
+        # Still not logged in? Show login page and EXIT EARLY
+        # This is the key optimization - no DB init for guests!
+        if not st.session_state.get('logged_in'):
+            _log_startup("Showing login page (no DB init needed for guests)")
+            login_page(cookie_manager)
+            return  # ⬅️ EXIT EARLY - don't initialize DB for anonymous users
+
     # =============================
     # DEFERRED DATABASE INITIALIZATION
     # =============================
-    # This was moved from module-level to here for fast startup
-    # Only runs once per user session
+    # CRITICAL: Only runs AFTER user is authenticated
+    # This saves 25-35 seconds on cold starts for the login page
     if "db_initialized" not in st.session_state:
-        _log_startup("Initializing database (first run)...")
+        _log_startup("Initializing database (first authenticated request)...")
         
         # Check for PostgreSQL and show errors if needed
         if is_postgres():
@@ -13790,70 +13878,7 @@ def main():
         except Exception as e:
             st.error(f"Database Initialization Error: {e}")
             print(f"DB Init Error: {e}")
-
-    # Initialize Cookie Manager (Global)
-    cookie_manager = None
-    cookies_data = None  # CRITICAL FIX: Single fetch variable
-    
-    if stx:
-        try:
-            cookie_manager = stx.CookieManager(key="portfolio_auth_v3")
-            # --- CRITICAL FIX: Fetch cookies ONCE here ---
-            cookies_data = cookie_manager.get_all()
-        except Exception as e:
-            print(f"Cookie manager init error: {e}")
-
-    # =============================
-    # ROBUST SESSION PERSISTENCE
-    # =============================
-    # Strategy: Use multiple methods to persist login:
-    # 1. session_state (in-memory, lost on refresh)
-    # 2. cookies (persistent, but async loading)
-    # 3. query_params as backup signaling mechanism
-    
-    # =============================
-    # FAST SESSION CHECK
-    # =============================
-    # Check if already logged in (fastest path)
-    if st.session_state.get('logged_in'):
-        pass  # Continue to main app
-    else:
-        # Try to restore session from cookie
-        restored = False
-        cookies_loaded = False  # Track if cookies have actually loaded
-        
-        if cookie_manager:
-            try:
-                # Use the already fetched cookies_data variable
-                if cookies_data is not None:
-                    cookies_loaded = True
-                    session_token = cookies_data.get("portfolio_session")
-                    if session_token:
-                        user_info = get_user_from_token(session_token)
-                        if user_info:
-                            st.session_state.logged_in = True
-                            st.session_state.user_id = user_info["id"]
-                            st.session_state.username = user_info["username"]
-                            restored = True
-                        else:
-                            # Token invalid - clean up silently
-                            try:
-                                cookie_manager.delete("portfolio_session")
-                            except:
-                                pass
-            except Exception as e:
-                print(f"Session restore error: {e}")
-        
-        # If cookies haven't loaded yet, rerun to let them load
-        # Only rerun if we haven't checked AND cookies aren't loaded yet
-        if not cookies_loaded and not st.session_state.get('_auth_checked'):
-            st.session_state._auth_checked = True
-            st.rerun()
-        
-        # Still not logged in? Show login page
-        if not st.session_state.get('logged_in'):
-            login_page(cookie_manager)
-            return
+            return  # Exit if DB init fails
 
     # =============================
     # COOKIE-BASED USER PREFERENCES
