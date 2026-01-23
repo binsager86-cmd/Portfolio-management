@@ -184,13 +184,16 @@ def init_db_config():
                 del query_params['options']
                 modified = True
             
-            # Also check for sslmode and other params that might cause issues
-            # Keep sslmode but ensure it's valid
+            # Ensure sslmode=require for DigitalOcean/production databases
+            if 'sslmode' not in query_params:
+                query_params['sslmode'] = ['require']
+                modified = True
+                print("ℹ️ Added sslmode=require for secure database connection")
             
             if modified:
                 new_query = urlencode(query_params, doseq=True)
                 database_url = urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, new_query, parsed.fragment))
-                print("⚠️ Removed 'options' parameter from DATABASE_URL to avoid schema issues")
+                print("⚠️ Modified DATABASE_URL parameters for compatibility")
         except Exception as e:
             print(f"⚠️ Could not parse DATABASE_URL for cleanup: {e}")
         
@@ -277,6 +280,10 @@ def get_connection():
                 if 'options' in query_params:
                     del query_params['options']
                 
+                # Ensure sslmode=require for DigitalOcean/production databases
+                if 'sslmode' not in query_params:
+                    query_params['sslmode'] = ['require']
+                
                 # Rebuild URL WITHOUT adding options to avoid URL encoding issues
                 # We'll set search_path after connection instead
                 new_query = urlencode(query_params, doseq=True)
@@ -291,6 +298,7 @@ def get_connection():
                 # Connect with explicit options for public schema
                 config_with_options = DB_CONFIG.copy()
                 config_with_options['options'] = '-c search_path=public'
+                config_with_options['sslmode'] = 'require'
                 conn = psycopg2.connect(**config_with_options)
         else:
             conn = sqlite3.connect(DB_CONFIG['path'], check_same_thread=False)
@@ -337,6 +345,10 @@ def get_conn():
             if 'options' in query_params:
                 del query_params['options']
             
+            # Ensure sslmode=require for DigitalOcean/production databases
+            if 'sslmode' not in query_params:
+                query_params['sslmode'] = ['require']
+            
             # Rebuild URL WITHOUT adding options to avoid URL encoding issues
             # We'll set search_path after connection instead
             new_query = urlencode(query_params, doseq=True)
@@ -351,6 +363,7 @@ def get_conn():
             # Connect with explicit options for public schema
             config_with_options = DB_CONFIG.copy()
             config_with_options['options'] = '-c search_path=public'
+            config_with_options['sslmode'] = 'require'
             conn = psycopg2.connect(**config_with_options)
         return conn
     else:
