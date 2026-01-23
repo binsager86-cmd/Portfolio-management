@@ -24,6 +24,11 @@ try:
 except ImportError:
     stx = None
 
+try:
+    import streamlit_antd_components as sac
+except ImportError:
+    sac = None
+
 import numpy as np
 import io
 import sys
@@ -13859,7 +13864,7 @@ def main():
     if "usd_to_kwd" not in st.session_state:
         st.session_state.usd_to_kwd = DEFAULT_USD_TO_KWD
 
-    # --- GLOBAL STYLING FOR METRIC CARDS AND MODERN SIDEBAR ---
+    # --- GLOBAL STYLING ---
     st.markdown("""
     <style>
     /* Equal height and width styling for all metric cards across the app */
@@ -13876,119 +13881,6 @@ def main():
     div[data-testid="metric-container"] > div {
         width: 100%;
     }
-    
-    /* Modern Sidebar Styling */
-    section[data-testid="stSidebar"] {
-        background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
-        border-right: 1px solid #e2e8f0;
-    }
-    
-    section[data-testid="stSidebar"] > div {
-        padding-top: 1rem;
-    }
-    
-    /* Navigation Button Styling */
-    .nav-button {
-        display: flex;
-        align-items: center;
-        width: 100%;
-        padding: 12px 16px;
-        margin: 4px 0;
-        border: none;
-        border-radius: 10px;
-        font-size: 14px;
-        font-weight: 500;
-        cursor: pointer;
-        transition: all 0.2s ease;
-        text-align: left;
-        background: transparent;
-        color: #4a5568;
-    }
-    
-    .nav-button:hover {
-        background: #f1f5f9;
-        color: #1e293b;
-    }
-    
-    .nav-button.active {
-        background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
-        color: white;
-        box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
-    }
-    
-    .nav-button .icon {
-        margin-right: 12px;
-        font-size: 18px;
-    }
-    
-    /* Section Headers */
-    .section-header {
-        font-size: 11px;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        color: #94a3b8;
-        padding: 16px 16px 8px 16px;
-        margin-top: 8px;
-    }
-    
-    /* User Profile Card */
-    .user-profile-card {
-        background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
-        border-radius: 12px;
-        padding: 16px;
-        margin: 8px;
-        border: 1px solid #e2e8f0;
-    }
-    
-    .user-email {
-        font-size: 13px;
-        color: #64748b;
-        font-weight: 500;
-    }
-    
-    /* Footer */
-    .sidebar-footer {
-        font-size: 11px;
-        color: #94a3b8;
-        padding: 16px;
-        text-align: center;
-        border-top: 1px solid #e2e8f0;
-        margin-top: auto;
-    }
-    
-    /* Hide default radio button styling */
-    div[data-testid="stRadio"] > label {
-        display: none !important;
-    }
-    
-    /* Custom Radio Button as Navigation */
-    div[data-testid="stRadio"] > div {
-        flex-direction: column;
-        gap: 4px;
-    }
-    
-    div[data-testid="stRadio"] > div > label {
-        background: transparent;
-        border: none;
-        border-radius: 10px;
-        padding: 12px 16px;
-        margin: 2px 0;
-        cursor: pointer;
-        transition: all 0.2s ease;
-        font-weight: 500;
-        color: #4a5568;
-    }
-    
-    div[data-testid="stRadio"] > div > label:hover {
-        background: #f1f5f9;
-    }
-    
-    div[data-testid="stRadio"] > div > label[data-checked="true"] {
-        background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
-        color: white;
-        box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
-    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -14003,13 +13895,13 @@ def main():
         save_preference("privacy", "true" if new_privacy else "false")
 
     # Header with theme toggle and logout on the right
-    col1, col2, col3, col4 = st.columns([6, 1, 1, 1])
+    col1, col2, col3 = st.columns([6, 1, 1])
     with col1:
         st.title("📊 Portfolio App")
     with col2:
         st.write("")  # Spacing
         st.toggle(
-            "🌙 Dark Mode",
+            "🌙 Dark",
             value=(st.session_state.theme == "dark"),
             on_change=toggle_theme,
             key="theme_toggle"
@@ -14024,33 +13916,6 @@ def main():
             on_change=toggle_privacy,
             key="privacy_toggle"
         )
-    with col4:
-        st.write("")  # Spacing
-        if st.button("🚪 Logout", key="logout_btn", type="secondary"):
-            # First, invalidate the session token in the database
-            # This ensures even if the cookie still exists, it won't work
-            try:
-                user_id = st.session_state.get('user_id')
-                if user_id:
-                    conn = get_conn()
-                    cur = conn.cursor()
-                    db_execute(cur, "DELETE FROM user_sessions WHERE user_id = ?", (user_id,))
-                    conn.commit()
-                    conn.close()
-            except Exception as e:
-                print(f"Error deleting session: {e}")
-            
-            # Delete cookies
-            if cookie_manager:
-                try:
-                    cookie_manager.delete("portfolio_session")
-                    cookie_manager.delete("portfolio_user")
-                except Exception:
-                    pass
-            
-            # Clear all session state
-            st.session_state.clear()
-            st.rerun()
 
     # Show price fetching status (collapsed to reduce visual noise)
     with st.expander("ℹ️ Price Fetching Status", expanded=False):
@@ -14077,118 +13942,120 @@ def main():
         else:
             st.success("✅ **Price Fetching Enabled**: Live prices from Yahoo Finance.")
 
-    # --- MODERN PAGE NAVIGATION (Persists across st.rerun()) ---
-    # Navigation items with icons matching the React design
-    nav_items = [
-        ("🏠", "Overview", "overview"),
-        ("💳", "Add Cash Deposit", "cash_deposit"),
-        ("💵", "Add Transactions", "transactions"),
-        ("📈", "Portfolio Analysis", "portfolio_analysis"),
-        ("👥", "Peer Analysis", "peer_analysis"),
-        ("📊", "Trading Section", "trading"),
-        ("🎯", "Portfolio Tracker", "portfolio_tracker"),
-        ("📤", "Dividends Tracker", "dividends"),
-        ("📅", "Planner", "planner"),
-        ("💾", "Backup & Restore", "backup"),
-        ("🏦", "Personal Finance", "pfm"),
-    ]
-    
-    # Account security items
-    security_items = [
-        ("🔒", "Account Security", "security"),
-        ("👤", "Profile Settings", "profile"),
-        ("⚙️", "App Settings", "settings"),
-    ]
-    
-    # Initialize current page in session state
-    if "current_page" not in st.session_state:
-        st.session_state.current_page = "overview"
-    
-    # Build page options dict for navigation
-    page_options = {f"{icon} {label}": value for icon, label, value in nav_items}
-    
-    # Sidebar navigation with modern styling
+    # --- PROFESSIONAL SIDEBAR (Using streamlit_antd_components) ---
     with st.sidebar:
-        # User Profile Card
-        user_email = st.session_state.get('email', st.session_state.get('username', 'User'))
+        # User Profile Header
         st.markdown(f"""
-        <div class="user-profile-card">
-            <div style="display: flex; align-items: center; gap: 10px;">
-                <div style="width: 36px; height: 36px; background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold;">
-                    {user_email[0].upper() if user_email else 'U'}
-                </div>
-                <div>
-                    <div style="font-size: 14px; font-weight: 600; color: #1e293b;">{st.session_state.get('username', 'User')}</div>
-                    <div class="user-email">{user_email}</div>
-                </div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # Navigation Section Header
-        st.markdown('<div class="section-header">📌 Navigation</div>', unsafe_allow_html=True)
-        
-        # Find current index for default selection
-        page_keys = list(page_options.keys())
-        page_values = list(page_options.values())
-        current_idx = page_values.index(st.session_state.current_page) if st.session_state.current_page in page_values else 0
-        
-        # Navigation radio buttons
-        selected_page_label = st.radio(
-            "Navigation",
-            options=page_keys,
-            index=current_idx,
-            key="nav_radio",
-            label_visibility="collapsed"
-        )
-        
-        # Update session state when user changes page
-        st.session_state.current_page = page_options[selected_page_label]
-        
-        # Account Security Section
-        st.markdown('<div class="section-header">🔐 Account Security</div>', unsafe_allow_html=True)
-        
-        # Security options as expander
-        with st.expander("🔒 Security Options", expanded=False):
-            ui_user_profile_sidebar()
-        
-        # Footer
-        st.markdown("""
-        <div class="sidebar-footer">
-            © 2026 Portfolio App<br/>
-            <span style="font-size: 10px;">Financial Dashboard v2.0</span>
+        <div style="padding: 10px; border-bottom: 1px solid #ddd; margin-bottom: 10px;">
+            <h4 style="margin:0; color: #333;">👤 {st.session_state.get('username', 'User')}</h4>
+            <p style="margin:0; font-size: 0.8em; color: #666;">{st.session_state.get('username', '')}@email.com</p>
         </div>
         """, unsafe_allow_html=True)
 
-    # --- RENDER SELECTED PAGE ---
-    current = st.session_state.current_page
+        # Check if sac is available
+        if sac:
+            # Navigation Menu using streamlit_antd_components
+            selected_tab = sac.menu([
+                # Section 1: Main Navigation
+                sac.MenuItem('Overview', icon='house-fill'),
+                sac.MenuItem('Add Cash Deposit', icon='wallet-fill'),
+                sac.MenuItem('Add Transactions', icon='cash-coin'),
+                sac.MenuItem('Portfolio Analysis', icon='graph-up-arrow'),
+                sac.MenuItem('Peer Analysis', icon='people-fill'),
+                sac.MenuItem('Trading Section', icon='bar-chart-line'),
+                sac.MenuItem('Portfolio Tracker', icon='pie-chart-fill'),
+                sac.MenuItem('Dividends Tracker', icon='arrow-up-right-circle-fill'),
+                sac.MenuItem('Planner', icon='calendar-event'),
+                sac.MenuItem('Backup & Restore', icon='archive-fill'),
+                sac.MenuItem('Personal Finance', icon='file-earmark-spreadsheet-fill'),
+                
+                # Divider
+                sac.MenuItem(type='divider'),
+                
+                # Section 2: Account Security
+                sac.MenuItem('Account Security', icon='shield-lock-fill', children=[
+                    sac.MenuItem('Change Password', icon='key'),
+                    sac.MenuItem('Logout', icon='box-arrow-right'),
+                ]),
+            ], format_func='title', open_all=True)
+        else:
+            # Fallback to native Streamlit radio if sac not installed
+            nav_options = [
+                "Overview", "Add Cash Deposit", "Add Transactions",
+                "Portfolio Analysis", "Peer Analysis", "Trading Section",
+                "Portfolio Tracker", "Dividends Tracker", "Planner",
+                "Backup & Restore", "Personal Finance", "---",
+                "Change Password", "Logout"
+            ]
+            selected_tab = st.radio("Navigation", nav_options, label_visibility="collapsed")
+
+        # Footer Info
+        st.markdown("---")
+        st.caption(f"{get_db_info()} | v3.5 Pro")
+
+    # --- MAIN CONTENT ROUTING ---
+    # This acts like the "activeItem" state in the React code
     
-    if current == "overview":
+    if selected_tab == 'Overview':
         ui_overview()
-    elif current == "cash_deposit":
+        
+    elif selected_tab == 'Add Cash Deposit':
         ui_cash_deposits()
-    elif current == "transactions":
+        
+    elif selected_tab == 'Add Transactions':
         ui_transactions()
-    elif current == "portfolio_analysis":
+        
+    elif selected_tab == 'Portfolio Analysis':
         ui_portfolio_analysis()
-    elif current == "peer_analysis":
+        
+    elif selected_tab == 'Peer Analysis':
         ui_peer_analysis()
-    elif current == "trading":
+        
+    elif selected_tab == 'Trading Section':
         ui_trading_section()
-    elif current == "portfolio_tracker":
+        
+    elif selected_tab == 'Portfolio Tracker':
         ui_portfolio_tracker()
-    elif current == "dividends":
+        
+    elif selected_tab == 'Dividends Tracker':
         ui_dividends_tracker()
-    elif current == "planner":
+        
+    elif selected_tab == 'Planner':
         ui_financial_planner()
-    elif current == "backup":
+        
+    elif selected_tab == 'Backup & Restore':
         ui_backup_restore()
-    elif current == "pfm":
+        
+    elif selected_tab == 'Personal Finance':
         ui_pfm()
+        
+    elif selected_tab == 'Change Password':
+        st.header("🔐 Account Security")
+        ui_user_profile_sidebar()  # Render security logic in the main area
+        
+    elif selected_tab == 'Logout':
+        # Logout Logic
+        try:
+            user_id = st.session_state.get('user_id')
+            if user_id:
+                conn = get_conn()
+                cur = conn.cursor()
+                db_execute(cur, "DELETE FROM user_sessions WHERE user_id = ?", (user_id,))
+                conn.commit()
+                conn.close()
+        except Exception as e:
+            print(f"Error during logout: {e}")
+        if cookie_manager:
+            try:
+                cookie_manager.delete("portfolio_session")
+            except:
+                pass
+        st.session_state.clear()
+        st.rerun()
+    
     else:
-        ui_overview()  # Fallback
-
-    st.caption(f"{get_db_info()} | UI: Streamlit")
+        # Default fallback
+        ui_overview()
 
 
 if __name__ == "__main__":
