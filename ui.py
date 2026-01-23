@@ -7086,6 +7086,8 @@ def ui_portfolio_tracker():
             existing = query_df("SELECT * FROM portfolio_snapshots WHERE snapshot_date = ? AND user_id = ?", (today_str, user_id))
             
             if not existing.empty:
+                # --- FIX: Strict Type Casting for PostgreSQL ---
+                # Ensure no Numpy types are passed to the DB adapter
                 exec_sql(
                     """
                     UPDATE portfolio_snapshots
@@ -7094,13 +7096,29 @@ def ui_portfolio_tracker():
                         change_percent = ?, roi_percent = ?, created_at = ?
                     WHERE snapshot_date = ? AND user_id = ?
                     """,
-                    (live_portfolio_value, daily_movement, beginning_diff,
-                     today_deposits_kwd, accumulated_cash, net_gain,
-                     change_percent, roi_percent, int(time.time()),
-                     today_str, user_id)
+                    (float(live_portfolio_value), float(daily_movement), float(beginning_diff),
+                     float(today_deposits_kwd), float(accumulated_cash), float(net_gain),
+                     float(change_percent), float(roi_percent), int(time.time()),
+                     str(today_str), int(user_id))
                 )
                 st.success(f"✅ Updated snapshot for {today_str}")
             else:
+                # --- FIX: Strict Type Casting for PostgreSQL ---
+                # Ensure no Numpy types are passed to the DB adapter
+                sql_params = (
+                    int(user_id),
+                    str(today_str),
+                    float(live_portfolio_value),
+                    float(daily_movement),
+                    float(beginning_diff),
+                    float(today_deposits_kwd),
+                    float(accumulated_cash),
+                    float(net_gain),
+                    float(change_percent),
+                    float(roi_percent),
+                    int(time.time())
+                )
+                
                 exec_sql(
                     """
                     INSERT INTO portfolio_snapshots 
@@ -7108,8 +7126,7 @@ def ui_portfolio_tracker():
                      deposit_cash, accumulated_cash, net_gain, change_percent, roi_percent, created_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (user_id, today_str, live_portfolio_value, daily_movement, beginning_diff,
-                     today_deposits_kwd, accumulated_cash, net_gain, change_percent, roi_percent, int(time.time()))
+                    sql_params
                 )
                 st.success(f"✅ Saved new snapshot for {today_str}")
             
@@ -13536,6 +13553,104 @@ def create_pdf_report(analysis_text):
     return buffer
 
 
+def ui_user_profile_sidebar():
+    """Sidebar widget for User Profile & Password Management"""
+    if not st.session_state.get('logged_in'):
+        return
+
+    st.sidebar.divider()
+    
+    # Expandable section for Account Security
+    with st.sidebar.expander("🔐 Account Security", expanded=False):
+        user_id = st.session_state.get('user_id')
+        user_email = st.session_state.get('username')  # Username might be email
+        
+        # State Management for this widget
+        if "pass_reset_stage" not in st.session_state:
+            st.session_state.pass_reset_stage = "request"  # request, verify
+
+        if st.session_state.pass_reset_stage == "request":
+            st.caption(f"Update password for: {user_email}")
+            if st.button("📧 Send OTP to Change Password", use_container_width=True, key="send_pass_otp"):
+                # 1. Fetch real email if username is not email
+                conn = get_conn()
+                cur = conn.cursor()
+                db_execute(cur, "SELECT email FROM users WHERE id = ?", (user_id,))
+                res = cur.fetchone()
+                conn.close()
+                
+                real_email = res[0] if res else user_email
+                
+                if real_email:
+                    # 2. Generate & Send OTP
+                    import random
+                    otp_code = str(random.randint(100000, 999999))
+                    exp_time = int(time.time()) + 600  # 10 mins expiry
+                    
+                    conn = get_conn()
+                    cur = conn.cursor()
+                    db_execute(cur, "DELETE FROM password_resets WHERE email=?", (real_email,))
+                    db_execute(cur, "INSERT INTO password_resets (email, otp, expires_at, created_at) VALUES (?, ?, ?, ?)",
+                              (real_email, otp_code, exp_time, int(time.time())))
+                    conn.commit()
+                    conn.close()
+                    
+                    # Send via existing helper
+                    send_otp_email(real_email, otp_code)
+                    
+                    st.session_state.pass_reset_email = real_email
+                    st.session_state.pass_reset_stage = "verify"
+                    st.rerun()
+                else:
+                    st.error("No email associated with this account.")
+
+        elif st.session_state.pass_reset_stage == "verify":
+            st.info(f"OTP sent to {st.session_state.pass_reset_email}")
+            
+            with st.form("change_pass_form"):
+                otp_input = st.text_input("Enter OTP", placeholder="123456")
+                new_pass = st.text_input("New Password", type="password")
+                confirm_pass = st.text_input("Confirm New Password", type="password")
+                
+                btn_change = st.form_submit_button("Update Password", type="primary", use_container_width=True)
+                
+                if btn_change:
+                    if new_pass != confirm_pass:
+                        st.error("Passwords do not match.")
+                    elif len(new_pass) < 6:
+                        st.error("Password too short (minimum 6 characters).")
+                    else:
+                        conn = get_conn()
+                        cur = conn.cursor()
+                        # Verify OTP
+                        db_execute(cur, """
+                            SELECT otp FROM password_resets 
+                            WHERE email=? AND expires_at > ?
+                        """, (st.session_state.pass_reset_email, int(time.time())))
+                        row = cur.fetchone()
+                        
+                        if row and row[0] == otp_input.strip():
+                            # Update Hash
+                            new_hash = hash_password(new_pass)
+                            db_execute(cur, "UPDATE users SET password_hash=? WHERE id=?", (new_hash, user_id))
+                            # Cleanup
+                            db_execute(cur, "DELETE FROM password_resets WHERE email=?", (st.session_state.pass_reset_email,))
+                            conn.commit()
+                            conn.close()
+                            
+                            st.success("✅ Password updated!")
+                            time.sleep(1)
+                            st.session_state.pass_reset_stage = "request"
+                            st.rerun()
+                        else:
+                            conn.close()
+                            st.error("Invalid or Expired OTP.")
+            
+            if st.button("Cancel", key="cancel_pass_change"):
+                st.session_state.pass_reset_stage = "request"
+                st.rerun()
+
+
 def main():
     # Inject Google Analytics (runs once per session)
     if 'ga_injected' not in st.session_state:
@@ -13662,6 +13777,10 @@ def main():
     # Sidebar Logout
     with st.sidebar:
         st.write(f"👤 **{st.session_state.get('username', 'User')}**")
+        
+        # --- Account Security (Password Change) ---
+        ui_user_profile_sidebar()
+        
         st.divider()
 
     # --- THEME TOGGLE ---
