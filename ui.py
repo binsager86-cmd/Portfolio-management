@@ -13947,52 +13947,29 @@ def main():
         else:
             st.success("✅ **Price Fetching Enabled**: Live prices from Yahoo Finance.")
 
-    # --- PROFESSIONAL SIDEBAR (Using streamlit_antd_components) ---
+    # --- PROFESSIONAL SIDEBAR ---
     with st.sidebar:
         # User Profile Header
         st.markdown(f"""
         <div style="padding: 10px; border-bottom: 1px solid #ddd; margin-bottom: 10px;">
             <h4 style="margin:0; color: #333;">👤 {st.session_state.get('username', 'User')}</h4>
-            <p style="margin:0; font-size: 0.8em; color: #666;">{st.session_state.get('username', '')}@email.com</p>
         </div>
         """, unsafe_allow_html=True)
 
-        # Navigation options
+        # Navigation Options (clean names for routing)
         nav_options = [
-            "🏠 Overview", 
-            "💳 Add Cash Deposit", 
-            "💵 Add Transactions",
-            "📈 Portfolio Analysis", 
-            "👥 Peer Analysis", 
-            "📊 Trading Section",
-            "🎯 Portfolio Tracker", 
-            "📤 Dividends Tracker", 
-            "📅 Planner",
-            "💾 Backup & Restore", 
-            "🏦 Personal Finance",
+            'Overview', 'Add Cash Deposit', 'Add Transactions', 'Portfolio Analysis',
+            'Peer Analysis', 'Trading Section', 'Portfolio Tracker', 'Dividends Tracker',
+            'Planner', 'Backup & Restore', 'Personal Finance'
         ]
         
-        # Map emoji labels back to clean names for routing
-        nav_map = {
-            "🏠 Overview": "Overview",
-            "💳 Add Cash Deposit": "Add Cash Deposit",
-            "💵 Add Transactions": "Add Transactions",
-            "📈 Portfolio Analysis": "Portfolio Analysis",
-            "👥 Peer Analysis": "Peer Analysis",
-            "📊 Trading Section": "Trading Section",
-            "🎯 Portfolio Tracker": "Portfolio Tracker",
-            "📤 Dividends Tracker": "Dividends Tracker",
-            "📅 Planner": "Planner",
-            "💾 Backup & Restore": "Backup & Restore",
-            "🏦 Personal Finance": "Personal Finance",
-        }
+        # Default selection
+        selected_tab = 'Overview'
         
-        # Check if sac is available
+        # LOGIC: Use SAC if installed, otherwise Standard Streamlit
         if sac:
             try:
-                # Navigation Menu using streamlit_antd_components
                 selected_tab = sac.menu([
-                    # Section 1: Main Navigation
                     sac.MenuItem('Overview', icon='house-fill'),
                     sac.MenuItem('Add Cash Deposit', icon='wallet-fill'),
                     sac.MenuItem('Add Transactions', icon='cash-coin'),
@@ -14004,11 +13981,7 @@ def main():
                     sac.MenuItem('Planner', icon='calendar-event'),
                     sac.MenuItem('Backup & Restore', icon='archive-fill'),
                     sac.MenuItem('Personal Finance', icon='file-earmark-spreadsheet-fill'),
-                    
-                    # Divider
                     sac.MenuItem(type='divider'),
-                    
-                    # Section 2: Account Security
                     sac.MenuItem('Account Security', icon='shield-lock-fill', children=[
                         sac.MenuItem('Change Password', icon='key'),
                         sac.MenuItem('Logout', icon='box-arrow-right'),
@@ -14016,33 +13989,28 @@ def main():
                 ], format_func='title', open_all=True)
             except Exception as e:
                 print(f"SAC menu error: {e}")
-                sac = None  # Fall through to fallback
+                selected_tab = None  # Force fallback
         
-        if not sac:
-            # Fallback to native Streamlit radio buttons
+        # Fallback for when SAC library is missing or fails
+        if not sac or selected_tab is None:
             st.markdown("### 📌 Navigation")
+            selected_tab = st.radio(
+                "Select Page",
+                nav_options,
+                key="nav_radio_main",
+                label_visibility="collapsed"
+            )
             
-            # Initialize session state for navigation if not exists
-            if "selected_nav_index" not in st.session_state:
-                st.session_state.selected_nav_index = 0
-            
-            # Create clickable buttons for each nav item
-            for i, option in enumerate(nav_options):
-                if st.button(option, key=f"nav_btn_{i}", use_container_width=True):
-                    st.session_state.selected_nav_index = i
-                    st.rerun()
-            
-            # Get selected tab from current index
-            selected_nav = nav_options[st.session_state.selected_nav_index]
-            selected_tab = nav_map.get(selected_nav, "Overview")
-            
-            # Account Security Section
+            # Account Security Section  
             st.markdown("---")
             st.markdown("### 🔐 Account")
-            if st.button("🔑 Change Password", key="nav_change_pass", use_container_width=True):
-                selected_tab = "Change Password"
-            if st.button("🚪 Logout", key="nav_logout", use_container_width=True):
-                selected_tab = "Logout"
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("🔑 Password", key="nav_change_pass"):
+                    selected_tab = "Change Password"
+            with col2:
+                if st.button("🚪 Logout", key="nav_logout"):
+                    selected_tab = "Logout"
 
         # Footer Info
         st.markdown("---")
