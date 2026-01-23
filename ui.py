@@ -5,6 +5,15 @@ import uuid
 import html
 import warnings
 
+# ====== STARTUP TIMING DIAGNOSTICS ======
+_startup_time = time.time()
+def _log_startup(msg: str):
+    """Log startup timing for performance diagnostics."""
+    elapsed = time.time() - _startup_time
+    print(f"[{time.strftime('%H:%M:%S')}] [{elapsed:.2f}s] {msg}")
+
+_log_startup("Starting imports...")
+
 # Suppress Pandas/SQLAlchemy warnings
 warnings.filterwarnings('ignore', category=UserWarning, module='pandas')
 
@@ -13,6 +22,8 @@ try:
     from datetime import date, datetime, timedelta # Added for peer analysis
 except ImportError:
     pass
+
+_log_startup("pandas imported")
 
 import bcrypt
 
@@ -38,6 +49,8 @@ import numpy as np
 import io
 import sys
 import streamlit as st
+
+_log_startup("streamlit imported")
 
 # ✅ PROFESSIONAL: Python version check (checks actual version, not path)
 REQUIRED = (3, 11)
@@ -182,6 +195,7 @@ except Exception as e:
     YFINANCE_ERROR = str(e)
     yf = None
 
+_log_startup("yfinance import complete")
 
 def session_tv(timeout=20):
     """Create a TradingView session with proper browser-like headers and cookie warm-up."""
@@ -366,45 +380,12 @@ from db_layer import (
     IS_PRODUCTION
 )
 
-# Initialize PostgreSQL schema if using Supabase/DigitalOcean PostgreSQL
-if is_postgres():
-    try:
-        init_postgres_schema()
-        print("✅ PostgreSQL schema initialized successfully")
-    except Exception as e:
-        import streamlit as st
-        st.error(f"""
-        ❌ **Database Connection Error**
-        
-        Could not connect to PostgreSQL database: `{e}`
-        
-        **Possible causes:**
-        - DATABASE_URL is not set correctly in DigitalOcean/Heroku config vars
-        - DATABASE_URL is empty or malformed
-        - Database server is not accessible
-        - psycopg2 driver not installed
-        
-        **To fix:**
-        1. Verify DATABASE_URL is set in your app's environment variables
-        2. Check the database is running and accessible
-        3. Ensure the connection string includes `?sslmode=require`
-        """)
-        st.stop()
-else:
-    if IS_PRODUCTION:
-        import streamlit as st
-        st.error("""
-        ❌ **CRITICAL: No PostgreSQL database in production!**
-        
-        Your app is running in a cloud environment but is using SQLite.
-        **All data will be LOST on each deployment!**
-        
-        To fix: Add DATABASE_URL to your app's environment variables.
-        """)
-        st.stop()
-    else:
-        print("📁 SQLite database ready (local development)")
+# NOTE: Database initialization is now DEFERRED to main() for fast startup
+# The init_postgres_schema() call was moved to avoid blocking module import
+_log_startup("db_layer imported (connection deferred)")
 
+
+_log_startup("Function definitions starting")
 
 def get_db_info():
     """Get current database type and status for display."""
@@ -13736,13 +13717,58 @@ def ui_user_profile_sidebar():
 
 
 def main():
+    _log_startup("main() started - About to render UI")
+    
     # Inject Google Analytics (runs once per session)
     if 'ga_injected' not in st.session_state:
         inject_google_analytics()
         st.session_state['ga_injected'] = True
     
-    # Performance Optimization: Only run DB initialization once per user session
+    # =============================
+    # DEFERRED DATABASE INITIALIZATION
+    # =============================
+    # This was moved from module-level to here for fast startup
+    # Only runs once per user session
     if "db_initialized" not in st.session_state:
+        _log_startup("Initializing database (first run)...")
+        
+        # Check for PostgreSQL and show errors if needed
+        if is_postgres():
+            try:
+                init_postgres_schema()
+                print("✅ PostgreSQL schema initialized successfully")
+            except Exception as e:
+                st.error(f"""
+                ❌ **Database Connection Error**
+                
+                Could not connect to PostgreSQL database: `{e}`
+                
+                **Possible causes:**
+                - DATABASE_URL is not set correctly in DigitalOcean/Heroku config vars
+                - DATABASE_URL is empty or malformed
+                - Database server is not accessible
+                - psycopg2 driver not installed
+                
+                **To fix:**
+                1. Verify DATABASE_URL is set in your app's environment variables
+                2. Check the database is running and accessible
+                3. Ensure the connection string includes `?sslmode=require`
+                """)
+                st.stop()
+        else:
+            if IS_PRODUCTION:
+                st.error("""
+                ❌ **CRITICAL: No PostgreSQL database in production!**
+                
+                Your app is running in a cloud environment but is using SQLite.
+                **All data will be LOST on each deployment!**
+                
+                To fix: Add DATABASE_URL to your app's environment variables.
+                """)
+                st.stop()
+            else:
+                print("📁 SQLite database ready (local development)")
+        
         # Initialize database schemas (PostgreSQL only - prevents InvalidSchemaName errors)
         try:
             from db_layer import init_db_schemas
@@ -13754,6 +13780,7 @@ def main():
         try:
             init_db()
             st.session_state.db_initialized = True
+            _log_startup("Database initialized successfully")
         except Exception as e:
             st.error(f"Database Initialization Error: {e}")
             print(f"DB Init Error: {e}")
@@ -14083,6 +14110,8 @@ def main():
         # Default fallback
         ui_overview()
 
+
+_log_startup("All imports and definitions complete - ready to serve")
 
 if __name__ == "__main__":
     main()
