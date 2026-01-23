@@ -7097,9 +7097,10 @@ def ui_portfolio_tracker():
                     prev_accumulated = float(val)
 
             # 2. Get ONLY new deposits made AFTER the previous snapshot up to TODAY
-            new_deposits_query = query_df(
+            # NOTE: Must handle currency conversion (USD deposits need to be converted to KWD)
+            new_deposits_df = query_df(
                 """
-                SELECT SUM(amount) as total 
+                SELECT amount, currency 
                 FROM cash_deposits 
                 WHERE user_id = ? 
                 AND deposit_date > ? 
@@ -7109,7 +7110,12 @@ def ui_portfolio_tracker():
                 (user_id, prev_date_str, today_str)
             )
             
-            new_cash_in = new_deposits_query.iloc[0]['total'] if not new_deposits_query.empty and pd.notna(new_deposits_query.iloc[0]['total']) else 0.0
+            new_cash_in = 0.0
+            if not new_deposits_df.empty:
+                for _, dep_row in new_deposits_df.iterrows():
+                    dep_amount = float(dep_row["amount"]) if pd.notna(dep_row["amount"]) else 0.0
+                    dep_currency = dep_row.get("currency", "KWD") or "KWD"
+                    new_cash_in += convert_to_kwd(dep_amount, dep_currency)
             
             # 3. Final Total = Previous + New
             accumulated_cash = prev_accumulated + new_cash_in
