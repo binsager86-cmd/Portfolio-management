@@ -2429,9 +2429,9 @@ def render_portfolio_table(title: str, df: pd.DataFrame, fx_usdkwd: Optional[flo
     st.dataframe(
         view_df.style
         .format(format_dict)
-        .applymap(color_positive_negative, subset=["Appreciation income", "Current Profit / Loss", "%"])
+        .map(color_positive_negative, subset=["Appreciation income", "Current Profit / Loss", "%"])
         .apply(lambda x: ['font-weight: bold; background-color: rgba(128,128,128,0.1); border-top: 2px solid gray' if x.name == len(view_df)-1 else '' for i in x], axis=1), # Style Total Row
-        use_container_width=True,
+        width="stretch",
         height=(len(view_df) + 1) * 35 + 3
     )
     
@@ -2612,13 +2612,13 @@ def ui_cash_deposits():
                 else:
                     # Show preview
                     st.markdown("#### 📋 Preview (first 10 rows)")
-                    st.dataframe(df.head(10), use_container_width=True)
+                    st.dataframe(df.head(10), width="stretch")
                     st.info(f"📊 Found **{len(df):,}** deposits to import")
                     
                     # Import button
                     col_btn1, col_btn2 = st.columns([1, 3])
                     with col_btn1:
-                        if st.button("✅ Import All Deposits", type="primary", use_container_width=True):
+                        if st.button("✅ Import All Deposits", type="primary", width="stretch"):
                             # Process the upload
                             success_count = 0
                             error_count = 0
@@ -2875,17 +2875,17 @@ def ui_cash_deposits():
     
     if not st.session_state.get("confirm_delete_all"):
         with col2:
-            if st.button("🗑️ Delete All Deposits", type="secondary", use_container_width=True, key="delete_all_btn"):
+            if st.button("🗑️ Delete All Deposits", type="secondary", width="stretch", key="delete_all_btn"):
                 st.session_state.confirm_delete_all = True
                 st.rerun()
     else:
         with col2:
-            if st.button("❌ Cancel", type="secondary", use_container_width=True, key="cancel_delete_btn"):
+            if st.button("❌ Cancel", type="secondary", width="stretch", key="cancel_delete_btn"):
                 st.session_state.confirm_delete_all = False
                 st.rerun()
         
         with col3:
-            if st.button("✅ Confirm Delete All", type="primary", use_container_width=True, key="confirm_delete_btn"):
+            if st.button("✅ Confirm Delete All", type="primary", width="stretch", key="confirm_delete_btn"):
                 # Hard delete all deposits for current user only
                 conn = get_conn()
                 cur = conn.cursor()
@@ -3228,7 +3228,7 @@ def ui_transactions():
             data=sample_data,
             file_name="transactions_sample_template.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True
+            width="stretch"
         )
     
     # --- Import / Export All Transactions Option ---
@@ -3272,7 +3272,7 @@ def ui_transactions():
                     data=buffer.getvalue(),
                     file_name=f"portfolio_backup_{date.today().strftime('%Y-%m-%d')}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True
+                    width="stretch"
                 )
             else:
                 st.info("No transactions found to export.")
@@ -3299,7 +3299,7 @@ def ui_transactions():
                 else:
                     confirm_delete = True  # No confirmation needed for merge
                 
-                if st.button("⚡ Restore / Import Data", type="primary", use_container_width=True, disabled=(import_mode == "🗑️ Delete All & Replace" and not confirm_delete)):
+                if st.button("⚡ Restore / Import Data", type="primary", width="stretch", disabled=(import_mode == "🗑️ Delete All & Replace" and not confirm_delete)):
                     try:
                         restore_df = pd.read_excel(restore_file)
                         
@@ -3778,7 +3778,7 @@ def ui_transactions():
                     df.columns = [_norm_col(c) for c in df.columns]
                     
                     st.write(f"Preview ({len(df):,} rows):")
-                    st.dataframe(df.head(20), use_container_width=True)
+                    st.dataframe(df.head(20), width="stretch")
                     
                     if st.button("Import These Transactions", type="primary", key=f"import_btn_{selected_symbol}"):
                         # Process each row and assign to selected_symbol
@@ -4758,7 +4758,7 @@ def ui_financial_planner():
         st.markdown("<br>", unsafe_allow_html=True)
         
         # Calculate Button (form submit)
-        calculate_btn = st.form_submit_button("🧮 Calculate Financial Future", use_container_width=True)
+        calculate_btn = st.form_submit_button("🧮 Calculate Financial Future", width="stretch")
     
     # Validation
     if calculate_btn:
@@ -4985,7 +4985,7 @@ def ui_financial_planner():
             for col in ["Payment Added", "Principal (Cash Invested)", "Interest Earned", "Cumulative Interest", "Total Balance"]:
                 df_formatted[col] = df_formatted[col].apply(lambda x: f"${x:,.2f}")
             
-            st.dataframe(df_formatted, use_container_width=True, hide_index=True)
+            st.dataframe(df_formatted, width="stretch", hide_index=True)
             
             st.markdown("<br>", unsafe_allow_html=True)
             
@@ -5028,7 +5028,7 @@ def ui_financial_planner():
                 titleFontSize=14
             )
             
-            st.altair_chart(chart, use_container_width=True)
+            st.altair_chart(chart, width="stretch")
             
             # Interest vs Principal breakdown
             st.markdown("""
@@ -5119,7 +5119,7 @@ def ui_financial_planner():
                 data=excel_buffer,
                 file_name=f"financial_plan_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True
+                width="stretch"
             )
         
         # PDF Export
@@ -5324,7 +5324,7 @@ def ui_financial_planner():
                     data=pdf_data,
                     file_name=f"financial_plan_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
                     mime="application/pdf",
-                    use_container_width=True
+                    width="stretch"
                 )
             except ImportError:
                 st.warning("⚠️ PDF export requires reportlab. Install with: pip install reportlab")
@@ -5335,7 +5335,7 @@ def ui_financial_planner():
         st.markdown("<br>", unsafe_allow_html=True)
         col_btn1, col_btn2, col_btn3 = st.columns([1, 2, 1])
         with col_btn2:
-            if st.button("🔄 Clear & Start Over", use_container_width=True):
+            if st.button("🔄 Clear & Start Over", width="stretch"):
                 st.session_state.planner_calculated = False
                 st.session_state.planner_data = None
                 st.rerun()
@@ -5666,7 +5666,7 @@ def ui_backup_restore():
                 file_name=filename,
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 type="primary",
-                use_container_width=True
+                width="stretch"
             )
             
             st.info("💡 **Tip:** Store this file safely. You can restore from it anytime using the 'Restore from Backup' tab.")
@@ -5685,7 +5685,7 @@ def ui_backup_restore():
                         data=fp.read(),
                         file_name=f"portfolio_backup_{db_timestamp}.db",
                         mime="application/x-sqlite3",
-                        use_container_width=True
+                        width="stretch"
                     )
                 st.caption("⚠️ **Note:** This is your complete database. Handle with care - it contains all user data.")
             except FileNotFoundError:
@@ -5786,7 +5786,7 @@ def ui_backup_restore():
                 # Restore button with confirmation
                 col1, col2 = st.columns(2)
                 with col1:
-                    if st.button("🔄 Confirm & Restore", type="primary", use_container_width=True):
+                    if st.button("🔄 Confirm & Restore", type="primary", width="stretch"):
                         
                         # IMPORTANT: Reset file pointer for reading sheets again
                         uploaded_file.seek(0)
@@ -6468,7 +6468,7 @@ def ui_portfolio_analysis():
     
     with col3:
         st.write("")  # Spacing for alignment
-        if st.button("🔄 Fetch All Prices", key="fetch_all_portfolio", use_container_width=True):
+        if st.button("🔄 Fetch All Prices", key="fetch_all_portfolio", width="stretch"):
             user_id = st.session_state.get('user_id')
             if not user_id:
                 st.error("Please log in.")
@@ -6632,7 +6632,7 @@ def ui_portfolio_analysis():
                 )
             },
             hide_index=True,
-            use_container_width=True,
+            width="stretch",
             key="cash_editor_widget"
         )
         
@@ -6891,14 +6891,14 @@ def ui_portfolio_analysis():
                 # Display chart and legend
                 c_left, c_right = st.columns([2, 1])
                 with c_left:
-                    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+                    st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
                 with c_right:
                     legend_df = chart_df.copy()
                     legend_df["Weight (%)"] = (legend_df["weight"] * 100).round(1).astype(str) + "%"
                     st.markdown("**Allocation Breakdown**")
                     st.dataframe(
                         legend_df[["Company", "Weight (%)"]],
-                        use_container_width=True,
+                        width="stretch",
                         hide_index=True,
                         column_config={
                             "Company": st.column_config.TextColumn("Company", width="medium"),
@@ -6982,10 +6982,10 @@ def ui_portfolio_tracker():
     col_save, col_delete = st.columns([3, 1])
     
     with col_save:
-        save_snapshot_btn = st.button("💾 Save Today's Snapshot (Live Data)", type="primary", use_container_width=True)
+        save_snapshot_btn = st.button("💾 Save Today's Snapshot (Live Data)", type="primary", width="stretch")
     
     with col_delete:
-        if st.button("🗑️ Delete All", use_container_width=True):
+        if st.button("🗑️ Delete All", width="stretch"):
             st.session_state.confirm_delete_snapshots = True
     
     # Confirmation dialog
@@ -6993,7 +6993,7 @@ def ui_portfolio_tracker():
         st.error("⚠️ **WARNING: This will PERMANENTLY delete ALL your portfolio tracker data!**")
         col_yes, col_no = st.columns(2)
         with col_yes:
-            if st.button("✅ Yes, Delete All", type="primary", use_container_width=True):
+            if st.button("✅ Yes, Delete All", type="primary", width="stretch"):
                 try:
                     conn = get_conn()
                     cur = conn.cursor()
@@ -7016,7 +7016,7 @@ def ui_portfolio_tracker():
                 except Exception as e:
                     st.error(f"Error: {e}")
         with col_no:
-            if st.button("❌ Cancel", use_container_width=True):
+            if st.button("❌ Cancel", width="stretch"):
                 st.session_state.confirm_delete_snapshots = False
                 st.rerun()
     
@@ -7622,7 +7622,7 @@ def ui_portfolio_tracker():
             yaxis=dict(showgrid=True, gridcolor=theme['grid'], gridwidth=1, showline=False, tickfont=dict(color=theme['tick_text'], size=12), tickformat=",.0f"),
             hoverlabel=dict(bgcolor=theme['tooltip_bg'], bordercolor=theme['tooltip_border'], font=dict(color=theme['tooltip_text'], family="Inter, sans-serif"))
         )
-        st.plotly_chart(fig_rev, use_container_width=True, config={'displayModeBar': False})
+        st.plotly_chart(fig_rev, width="stretch", config={'displayModeBar': False})
         st.markdown('</div>', unsafe_allow_html=True)
 
 
@@ -7667,7 +7667,7 @@ def ui_portfolio_tracker():
             yaxis=dict(showgrid=True, gridcolor=theme['grid'], gridwidth=1, showline=False, tickfont=dict(color=theme['tick_text'], size=12), tickformat=",.0f"),
             hoverlabel=dict(bgcolor=theme['tooltip_bg'], bordercolor=theme['prof_line'], font=dict(color=theme['prof_line'], family="Inter, sans-serif"))
         )
-        st.plotly_chart(fig_prof, use_container_width=True, config={'displayModeBar': False})
+        st.plotly_chart(fig_prof, width="stretch", config={'displayModeBar': False})
         st.markdown('</div>', unsafe_allow_html=True)
 
         # 6. Stats Summary Cards (New)
@@ -7741,7 +7741,7 @@ def ui_portfolio_tracker():
     edited_data = st.data_editor(
         edit_df,
         column_config=cols_config,
-        use_container_width=True,
+        width="stretch",
         num_rows="dynamic", # Allow adding/deleting rows
         key="snapshot_editor",
         hide_index=True,
@@ -7924,7 +7924,7 @@ def ui_dividends_tracker():
                 
                 col_del1, col_del2 = st.columns([1, 3])
                 with col_del1:
-                    if st.button("🗑️ Delete Permanently", type="primary", use_container_width=True):
+                    if st.button("🗑️ Delete Permanently", type="primary", width="stretch"):
                         if selected_delete:
                             try:
                                 record_id = selected_delete[0]
@@ -7980,7 +7980,7 @@ def ui_dividends_tracker():
         display_df['Bonus Shares'] = display_df['Bonus Shares'].apply(lambda x: f"{x:,.0f}" if x > 0 else "-")
         display_df['Reinvested (KWD)'] = display_df['Reinvested (KWD)'].apply(lambda x: fmt_money_plain(x, 3) if x > 0 else "-")
         
-        st.dataframe(display_df, use_container_width=True, hide_index=True)
+        st.dataframe(display_df, width="stretch", hide_index=True)
         
         # Download button
         csv = display_df.to_csv(index=False)
@@ -8032,7 +8032,7 @@ def ui_dividends_tracker():
         
         st.dataframe(
             summary_display,
-            use_container_width=True,
+            width="stretch",
             hide_index=True
         )
         
@@ -8062,7 +8062,7 @@ def ui_dividends_tracker():
             
             bonus_display['Bonus Shares Received'] = bonus_display['Bonus Shares Received'].apply(lambda x: f"{x:,.0f}")
             
-            st.dataframe(bonus_display, use_container_width=True, hide_index=True)
+            st.dataframe(bonus_display, width="stretch", hide_index=True)
             
             # Summary by stock
             st.subheader("Total Bonus Shares by Stock")
@@ -8070,7 +8070,7 @@ def ui_dividends_tracker():
             bonus_summary.columns = ['Stock', 'Total Bonus Shares']
             bonus_summary['Total Bonus Shares'] = bonus_summary['Total Bonus Shares'].apply(lambda x: f"{x:,.0f}")
             
-            st.dataframe(bonus_summary, use_container_width=True, hide_index=True)
+            st.dataframe(bonus_summary, width="stretch", hide_index=True)
             
             # Download button
             csv = bonus_display.to_csv(index=False)
@@ -8435,7 +8435,7 @@ def ui_trading_section():
                         return ['' for _ in df.columns]
                     
                     styled_df = df.style.apply(highlight_errors, axis=1)
-                    st.dataframe(styled_df, use_container_width=True, height=400)
+                    st.dataframe(styled_df, width="stretch", height=400)
                     
                     st.divider()
                     
@@ -8474,7 +8474,7 @@ def ui_trading_section():
                 else:
                     st.success(f"✅ Validation passed! All {len(df)} rows are valid.")
                     st.write(f"**Preview** ({len(df):,} rows from sheet '{sheet}'):")
-                    st.dataframe(df, use_container_width=True, height=300)
+                    st.dataframe(df, width="stretch", height=300)
                     proceed_with_errors = False  # Initialize for valid data path
                 
                 if st.button("✅ Import Trading Data", key="import_trades") or proceed_with_errors:
@@ -8884,12 +8884,12 @@ def ui_trading_section():
     with col3:
         st.write("")
         st.write("")
-        if st.button("🔍 Filter", use_container_width=True):
+        if st.button("🔍 Filter", width="stretch"):
             st.session_state['apply_date_filter'] = True
     with col4:
         st.write("")
         st.write("")
-        if st.button("🔄 Show All", use_container_width=True):
+        if st.button("🔄 Show All", width="stretch"):
             st.session_state['apply_date_filter'] = False
     
     # Check if we should apply date filter
@@ -9305,7 +9305,7 @@ def ui_trading_section():
             edited_df = st.data_editor(
                 final_df,
                 column_config=column_config,
-                use_container_width=True,
+                width="stretch",
                 hide_index=True,
                 num_rows="dynamic",
                 key="trading_editor_v2"
@@ -9313,7 +9313,7 @@ def ui_trading_section():
     
             st.caption("ℹ️ **Usage:** Click `+` to add rows. Set 'Sale Date' to mark as Sold. Clear it to set as Holding. Select rows and press Delete to remove.")
             st.write("") # Spacer
-            submitted = st.form_submit_button("💾 Save Changes", type="primary", use_container_width=True)
+            submitted = st.form_submit_button("💾 Save Changes", type="primary", width="stretch")
     
         if submitted:
             try:
@@ -10988,7 +10988,7 @@ def ui_overview():
                     key="ov_ai_input"
                 )
                 
-                generate = st.button("🚀 Run Analysis & Generate Report", type="primary", use_container_width=True, key="ov_ai_btn")
+                generate = st.button("🚀 Run Analysis & Generate Report", type="primary", width="stretch", key="ov_ai_btn")
 
             # 3. Generation Logic
             if generate:
@@ -11443,7 +11443,7 @@ def ui_peer_analysis():
         # ----------------------------------------------------
         # FETCH DATA & RENDER TABLES (New Implementation)
         # ----------------------------------------------------
-        if st.button("🚀 Fetch Data & Run Analysis", type="primary", use_container_width=True):
+        if st.button("🚀 Fetch Data & Run Analysis", type="primary", width="stretch"):
             if not YFINANCE_AVAILABLE:
                 st.error("Yahoo Finance library not available.")
                 return
@@ -11603,7 +11603,7 @@ def ui_peer_analysis():
                 
                 # Render with custom styled UI
                 render_styled_table(df_table)
-                # st.dataframe(df_table, use_container_width=True) # Replaced
+                # st.dataframe(df_table, width="stretch") # Replaced
 
     else:
         st.info("Add stocks above to begin comparison.")
@@ -11763,7 +11763,7 @@ def login_page(cookie_manager=None):
             reg_pass = st.text_input("Choose Password", type="password")
             confirm_pass = st.text_input("Confirm Password", type="password")
             
-            submit_reg = st.form_submit_button("Register", use_container_width=True)
+            submit_reg = st.form_submit_button("Register", width="stretch")
             
             if submit_reg:
                 # Normalize email
@@ -11814,7 +11814,7 @@ def login_page(cookie_manager=None):
             password_login = st.text_input("Password", type="password")
             remember_me = st.checkbox("Remember me for 30 days")
             
-            submitted = st.form_submit_button("Login", type="primary", use_container_width=True)
+            submitted = st.form_submit_button("Login", type="primary", width="stretch")
 
         if submitted:
             email_login = email_login_input.strip().lower()
@@ -11886,12 +11886,12 @@ def login_page(cookie_manager=None):
         
         col_act1, col_act2 = st.columns([1, 1])
         with col_act2:
-            if st.button("Forgot Password?", type="secondary", use_container_width=True):
+            if st.button("Forgot Password?", type="secondary", width="stretch"):
                 st.session_state.auth_mode = "forgot_pass"
                 st.rerun()
 
         st.markdown("---")
-        if st.button("Create an Account", type="secondary", use_container_width=True):
+        if st.button("Create an Account", type="secondary", width="stretch"):
             st.session_state.auth_mode = "register"
             st.rerun()
     
@@ -12114,7 +12114,7 @@ def ui_pfm():
                 income_df = st.data_editor(
                     pd.DataFrame(default_income),
                     num_rows="dynamic",
-                    use_container_width=True,
+                    width="stretch",
                     key=f"pfm_inc_{snapshot_date}",
                     column_config={
                         "Category": st.column_config.TextColumn(width="medium"),
@@ -12127,7 +12127,7 @@ def ui_pfm():
                 expense_df = st.data_editor(
                     pd.DataFrame(default_expense),
                     num_rows="dynamic",
-                    use_container_width=True,
+                    width="stretch",
                     key=f"pfm_exp_{snapshot_date}",
                     column_config={
                         "Category": st.column_config.TextColumn(width="medium"),
@@ -12162,7 +12162,7 @@ def ui_pfm():
                 re_df = st.data_editor(
                     pd.DataFrame(default_real_estate),
                     num_rows="dynamic",
-                    use_container_width=True,
+                    width="stretch",
                     key=f"pfm_re_{snapshot_date}",
                     column_config={
                         "Name": st.column_config.TextColumn(width="large"),
@@ -12206,7 +12206,7 @@ def ui_pfm():
                                 total_port += val_kwd
                                 port_data.append({"Ticker": ticker, "Company": name, "Shares": qty, "Price": price, "Value (KWD)": val_kwd})
                             
-                            st.dataframe(pd.DataFrame(port_data), use_container_width=True)
+                            st.dataframe(pd.DataFrame(port_data), width="stretch")
                             st.markdown(f"**Total Portfolio Value:** {total_port:,.2f} KWD")
                             shares_df = pd.DataFrame([{"auto_import": True, "value": total_port}])
                         else:
@@ -12219,7 +12219,7 @@ def ui_pfm():
                     shares_df = st.data_editor(
                         pd.DataFrame(default_shares),
                         num_rows="dynamic",
-                        use_container_width=True,
+                        width="stretch",
                         key=f"pfm_shares_{snapshot_date}",
                         column_config={
                             "Ticker": st.column_config.TextColumn(width="small"),
@@ -12239,7 +12239,7 @@ def ui_pfm():
                 gold_df = st.data_editor(
                     pd.DataFrame(default_gold),
                     num_rows="dynamic",
-                    use_container_width=True,
+                    width="stretch",
                     key=f"pfm_gold_{snapshot_date}",
                     column_config={
                         "Type": st.column_config.SelectboxColumn(options=["Bars", "Coins", "Jewelry", "Other"]),
@@ -12257,7 +12257,7 @@ def ui_pfm():
                 cash_df = st.data_editor(
                     pd.DataFrame(default_cash),
                     num_rows="dynamic",
-                    use_container_width=True,
+                    width="stretch",
                     key=f"pfm_cash_{snapshot_date}",
                     column_config={
                         "Account": st.column_config.TextColumn(width="medium"),
@@ -12280,7 +12280,7 @@ def ui_pfm():
                 crypto_df = st.data_editor(
                     pd.DataFrame(default_crypto),
                     num_rows="dynamic",
-                    use_container_width=True,
+                    width="stretch",
                     key=f"pfm_crypto_{snapshot_date}",
                     column_config={
                         "Coin": st.column_config.TextColumn(width="small"),
@@ -12298,7 +12298,7 @@ def ui_pfm():
                 liab_df = st.data_editor(
                     pd.DataFrame(default_liabilities),
                     num_rows="dynamic",
-                    use_container_width=True,
+                    width="stretch",
                     key=f"pfm_liab_{snapshot_date}",
                     column_config={
                         "Category": st.column_config.TextColumn(width="medium"),
@@ -12312,7 +12312,7 @@ def ui_pfm():
             st.divider()
             
             # Submit button
-            submitted = st.form_submit_button("💾 Save Financial Snapshot", type="primary", use_container_width=True)
+            submitted = st.form_submit_button("💾 Save Financial Snapshot", type="primary", width="stretch")
 
         # ═══════════════════════════════════════════════════════════════════
         # HANDLE FORM SUBMISSION (Outside the form)
@@ -13040,18 +13040,18 @@ def render_embedded_ai(context_data=None, role_desc="Senior Investment Analyst",
         st.markdown("**Quick Analysis Options:**")
         col1, col2 = st.columns(2)
         with col1:
-            if st.button("📈 Portfolio Analysis", key=f"{key_prefix}_quick_portfolio", use_container_width=True):
+            if st.button("📈 Portfolio Analysis", key=f"{key_prefix}_quick_portfolio", width="stretch"):
                 st.session_state[f"{key_prefix}_query"] = "Provide a comprehensive portfolio analysis with Buy/Hold/Sell recommendations for each stock."
         with col2:
-            if st.button("⚠️ Risk Assessment", key=f"{key_prefix}_quick_risk", use_container_width=True):
+            if st.button("⚠️ Risk Assessment", key=f"{key_prefix}_quick_risk", width="stretch"):
                 st.session_state[f"{key_prefix}_query"] = "Analyze the risk level of my portfolio and suggest risk reduction strategies."
         
         col3, col4 = st.columns(2)
         with col3:
-            if st.button("💰 Dividend Analysis", key=f"{key_prefix}_quick_div", use_container_width=True):
+            if st.button("💰 Dividend Analysis", key=f"{key_prefix}_quick_div", width="stretch"):
                 st.session_state[f"{key_prefix}_query"] = "Analyze my dividend income and recommend stocks for better dividend yield."
         with col4:
-            if st.button("🎯 Investment Strategy", key=f"{key_prefix}_quick_strategy", use_container_width=True):
+            if st.button("🎯 Investment Strategy", key=f"{key_prefix}_quick_strategy", width="stretch"):
                 st.session_state[f"{key_prefix}_query"] = "Based on my portfolio, suggest an optimal investment strategy with specific actions."
         
         custom_query = st.text_area(
@@ -13062,7 +13062,7 @@ def render_embedded_ai(context_data=None, role_desc="Senior Investment Analyst",
             key=f"{key_prefix}_query_input"
         )
         
-        run_btn = st.button("🚀 Generate Detailed Report", type="primary", use_container_width=True, key=f"{key_prefix}_run")
+        run_btn = st.button("🚀 Generate Detailed Report", type="primary", width="stretch", key=f"{key_prefix}_run")
         
         # 4. Execution
         if run_btn:
@@ -13645,7 +13645,7 @@ def ui_user_profile_sidebar():
 
         if st.session_state.pass_reset_stage == "request":
             st.caption(f"Update password for: {user_email}")
-            if st.button("📧 Send OTP to Change Password", use_container_width=True, key="send_pass_otp"):
+            if st.button("📧 Send OTP to Change Password", width="stretch", key="send_pass_otp"):
                 # 1. Fetch real email if username is not email
                 conn = get_conn()
                 cur = conn.cursor()
@@ -13686,7 +13686,7 @@ def ui_user_profile_sidebar():
                 new_pass = st.text_input("New Password", type="password")
                 confirm_pass = st.text_input("Confirm New Password", type="password")
                 
-                btn_change = st.form_submit_button("Update Password", type="primary", use_container_width=True)
+                btn_change = st.form_submit_button("Update Password", type="primary", width="stretch")
                 
                 if btn_change:
                     if new_pass != confirm_pass:
