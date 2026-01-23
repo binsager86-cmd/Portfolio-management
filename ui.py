@@ -2382,11 +2382,11 @@ def ui_cash_deposits():
     # Clean up any deposits from year 1970 (likely corrupt data)
     try:
         corrupt_deposits = query_df(
-            "SELECT COUNT(*) as count FROM cash_deposits WHERE deposit_date LIKE '1970%' AND user_id=?", (user_id,)
+            "SELECT COUNT(*) as count FROM cash_deposits WHERE deposit_date LIKE '1970%%' AND user_id=?", (user_id,)
         )
         if not corrupt_deposits.empty and corrupt_deposits["count"].iloc[0] > 0:
             count = corrupt_deposits["count"].iloc[0]
-            exec_sql("DELETE FROM cash_deposits WHERE deposit_date LIKE '1970%' AND user_id=?", (user_id,))
+            exec_sql("DELETE FROM cash_deposits WHERE deposit_date LIKE '1970%%' AND user_id=?", (user_id,))
             st.success(f"🧹 Cleaned up {count:,} corrupt deposit(s) from year 1970")
     except:
         pass  # Silently continue if cleanup fails
@@ -9415,18 +9415,30 @@ _cbk_rate_cache = {
 
 def _init_cbk_rate_table():
     """Initialize the CBK rate cache table in the database."""
+    from db_layer import is_postgres
     conn = get_conn()
     cur = conn.cursor()
     try:
-        db_execute(cur, """
-            CREATE TABLE IF NOT EXISTS cbk_rate_cache (
-                id INTEGER PRIMARY KEY,
-                rate REAL NOT NULL,
-                fetched_date TEXT NOT NULL,
-                source TEXT NOT NULL,
-                created_at INTEGER DEFAULT (strftime('%s', 'now'))
-            )
-        """)
+        if is_postgres():
+            db_execute(cur, """
+                CREATE TABLE IF NOT EXISTS cbk_rate_cache (
+                    id SERIAL PRIMARY KEY,
+                    rate DOUBLE PRECISION NOT NULL,
+                    fetched_date TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    created_at INTEGER DEFAULT EXTRACT(EPOCH FROM NOW())::INTEGER
+                )
+            """)
+        else:
+            db_execute(cur, """
+                CREATE TABLE IF NOT EXISTS cbk_rate_cache (
+                    id INTEGER PRIMARY KEY,
+                    rate REAL NOT NULL,
+                    fetched_date TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    created_at INTEGER DEFAULT (strftime('%s', 'now'))
+                )
+            """)
         conn.commit()
     except Exception as e:
         print(f"Error creating cbk_rate_cache table: {e}")

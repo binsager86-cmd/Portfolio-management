@@ -692,6 +692,17 @@ def init_postgres_schema():
             )
         """)
         
+        # CBK rate cache (for caching Central Bank of Kuwait discount rate)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS cbk_rate_cache (
+                id SERIAL PRIMARY KEY,
+                rate DOUBLE PRECISION NOT NULL,
+                fetched_date TEXT NOT NULL,
+                source TEXT NOT NULL,
+                created_at INTEGER DEFAULT EXTRACT(EPOCH FROM NOW())::INTEGER
+            )
+        """)
+        
         # Handle column migrations for existing tables
         # Add 'name' column to stocks if it doesn't exist (for old schemas with company_name)
         try:
