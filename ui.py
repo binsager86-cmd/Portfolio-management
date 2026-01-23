@@ -427,15 +427,71 @@ def get_db_info():
 
 
 # --- DATABASE PERFORMANCE OPTIMIZATION ---
-@st.cache_resource(ttl=3600, show_spinner=False)
+# Store connection in a mutable container so we can replace it if it becomes stale
+_connection_container = {"conn": None}
+
+class PersistentConnectionWrapper:
+    """
+    Wrapper that prevents accidental closing of the shared connection.
+    Calls to close() are ignored to keep the connection alive across reruns.
+    """
+    def __init__(self, real_conn):
+        self._conn = real_conn
+    
+    def cursor(self):
+        return self._conn.cursor()
+    
+    def commit(self):
+        return self._conn.commit()
+    
+    def rollback(self):
+        return self._conn.rollback()
+    
+    def close(self):
+        # NO-OP: Don't actually close the persistent connection
+        # This prevents "connection already closed" errors when code calls conn.close()
+        pass
+    
+    def _real_close(self):
+        """Only for internal use when we need to actually close and reconnect."""
+        return self._conn.close()
+    
+    def __getattr__(self, name):
+        # Proxy all other attributes to the real connection
+        return getattr(self._conn, name)
+
 def get_db_connection_pool():
     """
     Creates a PERSISTENT database connection that stays open across reruns.
     This eliminates the 300ms-1s SSL handshake latency on every click.
-    Uses st.cache_resource to keep the connection alive globally.
+    Validates the connection before returning and reconnects if stale.
     """
     from db_layer import get_conn as _db_get_conn
-    return _db_get_conn()
+    
+    wrapper = _connection_container.get("conn")
+    
+    # Validate existing connection
+    if wrapper is not None:
+        try:
+            # Test if connection is still alive
+            cur = wrapper.cursor()
+            cur.execute("SELECT 1")
+            cur.fetchone()
+            cur.close()
+            return wrapper
+        except Exception:
+            # Connection is stale, close it and create a new one
+            try:
+                wrapper._real_close()
+            except Exception:
+                pass
+            _connection_container["conn"] = None
+    
+    # Create new connection and wrap it
+    new_conn = _db_get_conn()
+    wrapper = PersistentConnectionWrapper(new_conn)
+    _connection_container["conn"] = wrapper
+    return wrapper
 
 def get_cached_connection():
     """Wrapper to use the cached connection pool."""
@@ -13892,84 +13948,99 @@ def main():
             st.session_state.clear()
             st.rerun()
 
-    # Show price fetching status
-    if not YFINANCE_AVAILABLE:
-        st.error(f"""
-        ❌ **Price Fetching Error**: yfinance library failed to load ({YFINANCE_ERROR}).
-        
-        **To fix (recommended):**
-        1. Create a virtual environment:
-           ```
-           cd C:\\Users\\Sager\\OneDrive\\Desktop\\portfolio_app
-           py -3.11 -m venv .venv
-           .\\.venv\\Scripts\\activate
-           pip install streamlit yfinance pandas openpyxl requests
-           streamlit run ui.py
-           ```
-        
-        **Or run the setup script:** `setup_venv.bat`
-        
-        Currently using TradingView symbol mapping only (manual price entry required).
-        """)
-    elif not requests:
-        st.warning("⚠️ **Price Fetching Disabled**: Please install requests: `pip install requests`")
-    else:
-        # Show success - yfinance is working
-        st.success("""
-        ✅ **Price Fetching Enabled**: Live prices from Yahoo Finance.
-        
-        Click "🔄 Fetch All Prices" in Portfolio Analysis to update stock prices.
-        """)
+    # Show price fetching status (collapsed to reduce visual noise)
+    with st.expander("ℹ️ Price Fetching Status", expanded=False):
+        if not YFINANCE_AVAILABLE:
+            st.error(f"""
+            ❌ **Price Fetching Error**: yfinance library failed to load ({YFINANCE_ERROR}).
+            
+            **To fix (recommended):**
+            1. Create a virtual environment:
+               ```
+               cd C:\\Users\\Sager\\OneDrive\\Desktop\\portfolio_app
+               py -3.11 -m venv .venv
+               .\\.venv\\Scripts\\activate
+               pip install streamlit yfinance pandas openpyxl requests
+               streamlit run ui.py
+               ```
+            
+            **Or run the setup script:** `setup_venv.bat`
+            
+            Currently using TradingView symbol mapping only (manual price entry required).
+            """)
+        elif not requests:
+            st.warning("⚠️ **Price Fetching Disabled**: Please install requests: `pip install requests`")
+        else:
+            st.success("✅ **Price Fetching Enabled**: Live prices from Yahoo Finance.")
 
-    tab_names = [
-        "Overview",
-        "Add Cash Deposit",
-        "Add Transactions",
-        "Portfolio Analysis",
-        "Peer Analysis",
-        "Trading Section",
-        "Portfolio Tracker",
-        "Dividends Tracker",
-        "Planner",
-        "Backup & Restore",
-        "Personal Finance"
-    ]
+    # --- PAGE NAVIGATION (Persists across st.rerun()) ---
+    page_options = {
+        "📊 Overview": "overview",
+        "💵 Add Cash Deposit": "cash_deposit",
+        "📝 Add Transactions": "transactions",
+        "📈 Portfolio Analysis": "portfolio_analysis",
+        "👥 Peer Analysis": "peer_analysis",
+        "📉 Trading Section": "trading",
+        "🎯 Portfolio Tracker": "portfolio_tracker",
+        "💰 Dividends Tracker": "dividends",
+        "📅 Planner": "planner",
+        "💾 Backup & Restore": "backup",
+        "🏦 Personal Finance": "pfm"
+    }
     
-    # Create tabs (compatible with all Streamlit versions)
-    tabs = st.tabs(tab_names)
+    # Initialize current page in session state
+    if "current_page" not in st.session_state:
+        st.session_state.current_page = "overview"
+    
+    # Sidebar navigation
+    with st.sidebar:
+        st.subheader("📍 Navigation")
+        
+        # Find current index for default selection
+        page_keys = list(page_options.keys())
+        page_values = list(page_options.values())
+        current_idx = page_values.index(st.session_state.current_page) if st.session_state.current_page in page_values else 0
+        
+        selected_page_label = st.radio(
+            "Go to:",
+            options=page_keys,
+            index=current_idx,
+            key="nav_radio",
+            label_visibility="collapsed"
+        )
+        
+        # Update session state when user changes page
+        st.session_state.current_page = page_options[selected_page_label]
+        
+        st.divider()
 
-    with tabs[0]:
+    # --- RENDER SELECTED PAGE ---
+    current = st.session_state.current_page
+    
+    if current == "overview":
         ui_overview()
-
-    with tabs[1]:
+    elif current == "cash_deposit":
         ui_cash_deposits()
-
-    with tabs[2]:
+    elif current == "transactions":
         ui_transactions()
-
-    with tabs[3]:
+    elif current == "portfolio_analysis":
         ui_portfolio_analysis()
-
-    with tabs[4]:
+    elif current == "peer_analysis":
         ui_peer_analysis()
-
-    with tabs[5]:
+    elif current == "trading":
         ui_trading_section()
-
-    with tabs[6]:
+    elif current == "portfolio_tracker":
         ui_portfolio_tracker()
-
-    with tabs[7]:
+    elif current == "dividends":
         ui_dividends_tracker()
-    
-    with tabs[8]:
+    elif current == "planner":
         ui_financial_planner()
-        
-    with tabs[9]:
+    elif current == "backup":
         ui_backup_restore()
-
-    with tabs[10]:
+    elif current == "pfm":
         ui_pfm()
+    else:
+        ui_overview()  # Fallback
 
     st.caption(f"{get_db_info()} | UI: Streamlit")
 
