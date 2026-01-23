@@ -13851,15 +13851,6 @@ def main():
     # Load preferences on page load
     load_user_preferences()
 
-    # Sidebar Logout
-    with st.sidebar:
-        st.write(f"👤 **{st.session_state.get('username', 'User')}**")
-        
-        # --- Account Security (Password Change) ---
-        ui_user_profile_sidebar()
-        
-        st.divider()
-
     # --- THEME TOGGLE ---
     if "theme" not in st.session_state:
         st.session_state.theme = "light"  # Default to light
@@ -13868,7 +13859,7 @@ def main():
     if "usd_to_kwd" not in st.session_state:
         st.session_state.usd_to_kwd = DEFAULT_USD_TO_KWD
 
-    # --- GLOBAL STYLING FOR METRIC CARDS ---
+    # --- GLOBAL STYLING FOR METRIC CARDS AND MODERN SIDEBAR ---
     st.markdown("""
     <style>
     /* Equal height and width styling for all metric cards across the app */
@@ -13884,6 +13875,119 @@ def main():
     }
     div[data-testid="metric-container"] > div {
         width: 100%;
+    }
+    
+    /* Modern Sidebar Styling */
+    section[data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+        border-right: 1px solid #e2e8f0;
+    }
+    
+    section[data-testid="stSidebar"] > div {
+        padding-top: 1rem;
+    }
+    
+    /* Navigation Button Styling */
+    .nav-button {
+        display: flex;
+        align-items: center;
+        width: 100%;
+        padding: 12px 16px;
+        margin: 4px 0;
+        border: none;
+        border-radius: 10px;
+        font-size: 14px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        text-align: left;
+        background: transparent;
+        color: #4a5568;
+    }
+    
+    .nav-button:hover {
+        background: #f1f5f9;
+        color: #1e293b;
+    }
+    
+    .nav-button.active {
+        background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+        color: white;
+        box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+    }
+    
+    .nav-button .icon {
+        margin-right: 12px;
+        font-size: 18px;
+    }
+    
+    /* Section Headers */
+    .section-header {
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: #94a3b8;
+        padding: 16px 16px 8px 16px;
+        margin-top: 8px;
+    }
+    
+    /* User Profile Card */
+    .user-profile-card {
+        background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+        border-radius: 12px;
+        padding: 16px;
+        margin: 8px;
+        border: 1px solid #e2e8f0;
+    }
+    
+    .user-email {
+        font-size: 13px;
+        color: #64748b;
+        font-weight: 500;
+    }
+    
+    /* Footer */
+    .sidebar-footer {
+        font-size: 11px;
+        color: #94a3b8;
+        padding: 16px;
+        text-align: center;
+        border-top: 1px solid #e2e8f0;
+        margin-top: auto;
+    }
+    
+    /* Hide default radio button styling */
+    div[data-testid="stRadio"] > label {
+        display: none !important;
+    }
+    
+    /* Custom Radio Button as Navigation */
+    div[data-testid="stRadio"] > div {
+        flex-direction: column;
+        gap: 4px;
+    }
+    
+    div[data-testid="stRadio"] > div > label {
+        background: transparent;
+        border: none;
+        border-radius: 10px;
+        padding: 12px 16px;
+        margin: 2px 0;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        font-weight: 500;
+        color: #4a5568;
+    }
+    
+    div[data-testid="stRadio"] > div > label:hover {
+        background: #f1f5f9;
+    }
+    
+    div[data-testid="stRadio"] > div > label[data-checked="true"] {
+        background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+        color: white;
+        box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
     }
     </style>
     """, unsafe_allow_html=True)
@@ -13973,36 +14077,65 @@ def main():
         else:
             st.success("✅ **Price Fetching Enabled**: Live prices from Yahoo Finance.")
 
-    # --- PAGE NAVIGATION (Persists across st.rerun()) ---
-    page_options = {
-        "📊 Overview": "overview",
-        "💵 Add Cash Deposit": "cash_deposit",
-        "📝 Add Transactions": "transactions",
-        "📈 Portfolio Analysis": "portfolio_analysis",
-        "👥 Peer Analysis": "peer_analysis",
-        "📉 Trading Section": "trading",
-        "🎯 Portfolio Tracker": "portfolio_tracker",
-        "💰 Dividends Tracker": "dividends",
-        "📅 Planner": "planner",
-        "💾 Backup & Restore": "backup",
-        "🏦 Personal Finance": "pfm"
-    }
+    # --- MODERN PAGE NAVIGATION (Persists across st.rerun()) ---
+    # Navigation items with icons matching the React design
+    nav_items = [
+        ("🏠", "Overview", "overview"),
+        ("💳", "Add Cash Deposit", "cash_deposit"),
+        ("💵", "Add Transactions", "transactions"),
+        ("📈", "Portfolio Analysis", "portfolio_analysis"),
+        ("👥", "Peer Analysis", "peer_analysis"),
+        ("📊", "Trading Section", "trading"),
+        ("🎯", "Portfolio Tracker", "portfolio_tracker"),
+        ("📤", "Dividends Tracker", "dividends"),
+        ("📅", "Planner", "planner"),
+        ("💾", "Backup & Restore", "backup"),
+        ("🏦", "Personal Finance", "pfm"),
+    ]
+    
+    # Account security items
+    security_items = [
+        ("🔒", "Account Security", "security"),
+        ("👤", "Profile Settings", "profile"),
+        ("⚙️", "App Settings", "settings"),
+    ]
     
     # Initialize current page in session state
     if "current_page" not in st.session_state:
         st.session_state.current_page = "overview"
     
-    # Sidebar navigation
+    # Build page options dict for navigation
+    page_options = {f"{icon} {label}": value for icon, label, value in nav_items}
+    
+    # Sidebar navigation with modern styling
     with st.sidebar:
-        st.subheader("📍 Navigation")
+        # User Profile Card
+        user_email = st.session_state.get('email', st.session_state.get('username', 'User'))
+        st.markdown(f"""
+        <div class="user-profile-card">
+            <div style="display: flex; align-items: center; gap: 10px;">
+                <div style="width: 36px; height: 36px; background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold;">
+                    {user_email[0].upper() if user_email else 'U'}
+                </div>
+                <div>
+                    <div style="font-size: 14px; font-weight: 600; color: #1e293b;">{st.session_state.get('username', 'User')}</div>
+                    <div class="user-email">{user_email}</div>
+                </div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Navigation Section Header
+        st.markdown('<div class="section-header">📌 Navigation</div>', unsafe_allow_html=True)
         
         # Find current index for default selection
         page_keys = list(page_options.keys())
         page_values = list(page_options.values())
         current_idx = page_values.index(st.session_state.current_page) if st.session_state.current_page in page_values else 0
         
+        # Navigation radio buttons
         selected_page_label = st.radio(
-            "Go to:",
+            "Navigation",
             options=page_keys,
             index=current_idx,
             key="nav_radio",
@@ -14012,7 +14145,20 @@ def main():
         # Update session state when user changes page
         st.session_state.current_page = page_options[selected_page_label]
         
-        st.divider()
+        # Account Security Section
+        st.markdown('<div class="section-header">🔐 Account Security</div>', unsafe_allow_html=True)
+        
+        # Security options as expander
+        with st.expander("🔒 Security Options", expanded=False):
+            ui_user_profile_sidebar()
+        
+        # Footer
+        st.markdown("""
+        <div class="sidebar-footer">
+            © 2026 Portfolio App<br/>
+            <span style="font-size: 10px;">Financial Dashboard v2.0</span>
+        </div>
+        """, unsafe_allow_html=True)
 
     # --- RENDER SELECTED PAGE ---
     current = st.session_state.current_page
