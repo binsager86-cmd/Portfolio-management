@@ -13984,15 +13984,51 @@ def main():
                 ]),
             ], format_func='title', open_all=True)
         else:
-            # Fallback to native Streamlit radio if sac not installed
+            # Fallback to native Streamlit selectbox if sac not installed
+            st.markdown("### 📌 Navigation")
             nav_options = [
-                "Overview", "Add Cash Deposit", "Add Transactions",
-                "Portfolio Analysis", "Peer Analysis", "Trading Section",
-                "Portfolio Tracker", "Dividends Tracker", "Planner",
-                "Backup & Restore", "Personal Finance", "---",
-                "Change Password", "Logout"
+                "🏠 Overview", 
+                "💳 Add Cash Deposit", 
+                "💵 Add Transactions",
+                "📈 Portfolio Analysis", 
+                "👥 Peer Analysis", 
+                "📊 Trading Section",
+                "🎯 Portfolio Tracker", 
+                "📤 Dividends Tracker", 
+                "📅 Planner",
+                "💾 Backup & Restore", 
+                "🏦 Personal Finance",
             ]
-            selected_tab = st.radio("Navigation", nav_options, label_visibility="collapsed")
+            selected_nav = st.radio(
+                "Select Page",
+                nav_options,
+                key="nav_radio_fallback",
+                label_visibility="collapsed"
+            )
+            
+            # Map emoji labels back to clean names for routing
+            nav_map = {
+                "🏠 Overview": "Overview",
+                "💳 Add Cash Deposit": "Add Cash Deposit",
+                "💵 Add Transactions": "Add Transactions",
+                "📈 Portfolio Analysis": "Portfolio Analysis",
+                "👥 Peer Analysis": "Peer Analysis",
+                "📊 Trading Section": "Trading Section",
+                "🎯 Portfolio Tracker": "Portfolio Tracker",
+                "📤 Dividends Tracker": "Dividends Tracker",
+                "📅 Planner": "Planner",
+                "💾 Backup & Restore": "Backup & Restore",
+                "🏦 Personal Finance": "Personal Finance",
+            }
+            selected_tab = nav_map.get(selected_nav, "Overview")
+            
+            # Account Security Section
+            st.markdown("### 🔐 Account")
+            with st.expander("Security Options", expanded=False):
+                if st.button("🔑 Change Password", key="nav_change_pass"):
+                    selected_tab = "Change Password"
+                if st.button("🚪 Logout", key="nav_logout"):
+                    selected_tab = "Logout"
 
         # Footer Info
         st.markdown("---")
