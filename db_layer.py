@@ -268,8 +268,8 @@ def get_connection():
                 if not url or not url.strip():
                     raise ValueError("DATABASE_URL is empty or not configured")
                 
-                # Parse the URL and remove any options parameter, then add our own
-                from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
+                # Parse the URL and remove any 'options' parameter that might cause issues
+                from urllib.parse import urlparse, parse_qs, urlencode, urlunparse, quote
                 parsed = urlparse(url)
                 query_params = parse_qs(parsed.query)
                 
@@ -277,14 +277,16 @@ def get_connection():
                 if 'options' in query_params:
                     del query_params['options']
                 
-                # Add our own options to force public schema
-                query_params['options'] = ['-c search_path=public']
-                
-                # Rebuild URL with our options
+                # Rebuild URL WITHOUT adding options to avoid URL encoding issues
+                # We'll set search_path after connection instead
                 new_query = urlencode(query_params, doseq=True)
                 clean_url = urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, new_query, parsed.fragment))
                 
                 conn = psycopg2.connect(clean_url)
+                # Set search_path after connection to avoid URL encoding issues
+                with conn.cursor() as cur:
+                    cur.execute("SET search_path TO public")
+                conn.commit()
             else:
                 # Connect with explicit options for public schema
                 config_with_options = DB_CONFIG.copy()
@@ -326,8 +328,8 @@ def get_conn():
             if not url or not url.strip():
                 raise ValueError("DATABASE_URL is empty or not configured")
             
-            # Parse the URL and remove any options parameter, then add our own
-            from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
+            # Parse the URL and remove any 'options' parameter that might cause issues
+            from urllib.parse import urlparse, parse_qs, urlencode, urlunparse, quote
             parsed = urlparse(url)
             query_params = parse_qs(parsed.query)
             
@@ -335,14 +337,16 @@ def get_conn():
             if 'options' in query_params:
                 del query_params['options']
             
-            # Add our own options to force public schema
-            query_params['options'] = ['-c search_path=public']
-            
-            # Rebuild URL with our options
+            # Rebuild URL WITHOUT adding options to avoid URL encoding issues
+            # We'll set search_path after connection instead
             new_query = urlencode(query_params, doseq=True)
             clean_url = urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, new_query, parsed.fragment))
             
             conn = psycopg2.connect(clean_url)
+            # Set search_path after connection to avoid URL encoding issues
+            with conn.cursor() as cur:
+                cur.execute("SET search_path TO public")
+            conn.commit()
         else:
             # Connect with explicit options for public schema
             config_with_options = DB_CONFIG.copy()
