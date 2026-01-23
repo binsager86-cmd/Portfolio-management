@@ -17,10 +17,14 @@ Priority for database detection:
 import os
 import sqlite3
 import sys
+import warnings
 from contextlib import contextmanager
 from typing import Optional, List, Tuple, Any
 import pandas as pd
 from urllib.parse import urlparse
+
+# Suppress Pandas/SQLAlchemy warnings
+warnings.filterwarnings('ignore', category=UserWarning, module='pandas')
 
 # Try to import psycopg2 for PostgreSQL support
 try:
