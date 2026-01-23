@@ -13967,7 +13967,10 @@ def main():
         selected_tab = 'Overview'
         
         # LOGIC: Use SAC if installed, otherwise Standard Streamlit
-        if sac:
+        # Check if sac module was successfully imported (defined at top of file)
+        sac_available = 'sac' in dir() and sac is not None
+        
+        if sac_available:
             try:
                 selected_tab = sac.menu([
                     sac.MenuItem('Overview', icon='house-fill'),
@@ -13989,10 +13992,10 @@ def main():
                 ], format_func='title', open_all=True)
             except Exception as e:
                 print(f"SAC menu error: {e}")
-                selected_tab = None  # Force fallback
+                sac_available = False  # Force fallback
         
         # Fallback for when SAC library is missing or fails
-        if not sac or selected_tab is None:
+        if not sac_available or selected_tab is None:
             st.markdown("### 📌 Navigation")
             selected_tab = st.radio(
                 "Select Page",
