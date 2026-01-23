@@ -13957,78 +13957,92 @@ def main():
         </div>
         """, unsafe_allow_html=True)
 
+        # Navigation options
+        nav_options = [
+            "🏠 Overview", 
+            "💳 Add Cash Deposit", 
+            "💵 Add Transactions",
+            "📈 Portfolio Analysis", 
+            "👥 Peer Analysis", 
+            "📊 Trading Section",
+            "🎯 Portfolio Tracker", 
+            "📤 Dividends Tracker", 
+            "📅 Planner",
+            "💾 Backup & Restore", 
+            "🏦 Personal Finance",
+        ]
+        
+        # Map emoji labels back to clean names for routing
+        nav_map = {
+            "🏠 Overview": "Overview",
+            "💳 Add Cash Deposit": "Add Cash Deposit",
+            "💵 Add Transactions": "Add Transactions",
+            "📈 Portfolio Analysis": "Portfolio Analysis",
+            "👥 Peer Analysis": "Peer Analysis",
+            "📊 Trading Section": "Trading Section",
+            "🎯 Portfolio Tracker": "Portfolio Tracker",
+            "📤 Dividends Tracker": "Dividends Tracker",
+            "📅 Planner": "Planner",
+            "💾 Backup & Restore": "Backup & Restore",
+            "🏦 Personal Finance": "Personal Finance",
+        }
+        
         # Check if sac is available
         if sac:
-            # Navigation Menu using streamlit_antd_components
-            selected_tab = sac.menu([
-                # Section 1: Main Navigation
-                sac.MenuItem('Overview', icon='house-fill'),
-                sac.MenuItem('Add Cash Deposit', icon='wallet-fill'),
-                sac.MenuItem('Add Transactions', icon='cash-coin'),
-                sac.MenuItem('Portfolio Analysis', icon='graph-up-arrow'),
-                sac.MenuItem('Peer Analysis', icon='people-fill'),
-                sac.MenuItem('Trading Section', icon='bar-chart-line'),
-                sac.MenuItem('Portfolio Tracker', icon='pie-chart-fill'),
-                sac.MenuItem('Dividends Tracker', icon='arrow-up-right-circle-fill'),
-                sac.MenuItem('Planner', icon='calendar-event'),
-                sac.MenuItem('Backup & Restore', icon='archive-fill'),
-                sac.MenuItem('Personal Finance', icon='file-earmark-spreadsheet-fill'),
-                
-                # Divider
-                sac.MenuItem(type='divider'),
-                
-                # Section 2: Account Security
-                sac.MenuItem('Account Security', icon='shield-lock-fill', children=[
-                    sac.MenuItem('Change Password', icon='key'),
-                    sac.MenuItem('Logout', icon='box-arrow-right'),
-                ]),
-            ], format_func='title', open_all=True)
-        else:
-            # Fallback to native Streamlit selectbox if sac not installed
+            try:
+                # Navigation Menu using streamlit_antd_components
+                selected_tab = sac.menu([
+                    # Section 1: Main Navigation
+                    sac.MenuItem('Overview', icon='house-fill'),
+                    sac.MenuItem('Add Cash Deposit', icon='wallet-fill'),
+                    sac.MenuItem('Add Transactions', icon='cash-coin'),
+                    sac.MenuItem('Portfolio Analysis', icon='graph-up-arrow'),
+                    sac.MenuItem('Peer Analysis', icon='people-fill'),
+                    sac.MenuItem('Trading Section', icon='bar-chart-line'),
+                    sac.MenuItem('Portfolio Tracker', icon='pie-chart-fill'),
+                    sac.MenuItem('Dividends Tracker', icon='arrow-up-right-circle-fill'),
+                    sac.MenuItem('Planner', icon='calendar-event'),
+                    sac.MenuItem('Backup & Restore', icon='archive-fill'),
+                    sac.MenuItem('Personal Finance', icon='file-earmark-spreadsheet-fill'),
+                    
+                    # Divider
+                    sac.MenuItem(type='divider'),
+                    
+                    # Section 2: Account Security
+                    sac.MenuItem('Account Security', icon='shield-lock-fill', children=[
+                        sac.MenuItem('Change Password', icon='key'),
+                        sac.MenuItem('Logout', icon='box-arrow-right'),
+                    ]),
+                ], format_func='title', open_all=True)
+            except Exception as e:
+                print(f"SAC menu error: {e}")
+                sac = None  # Fall through to fallback
+        
+        if not sac:
+            # Fallback to native Streamlit radio buttons
             st.markdown("### 📌 Navigation")
-            nav_options = [
-                "🏠 Overview", 
-                "💳 Add Cash Deposit", 
-                "💵 Add Transactions",
-                "📈 Portfolio Analysis", 
-                "👥 Peer Analysis", 
-                "📊 Trading Section",
-                "🎯 Portfolio Tracker", 
-                "📤 Dividends Tracker", 
-                "📅 Planner",
-                "💾 Backup & Restore", 
-                "🏦 Personal Finance",
-            ]
-            selected_nav = st.radio(
-                "Select Page",
-                nav_options,
-                key="nav_radio_fallback",
-                label_visibility="collapsed"
-            )
             
-            # Map emoji labels back to clean names for routing
-            nav_map = {
-                "🏠 Overview": "Overview",
-                "💳 Add Cash Deposit": "Add Cash Deposit",
-                "💵 Add Transactions": "Add Transactions",
-                "📈 Portfolio Analysis": "Portfolio Analysis",
-                "👥 Peer Analysis": "Peer Analysis",
-                "📊 Trading Section": "Trading Section",
-                "🎯 Portfolio Tracker": "Portfolio Tracker",
-                "📤 Dividends Tracker": "Dividends Tracker",
-                "📅 Planner": "Planner",
-                "💾 Backup & Restore": "Backup & Restore",
-                "🏦 Personal Finance": "Personal Finance",
-            }
+            # Initialize session state for navigation if not exists
+            if "selected_nav_index" not in st.session_state:
+                st.session_state.selected_nav_index = 0
+            
+            # Create clickable buttons for each nav item
+            for i, option in enumerate(nav_options):
+                if st.button(option, key=f"nav_btn_{i}", use_container_width=True):
+                    st.session_state.selected_nav_index = i
+                    st.rerun()
+            
+            # Get selected tab from current index
+            selected_nav = nav_options[st.session_state.selected_nav_index]
             selected_tab = nav_map.get(selected_nav, "Overview")
             
             # Account Security Section
+            st.markdown("---")
             st.markdown("### 🔐 Account")
-            with st.expander("Security Options", expanded=False):
-                if st.button("🔑 Change Password", key="nav_change_pass"):
-                    selected_tab = "Change Password"
-                if st.button("🚪 Logout", key="nav_logout"):
-                    selected_tab = "Logout"
+            if st.button("🔑 Change Password", key="nav_change_pass", use_container_width=True):
+                selected_tab = "Change Password"
+            if st.button("🚪 Logout", key="nav_logout", use_container_width=True):
+                selected_tab = "Logout"
 
         # Footer Info
         st.markdown("---")
