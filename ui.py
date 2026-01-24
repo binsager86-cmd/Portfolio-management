@@ -3891,17 +3891,29 @@ def ui_transactions():
         currency = c4.selectbox("Currency", ["KWD", "USD"], index=["KWD", "USD"].index(default_currency), key="manual_currency")
         
         if c5.button("Add Stock", type="primary", key="add_manual_stock"):
-            sym = symbol.strip()
+            sym = symbol.strip().upper()
             if sym == "":
                 st.error("Symbol is required.")
             else:
                 try:
                     user_id = st.session_state.get('user_id', 1)
+                    
+                    # Auto-fetch price for new stock
+                    initial_price = 0.0
+                    with st.spinner(f"Fetching price for {sym}..."):
+                        fetched_price, _ = fetch_price_yfinance(sym)
+                        if fetched_price and fetched_price > 0:
+                            initial_price = float(fetched_price)
+                    
                     exec_sql(
                         "INSERT INTO stocks (symbol, name, current_price, portfolio, currency, user_id) VALUES (?, ?, ?, ?, ?, ?)",
-                        (sym, name.strip(), 0.0, portfolio, currency, user_id),
+                        (sym, name.strip(), initial_price, portfolio, currency, user_id),
                     )
-                    st.success(f"Stock {sym} added.")
+                    if initial_price > 0:
+                        st.success(f"Stock {sym} added with price {initial_price:.4f}")
+                    else:
+                        st.success(f"Stock {sym} added. Click 'Fetch Current Price' to get latest price.")
+                    st.cache_data.clear()
                     st.rerun()
                 except sqlite3.IntegrityError:
                     st.warning("This symbol already exists.")
@@ -3993,10 +4005,10 @@ def ui_transactions():
                         user_id = st.session_state.get('user_id', 1)
                         exec_sql("UPDATE stocks SET current_price = ? WHERE symbol = ? AND user_id = ?", (float(p), selected_symbol, user_id))
                         st.success(f"Price updated: {p:.6f} (from Yahoo: {used_ticker})")
-                        try:
-                            st.rerun()
-                        except Exception:
-                            pass
+                        # Clear cache to ensure fresh data displays
+                        st.cache_data.clear()
+                        time.sleep(0.3)
+                        st.rerun()
                     except Exception as e:
                         st.error(f"Failed to save fetched price: {e}")
     
