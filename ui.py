@@ -2620,20 +2620,6 @@ def build_portfolio_table(portfolio_name: str, user_id: Optional[int] = None) ->
         sym = str(srow["symbol"]).strip()
         cp = safe_float(srow["current_price"], 0.0)
 
-        # --- ✅ CRITICAL FIX: Ensure we have the latest price ---
-        # If the price is 0 or very low (possible indicator of a failed fetch),
-        # attempt to fetch it again.
-        if cp <= 0.001 or sym.upper() == "KRE":
-            print(f"[DEBUG] Re-fetching price for {sym} (Current: {cp})")
-            # Try to fetch the price using yfinance
-            p, used_ticker = fetch_price_yfinance(sym)
-            if p is not None and p > 0:
-                # yfinance succeeded, update the database
-                exec_sql("UPDATE stocks SET current_price = ? WHERE symbol = ? AND user_id = ?", (float(p), sym, user_id))
-                cp = float(p)
-                print(f"[DEBUG] Updated {sym} price to {cp} via yfinance.")
-        # --- END OF CRITICAL FIX ---
-
         # Filter transactions in memory - use trimmed comparison
         tx = all_txs[all_txs['stock_symbol'].str.strip() == sym].copy()
 
