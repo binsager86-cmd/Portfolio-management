@@ -4,13 +4,109 @@ import time
 import uuid
 import html
 import warnings
+import logging
+import re
+import os
+
+# ====== LOGGING SETUP ======
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+logger = logging.getLogger(__name__)
 
 # ====== STARTUP TIMING DIAGNOSTICS ======
 _startup_time = time.time()
 def _log_startup(msg: str):
     """Log startup timing for performance diagnostics."""
     elapsed = time.time() - _startup_time
-    print(f"[{time.strftime('%H:%M:%S')}] [{elapsed:.2f}s] {msg}")
+    logger.info(f"[{elapsed:.2f}s] {msg}")
+
+
+# ====== INPUT VALIDATION & SECURITY HELPERS ======
+# Regex pattern for valid stock symbols (alphanumeric, dots, hyphens - max 20 chars)
+_VALID_SYMBOL_PATTERN = re.compile(r'^[A-Za-z0-9][A-Za-z0-9.\-]{0,19}$')
+
+# SQL injection patterns to reject
+_SQL_INJECTION_PATTERNS = [
+    r"('|--|;|\bDROP\b|\bDELETE\b|\bINSERT\b|\bUPDATE\b|\bSELECT\b|\bUNION\b)",
+    r"(\bOR\b.*=|\bAND\b.*=)",  # OR 1=1 type attacks
+]
+_SQL_INJECTION_REGEX = re.compile('|'.join(_SQL_INJECTION_PATTERNS), re.IGNORECASE)
+
+
+def validate_stock_symbol(symbol: str) -> tuple[bool, str]:
+    """Validate a stock symbol for safety and format.
+    
+    Returns:
+        (is_valid, error_message) - error_message is empty if valid
+    """
+    if not symbol:
+        return False, "Symbol cannot be empty"
+    
+    symbol = symbol.strip()
+    
+    if len(symbol) > 20:
+        return False, "Symbol too long (max 20 characters)"
+    
+    if _SQL_INJECTION_REGEX.search(symbol):
+        logger.warning(f"Potential SQL injection attempt blocked: {symbol[:50]}")
+        return False, "Invalid characters in symbol"
+    
+    if not _VALID_SYMBOL_PATTERN.match(symbol):
+        return False, "Symbol must be alphanumeric (dots and hyphens allowed)"
+    
+    return True, ""
+
+
+def sanitize_text_input(text: str, max_length: int = 500) -> str:
+    """Sanitize user text input - escape HTML and enforce length."""
+    if not text:
+        return ""
+    text = str(text).strip()[:max_length]
+    return html.escape(text)
+
+
+# File upload validation constants
+MAX_UPLOAD_ROWS = 50000  # Maximum rows allowed in uploaded files
+MAX_UPLOAD_SIZE_MB = 10  # Maximum file size in MB
+ALLOWED_EXCEL_MIMES = {
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',  # xlsx
+    'application/vnd.ms-excel',  # xls
+}
+
+
+def validate_file_upload(uploaded_file, max_rows: int = MAX_UPLOAD_ROWS) -> tuple[bool, str, Optional['pd.DataFrame']]:
+    """Validate an uploaded Excel file for safety.
+    
+    Returns:
+        (is_valid, error_message, dataframe_or_none)
+    """
+    if uploaded_file is None:
+        return False, "No file uploaded", None
+    
+    # Check file size
+    file_size_mb = uploaded_file.size / (1024 * 1024)
+    if file_size_mb > MAX_UPLOAD_SIZE_MB:
+        return False, f"File too large ({file_size_mb:.1f}MB > {MAX_UPLOAD_SIZE_MB}MB limit)", None
+    
+    # Check MIME type (if available)
+    if hasattr(uploaded_file, 'type') and uploaded_file.type:
+        if uploaded_file.type not in ALLOWED_EXCEL_MIMES:
+            logger.warning(f"Rejected file upload with MIME: {uploaded_file.type}")
+            return False, f"Invalid file type. Expected Excel file.", None
+    
+    try:
+        df = pd.read_excel(uploaded_file, sheet_name=0, nrows=max_rows + 1)
+        
+        if len(df) > max_rows:
+            return False, f"Too many rows ({len(df):,} > {max_rows:,} limit). Please split the file.", None
+        
+        return True, "", df
+    except Exception as e:
+        logger.warning(f"File upload parse error: {e}")
+        return False, f"Could not read Excel file: {str(e)[:100]}", None
 
 _log_startup("Starting imports...")
 
@@ -187,15 +283,55 @@ PORTFOLIO_CCY = {
 }
 YFINANCE_PATH = None
 
-try:
-    import yfinance as yf
-    YFINANCE_AVAILABLE = True
-    YFINANCE_PATH = yf.__file__
-except Exception as e:
-    YFINANCE_ERROR = str(e)
-    yf = None
+# NOTE: yfinance is now LAZY-LOADED to improve cold start time
+# The actual import happens in _ensure_yfinance() when first needed
+yf = None  # Will be set by _ensure_yfinance()
 
-_log_startup("yfinance import complete")
+_log_startup("yfinance deferred (lazy-load)")
+
+
+def _ensure_yfinance():
+    """Lazy-load yfinance only when actually needed.
+    
+    This saves 15-20 seconds on cold starts since yfinance
+    has many heavy dependencies that are only loaded when needed.
+    """
+    global YFINANCE_AVAILABLE, YFINANCE_ERROR, YFINANCE_PATH, yf
+    
+    # Already loaded?
+    if yf is not None:
+        return YFINANCE_AVAILABLE
+    
+    # Already tried and failed?
+    if YFINANCE_ERROR is not None:
+        return False
+    
+    try:
+        import yfinance as _yf
+        yf = _yf  # Set the global
+        YFINANCE_AVAILABLE = True
+        YFINANCE_PATH = _yf.__file__
+        _log_startup("yfinance loaded on-demand")
+        return True
+    except Exception as e:
+        YFINANCE_ERROR = str(e)
+        YFINANCE_AVAILABLE = False
+        yf = None
+        logger.warning(f"yfinance import failed: {e}")
+        return False
+
+
+@st.cache_resource(ttl=3600)  # Cache Ticker objects for 1 hour
+def _get_yf_ticker(symbol: str):
+    """Get a cached yfinance Ticker object.
+    
+    Using @st.cache_resource avoids recreating Ticker objects
+    on every rerun, which saves network round-trips.
+    """
+    if not _ensure_yfinance():
+        return None
+    return yf.Ticker(symbol)
+
 
 def session_tv(timeout=20):
     """Create a TradingView session with proper browser-like headers and cookie warm-up."""
@@ -222,7 +358,8 @@ def get_pe_ratios(items):
     Fetch P/E ratios for a list of (symbol, currency) tuples.
     Returns a dict {symbol: pe_ratio}.
     """
-    if not YFINANCE_AVAILABLE:
+    # Lazy-load yfinance
+    if not _ensure_yfinance():
         return {}
         
     results = {}
@@ -238,8 +375,11 @@ def get_pe_ratios(items):
             ticker_name = f"{sym}.KW"
             
         try:
-            # Use Ticker to get info
-            t = yf.Ticker(ticker_name)
+            # Use cached Ticker to avoid recreating on each rerun
+            t = _get_yf_ticker(ticker_name)
+            if t is None:
+                results[sym] = None
+                continue
             # Accessing info triggers the fetch
             info = t.info
             pe = info.get('trailingPE')
@@ -492,7 +632,7 @@ def get_conn():
     """Local wrapper to use persistent cached connection."""
     return get_db_connection_pool()
 
-def db_execute(cur, sql: str, params: tuple = ()):
+def db_execute(cur, sql: str, params: tuple = ()) -> None:
     """Execute SQL with automatic ? to %s conversion for PostgreSQL.
     
     Use this wrapper instead of cur.execute() to ensure cross-database compatibility.
@@ -594,7 +734,7 @@ def get_user_from_token(token: str) -> Optional[dict]:
         return None
     except Exception as e:
         # Table may not exist yet during init
-        print(f"get_user_from_token error (may be expected on first run): {e}")
+        logger.debug(f"get_user_from_token error (may be expected on first run): {e}")
         return None
 
 def delete_session_token(token: str):
@@ -621,10 +761,12 @@ def fetch_price_yfinance(symbol: str, max_retries: int = 3):
     
     Uses exponential backoff to avoid Yahoo Finance rate limits.
     Kuwait stock prices are divided by 1000 (fils to KWD conversion).
+    Includes strict validation to reject obviously wrong prices.
     
     Returns (price: float or None, used_ticker: str or None)
     """
-    if not YFINANCE_AVAILABLE or yf is None:
+    # Lazy-load yfinance
+    if not _ensure_yfinance():
         return None, None
     
     import time
@@ -632,13 +774,14 @@ def fetch_price_yfinance(symbol: str, max_retries: int = 3):
     
     # Get the correct Yahoo Finance ticker (e.g., KRE -> KRE.KW)
     yf_ticker = get_yf_ticker(symbol)
+    is_kuwait_stock = yf_ticker.endswith('.KW')
     
-    # Try the mapped ticker first, then fallback variants
-    variants = [yf_ticker] if yf_ticker != symbol else [symbol, f"{symbol}.KW", f"{symbol}.KSE"]
+    # Only try the mapped ticker + one fallback
+    variants = [yf_ticker]
+    if yf_ticker == symbol:  # No mapping found
+        variants.append(f"{symbol}.KW")
     
     for variant in variants:
-        is_kuwait_stock = variant.endswith('.KW') or variant.endswith('.KSE')
-        
         for attempt in range(1, max_retries + 1):
             try:
                 # Use .download() - more reliable than .history()
@@ -662,23 +805,28 @@ def fetch_price_yfinance(symbol: str, max_retries: int = 3):
                             # Single value case
                             price = float(last_close)
                         
-                        if price > 0:
-                            # Kuwait stocks: normalize Fils to KWD
-                            if is_kuwait_stock:
-                                price = normalize_kwd_price(price, 'KWD')
-                            return float(price), variant
+                        # ✅ VALIDATE PRICE LOGICALLY
+                        if price <= 0:
+                            continue  # Skip non-positive prices
+                        
+                        if is_kuwait_stock and price > 50:
+                            # Kuwait stock prices are in Fils → likely need /1000
+                            price = normalize_kwd_price(price, 'KWD')
+                        elif is_kuwait_stock and price < 0.01:
+                            # Reject implausibly low prices (e.g., 0.0001)
+                            continue
+                        
+                        return float(price), variant
                         
             except Exception as e:
-                # Exponential backoff for rate limits
-                if attempt < max_retries:
-                    wait = (2 ** attempt) + random.uniform(0.3, 1.0)
-                    time.sleep(wait)
-                continue
-        
-        # Small delay between ticker variants
-        time.sleep(0.5)
+                pass  # Silent fail → try next variant
+            
+            # Exponential backoff for rate limits
+            if attempt < max_retries:
+                wait = (2 ** attempt) + random.uniform(0.3, 1.0)
+                time.sleep(wait)
     
-    return None, None
+    return None, None  # All variants failed
 
 
 @st.cache_data(ttl=3600)  # Cache for 1 hour
@@ -692,7 +840,8 @@ def fetch_usd_kwd_rate(max_retries: int = 3):
     """Fetch USD to KWD exchange rate using yfinance.
     Returns rate as float. Falls back to hardcoded rate if API fails.
     """
-    if not YFINANCE_AVAILABLE or yf is None:
+    # Lazy-load yfinance
+    if not _ensure_yfinance():
         return 0.307  # Fallback rate
     
     import time
@@ -700,7 +849,10 @@ def fetch_usd_kwd_rate(max_retries: int = 3):
     
     for attempt in range(1, max_retries + 1):
         try:
-            ticker = yf.Ticker("KWD=X")
+            # Use cached Ticker object
+            ticker = _get_yf_ticker("KWD=X")
+            if ticker is None:
+                return 0.307  # Fallback
             # Use history only - no .info
             hist = ticker.history(period="5d", interval="1d", auto_adjust=False)
             
@@ -793,7 +945,7 @@ def fetch_price_tradingview_by_tv_symbol(tv_exchange: str, tv_symbol: str, sessi
     return None, " | ".join(debug_parts) if debug_parts else "No price found"
 
 
-def init_db():
+def init_db() -> None:
     """Initialize database schema. Handles both SQLite and PostgreSQL."""
     
     # ============================================
@@ -822,12 +974,12 @@ def init_db():
                 return
             conn.close()
     except Exception as e:
-        print(f"DB init check note: {e}")
+        logger.debug(f"DB init check note: {e}")
         # Continue with full initialization if check fails
     
     # If PostgreSQL, schema is already created by db_layer.init_postgres_schema()
     if is_postgres():
-        print("🐘 Using PostgreSQL - schema already initialized")
+        logger.info("🐘 Using PostgreSQL - schema already initialized")
         # Just ensure any missing columns are added
         for tbl in ["stocks", "transactions", "trading_history", "portfolio_cash", "cash_deposits"]:
             add_column_if_missing(tbl, "user_id", "INTEGER DEFAULT 1")
@@ -844,14 +996,14 @@ def init_db():
         add_column_if_missing("stocks", "tradingview_exchange", "TEXT")
         add_column_if_missing("transactions", "portfolio", "TEXT DEFAULT 'KFH'")
         add_column_if_missing("transactions", "category", "TEXT DEFAULT 'portfolio'")
-        print("✅ PostgreSQL schema ready")
+        logger.info("✅ PostgreSQL schema ready")
         return
     
     # SQLite initialization (original logic)
     conn = get_conn()
     cur = conn.cursor()
     
-    print("🔧 Initializing SQLite database...")
+    logger.info("🔧 Initializing SQLite database...")
 
     # ============================================
     # STEP 1: CREATE USERS TABLE FIRST (Priority #1)
@@ -875,7 +1027,7 @@ def init_db():
     cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
     if not cur.fetchone():
         raise Exception("CRITICAL: Failed to create users table!")
-    print("✅ Step 1: Users table verified.")
+    logger.info("✅ Step 1: Users table verified.")
     
     # Add missing columns to users (backwards compatibility)
     add_column_if_missing("users", "email", "TEXT")
@@ -885,7 +1037,7 @@ def init_db():
     # ============================================
     # STEP 2: CREATE DEPENDENT TABLES (after users)
     # ============================================
-    print("🔧 Step 2: Creating dependent tables...")
+    logger.info("🔧 Step 2: Creating dependent tables...")
 
     # Password Resets (OTP)
     cur.execute(
@@ -1289,7 +1441,7 @@ def init_db():
                     conn.commit()
         except Exception as e:
             conn.rollback()
-            print(f"Migration info: {e}")
+            logger.debug(f"Migration info: {e}")
         finally:
             conn.close()
     
@@ -1426,7 +1578,7 @@ def init_db():
     
     conn.commit()
     conn.close()
-    print("✅ PFM tables created.")
+    logger.info("✅ PFM tables created.")
     
     # ============================================
     # DATABASE INDEXES FOR PERFORMANCE
@@ -1446,9 +1598,9 @@ def init_db():
         cur.execute("CREATE INDEX IF NOT EXISTS idx_snapshots_user_date ON portfolio_snapshots(user_id, snapshot_date)")
         
         conn.commit()
-        print("✅ Database indexes created for performance.")
+        logger.info("✅ Database indexes created for performance.")
     except Exception as e:
-        print(f"⚠️ Index creation skipped: {e}")
+        logger.debug(f"Index creation skipped: {e}")
     finally:
         conn.close()
     
@@ -1513,9 +1665,9 @@ def init_db():
         
         total_fixed = fixed_cash + fixed_txn + fixed_stocks + fixed_trading + fixed_snapshots
         if total_fixed > 0:
-            print(f"✅ Fixed {total_fixed} records with NULL/default user_id (assigned to user {default_user_id})")
+            logger.info(f"✅ Fixed {total_fixed} records with NULL/default user_id (assigned to user {default_user_id})")
     except Exception as e:
-        print(f"⚠️ User ID fix skipped: {e}")
+        logger.debug(f"User ID fix skipped: {e}")
     finally:
         conn.close()
     
@@ -1542,17 +1694,17 @@ def init_db():
             cur.execute("CREATE INDEX IF NOT EXISTS idx_trading_history_user ON trading_history(user_id);")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_snapshots_user ON portfolio_snapshots(user_id);")
         conn.commit()
-        print("✅ Performance indexes created.")
+        logger.info("✅ Performance indexes created.")
     except Exception as e:
-        print(f"Index creation note: {e}")
+        logger.debug(f"Index creation note: {e}")
     finally:
         conn.close()
     
     # ============================================
     # STEP 4: VERIFICATION
     # ============================================
-    print("✅ Step 4: Database initialized. Users table verified.")
-    print("🔧 All tables created successfully.")
+    logger.info("✅ Step 4: Database initialized. Users table verified.")
+    logger.info("🔧 All tables created successfully.")
     
     # ============================================
     # SEED DEFAULT ADMIN USER (for cloud deployment)
@@ -1563,8 +1715,17 @@ def init_db():
 def seed_default_admin():
     """
     Create a default admin user if the users table is empty.
-    This ensures cloud deployments have a login account.
+    
+    SECURITY: Only seeds admin in development mode or when
+    INIT_ADMIN_USER env var is set. This prevents backdoors in production.
     """
+    import os
+    
+    # Security check: Don't seed admin in production unless explicitly requested
+    if IS_PRODUCTION and not os.getenv("INIT_ADMIN_USER"):
+        logger.info("⚠️ Skipping admin seed in production (set INIT_ADMIN_USER=1 to override)")
+        return
+    
     conn = get_conn()
     cur = conn.cursor()
     
@@ -1582,17 +1743,17 @@ def seed_default_admin():
             except ImportError:
                 # Fallback if bcrypt not available (plain text - not recommended for production)
                 hashed_pw = "admin123"
-                print("⚠️ WARNING: bcrypt not available, using plain text password")
+                logger.warning("⚠️ WARNING: bcrypt not available, using plain text password")
             
             cur.execute(
                 "INSERT INTO users (username, email, password_hash, created_at) VALUES (?, ?, ?, ?)",
                 ('admin', 'admin@cloud.com', hashed_pw, int(time.time()))
             )
             conn.commit()
-            print("✅ Default Admin User Created: admin / admin123")
-            print("⚠️ IMPORTANT: Change this password after first login!")
+            logger.info("✅ Default Admin User Created: admin / admin123")
+            logger.warning("⚠️ IMPORTANT: Change this password after first login!")
     except Exception as e:
-        print(f"Admin seed error: {e}")
+        logger.error(f"Admin seed error: {e}")
     finally:
         conn.close()
 
@@ -1600,7 +1761,8 @@ def seed_default_admin():
 # =========================
 # UTIL
 # =========================
-def safe_float(v, default=0.0):
+def safe_float(v, default: float = 0.0) -> float:
+    """Safely convert a value to float, returning default on failure."""
     try:
         if v is None or v == "":
             return default
@@ -1610,14 +1772,33 @@ def safe_float(v, default=0.0):
 
 
 def convert_to_kwd(amount: float, ccy: str) -> float:
-    """Convert amount from given currency to KWD."""
+    """Convert amount from given currency to KWD.
+    
+    Safe for use both within Streamlit and standalone scripts.
+    Uses DEFAULT_USD_TO_KWD if session state is not available.
+    """
     if amount is None:
         return 0.0
+    try:
+        amount = float(amount)
+    except (TypeError, ValueError):
+        return 0.0
+        
+    if ccy is None:
+        ccy = "KWD"  # Default to KWD if currency not specified
+        
     if ccy == "KWD":
-        return float(amount)
+        return amount
     if ccy == "USD":
-        return float(amount) * float(st.session_state.usd_to_kwd)
-    return float(amount)  # fallback
+        # Safe access to session state with fallback to default
+        try:
+            rate = st.session_state.get("usd_to_kwd", DEFAULT_USD_TO_KWD)
+            if rate is None:
+                rate = DEFAULT_USD_TO_KWD
+        except (AttributeError, RuntimeError):
+            rate = DEFAULT_USD_TO_KWD
+        return amount * float(rate)
+    return amount  # fallback for other currencies
 
 
 def fmt_money(amount: float, ccy: str) -> str:
@@ -1943,9 +2124,7 @@ class PortfolioCalculator:
             
         except Exception as e:
             # Log error for debugging
-            import traceback
-            print(f"MWRR calculation error: {e}")
-            traceback.print_exc()
+            logger.error(f"MWRR calculation error: {e}", exc_info=True)
             return None
     
     @staticmethod
@@ -2218,12 +2397,19 @@ def compute_holdings_avg_cost(tx: pd.DataFrame):
 
 
 @st.cache_data(ttl=60, show_spinner=False)  # Cache result for 60 seconds for instant refresh
-def build_portfolio_table(portfolio_name: str):
-    """Build portfolio table with optimized bulk transaction fetch (N+1 fix)."""
-    user_id = st.session_state.get('user_id')
+def build_portfolio_table(portfolio_name: str, user_id: Optional[int] = None) -> pd.DataFrame:
+    """Build portfolio table with optimized bulk transaction fetch (N+1 fix).
+    
+    Args:
+        portfolio_name: Name of the portfolio ('KFH', 'BBYN', 'USA')
+        user_id: Optional user ID. If None, uses st.session_state.user_id.
+                 Pass explicitly when running outside Streamlit (e.g., cron jobs).
+    """
+    if user_id is None:
+        user_id = st.session_state.get('user_id')
     
     # 1. Bulk Fetch Stocks for this portfolio
-    stocks = query_df(
+    stocks: pd.DataFrame = query_df(
         """
         SELECT
             symbol,
@@ -2276,20 +2462,22 @@ def build_portfolio_table(portfolio_name: str):
         if qty <= 0.001 and h["cost_basis"] <= 0.001 and h["cash_div"] <= 0.001:
             continue
 
-        total_cost = h["cost_basis"]
-        avg_cost = (total_cost / qty) if qty > 0 else 0.0
+        # --- FIX: Rounding to 3 decimals to prevent 1 fils errors ---
+        total_cost = round(h["cost_basis"], 3)
+        avg_cost = (total_cost / qty) if qty > 0 else 0.0 # Avg cost can keep precision or round
 
         mkt_price = cp
-        mkt_value = qty * mkt_price
-        unreal = mkt_value - total_cost
+        mkt_value = round(qty * mkt_price, 3)
+        unreal = round(mkt_value - total_cost, 3)
 
-        cash_div = h["cash_div"]
+        cash_div = round(h["cash_div"], 3)
         bonus_sh = h["bonus_shares"]
-        reinv_div = h["reinv"]
+        reinv_div = round(h["reinv"], 3)
 
         yield_pct = (cash_div / total_cost) if total_cost > 0 else 0.0
-        total_pnl = (mkt_value + cash_div) - total_cost
+        total_pnl = round((mkt_value + cash_div) - total_cost, 3)
         pnl_pct = (total_pnl / total_cost) if total_cost > 0 else 0.0
+        # ------------------------------------------------------------
         
         display_name = srow.get('name') if srow.get('name') else sym
         
@@ -2383,9 +2571,9 @@ def render_portfolio_table(title: str, df: pd.DataFrame, fx_usdkwd: Optional[flo
         "Company": "TOTAL",
         "P/E Ratio": None,
         "Quantity": view_df["Quantity"].sum(),
-        "Avg. Cost Per Share": 0.0, # Not applicable
+        "Avg. Cost Per Share": 0,     # Placeholder, hidden by formatter
         "Total cost": view_df["Total cost"].sum(),
-        "Market price": 0.0, # Not applicable
+        "Market price": 0,            # Placeholder, hidden by formatter
         "Market value": view_df["Market value"].sum(),
         "Appreciation income": view_df["Appreciation income"].sum(),
         "Cash dividends": view_df["Cash dividends"].sum(),
@@ -2427,9 +2615,10 @@ def render_portfolio_table(title: str, df: pd.DataFrame, fx_usdkwd: Optional[flo
 
     format_dict = {
         "Quantity": lambda x: fmt_val(x, "{:,.0f}"),
-        "Avg. Cost Per Share": lambda x: fmt_val(x, "{:,.3f}"),
+        # Logic: If value is 0 (Total row) or None, show "-", otherwise show 3 decimals
+        "Avg. Cost Per Share": lambda x: fmt_val(x, "{:,.3f}") if x and x != 0 else "-",
         "Total cost": lambda x: fmt_val(x, "{:,.3f}"),
-        "Market price": lambda x: fmt_val(x, "{:,.3f}"),
+        "Market price": lambda x: fmt_val(x, "{:,.3f}") if x and x != 0 else "-",
         "P/E Ratio": "{:.2f}",
         "Market value": lambda x: fmt_val(x, "{:,.3f}"),
         "Appreciation income": lambda x: fmt_val(x, "{:,.3f}"),
@@ -3146,7 +3335,7 @@ def load_stocks_master():
         )
         return df
     except Exception as e:
-        print(f"Error loading stocks master: {e}")
+        logger.error(f"Error loading stocks master: {e}")
         return pd.DataFrame(columns=["symbol", "name", "portfolio", "currency"])
 
 
@@ -6523,14 +6712,15 @@ def ui_portfolio_analysis():
 
                     unique_yf_tickers = list(ticker_map.keys())
                     
-                    if not YFINANCE_AVAILABLE:
+                    # Lazy-load yfinance
+                    if not _ensure_yfinance():
                         st.error("yfinance not installed.")
                     else:
                         st.info(f"🚀 Batch fetching {len(unique_yf_tickers)} stocks...")
                         progress = st.progress(0)
                         
                         try:
-                            import yfinance as yf
+                            # yf is already loaded by _ensure_yfinance() above
                             
                             # 2. Batch Download
                             batch_data = yf.download(
@@ -8119,7 +8309,7 @@ def ui_trading_section():
         with st.form("add_single_trade_form"):
             col1, col2 = st.columns(2)
             with col1:
-                stock_symbol = st.text_input("Stock Symbol").strip().upper()
+                stock_symbol = st.text_input("Stock Symbol", max_chars=20).strip().upper()
                 quantity = st.number_input("Quantity", min_value=0.0, step=1.0, format="%.0f")
             with col2:
                 purchase_date = st.date_input("Purchase Date", value=date.today())
@@ -8144,8 +8334,10 @@ def ui_trading_section():
             submitted = st.form_submit_button("💾 Save Trade")
             
             if submitted:
-                if not stock_symbol:
-                    st.error("Stock Symbol is required")
+                # Validate stock symbol
+                is_valid, validation_error = validate_stock_symbol(stock_symbol)
+                if not is_valid:
+                    st.error(f"Invalid symbol: {validation_error}")
                 elif quantity <= 0:
                     st.error("Quantity must be greater than 0")
                 elif purchase_price <= 0:
@@ -9129,7 +9321,7 @@ def ui_trading_section():
 
     # --- 2. BATCH FETCH PRICES (Unrealized Only) ---
     live_prices = {}
-    if all_tickers_for_fetch and YFINANCE_AVAILABLE:
+    if all_tickers_for_fetch and _ensure_yfinance():
         tickers_list = list(all_tickers_for_fetch)
         # Filter for valid tickers only (simple heuristic)
         valid_tickers = [t for t in tickers_list if "." in t or t.isupper()]
@@ -9168,7 +9360,7 @@ def ui_trading_section():
                                         live_prices[t] = raw_val
                 except Exception as e:
                     # Fallback or silent fail
-                    print(f"Batch fetch error: {e}")
+                    logger.debug(f"Batch fetch error: {e}")
 
     # --- 3. BUILD DATAFRAME & CALCULATE METRICS ---
     combined_data = realized_trades + unrealized_positions
@@ -9557,7 +9749,7 @@ def _init_cbk_rate_table():
             """)
         conn.commit()
     except Exception as e:
-        print(f"Error creating cbk_rate_cache table: {e}")
+        logger.error(f"Error creating cbk_rate_cache table: {e}")
     finally:
         conn.close()
 
@@ -9606,9 +9798,9 @@ def _fetch_cbk_rate_from_api():
                             return rate, True
                             
         except requests.RequestException as e:
-            print(f"CBK API request failed for {url}: {e}")
+            logger.debug(f"CBK API request failed for {url}: {e}")
         except Exception as e:
-            print(f"Error parsing CBK response: {e}")
+            logger.debug(f"Error parsing CBK response: {e}")
     
     # Secondary source: Try to get from financial data APIs
     try:
@@ -9622,7 +9814,7 @@ def _fetch_cbk_rate_from_api():
                 if rate_value and 0.5 <= rate_value <= 20:  # Sanity check
                     return rate_value / 100, True
     except Exception as e:
-        print(f"World Bank API failed: {e}")
+        logger.debug(f"World Bank API failed: {e}")
     
     return None, False
 
@@ -9688,7 +9880,7 @@ def _get_cbk_rate_from_db_cache():
         if row:
             return float(row[0]), row[1], row[2]
     except Exception as e:
-        print(f"Error reading CBK rate from cache: {e}")
+        logger.debug(f"Error reading CBK rate from cache: {e}")
     
     return None, None, None
 
@@ -9716,7 +9908,7 @@ def _save_cbk_rate_to_cache(rate, source):
         _cbk_rate_cache['source'] = source
         
     except Exception as e:
-        print(f"Error saving CBK rate to cache: {e}")
+        logger.error(f"Error saving CBK rate to cache: {e}")
 
 def get_cbk_risk_free_rate(force_refresh=False):
     """
@@ -9780,7 +9972,7 @@ def get_cbk_risk_free_rate(force_refresh=False):
             result['is_stale'] = False
             return result
     except Exception as e:
-        print(f"CBK API fetch error: {e}")
+        logger.debug(f"CBK API fetch error: {e}")
     
     # Try config fallback
     config_rate, config_found = _get_cbk_rate_from_config()
@@ -9874,11 +10066,15 @@ def calculate_sharpe_ratio(rf_rate):
 def get_us_risk_free_rate():
     """Fetch 10-Year Treasury Yield (^TNX) for Sortino Ratio."""
     default_rate = 0.045
-    if not YFINANCE_AVAILABLE or yf is None:
+    # Lazy-load yfinance
+    if not _ensure_yfinance():
         return default_rate
     
     try:
-        ticker = yf.Ticker("^TNX")
+        # Use cached Ticker object
+        ticker = _get_yf_ticker("^TNX")
+        if ticker is None:
+            return default_rate
         hist = ticker.history(period="1d")
         if not hist.empty:
             # TNX is in percentage points (e.g. 4.50), so divide by 100
@@ -10092,15 +10288,15 @@ def calculate_total_cash_dividends(user_id, debug=False):
     # Debug output
     debug_df = None
     if debug:
-        print(f"DEBUG – Dividend rows used (transactions): {len(dividends_df)}")
-        print(f"DEBUG – Dividend rows used (trading): {len(trading_dividends_df)}")
-        print(f"DEBUG – Total cash dividends: {total_dividends_kwd:.2f} KWD")
+        logger.debug(f"DEBUG – Dividend rows used (transactions): {len(dividends_df)}")
+        logger.debug(f"DEBUG – Dividend rows used (trading): {len(trading_dividends_df)}")
+        logger.debug(f"DEBUG – Total cash dividends: {total_dividends_kwd:.2f} KWD")
         if not dividends_df.empty:
-            print("Sample from transactions:")
-            print(dividends_df[['stock_symbol', 'txn_date', 'cash_dividend', 'currency', 'amount_in_kwd']].tail(5))
+            logger.debug("Sample from transactions:")
+            logger.debug(dividends_df[['stock_symbol', 'txn_date', 'cash_dividend', 'currency', 'amount_in_kwd']].tail(5).to_string())
         if not trading_dividends_df.empty:
-            print("Sample from trading_history:")
-            print(trading_dividends_df[['stock_symbol', 'txn_date', 'cash_dividend', 'currency', 'amount_in_kwd']].tail(5))
+            logger.debug("Sample from trading_history:")
+            logger.debug(trading_dividends_df[['stock_symbol', 'txn_date', 'cash_dividend', 'currency', 'amount_in_kwd']].tail(5).to_string())
         
         # Combine for debug
         debug_df = pd.concat([dividends_df, trading_dividends_df], ignore_index=True) if not trading_dividends_df.empty else dividends_df
@@ -11135,11 +11331,15 @@ If the data shows "No active stock holdings" or empty sections, acknowledge this
 @st.cache_data(ttl=3600*12)  # Cache for 12 hours
 def fetch_single_peer_data(ticker):
     """Fetch extensive data for a single ticker to optimize performance."""
-    if not YFINANCE_AVAILABLE:
+    # Lazy-load yfinance
+    if not _ensure_yfinance():
         return {"error": "yfinance not loaded"}
         
     try:
-        t = yf.Ticker(ticker)
+        # Use cached Ticker object for efficiency
+        t = _get_yf_ticker(ticker)
+        if t is None:
+            return {"error": "Failed to create Ticker"}
         info = t.info
         
         # Fetch history for total return calcs (10y to be safe)
@@ -11470,7 +11670,8 @@ def ui_peer_analysis():
         # FETCH DATA & RENDER TABLES (New Implementation)
         # ----------------------------------------------------
         if st.button("🚀 Fetch Data & Run Analysis", type="primary", width="stretch"):
-            if not YFINANCE_AVAILABLE:
+            # Lazy-load yfinance
+            if not _ensure_yfinance():
                 st.error("Yahoo Finance library not available.")
                 return
 
@@ -11669,7 +11870,7 @@ def send_otp_email(to_email: str, otp: str):
             
             email_sent = True
         except Exception as e:
-            print(f"SMTP Error: {e}")
+            logger.error(f"SMTP Error: {e}")
             email_sent = False
             
     # 2. Fallback / Simulation
@@ -11702,45 +11903,65 @@ def login_page(cookie_manager=None):
             st.rerun()
             
         with st.form("reset_request_form"):
-            email_reset = st.text_input("Enter your registered email")
+            email_reset = st.text_input("Enter your registered email", max_chars=100)
             btn_reset = st.form_submit_button("Send OTP")
             
             if btn_reset:
+                # =============================
+                # OTP RATE LIMITING
+                # =============================
+                # Limit: max 3 OTP requests per email per 15 minutes
+                now = int(time.time())
+                rate_limit_window = 900  # 15 minutes
+                max_otp_requests = 3
+                
                 conn = get_conn()
                 cur = conn.cursor()
-                db_execute(cur, "SELECT id FROM users WHERE email=? OR username=?", (email_reset, email_reset))
-                res = cur.fetchone()
-                conn.close()
-                if res:
-                    # Generate OTP
-                    import random
-                    otp_code = str(random.randint(100000, 999999))
-                    exp_time = int(time.time()) + 900 # 15 mins
-                    
-                    conn = get_conn()
-                    cur = conn.cursor()
-                    # Clean old OTPs
-                    db_execute(cur, "DELETE FROM password_resets WHERE email=?", (email_reset,))
-                    db_execute(cur, "INSERT INTO password_resets (email, otp, expires_at, created_at) VALUES (?, ?, ?, ?)",
-                                (email_reset, otp_code, exp_time, int(time.time())))
-                    conn.commit()
+                
+                # Check rate limit first
+                db_execute(cur, 
+                    "SELECT COUNT(*) FROM password_resets WHERE email=? AND created_at > ?",
+                    (email_reset, now - rate_limit_window))
+                otp_count = cur.fetchone()[0]
+                
+                if otp_count >= max_otp_requests:
+                    conn.close()
+                    st.error("⏰ Too many OTP requests. Please wait 15 minutes before trying again.")
+                    logger.warning(f"OTP rate limit exceeded for: {email_reset[:30]}...")
+                else:
+                    db_execute(cur, "SELECT id FROM users WHERE email=? OR username=?", (email_reset, email_reset))
+                    res = cur.fetchone()
                     conn.close()
                     
-                    send_otp_email(email_reset, otp_code)
-                    st.session_state.reset_email = email_reset
-                    st.session_state.auth_mode = "verify_otp"
-                    st.rerun()
-                else:
-                    st.error("Email not found.")
+                    if res:
+                        # Generate OTP
+                        import random
+                        otp_code = str(random.randint(100000, 999999))
+                        exp_time = now + 900  # 15 mins
+                        
+                        conn = get_conn()
+                        cur = conn.cursor()
+                        # Don't delete old OTPs (for rate limiting), just add new one
+                        db_execute(cur, "INSERT INTO password_resets (email, otp, expires_at, created_at) VALUES (?, ?, ?, ?)",
+                                    (email_reset, otp_code, exp_time, now))
+                        conn.commit()
+                        conn.close()
+                        
+                        send_otp_email(email_reset, otp_code)
+                        st.session_state.reset_email = email_reset
+                        st.session_state.auth_mode = "verify_otp"
+                        st.rerun()
+                    else:
+                        st.error("Email not found.")
                     
     elif st.session_state.auth_mode == "verify_otp":
         st.subheader("🔐 Verify OTP")
         st.caption(f"Enter the code sent to {st.session_state.get('reset_email')}")
         
         with st.form("verify_otp_form"):
-            otp_input = st.text_input("OTP Code")
-            new_pass_1 = st.text_input("New Password", type="password")
-            new_pass_2 = st.text_input("Confirm New Password", type="password")
+            otp_input = st.text_input("OTP Code", max_chars=6)
+            new_pass_1 = st.text_input("New Password", type="password", max_chars=128)
+            new_pass_2 = st.text_input("Confirm New Password", type="password", max_chars=128)
             btn_verify = st.form_submit_button("Reset Password")
             
             if btn_verify:
@@ -11894,7 +12115,7 @@ def login_page(cookie_manager=None):
                                         time_module.sleep(0.5)
                                     st.rerun()
                                 except Exception as ce:
-                                    print(f"Session Token Error: {ce}")
+                                    logger.error(f"Session Token Error: {ce}")
                             else:
                                 st.rerun()
                             
@@ -13295,7 +13516,7 @@ def get_full_financial_context(user_id):
                                 'Currency': currency
                             })
             except Exception as e:
-                print(f"Error reading portfolio {p_name}: {e}")
+                logger.error(f"Error reading portfolio {p_name}: {e}")
 
         if holdings_data:
             context_parts.append("\n" + "=" * 60)
@@ -13752,6 +13973,15 @@ def ui_user_profile_sidebar():
 
 
 def main():
+    # =============================
+    # HEALTH CHECK ENDPOINT (for Cloud Deployments)
+    # =============================
+    # Allows load balancers/health monitors to check if app is running
+    # Usage: ?health=check returns "OK" and exits
+    if st.query_params.get("health") == "check":
+        st.write("OK")
+        st.stop()
+    
     _log_startup("main() started - About to render UI")
     
     # Inject Google Analytics (runs once per session)
@@ -13769,7 +13999,7 @@ def main():
             # --- CRITICAL FIX: Fetch cookies ONCE here ---
             cookies_data = cookie_manager.get_all()
         except Exception as e:
-            print(f"Cookie manager init error: {e}")
+            logger.warning(f"Cookie manager init error: {e}")
 
     # =============================
     # FAST SESSION CHECK (BEFORE DB INIT)
@@ -13803,7 +14033,7 @@ def main():
                             except:
                                 pass
             except Exception as e:
-                print(f"Session restore error: {e}")
+                logger.debug(f"Session restore error: {e}")
         
         # If cookies haven't loaded yet, rerun to let them load
         # Only rerun if we haven't checked AND cookies aren't loaded yet
@@ -13830,7 +14060,7 @@ def main():
         if is_postgres():
             try:
                 init_postgres_schema()
-                print("✅ PostgreSQL schema initialized successfully")
+                logger.info("✅ PostgreSQL schema initialized successfully")
             except Exception as e:
                 st.error(f"""
                 ❌ **Database Connection Error**
@@ -13861,14 +14091,14 @@ def main():
                 """)
                 st.stop()
             else:
-                print("📁 SQLite database ready (local development)")
+                logger.info("📁 SQLite database ready (local development)")
         
         # Initialize database schemas (PostgreSQL only - prevents InvalidSchemaName errors)
         try:
             from db_layer import init_db_schemas
             init_db_schemas()
         except Exception as e:
-            print(f"Schema init note: {e}")
+            logger.debug(f"Schema init note: {e}")
         
         # Initialize database schema (handles both SQLite and PostgreSQL)
         try:
@@ -13877,7 +14107,7 @@ def main():
             _log_startup("Database initialized successfully")
         except Exception as e:
             st.error(f"Database Initialization Error: {e}")
-            print(f"DB Init Error: {e}")
+            logger.error(f"DB Init Error: {e}")
             return  # Exit if DB init fails
 
     # =============================
@@ -13899,12 +14129,17 @@ def main():
             if saved_privacy is not None and "privacy_mode" not in st.session_state:
                 st.session_state.privacy_mode = saved_privacy == "true"
                 
-            # Last selected portfolio tab
+            # Last selected portfolio tab (legacy)
             saved_portfolio = all_cookies.get("portfolio_last_tab")
             if saved_portfolio and "last_portfolio_tab" not in st.session_state:
                 st.session_state.last_portfolio_tab = saved_portfolio
+            
+            # Last selected navigation tab (persists user's last page)
+            saved_nav_tab = all_cookies.get("portfolio_nav_tab")
+            if saved_nav_tab and "last_nav_tab" not in st.session_state:
+                st.session_state.last_nav_tab = saved_nav_tab
         except Exception as e:
-            print(f"Error loading preferences: {e}")
+            logger.debug(f"Error loading preferences: {e}")
     
     def save_preference(key: str, value: str):
         """Save a user preference to cookies (30-day expiry)."""
@@ -13914,7 +14149,7 @@ def main():
             expires = datetime.now() + timedelta(days=30)
             cookie_manager.set(f"portfolio_{key}", str(value), expires_at=expires)
         except Exception as e:
-            print(f"Error saving preference {key}: {e}")
+            logger.debug(f"Error saving preference {key}: {e}")
     
     # Load preferences on page load using pre-fetched cookies_data
     load_user_preferences(cookies_data or {})
@@ -13982,7 +14217,10 @@ def main():
 
     # Show price fetching status (collapsed to reduce visual noise)
     with st.expander("ℹ️ Price Fetching Status", expanded=False):
-        if not YFINANCE_AVAILABLE:
+        # Note: yfinance is lazy-loaded for faster startup
+        # Check if it's available when the user expands this section
+        yf_ready = _ensure_yfinance()
+        if not yf_ready:
             st.error(f"""
             ❌ **Price Fetching Error**: yfinance library failed to load ({YFINANCE_ERROR}).
             
@@ -14021,8 +14259,12 @@ def main():
             'Planner', 'Backup & Restore', 'Personal Finance'
         ]
         
-        # Default selection
-        selected_tab = 'Overview'
+        # Default selection - restore from session/cookies if available
+        saved_tab = st.session_state.get('last_nav_tab')
+        if saved_tab and saved_tab in nav_options:
+            selected_tab = saved_tab
+        else:
+            selected_tab = 'Overview'
         
         # LOGIC: Use SAC if installed, otherwise Standard Streamlit
         # Check if sac module was successfully imported (defined at top of file)
@@ -14049,15 +14291,18 @@ def main():
                     ]),
                 ], format_func='title', open_all=True)
             except Exception as e:
-                print(f"SAC menu error: {e}")
+                logger.debug(f"SAC menu error: {e}")
                 sac_available = False  # Force fallback
         
         # Fallback for when SAC library is missing or fails
         if not sac_available or selected_tab is None:
             st.markdown("### 📌 Navigation")
+            # Get index for default selection
+            default_idx = nav_options.index(saved_tab) if saved_tab in nav_options else 0
             selected_tab = st.radio(
                 "Select Page",
                 nav_options,
+                index=default_idx,
                 key="nav_radio_main",
                 label_visibility="collapsed"
             )
@@ -14072,6 +14317,12 @@ def main():
             with col2:
                 if st.button("🚪 Logout", key="nav_logout"):
                     selected_tab = "Logout"
+
+        # Persist selected tab for next visit (skip Change Password and Logout)
+        if selected_tab and selected_tab not in ['Change Password', 'Logout']:
+            if st.session_state.get('last_nav_tab') != selected_tab:
+                st.session_state.last_nav_tab = selected_tab
+                save_preference("nav_tab", selected_tab)
 
         # Footer Info
         st.markdown("---")
@@ -14128,7 +14379,7 @@ def main():
                 conn.commit()
                 conn.close()
         except Exception as e:
-            print(f"Error during logout: {e}")
+            logger.error(f"Error during logout: {e}")
         if cookie_manager:
             try:
                 cookie_manager.delete("portfolio_session")

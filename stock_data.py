@@ -311,12 +311,13 @@ def normalize_kwd_price(price: float, currency: str) -> float:
         currency: The currency code (e.g., 'KWD', 'USD')
     
     Returns:
-        Normalized price in proper units
+        Normalized price in proper units (rounded to 3 decimals for KWD)
     """
     if price is None:
         return 0.0
     if currency == 'KWD' and price > 50:
-        return price / 1000.0
+        # Round to 3 decimals to prevent floating point precision errors
+        return round(price / 1000.0, 3)
     return price
 
 
