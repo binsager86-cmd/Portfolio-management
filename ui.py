@@ -541,7 +541,11 @@ def map_to_tradingview(symbol: str, exchange: str = "KSE", limit: int = 20):
 # =========================
 # CONFIG
 # =========================
-st.set_page_config(page_title="Portfolio App", layout="wide")
+# Only set page config if not already set (e.g., when run directly vs from app.py)
+try:
+    st.set_page_config(page_title="Portfolio App", layout="wide")
+except st.errors.StreamlitAPIException:
+    pass  # Already set by app.py router
 
 # =========================
 # DATABASE LAYER (Supports SQLite & PostgreSQL/Supabase)
@@ -3978,49 +3982,17 @@ def ui_transactions():
     with cpx2:
         if st.button("Fetch Current Price", type="primary"):
                 with st.spinner(f"Fetching price for {selected_symbol}..."):
-                    p = None
-                    err = None
-                    source = None
-
-                    # Try yfinance first (most reliable)
+                    # Use Yahoo Finance only
                     p, used_ticker = fetch_price_yfinance(selected_symbol)
-                    if p is not None:
-                        source = f"yfinance ({used_ticker})"
-                    else:
-                        # Fallback to TradingView
-                        tv_sym = stock_row.get("tradingview_symbol") or None
-                        tv_exch = stock_row.get("tradingview_exchange") or "KSE"
-                        
-                        if tv_sym:
-                            p, err = fetch_price_tradingview_by_tv_symbol(tv_exch, tv_sym)
-                            if p is not None:
-                                source = f"TradingView ({tv_exch}:{tv_sym})"
-                        else:
-                            tv_cands = map_to_tradingview(selected_symbol, exchange="KSE")
-                            if tv_cands:
-                                for c in tv_cands:
-                                    cand_sym = c.get("tv_symbol")
-                                    cand_exch = c.get("exchange") or "KSE"
-                                    p, err = fetch_price_tradingview_by_tv_symbol(cand_exch, cand_sym)
-                                    if p is not None:
-                                        source = f"TradingView ({cand_exch}:{cand_sym})"
-                                        try:
-                                            user_id = st.session_state.get('user_id', 1)
-                                            exec_sql("UPDATE stocks SET tradingview_symbol = ?, tradingview_exchange = ? WHERE symbol = ? AND user_id = ?", (cand_sym, cand_exch, selected_symbol, user_id))
-                                        except Exception:
-                                            pass
-                                        break
-                            else:
-                                err = "No price source found"
 
                 if p is None:
-                    st.error(f"Price fetch failed: {err or 'No price found'}")
-                    st.info("Try mapping to TradingView symbol (Edit Stock Details -> Map to TradingView) or check ticker suffix (.KW, .KSE)")
+                    st.error("Price fetch failed from Yahoo Finance")
+                    st.info("Check if ticker is correctly mapped in stock_data.py (e.g., KRE -> KRE.KW)")
                 else:
                     try:
                         user_id = st.session_state.get('user_id', 1)
                         exec_sql("UPDATE stocks SET current_price = ? WHERE symbol = ? AND user_id = ?", (float(p), selected_symbol, user_id))
-                        st.success(f"Price updated: {p:.6f} (from {source})")
+                        st.success(f"Price updated: {p:.6f} (from Yahoo: {used_ticker})")
                         try:
                             st.rerun()
                         except Exception:
@@ -14963,9 +14935,10 @@ def main():
     # =============================
     # FAST SESSION CHECK (BEFORE DB INIT)
     # =============================
-    # Check if already logged in (fastest path)
-    if st.session_state.get('logged_in'):
-        pass  # Continue to main app
+    # If already authenticated (e.g., from app.py router), skip auth checks
+    if st.session_state.get('logged_in') and st.session_state.get('user_id'):
+        _log_startup("User already authenticated - skipping auth checks")
+        pass  # Continue directly to main app
     else:
         # Try to restore session from cookie
         restored = False
