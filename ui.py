@@ -6994,7 +6994,9 @@ def ui_portfolio_analysis():
                                 with st.expander("⚠️ View skipped symbols"):
                                     st.write(", ".join(failed_symbols))
                             
-                            time.sleep(1)
+                            # Clear all caches to ensure fresh data displays
+                            st.cache_data.clear()
+                            time.sleep(0.5)
                             st.rerun()
                         except Exception as e:
                             progress.empty()
