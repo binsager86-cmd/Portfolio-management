@@ -2578,11 +2578,11 @@ def build_portfolio_table(portfolio_name: str, user_id: Optional[int] = None) ->
     if user_id is None:
         user_id = st.session_state.get('user_id')
     
-    # 1. Bulk Fetch Stocks for this portfolio
+    # 1. Bulk Fetch Stocks for this portfolio - use TRIM to avoid trailing space issues
     stocks: pd.DataFrame = query_df(
         """
         SELECT
-            symbol,
+            TRIM(symbol) AS symbol,
             COALESCE(name,'') AS name,
             COALESCE(current_price,0) AS current_price,
             COALESCE(portfolio,'KFH') AS portfolio,
@@ -2596,13 +2596,19 @@ def build_portfolio_table(portfolio_name: str, user_id: Optional[int] = None) ->
 
     if stocks.empty:
         return pd.DataFrame()
+    
+    # DEBUG: Log KRE row to see what price is being fetched
+    kre_rows = stocks[stocks['symbol'].str.upper().str.strip() == 'KRE']
+    if not kre_rows.empty:
+        for _, kre_row in kre_rows.iterrows():
+            print(f"[DEBUG] KRE from stocks table: symbol='{kre_row['symbol']}', current_price={kre_row['current_price']}")
 
     # 2. Bulk Fetch All Transactions for this user (Performance Optimization)
     # Fetch once instead of per-stock query (eliminates N+1 problem)
     all_txs = query_df(
         """
         SELECT
-            id, stock_symbol, txn_date, txn_type,
+            id, TRIM(stock_symbol) AS stock_symbol, txn_date, txn_type,
             purchase_cost, sell_value, shares,
             bonus_shares, cash_dividend,
             price_override, planned_cum_shares,
@@ -2617,11 +2623,15 @@ def build_portfolio_table(portfolio_name: str, user_id: Optional[int] = None) ->
 
     rows = []
     for _, srow in stocks.iterrows():
-        sym = srow["symbol"]
+        sym = str(srow["symbol"]).strip()  # Ensure trimmed
         cp = safe_float(srow["current_price"], 0.0)
+        
+        # DEBUG: Log KRE specifically
+        if sym.upper() == 'KRE':
+            print(f"[DEBUG] Processing KRE: current_price from DB = {cp}")
 
-        # Filter transactions in memory (Fast - no DB round-trip)
-        tx = all_txs[all_txs['stock_symbol'] == sym].copy()
+        # Filter transactions in memory - use trimmed comparison
+        tx = all_txs[all_txs['stock_symbol'].str.strip() == sym].copy()
 
         # Calculate metrics (business logic preserved)
         h = compute_holdings_avg_cost(tx)
@@ -2636,7 +2646,13 @@ def build_portfolio_table(portfolio_name: str, user_id: Optional[int] = None) ->
         total_cost = round(h["cost_basis"], 3)
         avg_cost = (total_cost / qty) if qty > 0 else 0.0 # Avg cost can keep precision or round
 
+        # Market Price = current_price from stocks table (no override logic)
         mkt_price = cp
+        
+        # DEBUG: Log KRE market price assignment
+        if sym.upper() == 'KRE':
+            print(f"[DEBUG] KRE: mkt_price assigned = {mkt_price}, qty = {qty}")
+        
         mkt_value = round(qty * mkt_price, 3)
         unreal = round(mkt_value - total_cost, 3)
 
