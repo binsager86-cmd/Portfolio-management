@@ -60,6 +60,51 @@ def validate_stock_symbol(symbol: str) -> tuple[bool, str]:
     return True, ""
 
 
+def check_stock_exclusivity(symbol: str, target_mode: str, user_id: int) -> tuple[bool, str]:
+    """
+    CFA Compliance: Ensures a stock is not tracked in both Portfolio and Trading simultaneously.
+    This prevents mixing accounting methods (Avg Cost vs FIFO) for the same stock.
+    
+    Args:
+        symbol: Stock symbol to check
+        target_mode: 'portfolio' or 'trading'
+        user_id: User ID
+        
+    Returns:
+        (is_allowed, error_message) - error_message is empty if allowed
+    """
+    conn = get_conn()
+    cursor = conn.cursor()
+    
+    # Check Portfolio (transactions table) - only count if has shares
+    db_execute(cursor, """
+        SELECT COALESCE(SUM(CASE WHEN txn_type = 'Buy' THEN shares ELSE 0 END) - 
+                        SUM(CASE WHEN txn_type = 'Sell' THEN shares ELSE 0 END), 0) as net_shares
+        FROM transactions WHERE stock_symbol = ? AND user_id = ?
+    """, (symbol, user_id))
+    result = cursor.fetchone()
+    in_portfolio = result[0] > 0 if result else False
+    
+    # Check Trading (trading_history table) - only count if has open positions
+    db_execute(cursor, """
+        SELECT COALESCE(SUM(CASE WHEN txn_type = 'Buy' THEN shares ELSE 0 END) - 
+                        SUM(CASE WHEN txn_type = 'Sell' THEN shares ELSE 0 END), 0) as net_shares
+        FROM trading_history WHERE stock_symbol = ? AND user_id = ?
+    """, (symbol, user_id))
+    result = cursor.fetchone()
+    in_trading = result[0] > 0 if result else False
+    
+    conn.close()
+    
+    if target_mode == 'portfolio' and in_trading:
+        return False, f"⚠️ CFA Violation: '{symbol}' has open positions in your Trading Section. You cannot mix Accounting Methods (Avg Cost vs FIFO) for the same stock. Please close the trading position first."
+        
+    if target_mode == 'trading' and in_portfolio:
+        return False, f"⚠️ CFA Violation: '{symbol}' is in your Long-Term Portfolio. You cannot mix Accounting Methods. Please sell or remove it from Portfolio first."
+        
+    return True, ""
+
+
 def sanitize_text_input(text: str, max_length: int = 500) -> str:
     """Sanitize user text input - escape HTML and enforce length."""
     if not text:
@@ -2838,28 +2883,81 @@ def ui_cash_deposits():
                         existing = query_df("SELECT * FROM portfolio_snapshots WHERE snapshot_date = ? AND user_id = ?", (deposit_date_str, user_id))
                         
                         if not existing.empty:
-                            # Update existing snapshot with the deposit
+                            # Update existing snapshot: add deposit to deposit_cash and accumulated_cash
+                            current_acc = float(existing["accumulated_cash"].iloc[0]) if pd.notna(existing["accumulated_cash"].iloc[0]) else 0
+                            new_accumulated = current_acc + convert_to_kwd(float(amount), currency)
+                            
+                            # Recalculate net_gain and ROI with new accumulated cash
+                            current_beginning_diff = float(existing["beginning_difference"].iloc[0]) if pd.notna(existing["beginning_difference"].iloc[0]) else 0
+                            new_net_gain = current_beginning_diff - new_accumulated
+                            
+                            # Get net invested capital for ROI
+                            total_deps = query_df("SELECT SUM(amount) as total FROM cash_deposits WHERE user_id = ? AND include_in_analysis = 1", (user_id,))
+                            total_deps_kwd = float(total_deps["total"].iloc[0]) if not total_deps.empty and pd.notna(total_deps["total"].iloc[0]) else 0
+                            new_roi = (new_net_gain / total_deps_kwd * 100) if total_deps_kwd > 0 else 0
+                            
                             exec_sql(
-                                "UPDATE portfolio_snapshots SET deposit_cash = deposit_cash + ? WHERE snapshot_date = ? AND user_id = ?",
-                                (float(amount), deposit_date_str, user_id)
+                                """UPDATE portfolio_snapshots 
+                                   SET deposit_cash = deposit_cash + ?, accumulated_cash = ?, net_gain = ?, roi_percent = ?
+                                   WHERE snapshot_date = ? AND user_id = ?""",
+                                (convert_to_kwd(float(amount), currency), new_accumulated, new_net_gain, new_roi, deposit_date_str, user_id)
                             )
                         else:
-                            # Create new snapshot with just the deposit
-                            # Get accumulated cash from previous date
+                            # TWR FIX: Create a proper snapshot with LIVE portfolio value
+                            # This ensures TWR has accurate valuation on cash flow dates
+                            
+                            # 1. Calculate LIVE portfolio value (Stock Market Values)
+                            live_stock_value = 0.0
+                            for port_name in PORTFOLIO_CCY.keys():
+                                df_port = build_portfolio_table(port_name)
+                                if not df_port.empty:
+                                    for _, row in df_port.iterrows():
+                                        live_stock_value += convert_to_kwd(row['Market Value'], row['Currency'])
+                            
+                            # Add Manual Cash from portfolio_cash table
+                            manual_cash_kwd = 0.0
+                            cash_recs = query_df("SELECT balance, currency FROM portfolio_cash WHERE user_id=?", (user_id,))
+                            if not cash_recs.empty:
+                                for _, cr in cash_recs.iterrows():
+                                    manual_cash_kwd += convert_to_kwd(cr["balance"], cr["currency"])
+                            
+                            live_portfolio_value = live_stock_value + manual_cash_kwd
+                            
+                            # 2. Get previous snapshot for calculations
                             prev_snap = query_df(
-                                "SELECT accumulated_cash FROM portfolio_snapshots WHERE snapshot_date < ? AND user_id = ? ORDER BY snapshot_date DESC LIMIT 1",
+                                "SELECT portfolio_value, accumulated_cash FROM portfolio_snapshots WHERE snapshot_date < ? AND user_id = ? ORDER BY snapshot_date DESC LIMIT 1",
                                 (deposit_date_str, user_id)
                             )
                             
+                            prev_value = 0.0
+                            prev_acc = 0.0
                             if not prev_snap.empty:
-                                prev_acc = prev_snap["accumulated_cash"].iloc[0]
-                                accumulated_cash = (float(prev_acc) if pd.notna(prev_acc) else 0) + float(amount)
-                            else:
-                                accumulated_cash = float(amount)
+                                prev_value = float(prev_snap["portfolio_value"].iloc[0]) if pd.notna(prev_snap["portfolio_value"].iloc[0]) else 0
+                                prev_acc = float(prev_snap["accumulated_cash"].iloc[0]) if pd.notna(prev_snap["accumulated_cash"].iloc[0]) else 0
                             
-                            # Calculate net_gain and roi
-                            net_gain = 0 - accumulated_cash  # beginning_diff is 0 since no portfolio value yet
-                            roi_percent = 0
+                            # 3. Calculate accumulated cash (previous + this deposit in KWD)
+                            deposit_in_kwd = convert_to_kwd(float(amount), currency)
+                            accumulated_cash = prev_acc + deposit_in_kwd
+                            
+                            # 4. Calculate metrics
+                            daily_movement = live_portfolio_value - prev_value if prev_value > 0 else 0.0
+                            
+                            # Beginning diff = Current Value - First Value
+                            first_snap = query_df("SELECT portfolio_value FROM portfolio_snapshots WHERE user_id = ? ORDER BY snapshot_date ASC LIMIT 1", (user_id,))
+                            if not first_snap.empty:
+                                baseline = float(first_snap["portfolio_value"].iloc[0])
+                                beginning_diff = live_portfolio_value - baseline
+                            else:
+                                beginning_diff = 0.0
+                            
+                            net_gain = beginning_diff - accumulated_cash
+                            
+                            # Get net invested capital for ROI
+                            total_deps = query_df("SELECT SUM(amount) as total FROM cash_deposits WHERE user_id = ? AND include_in_analysis = 1", (user_id,))
+                            total_deps_kwd = float(total_deps["total"].iloc[0]) if not total_deps.empty and pd.notna(total_deps["total"].iloc[0]) else 0
+                            roi_percent = (net_gain / total_deps_kwd * 100) if total_deps_kwd > 0 else 0
+                            
+                            change_percent = ((live_portfolio_value - prev_value) / prev_value * 100) if prev_value > 0 else 0.0
                             
                             exec_sql(
                                 """
@@ -2868,7 +2966,8 @@ def ui_cash_deposits():
                                  deposit_cash, accumulated_cash, net_gain, change_percent, roi_percent, created_at)
                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                                 """,
-                                (user_id, deposit_date_str, 0, 0, 0, float(amount), accumulated_cash, net_gain, 0, roi_percent, int(time.time()))
+                                (user_id, deposit_date_str, live_portfolio_value, daily_movement, beginning_diff, 
+                                 deposit_in_kwd, accumulated_cash, net_gain, change_percent, roi_percent, int(time.time()))
                             )
                     
                     success_msg = "Deposit saved!"
@@ -3039,12 +3138,26 @@ def ui_cash_deposits():
                                             (deposit_date_str, user_id)
                                         )
                                         
+                                        # Convert deposit to KWD for consistent tracking
+                                        deposit_in_kwd = convert_to_kwd(amount_val, currency_val)
+                                        
                                         if not existing.empty:
+                                            # Update existing snapshot with the deposit
+                                            current_acc = float(existing["accumulated_cash"].iloc[0]) if pd.notna(existing["accumulated_cash"].iloc[0]) else 0
+                                            new_accumulated = current_acc + deposit_in_kwd
+                                            
+                                            current_beginning_diff = float(existing["beginning_difference"].iloc[0]) if pd.notna(existing["beginning_difference"].iloc[0]) else 0
+                                            new_net_gain = current_beginning_diff - new_accumulated
+                                            
                                             exec_sql(
-                                                "UPDATE portfolio_snapshots SET deposit_cash = deposit_cash + ? WHERE snapshot_date = ? AND user_id = ?",
-                                                (amount_val, deposit_date_str, user_id)
+                                                """UPDATE portfolio_snapshots 
+                                                   SET deposit_cash = deposit_cash + ?, accumulated_cash = ?, net_gain = ?
+                                                   WHERE snapshot_date = ? AND user_id = ?""",
+                                                (deposit_in_kwd, new_accumulated, new_net_gain, deposit_date_str, user_id)
                                             )
                                         else:
+                                            # For historical deposits, create a placeholder snapshot
+                                            # Note: Portfolio value will need to be updated manually or via "Save Today's Snapshot"
                                             prev_snap = query_df(
                                                 "SELECT accumulated_cash FROM portfolio_snapshots WHERE snapshot_date < ? AND user_id = ? ORDER BY snapshot_date DESC LIMIT 1",
                                                 (deposit_date_str, user_id)
@@ -3052,9 +3165,9 @@ def ui_cash_deposits():
                                             
                                             if not prev_snap.empty:
                                                 prev_acc = prev_snap["accumulated_cash"].iloc[0]
-                                                accumulated_cash = (float(prev_acc) if pd.notna(prev_acc) else 0) + amount_val
+                                                accumulated_cash = (float(prev_acc) if pd.notna(prev_acc) else 0) + deposit_in_kwd
                                             else:
-                                                accumulated_cash = amount_val
+                                                accumulated_cash = deposit_in_kwd
                                             
                                             net_gain = 0 - accumulated_cash
                                             
@@ -3065,7 +3178,7 @@ def ui_cash_deposits():
                                                  deposit_cash, accumulated_cash, net_gain, change_percent, roi_percent, created_at)
                                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                                                 """,
-                                                (user_id, deposit_date_str, 0, 0, 0, amount_val, accumulated_cash, net_gain, 0, 0, int(time.time()))
+                                                (user_id, deposit_date_str, 0, 0, 0, deposit_in_kwd, accumulated_cash, net_gain, 0, 0, int(time.time()))
                                             )
                                     
                                     success_count += 1
@@ -4301,49 +4414,54 @@ def ui_transactions():
                 if txn_type == "Sell" and shares > available_before:
                     st.error("Cannot sell more than available quantity.")
                 else:
-                    # Allow empty/zero shares and costs; provide non-blocking warnings
-                    if shares <= 0:
-                        st.warning("Shares is empty or zero • transaction will be recorded with 0 shares.")
-                    if txn_type == "Buy" and purchase_cost <= 0:
-                        st.warning("Purchase cost is empty or zero • recorded as 0.0.")
-                    if txn_type == "Sell" and sell_value <= 0:
-                        st.warning("Sell value is empty or zero • recorded as 0.0.")
+                    # CFA Compliance: Check stock exclusivity (cannot be in both Portfolio and Trading)
+                    is_exclusive, excl_err = check_stock_exclusivity(selected_symbol, 'portfolio', st.session_state.get('user_id', 1))
+                    if not is_exclusive:
+                        st.error(excl_err)
+                    else:
+                        # Allow empty/zero shares and costs; provide non-blocking warnings
+                        if shares <= 0:
+                            st.warning("Shares is empty or zero • transaction will be recorded with 0 shares.")
+                        if txn_type == "Buy" and purchase_cost <= 0:
+                            st.warning("Purchase cost is empty or zero • recorded as 0.0.")
+                        if txn_type == "Sell" and sell_value <= 0:
+                            st.warning("Sell value is empty or zero • recorded as 0.0.")
 
-                    po = None if (price_override is None) else float(price_override)
-                    pc = None if planned_cum == 0 else float(planned_cum)
+                        po = None if (price_override is None) else float(price_override)
+                        pc = None if planned_cum == 0 else float(planned_cum)
 
-                    exec_sql(
-                        """
-                        INSERT INTO transactions
-                        (stock_symbol, txn_date, txn_type, purchase_cost, sell_value, shares,
-                         bonus_shares, cash_dividend,
-                         price_override, planned_cum_shares, reinvested_dividend, fees,
-                         broker, reference, notes, category, created_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """,
-                        (
-                            selected_symbol,
-                            txn_date.isoformat(),
-                            txn_type,
-                            float(purchase_cost),
-                            float(sell_value),
-                            float(shares),
-                            float(bonus_shares),
-                            float(cash_dividend),
-                            po,
-                            pc,
-                            float(reinv),
-                            float(fees),
-                            broker.strip(),
-                            reference.strip(),
-                            notes.strip(),
-                            'portfolio',
-                            int(time.time()),
-                        ),
-                    )
+                        exec_sql(
+                            """
+                            INSERT INTO transactions
+                            (stock_symbol, txn_date, txn_type, purchase_cost, sell_value, shares,
+                             bonus_shares, cash_dividend,
+                             price_override, planned_cum_shares, reinvested_dividend, fees,
+                             broker, reference, notes, category, created_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            """,
+                            (
+                                selected_symbol,
+                                txn_date.isoformat(),
+                                txn_type,
+                                float(purchase_cost),
+                                float(sell_value),
+                                float(shares),
+                                float(bonus_shares),
+                                float(cash_dividend),
+                                po,
+                                pc,
+                                float(reinv),
+                                float(fees),
+                                broker.strip(),
+                                reference.strip(),
+                                notes.strip(),
+                                'portfolio',
+                                int(time.time()),
+                            ),
+                        )
 
-                    st.success("Transaction saved.")
-                    st.rerun()
+                        st.success("Transaction saved.")
+                        st.rerun()
 
     st.markdown("### Transactions Table")
     
@@ -5538,10 +5656,10 @@ def ui_financial_planner():
                 if calc_yield is not None and calc_contribution is not None:
                     elements.append(Paragraph("📊 Statistics", heading_style))
                     stats_data = [
-                        ["Starting Value", f"${pv:,.2f}"],
-                        ["Total Contributions", f"${total_contributions_amount:,.2f}"],
-                        ["Total Interest Earned", f"${total_interest:,.2f}"],
-                        ["Final Portfolio Value", f"${final_value:,.2f}"],
+                        ["Starting Value", f"{pv:,.2f} KWD"],
+                        ["Total Contributions", f"{total_contributions_amount:,.2f} KWD"],
+                        ["Total Interest Earned", f"{total_interest:,.2f} KWD"],
+                        ["Final Portfolio Value", f"{final_value:,.2f} KWD"],
                     ]
                     stats_table = Table(stats_data, colWidths=[2.5*inch, 3*inch])
                     stats_table.setStyle(TableStyle([
@@ -5624,9 +5742,9 @@ def ui_financial_planner():
                         elements.append(Paragraph("💎 Portfolio Breakdown", heading_style))
                         breakdown_data = [
                             ["Component", "Amount", "Percentage"],
-                            ["Principal (Your Money)", f"${f_principal:,.2f}", f"{p_pct:.1f}%"],
-                            ["Interest (Growth)", f"${f_interest:,.2f}", f"{i_pct:.1f}%"],
-                            ["Total", f"${f_bal:,.2f}", "100%"],
+                            ["Principal (Your Money)", f"{f_principal:,.2f} KWD", f"{p_pct:.1f}%"],
+                            ["Interest (Growth)", f"{f_interest:,.2f} KWD", f"{i_pct:.1f}%"],
+                            ["Total", f"{f_bal:,.2f} KWD", "100%"],
                         ]
                         breakdown_table = Table(breakdown_data, colWidths=[2*inch, 2*inch, 1.5*inch])
                         breakdown_table.setStyle(TableStyle([
@@ -7505,8 +7623,11 @@ def ui_portfolio_tracker():
             # Net Gain = Beginning Diff - Accumulated Cash (Corrected Formula)
             net_gain = beginning_diff - accumulated_cash
             
-            # Calculate TOTAL cash deposited (all deposits converted to KWD)
-            total_cash_deposited = 0.0
+            # Calculate NET INVESTED CAPITAL (Deposits - Withdrawals, all converted to KWD)
+            total_deposits_kwd = 0.0
+            total_withdrawals_kwd = 0.0
+            
+            # Sum all deposits
             all_deps = query_df(
                 "SELECT amount, currency FROM cash_deposits WHERE user_id = ? AND include_in_analysis = 1",
                 (user_id,)
@@ -7515,10 +7636,24 @@ def ui_portfolio_tracker():
                 for _, dep_row in all_deps.iterrows():
                     dep_amt = float(dep_row["amount"]) if pd.notna(dep_row["amount"]) else 0.0
                     dep_ccy = dep_row.get("currency", "KWD") or "KWD"
-                    total_cash_deposited += convert_to_kwd(dep_amt, dep_ccy)
+                    total_deposits_kwd += convert_to_kwd(dep_amt, dep_ccy)
             
-            # ROI % = Net Gain / Total Cash Deposited * 100
-            roi_percent = (net_gain / total_cash_deposited * 100) if total_cash_deposited > 0 else 0.0
+            # Sum all withdrawals (from transactions table where txn_type = 'Withdrawal' or category = 'FLOW_OUT')
+            all_withdrawals = query_df(
+                "SELECT sell_value, COALESCE(s.currency, 'KWD') as currency FROM transactions t LEFT JOIN stocks s ON t.stock_symbol = s.symbol AND s.user_id = t.user_id WHERE t.user_id = ? AND (t.txn_type = 'Withdrawal' OR t.category = 'FLOW_OUT')",
+                (user_id,)
+            )
+            if not all_withdrawals.empty:
+                for _, wd_row in all_withdrawals.iterrows():
+                    wd_amt = float(wd_row["sell_value"]) if pd.notna(wd_row["sell_value"]) else 0.0
+                    wd_ccy = wd_row.get("currency", "KWD") or "KWD"
+                    total_withdrawals_kwd += convert_to_kwd(wd_amt, wd_ccy)
+            
+            # Net Invested Capital = Deposits - Withdrawals
+            net_invested_capital = total_deposits_kwd - total_withdrawals_kwd
+            
+            # ROI % = Net Gain / Net Invested Capital * 100
+            roi_percent = (net_gain / net_invested_capital * 100) if net_invested_capital > 0 else 0.0
             change_percent = ((live_portfolio_value - prev_value) / prev_value * 100) if prev_value > 0 else 0.0
             
             # 5. Insert or Update
@@ -7685,8 +7820,10 @@ def ui_portfolio_tracker():
                                     accumulated_cash += deposit_cash
                                 # else: carry forward previous value (no change to accumulated_cash)
                             
-                            # Get total deposits up to this date for ROI calculation (with currency conversion)
-                            total_cash_deposited = 0.0
+                            # Calculate NET INVESTED CAPITAL (Deposits - Withdrawals)
+                            total_deposits_kwd = 0.0
+                            total_withdrawals_kwd = 0.0
+                            
                             all_deps = query_df("""
                                 SELECT amount, currency 
                                 FROM cash_deposits 
@@ -7696,12 +7833,24 @@ def ui_portfolio_tracker():
                                 for _, dep_row in all_deps.iterrows():
                                     dep_amt = float(dep_row["amount"]) if pd.notna(dep_row["amount"]) else 0.0
                                     dep_ccy = dep_row.get("currency", "KWD") or "KWD"
-                                    total_cash_deposited += convert_to_kwd(dep_amt, dep_ccy)
+                                    total_deposits_kwd += convert_to_kwd(dep_amt, dep_ccy)
+                            
+                            all_withdrawals = query_df(
+                                "SELECT sell_value, COALESCE(s.currency, 'KWD') as currency FROM transactions t LEFT JOIN stocks s ON t.stock_symbol = s.symbol AND s.user_id = t.user_id WHERE t.user_id = ? AND (t.txn_type = 'Withdrawal' OR t.category = 'FLOW_OUT')",
+                                (user_id,)
+                            )
+                            if not all_withdrawals.empty:
+                                for _, wd_row in all_withdrawals.iterrows():
+                                    wd_amt = float(wd_row["sell_value"]) if pd.notna(wd_row["sell_value"]) else 0.0
+                                    wd_ccy = wd_row.get("currency", "KWD") or "KWD"
+                                    total_withdrawals_kwd += convert_to_kwd(wd_amt, wd_ccy)
+                            
+                            net_invested_capital = total_deposits_kwd - total_withdrawals_kwd
                             
                             # Net gain from stocks = Beginning Difference - Accumulated Cash (Corrected Formula)
                             net_gain = beginning_diff - accumulated_cash if accumulated_cash else beginning_diff
-                            # ROI % = Net Gain / Total Cash Deposited * 100
-                            roi_percent = (net_gain / total_cash_deposited * 100) if total_cash_deposited > 0 else 0
+                            # ROI % = Net Gain / Net Invested Capital * 100
+                            roi_percent = (net_gain / net_invested_capital * 100) if net_invested_capital > 0 else 0
                             # Change % = change from previous day
                             change_percent = ((portfolio_value - prev_value) / prev_value * 100) if prev_value > 0 else 0
                             
@@ -7807,8 +7956,10 @@ def ui_portfolio_tracker():
                 
                 net_gain = beginning_diff - accumulated_cash
                 
-                # Calculate TOTAL cash deposited (all deposits converted to KWD)
-                total_cash_deposited = 0.0
+                # Calculate NET INVESTED CAPITAL (Deposits - Withdrawals)
+                total_deposits_kwd = 0.0
+                total_withdrawals_kwd = 0.0
+                
                 all_deps = query_df(
                     "SELECT amount, currency FROM cash_deposits WHERE user_id = ? AND include_in_analysis = 1",
                     (user_id,)
@@ -7817,10 +7968,22 @@ def ui_portfolio_tracker():
                     for _, dep_row in all_deps.iterrows():
                         dep_amt = float(dep_row["amount"]) if pd.notna(dep_row["amount"]) else 0.0
                         dep_ccy = dep_row.get("currency", "KWD") or "KWD"
-                        total_cash_deposited += convert_to_kwd(dep_amt, dep_ccy)
+                        total_deposits_kwd += convert_to_kwd(dep_amt, dep_ccy)
                 
-                # ROI % = Net Gain / Total Cash Deposited * 100
-                roi_percent = (net_gain / total_cash_deposited * 100) if total_cash_deposited > 0 else 0.0
+                all_withdrawals = query_df(
+                    "SELECT sell_value, COALESCE(s.currency, 'KWD') as currency FROM transactions t LEFT JOIN stocks s ON t.stock_symbol = s.symbol AND s.user_id = t.user_id WHERE t.user_id = ? AND (t.txn_type = 'Withdrawal' OR t.category = 'FLOW_OUT')",
+                    (user_id,)
+                )
+                if not all_withdrawals.empty:
+                    for _, wd_row in all_withdrawals.iterrows():
+                        wd_amt = float(wd_row["sell_value"]) if pd.notna(wd_row["sell_value"]) else 0.0
+                        wd_ccy = wd_row.get("currency", "KWD") or "KWD"
+                        total_withdrawals_kwd += convert_to_kwd(wd_amt, wd_ccy)
+                
+                net_invested_capital = total_deposits_kwd - total_withdrawals_kwd
+                
+                # ROI % = Net Gain / Net Invested Capital * 100
+                roi_percent = (net_gain / net_invested_capital * 100) if net_invested_capital > 0 else 0.0
                 change_percent = ((portfolio_value - prev_value) / prev_value * 100) if prev_value > 0 else 0.0
                 
                 exec_sql(
@@ -8283,74 +8446,7 @@ def ui_dividends_tracker():
         ORDER BY t.stock_symbol, t.txn_date
     """, (user_id,))
     
-    # 2. Trading history table dividends
-    trading_dividends_df = query_df("""
-        SELECT 
-            t.id,
-            t.stock_symbol,
-            t.txn_date,
-            COALESCE(t.cash_dividend, 0) as cash_dividend,
-            COALESCE(t.bonus_shares, 0) as bonus_shares,
-            0 as reinvested_dividend,
-            COALESCE(s.currency, 'KWD') as currency,
-            'trading' as source
-        FROM trading_history t
-        LEFT JOIN stocks s ON t.stock_symbol = s.symbol AND s.user_id = t.user_id
-        WHERE t.user_id = ?
-          AND COALESCE(t.cash_dividend, 0) > 0
-        ORDER BY t.stock_symbol, t.txn_date
-    """, (user_id,))
-    
-    # Combine both sources
-    if not trading_dividends_df.empty:
-        dividends_df = pd.concat([dividends_df, trading_dividends_df], ignore_index=True)
-        dividends_df = dividends_df.sort_values(['stock_symbol', 'txn_date'])
-    
-    # DEDUPLICATION: Remove duplicates where same stock, date, and amount exist in both tables
-    # Keep the 'portfolio' record as primary, drop 'trading' duplicates
-    removed_duplicates_df = pd.DataFrame()  # Track what was removed
-    if not dividends_df.empty:
-        # Create a composite key for deduplication
-        dividends_df['_dedup_key'] = (
-            dividends_df['stock_symbol'].astype(str) + '_' + 
-            dividends_df['txn_date'].astype(str) + '_' + 
-            dividends_df['cash_dividend'].astype(str) + '_' +
-            dividends_df['bonus_shares'].astype(str)
-        )
-        
-        # Find duplicates (records that appear more than once)
-        duplicate_mask = dividends_df.duplicated(subset=['_dedup_key'], keep=False)
-        num_potential_dupes = duplicate_mask.sum()
-        
-        if num_potential_dupes > 0:
-            # Save duplicates for debug display
-            duplicates_preview = dividends_df[duplicate_mask].copy()
-            
-            # Sort so 'portfolio' comes before 'trading' (alphabetically), then drop duplicates keeping first
-            dividends_df = dividends_df.sort_values(['_dedup_key', 'source'])
-            before_count = len(dividends_df)
-            
-            # Identify which records will be removed (the 'trading' ones)
-            removed_duplicates_df = dividends_df[dividends_df.duplicated(subset=['_dedup_key'], keep='first')].copy()
-            
-            dividends_df = dividends_df.drop_duplicates(subset=['_dedup_key'], keep='first')
-            after_count = len(dividends_df)
-            removed_count = before_count - after_count
-            
-            if removed_count > 0:
-                st.info(f"ℹ️ Removed {removed_count} duplicate dividend records (same stock, date, amount in both Portfolio & Trading tables)")
-                
-                # Show debug expander with duplicate details
-                with st.expander(f"🔍 View {removed_count} Removed Duplicates", expanded=False):
-                    st.write("**These records were removed because they exist in both tables:**")
-                    debug_display = removed_duplicates_df[['stock_symbol', 'txn_date', 'cash_dividend', 'bonus_shares', 'source']].copy()
-                    debug_display.columns = ['Stock', 'Date', 'Cash Dividend', 'Bonus Shares', 'Source (Removed)']
-                    st.dataframe(debug_display, hide_index=True)
-                    st.caption("💡 The Portfolio version was kept. Trading version was removed to avoid double-counting.")
-        
-        # Drop the dedup key column
-        dividends_df = dividends_df.drop(columns=['_dedup_key'])
-        dividends_df = dividends_df.sort_values(['stock_symbol', 'txn_date']).reset_index(drop=True)
+    # NOTE: Trading history dividends are NOT included here - they are tracked separately in Trading Section
     
     if dividends_df.empty:
         st.info("📊 No dividend data yet. Add transactions with cash dividends or bonus shares.")
@@ -8661,51 +8757,56 @@ def ui_trading_section():
                 elif is_closed and sale_price <= 0:
                     st.error("Sale Price must be greater than 0 for closed trades")
                 else:
-                    try:
-                        conn = get_conn()
-                        cur = conn.cursor()
-                        
-                        # Check/Add Stock
-                        user_id = st.session_state.get('user_id', 1)
-                        db_execute(cur, "SELECT id FROM stocks WHERE symbol = ? AND user_id = ?", (stock_symbol, user_id))
-                        if not cur.fetchone():
-                            db_execute(cur,
-                                "INSERT INTO stocks (symbol, name, portfolio, currency, user_id) VALUES (?, ?, ?, ?, ?)",
-                                (stock_symbol, stock_symbol, "KFH", "KWD", user_id)
-                            )
-                        
-                        # Calculate totals
-                        total_purchase_cost = purchase_price * quantity
-                        total_sell_value = sale_price * quantity if is_closed else 0
-                        
-                        # Insert Buy
-                        db_execute(cur, """
-                            INSERT INTO trading_history 
-                            (stock_symbol, txn_date, txn_type, purchase_cost, sell_value, shares, 
-                             cash_dividend, bonus_shares, created_at, user_id)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """, (stock_symbol, purchase_date.strftime("%Y-%m-%d"), 'Buy', total_purchase_cost, 0, quantity, 0, 0, int(time.time()), user_id))
-                        
-                        # Insert Sell if applicable
-                        if is_closed:
+                    # CFA Compliance: Check stock exclusivity (cannot be in both Portfolio and Trading)
+                    user_id = st.session_state.get('user_id', 1)
+                    is_exclusive, excl_err = check_stock_exclusivity(stock_symbol, 'trading', user_id)
+                    if not is_exclusive:
+                        st.error(excl_err)
+                    else:
+                        try:
+                            conn = get_conn()
+                            cur = conn.cursor()
+                            
+                            # Check/Add Stock
+                            db_execute(cur, "SELECT id FROM stocks WHERE symbol = ? AND user_id = ?", (stock_symbol, user_id))
+                            if not cur.fetchone():
+                                db_execute(cur,
+                                    "INSERT INTO stocks (symbol, name, portfolio, currency, user_id) VALUES (?, ?, ?, ?, ?)",
+                                    (stock_symbol, stock_symbol, "KFH", "KWD", user_id)
+                                )
+                            
+                            # Calculate totals
+                            total_purchase_cost = purchase_price * quantity
+                            total_sell_value = sale_price * quantity if is_closed else 0
+                            
+                            # Insert Buy
                             db_execute(cur, """
                                 INSERT INTO trading_history 
                                 (stock_symbol, txn_date, txn_type, purchase_cost, sell_value, shares, 
                                  cash_dividend, bonus_shares, created_at, user_id)
                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                            """, (stock_symbol, sale_date.strftime("%Y-%m-%d"), 'Sell', 0, total_sell_value, quantity, cash_div, bonus_shares, int(time.time()), user_id))
-                            st.success(f"✅ Added closed trade for {stock_symbol} (Buy + Sell)")
-                        else:
-                            st.success(f"✅ Added open position for {stock_symbol} (Buy only)")
-                        
-                        conn.commit()
-                        conn.close()
-                        st.cache_data.clear()  # Clear cache to show updated data
-                        time.sleep(1)
-                        st.rerun()
-                        
-                    except Exception as e:
-                        st.error(f"Error saving trade: {e}")
+                            """, (stock_symbol, purchase_date.strftime("%Y-%m-%d"), 'Buy', total_purchase_cost, 0, quantity, 0, 0, int(time.time()), user_id))
+                            
+                            # Insert Sell if applicable
+                            if is_closed:
+                                db_execute(cur, """
+                                    INSERT INTO trading_history 
+                                    (stock_symbol, txn_date, txn_type, purchase_cost, sell_value, shares, 
+                                     cash_dividend, bonus_shares, created_at, user_id)
+                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                """, (stock_symbol, sale_date.strftime("%Y-%m-%d"), 'Sell', 0, total_sell_value, quantity, cash_div, bonus_shares, int(time.time()), user_id))
+                                st.success(f"✅ Added closed trade for {stock_symbol} (Buy + Sell)")
+                            else:
+                                st.success(f"✅ Added open position for {stock_symbol} (Buy only)")
+                            
+                            conn.commit()
+                            conn.close()
+                            st.cache_data.clear()  # Clear cache to show updated data
+                            time.sleep(1)
+                            st.rerun()
+                            
+                        except Exception as e:
+                            st.error(f"Error saving trade: {e}")
     
     # Excel Upload Section
     with st.expander("📥 Upload Trading Data (Excel)", expanded=False):
@@ -10372,9 +10473,25 @@ def calculate_sharpe_ratio(rf_rate):
     
     if df.empty or len(df) < 2:
         return None
+    
+    # Convert snapshot_date to datetime for time delta calculation
+    df['snapshot_date'] = pd.to_datetime(df['snapshot_date'])
+    
+    # Calculate average days between snapshots to determine annualization factor
+    avg_days = df['snapshot_date'].diff().dt.days.mean()
+    if pd.isna(avg_days) or avg_days <= 0:
+        avg_days = 1  # Default to daily
+    
+    # Determine annualization factor based on snapshot frequency
+    if avg_days > 25:      # Monthly snapshots
+        annual_factor = 12
+    elif avg_days > 5:     # Weekly snapshots  
+        annual_factor = 52
+    else:                  # Daily snapshots
+        annual_factor = 252
         
-    # Calculate daily returns
-    df['daily_return'] = df['portfolio_value'].pct_change()
+    # Calculate period returns
+    df['period_return'] = df['portfolio_value'].pct_change()
     
     # Drop NaN (first row)
     df = df.dropna()
@@ -10382,12 +10499,12 @@ def calculate_sharpe_ratio(rf_rate):
     if df.empty:
         return None
         
-    # Convert annual Rf to daily Rf
-    # daily_rf = (1 + annual_rf) ^ (1/252) - 1
-    daily_rf = (1 + rf_rate) ** (1/252) - 1
+    # Convert annual Rf to period Rf
+    # period_rf = (1 + annual_rf) ^ (1/annual_factor) - 1
+    period_rf = (1 + rf_rate) ** (1/annual_factor) - 1
     
     # Calculate Excess Returns
-    df['excess_return'] = df['daily_return'] - daily_rf
+    df['excess_return'] = df['period_return'] - period_rf
     
     # Calculate Sharpe
     mean_excess = df['excess_return'].mean()
@@ -10396,8 +10513,8 @@ def calculate_sharpe_ratio(rf_rate):
     if std_excess == 0:
         return 0.0
         
-    # Annualize
-    sharpe = (mean_excess / std_excess) * np.sqrt(252)
+    # Annualize using appropriate factor
+    sharpe = (mean_excess / std_excess) * np.sqrt(annual_factor)
     
     return sharpe
 
@@ -10422,17 +10539,37 @@ def get_us_risk_free_rate():
         pass
     return default_rate
 
-def calculate_sortino_ratio(rf_rate):
-    """Calculate Sortino Ratio based on portfolio snapshots."""
+def calculate_sortino_ratio(rf_rate=None):
+    """
+    Calculate Sortino Ratio based on portfolio snapshots.
+    Uses MAR (Minimum Acceptable Return) = 0%, which is the industry standard
+    for absolute return strategies (penalize only losses, not returns below CBK rate).
+    """
     # Load portfolio snapshots
     user_id = st.session_state.get('user_id', 1)
     df = query_df("SELECT snapshot_date, portfolio_value FROM portfolio_snapshots WHERE user_id = ? ORDER BY snapshot_date ASC", (user_id,))
     
     if df.empty or len(df) < 2:
         return None
+    
+    # Convert snapshot_date to datetime for time delta calculation
+    df['snapshot_date'] = pd.to_datetime(df['snapshot_date'])
+    
+    # Calculate average days between snapshots to determine annualization factor
+    avg_days = df['snapshot_date'].diff().dt.days.mean()
+    if pd.isna(avg_days) or avg_days <= 0:
+        avg_days = 1  # Default to daily
+    
+    # Determine annualization factor based on snapshot frequency
+    if avg_days > 25:      # Monthly snapshots
+        annual_factor = 12
+    elif avg_days > 5:     # Weekly snapshots  
+        annual_factor = 52
+    else:                  # Daily snapshots
+        annual_factor = 252
         
-    # Calculate daily returns
-    df['daily_return'] = df['portfolio_value'].pct_change()
+    # Calculate period returns
+    df['period_return'] = df['portfolio_value'].pct_change()
     
     # Drop NaN (first row)
     df = df.dropna()
@@ -10440,11 +10577,12 @@ def calculate_sortino_ratio(rf_rate):
     if df.empty:
         return None
         
-    # Convert annual Rf to daily Rf
-    daily_rf = (1 + rf_rate) ** (1/252) - 1
+    # MAR (Minimum Acceptable Return) = 0% (Break-even)
+    # We penalize only negative returns, not returns below CBK rate
+    mar = 0.0
     
-    # Calculate Excess Returns
-    df['excess_return'] = df['daily_return'] - daily_rf
+    # Calculate Excess Returns vs 0% MAR
+    df['excess_return'] = df['period_return'] - mar
     
     # Calculate Downside Deviation
     # Keep only negative excess returns, replace positives with 0
@@ -10454,11 +10592,11 @@ def calculate_sortino_ratio(rf_rate):
     downside_std = np.std(negative_returns)
     
     if downside_std == 0:
-        return 10.0 # Cap if no downside
+        return 10.0 # Cap if no downside volatility
         
-    # Calculate Sortino
+    # Calculate Sortino using appropriate annualization factor
     mean_excess = df['excess_return'].mean()
-    sortino = (mean_excess / downside_std) * np.sqrt(252)
+    sortino = (mean_excess / downside_std) * np.sqrt(annual_factor)
     
     return sortino
 
@@ -10715,27 +10853,64 @@ def ui_overview():
     # Get total cash dividends (properly calculated - excludes bonus shares, reinvested, etc.)
     total_dividends_kwd, dividend_count, _ = calculate_total_cash_dividends(user_id, debug=False)
     
-    # Calculate Realized Profit (from Sell transactions - Portfolio)
+    # Calculate Realized Profit (Portfolio - Average Cost Method)
+    # CFA Compliant: Match Revenue (Sell Value) with Cost Basis at time of sale
     portfolio_realized_kwd = 0.0
-    realized_query = query_df("""
+    
+    # Get all portfolio transactions ordered chronologically
+    all_port_tx = query_df("""
         SELECT 
-            t.sell_value, 
-            t.purchase_cost,
-            t.shares,
+            t.stock_symbol, 
+            t.txn_type, 
+            t.shares, 
+            t.purchase_cost, 
+            t.sell_value,
             COALESCE(s.currency, 'KWD') as currency
         FROM transactions t
         LEFT JOIN stocks s ON t.stock_symbol = s.symbol AND s.user_id = t.user_id
-        WHERE t.txn_type = 'Sell' AND t.user_id = ? AND COALESCE(t.category, 'portfolio') = 'portfolio'
+        WHERE t.user_id = ? AND COALESCE(t.category, 'portfolio') = 'portfolio'
+        ORDER BY t.txn_date ASC, t.id ASC
     """, (user_id,))
     
-    if not realized_query.empty:
-        for _, row in realized_query.iterrows():
-            sell_val = safe_float(row.get('sell_value', 0), 0)
-            buy_cost = safe_float(row.get('purchase_cost', 0), 0)
-            profit = sell_val - buy_cost
-            portfolio_realized_kwd += convert_to_kwd(profit, row.get('currency', 'KWD'))
+    if not all_port_tx.empty:
+        # Track cost basis per stock: {symbol: {'qty': float, 'total_cost': float, 'currency': str}}
+        stock_basis = {}
+        
+        for _, row in all_port_tx.iterrows():
+            sym = row['stock_symbol']
+            typ = row['txn_type']
+            qty = safe_float(row['shares'], 0)
+            ccy = row.get('currency', 'KWD') or 'KWD'
+            
+            if sym not in stock_basis:
+                stock_basis[sym] = {'qty': 0.0, 'total_cost': 0.0, 'currency': ccy}
+            
+            if typ == 'Buy':
+                cost = safe_float(row['purchase_cost'], 0)
+                stock_basis[sym]['qty'] += qty
+                stock_basis[sym]['total_cost'] += cost
+                
+            elif typ == 'Sell':
+                # Calculate Average Cost at this moment
+                current_qty = stock_basis[sym]['qty']
+                current_cost = stock_basis[sym]['total_cost']
+                
+                if current_qty > 0 and qty > 0:
+                    avg_cost_per_share = current_cost / current_qty
+                    cost_of_sold_shares = avg_cost_per_share * qty
+                    
+                    # Realized Profit = Proceeds - Cost of Sold Shares
+                    proceeds = safe_float(row['sell_value'], 0)
+                    profit = proceeds - cost_of_sold_shares
+                    
+                    # Convert to KWD
+                    portfolio_realized_kwd += convert_to_kwd(profit, ccy)
+                    
+                    # Update basis (reduce by sold shares)
+                    stock_basis[sym]['qty'] -= qty
+                    stock_basis[sym]['total_cost'] -= cost_of_sold_shares
     
-    # Calculate Realized Profit from Trading Section (trading_history table)
+    # Calculate Realized Profit from Trading Section (trading_history table - uses FIFO)
     trading_realized_kwd = calculate_trading_realized_profit(user_id)
     
     # Total Realized Profit = Portfolio + Trading
@@ -11072,25 +11247,19 @@ def ui_overview():
             else:
                 so_color = "#f97316" # Orange (Risky)
             
-            # Build subtitle with stale indicator
-            so_subtitle = f"Risk-Free (CBK): {rf_rate_percent:.2f}%"
-            if cbk_rate_is_stale:
-                so_subtitle += " ⚠️"
-            
             st.markdown(f"""
             <div class="ov-card">
                 <div class="ov-title">Sortino Ratio</div>
                 <div class="ov-value" style="color: {so_color};">{so_val:.2f}</div>
-                <div class="ov-sub">{so_subtitle}</div>
+                <div class="ov-sub">Target Return (MAR): 0%</div>
             </div>
             """, unsafe_allow_html=True)
         else:
-            error_msg = "Need more data" if not sharpe_sortino_error else "Rate unavailable"
             st.markdown(f"""
             <div class="ov-card">
                 <div class="ov-title">Sortino Ratio</div>
                 <div class="ov-value">N/A</div>
-                <div class="ov-sub">{error_msg}</div>
+                <div class="ov-sub">Need more data</div>
             </div>
             """, unsafe_allow_html=True)
 
