@@ -2565,7 +2565,8 @@ def compute_holdings_avg_cost(tx: pd.DataFrame):
     }
 
 
-@st.cache_data(ttl=60, show_spinner=False)  # Cache result for 60 seconds for instant refresh
+# NOTE: Removed @st.cache_data to ensure price updates show immediately
+# The query is fast enough (~50ms) that caching isn't needed
 def build_portfolio_table(portfolio_name: str, user_id: Optional[int] = None) -> pd.DataFrame:
     """Build portfolio table with optimized bulk transaction fetch (N+1 fix).
     
@@ -7012,9 +7013,8 @@ def ui_portfolio_analysis():
                                     for sym in failed_symbols:
                                         st.text(sym)
                             
-                            # Clear all caches to ensure fresh data displays
+                            # Clear all caches and rerun to show new prices
                             st.cache_data.clear()
-                            time.sleep(0.5)
                             st.rerun()
                         except Exception as e:
                             progress.empty()
