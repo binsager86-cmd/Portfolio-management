@@ -14954,6 +14954,73 @@ def ui_user_profile_sidebar():
                 st.rerun()
 
 
+def show_pre_warm_screen():
+    """Display a professional pre-warming/loading screen."""
+    st.markdown("""
+    <style>
+    .prewarm-container {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        height: 70vh;
+        text-align: center;
+        padding: 2rem;
+    }
+    .prewarm-title {
+        font-size: 1.8rem;
+        font-weight: 700;
+        margin-bottom: 1rem;
+        color: #3b82f6;
+    }
+    .prewarm-status {
+        font-size: 1rem;
+        color: #64748b;
+        margin: 0.5rem 0;
+    }
+    .prewarm-spinner {
+        margin: 1.5rem 0;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    st.markdown('<div class="prewarm-container">', unsafe_allow_html=True)
+    st.markdown('<div class="prewarm-title">🚀 Initializing Portfolio Intelligence</div>', unsafe_allow_html=True)
+    
+    status_text = st.empty()
+    progress_bar = st.progress(0)
+    
+    return status_text, progress_bar
+
+
+def pre_warm_services():
+    """Pre-warm critical services and cache results."""
+    status_text, progress_bar = show_pre_warm_screen()
+    
+    steps = [
+        ("Validating session...", lambda: st.session_state.get('logged_in', False)),
+        ("Fetching USD/KWD rate...", fetch_usd_kwd_rate),
+        ("Checking market data access...", _ensure_yfinance),
+        ("Loading user preferences...", lambda: st.session_state.get('theme', 'light')),
+        ("Verifying database...", get_db_info),
+    ]
+    
+    for i, (msg, func) in enumerate(steps):
+        status_text.markdown(f'<div class="prewarm-status">{msg}</div>', unsafe_allow_html=True)
+        progress_bar.progress((i + 1) / len(steps))
+        try:
+            result = func()
+            if result is None or result is False:
+                logger.warning(f"Pre-warm step failed: {msg}")
+        except Exception as e:
+            logger.error(f"Pre-warm error in {msg}: {e}")
+    
+    # Finalize
+    status_text.markdown('<div class="prewarm-status">✅ Ready! Loading your portfolio...</div>', unsafe_allow_html=True)
+    time.sleep(0.5)
+    progress_bar.empty()
+
+
 def main():
     # =============================
     # HEALTH CHECK ENDPOINT (for Cloud Deployments)
