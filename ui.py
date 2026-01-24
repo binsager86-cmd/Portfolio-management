@@ -398,9 +398,10 @@ def session_tv(timeout=20):
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def get_pe_ratios(items):
+def get_pe_ratios(items: tuple):
     """
-    Fetch P/E ratios for a list of (symbol, currency) tuples.
+    Fetch P/E ratios for a tuple of (symbol, currency) tuples.
+    Use tuple(items) when calling for proper cache hashability.
     Returns a dict {symbol: pe_ratio}.
     """
     # Lazy-load yfinance
@@ -2565,7 +2566,7 @@ def compute_holdings_avg_cost(tx: pd.DataFrame):
     }
 
 
-@st.cache_data(ttl=60, show_spinner=False)  # Cache result for 60 seconds for instant refresh
+@st.cache_data(ttl=300, show_spinner=False)  # Cache for 5 minutes - manual refresh via button
 def build_portfolio_table(portfolio_name: str, user_id: Optional[int] = None) -> pd.DataFrame:
     """Build portfolio table with optimized bulk transaction fetch (N+1 fix).
     
@@ -2693,7 +2694,7 @@ def render_portfolio_table(title: str, df: pd.DataFrame, fx_usdkwd: Optional[flo
     
     # Fetch P/E Ratios
     if not df.empty and "Symbol" in df.columns:
-        items = list(zip(df["Symbol"], df["Currency"]))
+        items = tuple(zip(df["Symbol"], df["Currency"]))  # tuple for cache hashability
         pe_map = get_pe_ratios(items)
         df["P/E Ratio"] = df["Symbol"].map(pe_map)
     else:
@@ -3343,7 +3344,7 @@ def ui_cash_deposits():
                 db_execute(cur, "DELETE FROM cash_deposits WHERE user_id = ?", (user_id,))
                 conn.commit()
                 conn.close()
-                st.cache_data.clear()  # Clear cache to show updated data
+                build_portfolio_table.clear()  # Clear cache to show updated data
                 st.session_state.confirm_delete_all = False
                 st.rerun()
         
@@ -3526,7 +3527,7 @@ def ui_cash_deposits():
                             db_execute(cur, "DELETE FROM cash_deposits WHERE id = ?", (deposit_id,))
                             conn.commit()
                             conn.close()
-                            st.cache_data.clear()  # Clear cache to show updated data
+                            build_portfolio_table.clear()  # Clear cache to show updated data
                             st.rerun()
                 
                 st.divider()
@@ -3837,7 +3838,7 @@ def ui_transactions():
                             conn.commit()
                             conn.close()
                             progress_bar.empty()
-                            st.cache_data.clear()  # Clear cache to show updated data
+                            build_portfolio_table.clear()  # Clear cache to show updated data
                             
                             if import_mode == "🗑️ Delete All & Replace":
                                 st.success(f"✅ Full Replace Complete: Deleted {deleted_count:,}, imported {restored_count:,} records.")
@@ -3915,7 +3916,7 @@ def ui_transactions():
                         st.success(f"Stock {sym} added with price {initial_price:.4f}")
                     else:
                         st.success(f"Stock {sym} added. Click 'Fetch Current Price' to get latest price.")
-                    st.cache_data.clear()
+                    build_portfolio_table.clear()
                     st.rerun()
                 except sqlite3.IntegrityError:
                     st.warning("This symbol already exists.")
@@ -4008,7 +4009,7 @@ def ui_transactions():
                         exec_sql("UPDATE stocks SET current_price = ? WHERE symbol = ? AND user_id = ?", (float(p), selected_symbol, user_id))
                         st.success(f"Price updated: {p:.6f} (from Yahoo: {used_ticker})")
                         # Clear cache to ensure fresh data displays
-                        st.cache_data.clear()
+                        build_portfolio_table.clear()
                         time.sleep(0.3)
                         st.rerun()
                     except Exception as e:
@@ -4048,7 +4049,7 @@ def ui_transactions():
                     
                     # Clear confirmation state
                     del st.session_state['confirm_delete_stock']
-                    st.cache_data.clear()  # Clear cache to show updated data
+                    build_portfolio_table.clear()  # Clear cache to show updated data
                     
                     st.success(f"✅ Deleted {selected_symbol} and {txn_deleted:,} transactions")
                     time.sleep(2)
@@ -4254,7 +4255,7 @@ def ui_transactions():
                             st.write(errors[:10])
                         
                         if imported > 0:
-                            st.cache_data.clear()  # Clear cache to show updated data
+                            build_portfolio_table.clear()  # Clear cache to show updated data
                             st.success(f"✅ Imported {imported:,} transactions for {selected_symbol}")
                             time.sleep(1)
                             st.rerun()
@@ -7005,7 +7006,7 @@ def ui_portfolio_analysis():
                                 st.warning(f"⚠️ Could not fetch: {', '.join(failed_symbols)}")
                             
                             # Clear cache and refresh to show new prices
-                            st.cache_data.clear()
+                            build_portfolio_table.clear()
                             st.rerun()
                             
                         except Exception as e:
@@ -7689,7 +7690,7 @@ def ui_portfolio_tracker():
                 )
                 st.success(f"✅ Saved new snapshot for {today_str}")
             
-            st.cache_data.clear()  # Clear cache to show updated data
+            build_portfolio_table.clear()  # Clear cache to show updated data
             time.sleep(1)
             st.rerun()
 
@@ -8802,7 +8803,7 @@ def ui_trading_section():
                             
                             conn.commit()
                             conn.close()
-                            st.cache_data.clear()  # Clear cache to show updated data
+                            build_portfolio_table.clear()  # Clear cache to show updated data
                             time.sleep(1)
                             st.rerun()
                             
@@ -11492,7 +11493,7 @@ def ui_overview():
         
         # Fetch P/E Ratios
         # We need unique symbols
-        unique_items = list(set(zip(holdings_df["Symbol"], holdings_df["Currency"])))
+        unique_items = tuple(set(zip(holdings_df["Symbol"], holdings_df["Currency"])))  # tuple for cache
         pe_map = get_pe_ratios(unique_items)
         
         holdings_df["PE"] = holdings_df["Symbol"].map(pe_map)
