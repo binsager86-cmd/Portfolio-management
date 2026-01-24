@@ -12866,10 +12866,56 @@ def ui_pfm():
     with pfm_tabs[0]:
         st.subheader("📝 Financial Data Entry")
         
+        # --- SAVED SNAPSHOTS QUICK VIEW ---
+        conn = get_conn()
+        try:
+            cur = conn.cursor()
+            db_execute(cur, """
+                SELECT id, snapshot_date, notes FROM pfm_snapshots
+                WHERE user_id = ?
+                ORDER BY snapshot_date DESC
+            """, (user_id,))
+            all_snapshots = cur.fetchall()
+        except:
+            all_snapshots = []
+        finally:
+            conn.close()
+        
+        if all_snapshots:
+            with st.expander("📋 Saved Snapshots (click date to edit)", expanded=False):
+                # Show saved snapshots as selectable list
+                snap_options = ["➕ New Snapshot"] + [f"{s[1]} - {s[2] or 'No notes'}" for s in all_snapshots]
+                snap_ids = [None] + [s[0] for s in all_snapshots]
+                snap_dates = [None] + [s[1] for s in all_snapshots]
+                
+                selected_idx = st.selectbox(
+                    "Select a snapshot to edit or create new",
+                    range(len(snap_options)),
+                    format_func=lambda x: snap_options[x],
+                    key="pfm_snap_selector"
+                )
+                
+                # If user selected an existing snapshot, update the date picker
+                if selected_idx > 0:
+                    selected_snap_date = snap_dates[selected_idx]
+                    if selected_snap_date:
+                        st.session_state["pfm_edit_date"] = selected_snap_date
+                else:
+                    st.session_state["pfm_edit_date"] = None
+        
         # --- Configuration outside form (for immediate UI updates) ---
         col_config1, col_config2, col_config3 = st.columns([1, 1, 1])
         with col_config1:
-            snapshot_date = st.date_input("Snapshot Date", value=datetime.today(), key="pfm_snapshot_date")
+            # Use selected date from dropdown if editing existing, otherwise today
+            edit_date_str = st.session_state.get("pfm_edit_date")
+            if edit_date_str:
+                try:
+                    default_date = datetime.strptime(edit_date_str, "%Y-%m-%d").date()
+                except:
+                    default_date = datetime.today().date()
+            else:
+                default_date = datetime.today().date()
+            snapshot_date = st.date_input("Snapshot Date", value=default_date, key="pfm_snapshot_date")
         with col_config2:
             snapshot_notes = st.text_input("Notes", key="pfm_snapshot_notes", placeholder="e.g., Year-end snapshot 2024")
         with col_config3:
