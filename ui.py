@@ -6944,20 +6944,15 @@ def ui_portfolio_analysis():
                         progress = st.progress(0)
                         
                         try:
-                            # yf is already loaded by _ensure_yfinance() above
-                            
-                            # 2. Batch Download
-                            batch_data = yf.download(
-                                unique_yf_tickers, period="5d", group_by='ticker', threads=True, progress=False
-                            )
-                            
                             conn = get_conn()
                             cur = conn.cursor()
                             success_count = 0
                             success_details = []
                             failed_symbols = []
+                            debug_info = []
                             
-                            # 3. Process & Update
+                            # ROBUST APPROACH: Fetch each ticker individually for reliability
+                            # This is slightly slower but far more reliable than batch with group_by
                             for i, yf_tick in enumerate(unique_yf_tickers):
                                 stock_info = ticker_map[yf_tick]
                                 db_symbol = stock_info['symbol']
@@ -6965,46 +6960,57 @@ def ui_portfolio_analysis():
                                 price = None
                                 
                                 try:
-                                    # Safe Data Access
-                                    if len(unique_yf_tickers) == 1:
-                                        # Single ticker - batch_data has different structure
-                                        if 'Close' in batch_data.columns and not batch_data['Close'].empty:
-                                            price = float(batch_data['Close'].dropna().iloc[-1])
-                                    else:
-                                        # Multiple tickers - access by ticker name
-                                        if yf_tick in batch_data.columns.get_level_values(0):
-                                            df_tick = batch_data[yf_tick]
-                                            if 'Close' in df_tick.columns and not df_tick['Close'].dropna().empty:
-                                                price = float(df_tick['Close'].dropna().iloc[-1])
+                                    # Fetch individual ticker data
+                                    ticker_data = yf.download(
+                                        yf_tick, period="5d", progress=False, threads=False
+                                    )
                                     
-                                    # Normalize Kuwait prices (Fils to KWD)
-                                    if price and db_ccy == 'KWD':
-                                        price = normalize_kwd_price(price, db_ccy)
+                                    if not ticker_data.empty and 'Close' in ticker_data.columns:
+                                        close_series = ticker_data['Close'].dropna()
+                                        if not close_series.empty:
+                                            raw_price = float(close_series.iloc[-1])
+                                            debug_info.append(f"{db_symbol}: raw={raw_price}")
                                             
+                                            # Normalize Kuwait prices (Fils to KWD)
+                                            if db_ccy == 'KWD':
+                                                price = normalize_kwd_price(raw_price, db_ccy)
+                                                debug_info[-1] += f" → normalized={price}"
+                                            else:
+                                                price = raw_price
+                                    
                                     if price and price > 0:
-                                        db_execute(cur, "UPDATE stocks SET current_price = ? WHERE symbol = ? AND user_id = ?", (price, db_symbol, user_id))
+                                        db_execute(cur, "UPDATE stocks SET current_price = ? WHERE symbol = ? AND user_id = ?", 
+                                                   (price, db_symbol, user_id))
                                         success_count += 1
                                         success_details.append(f"{db_symbol} = {price:,.3f} {db_ccy}")
                                     else:
-                                        failed_symbols.append(db_symbol)
-                                except Exception:
-                                    failed_symbols.append(db_symbol)
+                                        failed_symbols.append(f"{db_symbol} (no price)")
+                                        
+                                except Exception as ticker_err:
+                                    failed_symbols.append(f"{db_symbol} ({str(ticker_err)[:30]})")
+                                    
                                 progress.progress((i + 1) / len(unique_yf_tickers))
 
                             conn.commit()
                             conn.close()
                             progress.empty()
                             
-                            st.success(f"✅ Updated {success_count} stocks.")
+                            st.success(f"✅ Updated {success_count}/{len(unique_yf_tickers)} stocks.")
                             
                             if success_details:
-                                with st.expander("✓ Successfully fetched prices"):
+                                with st.expander("✓ Successfully fetched prices", expanded=True):
                                     for detail in success_details:
                                         st.text(detail)
                             
+                            if debug_info:
+                                with st.expander("🔍 Debug: Raw vs Normalized"):
+                                    for info in debug_info:
+                                        st.text(info)
+                            
                             if failed_symbols:
                                 with st.expander("⚠️ View skipped symbols"):
-                                    st.write(", ".join(failed_symbols))
+                                    for sym in failed_symbols:
+                                        st.text(sym)
                             
                             # Clear all caches to ensure fresh data displays
                             st.cache_data.clear()
