@@ -6910,12 +6910,18 @@ def ui_portfolio_analysis():
                 try:
                     # 1. Fetch Symbol AND Currency from DB
                     symbols_df = query_df("SELECT symbol, currency FROM stocks WHERE user_id = ?", (user_id,))
-                except Exception:
+                except Exception as e:
+                    st.error(f"DB query failed: {e}")
                     symbols_df = pd.DataFrame()
                 
                 if symbols_df.empty:
                     st.info("No stocks found.")
                 else:
+                    # DEBUG: Show what symbols we got from DB
+                    st.write("📋 **Symbols from DB:**")
+                    for _, row in symbols_df.iterrows():
+                        st.write(f"  - `{row['symbol']}` (currency: `{row.get('currency', 'N/A')}`)")
+                    
                     # Map Yahoo Ticker -> {DB Symbol, DB Currency}
                     ticker_map = {}
                     
@@ -6937,6 +6943,11 @@ def ui_portfolio_analysis():
 
                     unique_yf_tickers = list(ticker_map.keys())
                     
+                    # DEBUG: Show mapping
+                    st.write("🔗 **Yahoo ticker mapping:**")
+                    for yf_t, info in ticker_map.items():
+                        st.write(f"  - Yahoo: `{yf_t}` → DB: `{info['symbol']}`")
+                    
                     # Lazy-load yfinance
                     if not _ensure_yfinance():
                         st.error("yfinance not installed.")
@@ -6948,6 +6959,7 @@ def ui_portfolio_analysis():
                             success_count = 0
                             success_details = []
                             failed_symbols = []
+                            debug_log = []
                             
                             # SIMPLE APPROACH: Fetch each ticker and update DB directly
                             for i, yf_tick in enumerate(unique_yf_tickers):
@@ -6958,19 +6970,24 @@ def ui_portfolio_analysis():
                                 try:
                                     # Fetch price from Yahoo Finance
                                     ticker_data = yf.download(yf_tick, period="5d", progress=False, threads=False)
+                                    debug_log.append(f"{db_symbol}: yf.download('{yf_tick}') → shape={ticker_data.shape}")
                                     
                                     if not ticker_data.empty and 'Close' in ticker_data.columns:
                                         close_series = ticker_data['Close'].dropna()
                                         if not close_series.empty:
                                             raw_price = float(close_series.iloc[-1])
+                                            debug_log.append(f"  raw_price = {raw_price}")
                                             
                                             # Normalize Kuwait prices (Fils to KWD)
                                             if db_ccy == 'KWD':
                                                 price = normalize_kwd_price(raw_price, db_ccy)
+                                                debug_log.append(f"  normalized = {price}")
                                             else:
                                                 price = raw_price
                                             
                                             # DIRECT UPDATE using exec_sql (auto-commits)
+                                            update_sql = f"UPDATE stocks SET current_price = {price} WHERE symbol = '{db_symbol}' AND user_id = {user_id}"
+                                            debug_log.append(f"  SQL: {update_sql}")
                                             exec_sql(
                                                 "UPDATE stocks SET current_price = ? WHERE symbol = ? AND user_id = ?",
                                                 (price, db_symbol, user_id)
@@ -6978,21 +6995,29 @@ def ui_portfolio_analysis():
                                             success_count += 1
                                             success_details.append(f"{db_symbol} = {price:,.3f} {db_ccy}")
                                         else:
-                                            failed_symbols.append(db_symbol)
+                                            failed_symbols.append(f"{db_symbol} (empty close)")
+                                            debug_log.append(f"  FAILED: close_series empty")
                                     else:
-                                        failed_symbols.append(db_symbol)
+                                        failed_symbols.append(f"{db_symbol} (no data)")
+                                        debug_log.append(f"  FAILED: ticker_data empty or no Close column")
                                         
                                 except Exception as ticker_err:
-                                    failed_symbols.append(f"{db_symbol}")
+                                    failed_symbols.append(f"{db_symbol} ({ticker_err})")
+                                    debug_log.append(f"  ERROR: {ticker_err}")
                                     
                                 progress.progress((i + 1) / len(unique_yf_tickers))
 
                             progress.empty()
                             
+                            # Show debug log FIRST
+                            with st.expander("🔍 DEBUG LOG (click to expand)", expanded=True):
+                                for line in debug_log:
+                                    st.code(line)
+                            
                             # Show results
                             if success_count > 0:
                                 st.success(f"✅ Updated {success_count} stock prices")
-                                with st.expander("View updated prices", expanded=True):
+                                with st.expander("View updated prices", expanded=False):
                                     for detail in success_details:
                                         st.text(detail)
                             
