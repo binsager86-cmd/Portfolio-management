@@ -1815,8 +1815,8 @@ def fmt_money(amount: float, ccy: str) -> str:
         return f"{ccy} {amount:,.2f}"
 
 
-def fmt_money_plain(x, d=3):
-    """Format money without currency prefix (legacy support)."""
+def fmt_money_plain(x, d=0):
+    """Format money without currency prefix. Default 0 decimals for money values."""
     if st.session_state.get("privacy_mode", False):
         return "*****"
     try:
@@ -1828,6 +1828,126 @@ def fmt_money_plain(x, d=3):
 def fmt_kwd(amount):
     """Format amount as KWD (for use with .map())."""
     return fmt_money(amount, "KWD")
+
+
+def format_financial(value, type_hint: str, for_html: bool = True) -> str:
+    """
+    Central formatter for all financial values.
+    
+    Args:
+        value: The numeric value to format
+        type_hint: One of "quantity", "money", "price", "percent"
+        for_html: If True, returns HTML with color spans. If False, returns plain text.
+    
+    Returns:
+        Formatted string with appropriate styling
+    
+    Examples:
+        format_financial(13628, "quantity")     → "13,628"
+        format_financial(7399.82, "money")      → '<span style="color:#10b981">7,400</span>'
+        format_financial(-899.09, "money")      → '<span style="color:#ef4444">(899)</span>'
+        format_financial(2.65, "price")         → "2.650"
+        format_financial(-0.5376, "percent")    → '<span style="color:#ef4444">-0.54%</span>'
+    """
+    # Handle None/NaN
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return "-"
+    
+    # Try to convert to float
+    try:
+        if isinstance(value, str):
+            # Clean string values
+            clean_str = value.replace(',', '').replace('%', '').replace(' KWD', '').replace('(', '-').replace(')', '')
+            num = float(clean_str)
+        else:
+            num = float(value)
+    except (ValueError, TypeError):
+        return str(value)  # Return as-is if not numeric
+    
+    # Colors
+    c_pos = "#10b981"  # Emerald Green
+    c_neg = "#ef4444"  # Red
+    
+    if type_hint == "quantity":
+        # Thousands separator, no decimals, default color
+        return f"{num:,.0f}"
+    
+    elif type_hint == "money":
+        # Monetary values: Green/Red, no decimals, thousands separator
+        if num > 0:
+            formatted = f"{num:,.0f}"
+            if for_html:
+                return f'<span style="color:{c_pos}">{formatted}</span>'
+            return formatted
+        elif num < 0:
+            formatted = f"({abs(num):,.0f})"
+            if for_html:
+                return f'<span style="color:{c_neg}">{formatted}</span>'
+            return formatted
+        else:
+            return "0"
+    
+    elif type_hint == "price":
+        # Prices: 3 decimal places, default color
+        if num == 0:
+            return "-"
+        return f"{num:,.3f}"
+    
+    elif type_hint == "percent":
+        # Percentages: 2 decimals with % sign, Green/Red
+        formatted = f"{num:.2f}%"
+        if num > 0:
+            if for_html:
+                return f'<span style="color:{c_pos}">{formatted}</span>'
+            return formatted
+        elif num < 0:
+            if for_html:
+                return f'<span style="color:{c_neg}">{formatted}</span>'
+            return formatted
+        else:
+            return "0.00%"
+    
+    else:
+        # Fallback: return as-is with 2 decimals
+        return f"{num:,.2f}"
+
+
+def detect_column_type(col_name: str) -> str:
+    """
+    Detect the type of a column based on its name.
+    
+    Returns: "quantity", "money", "price", "percent", or "text"
+    """
+    col_lower = str(col_name).lower()
+    
+    # Quantity columns
+    if any(k in col_lower for k in ['qty', 'quantity', 'shares', 'volume', 'units', 'bonus']):
+        return "quantity"
+    
+    # Percentage columns
+    if any(k in col_lower for k in ['%', 'percent', 'yield', 'roi', 'margin', 'rate', 'change', 'pnl %', 'weight']):
+        return "percent"
+    
+    # Specific price columns (per-share prices - 3 decimals)
+    # Must check exact patterns to distinguish from monetary values
+    price_patterns = ['market price', 'avg cost', 'avg. cost', 'average cost', 'price cost', 
+                      'sale price', 'current price', 'buy price', 'sell price', 'unit price',
+                      'price per']
+    if any(k in col_lower for k in price_patterns):
+        return "price"
+    
+    # Money/Value columns - monetary totals (no decimals)
+    if any(k in col_lower for k in ['value', 'total', 'gain', 'loss', 'profit', 'income', 
+                                     'div', 'movement', 'amount', 'diff', 'balance', 
+                                     'deposit', 'cash', 'market', 'unrealized', 'realized',
+                                     'appreciation', 'net', 'pnl', 'cost']):
+        return "money"
+    
+    # Fallback price check for standalone "price" 
+    if 'price' in col_lower:
+        return "price"
+    
+    return "text"
 
 
 # =========================
@@ -2615,22 +2735,24 @@ def render_portfolio_table(title: str, df: pd.DataFrame, fx_usdkwd: Optional[flo
 
     format_dict = {
         "Quantity": lambda x: fmt_val(x, "{:,.0f}"),
-        # Logic: If value is 0 (Total row) or None, show "-", otherwise show 3 decimals
+        # Prices: 3 decimals
         "Avg. Cost Per Share": lambda x: fmt_val(x, "{:,.3f}") if x and x != 0 else "-",
-        "Total cost": lambda x: fmt_val(x, "{:,.3f}"),
         "Market price": lambda x: fmt_val(x, "{:,.3f}") if x and x != 0 else "-",
         "P/E Ratio": "{:.2f}",
-        "Market value": lambda x: fmt_val(x, "{:,.3f}"),
-        "Appreciation income": lambda x: fmt_val(x, "{:,.3f}"),
-        "Cash dividends": lambda x: fmt_val(x, "{:,.3f}"),
-        "amount reinvested from dividends": lambda x: fmt_val(x, "{:,.3f}"),
+        # Money/Values: No decimals (rounded)
+        "Total cost": lambda x: fmt_val(x, "{:,.0f}"),
+        "Market value": lambda x: fmt_val(x, "{:,.0f}"),
+        "Appreciation income": lambda x: fmt_val(x, "{:,.0f}"),
+        "Cash dividends": lambda x: fmt_val(x, "{:,.0f}"),
+        "amount reinvested from dividends": lambda x: fmt_val(x, "{:,.0f}"),
         "Bonus dividend shares": lambda x: fmt_val(x, "{:,.0f}"),
-        "Bonus share value": lambda x: fmt_val(x, "{:,.3f}"),
+        "Bonus share value": lambda x: fmt_val(x, "{:,.0f}"),
+        "Yield Amount": lambda x: fmt_val(x, "{:,.0f}"),
+        "Current Profit / Loss": lambda x: fmt_val(x, "{:,.0f}"),
+        # Percentages: 2 decimals
         "weight by Cost": "{:.2%}",
         "Yield": "{:.2%}",
-        "Yield Amount": lambda x: fmt_val(x, "{:,.3f}"),
         "Weighted yield": "{:.2%}",
-        "Current Profit / Loss": lambda x: fmt_val(x, "{:,.3f}"),
         "%": "{:.2%}"
     }
 
@@ -6760,7 +6882,7 @@ def ui_portfolio_analysis():
                                     if price and price > 0:
                                         db_execute(cur, "UPDATE stocks SET current_price = ? WHERE symbol = ? AND user_id = ?", (price, db_symbol, user_id))
                                         success_count += 1
-                                        success_details.append(f"{db_symbol} = {price:.3f} {db_ccy}")
+                                        success_details.append(f"{db_symbol} = {price:,.3f} {db_ccy}")
                                     else:
                                         failed_symbols.append(db_symbol)
                                 except Exception:
@@ -6832,12 +6954,12 @@ def ui_portfolio_analysis():
                 "Total Capital": st.column_config.NumberColumn(
                     "Total Capital (Deposited)",
                     disabled=True, 
-                    format="%.3f",
+                    format="%,.0f",
                     help="Sum of all deposits in 'Cash/Deposits' table."
                 ),
                 "Available Cash": st.column_config.NumberColumn(
                     "Available Cash (Manual)",
-                    min_value=0, step=100.0, format="%.3f",
+                    min_value=0, step=100.0, format="%,.0f",
                     help="Enter your actual current cash balance in the portfolio."
                 )
             },
@@ -6954,7 +7076,7 @@ def ui_portfolio_analysis():
         with col4:
             kpi_card("Unrealized P/L", fmt_money(overall_total_unreal, "KWD"), f"▲ {unreal_change_pct:.2f}%")
         with col5:
-            kpi_card("Cash Dividends", fmt_money(overall_total_cash_div, "KWD"))
+            kpi_card("Cash Dividends Received", fmt_money(overall_total_cash_div, "KWD"), "Excl. reinvested")
         with col6:
             kpi_card("Total PNL", fmt_money(overall_total_pnl, "KWD"), f"▲ {overall_total_pnl_pct:.2%}")
         with col7:
@@ -7166,6 +7288,8 @@ def ui_portfolio_analysis():
             usa_pnl_pct = (usa_pnl_usd / usa_cost_usd) if usa_cost_usd > 0 else 0.0
             kpi_card("Total PNL (KWD)", fmt_money(usa_pnl_kwd, "KWD"), f"{usa_pnl_pct:.2%}")
     
+    st.divider()
+    
     # Footer
     st.markdown("""
     <div class="portfolio-footer">
@@ -7338,6 +7462,22 @@ def ui_portfolio_tracker():
             
             # 3. Final Total = Previous + New
             accumulated_cash = prev_accumulated + new_cash_in
+            
+            # FALLBACK: If accumulated_cash is still 0, calculate from ALL deposits
+            if accumulated_cash <= 0:
+                all_deposits_fallback = query_df(
+                    """
+                    SELECT amount, currency 
+                    FROM cash_deposits 
+                    WHERE user_id = ? AND include_in_analysis = 1
+                    """,
+                    (user_id,)
+                )
+                if not all_deposits_fallback.empty:
+                    for _, dep_row in all_deposits_fallback.iterrows():
+                        dep_amount = float(dep_row["amount"]) if pd.notna(dep_row["amount"]) else 0.0
+                        dep_currency = dep_row.get("currency", "KWD") or "KWD"
+                        accumulated_cash += convert_to_kwd(dep_amount, dep_currency)
             # -------------------------------
             
             # 4. Calculate Metrics
@@ -7365,7 +7505,20 @@ def ui_portfolio_tracker():
             # Net Gain = Beginning Diff - Accumulated Cash (Corrected Formula)
             net_gain = beginning_diff - accumulated_cash
             
-            roi_percent = (net_gain / accumulated_cash * 100) if accumulated_cash > 0 else 0.0
+            # Calculate TOTAL cash deposited (all deposits converted to KWD)
+            total_cash_deposited = 0.0
+            all_deps = query_df(
+                "SELECT amount, currency FROM cash_deposits WHERE user_id = ? AND include_in_analysis = 1",
+                (user_id,)
+            )
+            if not all_deps.empty:
+                for _, dep_row in all_deps.iterrows():
+                    dep_amt = float(dep_row["amount"]) if pd.notna(dep_row["amount"]) else 0.0
+                    dep_ccy = dep_row.get("currency", "KWD") or "KWD"
+                    total_cash_deposited += convert_to_kwd(dep_amt, dep_ccy)
+            
+            # ROI % = Net Gain / Total Cash Deposited * 100
+            roi_percent = (net_gain / total_cash_deposited * 100) if total_cash_deposited > 0 else 0.0
             change_percent = ((live_portfolio_value - prev_value) / prev_value * 100) if prev_value > 0 else 0.0
             
             # 5. Insert or Update
@@ -7532,10 +7685,23 @@ def ui_portfolio_tracker():
                                     accumulated_cash += deposit_cash
                                 # else: carry forward previous value (no change to accumulated_cash)
                             
+                            # Get total deposits up to this date for ROI calculation (with currency conversion)
+                            total_cash_deposited = 0.0
+                            all_deps = query_df("""
+                                SELECT amount, currency 
+                                FROM cash_deposits 
+                                WHERE user_id = ? AND include_in_analysis = 1
+                            """, (user_id,))
+                            if not all_deps.empty:
+                                for _, dep_row in all_deps.iterrows():
+                                    dep_amt = float(dep_row["amount"]) if pd.notna(dep_row["amount"]) else 0.0
+                                    dep_ccy = dep_row.get("currency", "KWD") or "KWD"
+                                    total_cash_deposited += convert_to_kwd(dep_amt, dep_ccy)
+                            
                             # Net gain from stocks = Beginning Difference - Accumulated Cash (Corrected Formula)
                             net_gain = beginning_diff - accumulated_cash if accumulated_cash else beginning_diff
-                            # ROI % = Net Gain / Accumulated Cash
-                            roi_percent = (net_gain / accumulated_cash * 100) if accumulated_cash and accumulated_cash > 0 else 0
+                            # ROI % = Net Gain / Total Cash Deposited * 100
+                            roi_percent = (net_gain / total_cash_deposited * 100) if total_cash_deposited > 0 else 0
                             # Change % = change from previous day
                             change_percent = ((portfolio_value - prev_value) / prev_value * 100) if prev_value > 0 else 0
                             
@@ -7608,6 +7774,20 @@ def ui_portfolio_tracker():
                 # Calculate Accumulated Cash
                 accumulated_cash = prev_accumulated + deposit_cash
                 
+                # FALLBACK: If accumulated_cash is still 0, use total deposits
+                if accumulated_cash <= 0:
+                    # Get total deposits up to this date with currency conversion
+                    all_deposits_fallback = query_df("""
+                        SELECT amount, currency 
+                        FROM cash_deposits 
+                        WHERE user_id = ? AND deposit_date <= ? AND include_in_analysis = 1
+                    """, (user_id, snap_date_str))
+                    if not all_deposits_fallback.empty:
+                        for _, dep_row in all_deposits_fallback.iterrows():
+                            dep_amount = float(dep_row["amount"]) if pd.notna(dep_row["amount"]) else 0.0
+                            dep_currency = dep_row.get("currency", "KWD") or "KWD"
+                            accumulated_cash += convert_to_kwd(dep_amount, dep_currency)
+                
                 # Auto-calculate metrics if 0
                 if daily_movement == 0:
                     daily_movement = portfolio_value - prev_value if prev_value > 0 else 0.0
@@ -7626,7 +7806,21 @@ def ui_portfolio_tracker():
                             beginning_diff = 0.0
                 
                 net_gain = beginning_diff - accumulated_cash
-                roi_percent = (net_gain / accumulated_cash * 100) if accumulated_cash > 0 else 0.0
+                
+                # Calculate TOTAL cash deposited (all deposits converted to KWD)
+                total_cash_deposited = 0.0
+                all_deps = query_df(
+                    "SELECT amount, currency FROM cash_deposits WHERE user_id = ? AND include_in_analysis = 1",
+                    (user_id,)
+                )
+                if not all_deps.empty:
+                    for _, dep_row in all_deps.iterrows():
+                        dep_amt = float(dep_row["amount"]) if pd.notna(dep_row["amount"]) else 0.0
+                        dep_ccy = dep_row.get("currency", "KWD") or "KWD"
+                        total_cash_deposited += convert_to_kwd(dep_amt, dep_ccy)
+                
+                # ROI % = Net Gain / Total Cash Deposited * 100
+                roi_percent = (net_gain / total_cash_deposited * 100) if total_cash_deposited > 0 else 0.0
                 change_percent = ((portfolio_value - prev_value) / prev_value * 100) if prev_value > 0 else 0.0
                 
                 exec_sql(
@@ -7930,96 +8124,114 @@ def ui_portfolio_tracker():
     st.divider()
     
     # Format and display table
-    st.markdown("### 📊 Portfolio Snapshots (Editable)")
-    st.caption("Double-click any cell to edit. Click 'Save Changes' to update the database and graphs.")
+    st.markdown("### 📊 Portfolio Snapshots")
     
-    # Prepare dataframe for editor (raw values)
-    edit_df = snapshots.copy()
-    # Ensure date is string for consistency or date object
-    # st.data_editor handles date columns well if they are datetime objects
-    edit_df["snapshot_date"] = pd.to_datetime(edit_df["snapshot_date"]).dt.date
+    # View Mode Toggle (like Trading Section)
+    col_mode, col_spacer = st.columns([2, 3])
+    with col_mode:
+        view_mode = st.radio(" ", ["📊 Read View", "✏️ Edit Mode"], horizontal=True, label_visibility="collapsed", key="snapshot_view_mode")
     
-    # Columns to edit
-    cols_config = {
-        "snapshot_date": st.column_config.DateColumn("Date", format="YYYY-MM-DD", required=True),
-        "portfolio_value": st.column_config.NumberColumn("Value", format="%.3f", required=True),
-        "daily_movement": st.column_config.NumberColumn("Daily Movement", format="%.3f"),
-        "beginning_difference": st.column_config.NumberColumn("Beginning Diff", format="%.3f"),
-        "deposit_cash": st.column_config.NumberColumn("Deposit Cash", format="%.3f"),
-        "accumulated_cash": st.column_config.NumberColumn("Accumulated Cash", format="%.3f"),
-        "net_gain": st.column_config.NumberColumn("Net Gain", format="%.3f"),
-        "change_percent": st.column_config.NumberColumn("Change %", format="%.2f%%"),
-        "roi_percent": st.column_config.NumberColumn("ROI %", format="%.2f%%"),
-        "created_at": st.column_config.NumberColumn("Created At", disabled=True)
-    }
-    
-    # Show editor
-    edited_data = st.data_editor(
-        edit_df,
-        column_config=cols_config,
-        width="stretch",
-        num_rows="dynamic", # Allow adding/deleting rows
-        key="snapshot_editor",
-        hide_index=True,
-        column_order=[
-            "snapshot_date", "portfolio_value", "daily_movement", "beginning_difference",
-            "deposit_cash", "accumulated_cash", "net_gain", "change_percent", "roi_percent"
-        ]
-    )
-    
-    if st.button("💾 Save Changes", type="primary"):
-        try:
-            # 1. Delete all existing snapshots for this user
-            conn = get_conn()
-            cur = conn.cursor()
-            db_execute(cur, "DELETE FROM portfolio_snapshots WHERE user_id = ?", (user_id,))
-            
-            # 2. Insert all rows from edited_data
-            records = []
-            for _, row in edited_data.iterrows():
-                # Convert date back to string YYYY-MM-DD
-                s_date = row["snapshot_date"].strftime("%Y-%m-%d") if isinstance(row["snapshot_date"], date) else str(row["snapshot_date"])
+    if view_mode == "📊 Read View":
+        # Professional styled HTML table with coloring
+        st.caption("Switch to **Edit Mode** to modify data.")
+        
+        display_df = snapshots.copy()
+        display_df = display_df.sort_values('snapshot_date', ascending=False)
+        
+        # Render styled table with financial formatting
+        render_snapshot_table(display_df)
+        
+    else:
+        # Edit Mode
+        st.caption("Double-click any cell to edit. Click 'Save Changes' to update the database and graphs.")
+        
+        # Prepare dataframe for editor (raw values)
+        edit_df = snapshots.copy()
+        # Ensure date is string for consistency or date object
+        # st.data_editor handles date columns well if they are datetime objects
+        edit_df["snapshot_date"] = pd.to_datetime(edit_df["snapshot_date"]).dt.date
+        
+        # Columns to edit - formatted for editing with 2 decimals for money
+        cols_config = {
+            "snapshot_date": st.column_config.DateColumn("Date", format="YYYY-MM-DD", required=True),
+            "portfolio_value": st.column_config.NumberColumn("Value", format="%,.2f", required=True),
+            "daily_movement": st.column_config.NumberColumn("Daily Movement", format="%,.2f"),
+            "beginning_difference": st.column_config.NumberColumn("Beginning Diff", format="%,.2f"),
+            "deposit_cash": st.column_config.NumberColumn("Deposit Cash", format="%,.0f"),
+            "accumulated_cash": st.column_config.NumberColumn("Accumulated Cash", format="%,.0f"),
+            "net_gain": st.column_config.NumberColumn("Net Gain", format="%,.2f"),
+            "change_percent": st.column_config.NumberColumn("Change %", format="%.2f%%"),
+            "roi_percent": st.column_config.NumberColumn("ROI %", format="%.2f%%"),
+            "created_at": st.column_config.NumberColumn("Created At", disabled=True)
+        }
+        
+        # Show editor
+        edited_data = st.data_editor(
+            edit_df,
+            column_config=cols_config,
+            width="stretch",
+            num_rows="dynamic", # Allow adding/deleting rows
+            key="snapshot_editor",
+            hide_index=True,
+            column_order=[
+                "snapshot_date", "portfolio_value", "daily_movement", "beginning_difference",
+                "deposit_cash", "accumulated_cash", "net_gain", "change_percent", "roi_percent"
+            ]
+        )
+        
+        if st.button("💾 Save Changes", type="primary"):
+            try:
+                # 1. Delete all existing snapshots for this user
+                conn = get_conn()
+                cur = conn.cursor()
+                db_execute(cur, "DELETE FROM portfolio_snapshots WHERE user_id = ?", (user_id,))
                 
-                records.append((
-                    user_id,
-                    s_date,
-                    float(row["portfolio_value"]),
-                    float(row["daily_movement"]),
-                    float(row["beginning_difference"]),
-                    float(row["deposit_cash"]),
-                    float(row["accumulated_cash"]),
-                    float(row["net_gain"]),
-                    float(row["change_percent"]),
-                    float(row["roi_percent"]),
-                    int(time.time()) # Update created_at or keep original? Let's update to show it was modified
-                ))
-            
-            sql = convert_sql_placeholders("""
-                INSERT INTO portfolio_snapshots 
-                (user_id, snapshot_date, portfolio_value, daily_movement, beginning_difference, 
-                 deposit_cash, accumulated_cash, net_gain, change_percent, roi_percent, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """)
-            cur.executemany(sql, records)
-            conn.commit()
-            conn.close()
-            
-            st.success("✅ Changes saved successfully!")
-            time.sleep(1)
-            st.rerun()
-            
-        except Exception as e:
-            st.error(f"Error saving changes: {e}")
+                # 2. Insert all rows from edited_data
+                records = []
+                for _, row in edited_data.iterrows():
+                    # Convert date back to string YYYY-MM-DD
+                    s_date = row["snapshot_date"].strftime("%Y-%m-%d") if isinstance(row["snapshot_date"], date) else str(row["snapshot_date"])
+                    
+                    records.append((
+                        user_id,
+                        s_date,
+                        float(row["portfolio_value"]),
+                        float(row["daily_movement"]),
+                        float(row["beginning_difference"]),
+                        float(row["deposit_cash"]),
+                        float(row["accumulated_cash"]),
+                        float(row["net_gain"]),
+                        float(row["change_percent"]),
+                        float(row["roi_percent"]),
+                        int(time.time()) # Update created_at or keep original? Let's update to show it was modified
+                    ))
+                
+                sql = convert_sql_placeholders("""
+                    INSERT INTO portfolio_snapshots 
+                    (user_id, snapshot_date, portfolio_value, daily_movement, beginning_difference, 
+                     deposit_cash, accumulated_cash, net_gain, change_percent, roi_percent, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """)
+                cur.executemany(sql, records)
+                conn.commit()
+                conn.close()
+                
+                st.success("✅ Changes saved successfully!")
+                time.sleep(1)
+                st.rerun()
+                
+            except Exception as e:
+                st.error(f"Error saving changes: {e}")
 
-    # Delete snapshot (Legacy - can be removed since editor handles deletes, but keeping for safety)
-    with st.expander("🗑️ Delete Snapshot (Alternative Method)"):
-        del_date = st.date_input("Select date to delete", value=date.today(), key="del_snap_date")
-        if st.button("Delete Snapshot", key="del_snap"):
-            del_date_str = del_date.strftime("%Y-%m-%d")
-            user_id = st.session_state.get('user_id', 1)
-            exec_sql("DELETE FROM portfolio_snapshots WHERE snapshot_date = ? AND user_id = ?", (del_date_str, user_id))
-            st.success(f"Deleted snapshot for {del_date_str} (if it existed).")
-            st.rerun()
+        # Delete snapshot (Legacy - can be removed since editor handles deletes, but keeping for safety)
+        with st.expander("🗑️ Delete Snapshot (Alternative Method)"):
+            del_date = st.date_input("Select date to delete", value=date.today(), key="del_snap_date")
+            if st.button("Delete Snapshot", key="del_snap"):
+                del_date_str = del_date.strftime("%Y-%m-%d")
+                user_id = st.session_state.get('user_id', 1)
+                exec_sql("DELETE FROM portfolio_snapshots WHERE snapshot_date = ? AND user_id = ?", (del_date_str, user_id))
+                st.success(f"Deleted snapshot for {del_date_str} (if it existed).")
+                st.rerun()
 
 
 def ui_dividends_tracker():
@@ -8047,23 +8259,98 @@ def ui_dividends_tracker():
         st.dataframe(all_transactions)
         st.write("**Column names available:**", list(all_transactions.columns) if not all_transactions.empty else "No data")
     
-    # Query dividend data - include id for deletion
+    # Query dividend data from BOTH tables (transactions + trading_history)
+    # This matches the logic in calculate_total_cash_dividends()
+    
+    # 1. Transactions table dividends
     dividends_df = query_df("""
         SELECT 
-            id,
-            stock_symbol,
-            txn_date,
-            COALESCE(cash_dividend, 0) as cash_dividend,
-            COALESCE(bonus_shares, 0) as bonus_shares,
-            COALESCE(reinvested_dividend, 0) as reinvested_dividend
-        FROM transactions
-        WHERE user_id = ? AND (
-            COALESCE(cash_dividend, 0) > 0 
-           OR COALESCE(bonus_shares, 0) > 0
-           OR COALESCE(reinvested_dividend, 0) > 0
+            t.id,
+            t.stock_symbol,
+            t.txn_date,
+            COALESCE(t.cash_dividend, 0) as cash_dividend,
+            COALESCE(t.bonus_shares, 0) as bonus_shares,
+            COALESCE(t.reinvested_dividend, 0) as reinvested_dividend,
+            COALESCE(s.currency, 'KWD') as currency,
+            'portfolio' as source
+        FROM transactions t
+        LEFT JOIN stocks s ON t.stock_symbol = s.symbol AND s.user_id = t.user_id
+        WHERE t.user_id = ? AND (
+            COALESCE(t.cash_dividend, 0) > 0 
+           OR COALESCE(t.bonus_shares, 0) > 0
+           OR COALESCE(t.reinvested_dividend, 0) > 0
         )
-        ORDER BY stock_symbol, txn_date
+        ORDER BY t.stock_symbol, t.txn_date
     """, (user_id,))
+    
+    # 2. Trading history table dividends
+    trading_dividends_df = query_df("""
+        SELECT 
+            t.id,
+            t.stock_symbol,
+            t.txn_date,
+            COALESCE(t.cash_dividend, 0) as cash_dividend,
+            COALESCE(t.bonus_shares, 0) as bonus_shares,
+            0 as reinvested_dividend,
+            COALESCE(s.currency, 'KWD') as currency,
+            'trading' as source
+        FROM trading_history t
+        LEFT JOIN stocks s ON t.stock_symbol = s.symbol AND s.user_id = t.user_id
+        WHERE t.user_id = ?
+          AND COALESCE(t.cash_dividend, 0) > 0
+        ORDER BY t.stock_symbol, t.txn_date
+    """, (user_id,))
+    
+    # Combine both sources
+    if not trading_dividends_df.empty:
+        dividends_df = pd.concat([dividends_df, trading_dividends_df], ignore_index=True)
+        dividends_df = dividends_df.sort_values(['stock_symbol', 'txn_date'])
+    
+    # DEDUPLICATION: Remove duplicates where same stock, date, and amount exist in both tables
+    # Keep the 'portfolio' record as primary, drop 'trading' duplicates
+    removed_duplicates_df = pd.DataFrame()  # Track what was removed
+    if not dividends_df.empty:
+        # Create a composite key for deduplication
+        dividends_df['_dedup_key'] = (
+            dividends_df['stock_symbol'].astype(str) + '_' + 
+            dividends_df['txn_date'].astype(str) + '_' + 
+            dividends_df['cash_dividend'].astype(str) + '_' +
+            dividends_df['bonus_shares'].astype(str)
+        )
+        
+        # Find duplicates (records that appear more than once)
+        duplicate_mask = dividends_df.duplicated(subset=['_dedup_key'], keep=False)
+        num_potential_dupes = duplicate_mask.sum()
+        
+        if num_potential_dupes > 0:
+            # Save duplicates for debug display
+            duplicates_preview = dividends_df[duplicate_mask].copy()
+            
+            # Sort so 'portfolio' comes before 'trading' (alphabetically), then drop duplicates keeping first
+            dividends_df = dividends_df.sort_values(['_dedup_key', 'source'])
+            before_count = len(dividends_df)
+            
+            # Identify which records will be removed (the 'trading' ones)
+            removed_duplicates_df = dividends_df[dividends_df.duplicated(subset=['_dedup_key'], keep='first')].copy()
+            
+            dividends_df = dividends_df.drop_duplicates(subset=['_dedup_key'], keep='first')
+            after_count = len(dividends_df)
+            removed_count = before_count - after_count
+            
+            if removed_count > 0:
+                st.info(f"ℹ️ Removed {removed_count} duplicate dividend records (same stock, date, amount in both Portfolio & Trading tables)")
+                
+                # Show debug expander with duplicate details
+                with st.expander(f"🔍 View {removed_count} Removed Duplicates", expanded=False):
+                    st.write("**These records were removed because they exist in both tables:**")
+                    debug_display = removed_duplicates_df[['stock_symbol', 'txn_date', 'cash_dividend', 'bonus_shares', 'source']].copy()
+                    debug_display.columns = ['Stock', 'Date', 'Cash Dividend', 'Bonus Shares', 'Source (Removed)']
+                    st.dataframe(debug_display, hide_index=True)
+                    st.caption("💡 The Portfolio version was kept. Trading version was removed to avoid double-counting.")
+        
+        # Drop the dedup key column
+        dividends_df = dividends_df.drop(columns=['_dedup_key'])
+        dividends_df = dividends_df.sort_values(['stock_symbol', 'txn_date']).reset_index(drop=True)
     
     if dividends_df.empty:
         st.info("📊 No dividend data yet. Add transactions with cash dividends or bonus shares.")
@@ -8079,6 +8366,16 @@ def ui_dividends_tracker():
             st.warning(f"⚠️ Found {count} transactions with reinvested_dividend > 0, but query returned empty. Check data.")
         return
     
+    # Convert cash_dividend to KWD for consistent totals
+    dividends_df["cash_dividend_kwd"] = dividends_df.apply(
+        lambda row: convert_to_kwd(safe_float(row["cash_dividend"], 0), row.get("currency", "KWD")),
+        axis=1
+    )
+    dividends_df["reinvested_kwd"] = dividends_df.apply(
+        lambda row: convert_to_kwd(safe_float(row["reinvested_dividend"], 0), row.get("currency", "KWD")),
+        axis=1
+    )
+    
     # Get cost basis for yield calculation
     cost_df = query_df("""
         SELECT 
@@ -8088,19 +8385,23 @@ def ui_dividends_tracker():
         GROUP BY stock_symbol
     """)
     
-    # Summary Cards
-    total_cash_div = dividends_df['cash_dividend'].sum()
+    # Summary Cards - USE CONVERTED KWD VALUES (matches Overview tab)
+    total_cash_div_kwd = dividends_df['cash_dividend_kwd'].sum()
     total_bonus_shares = dividends_df['bonus_shares'].sum()
-    total_reinvested = dividends_df['reinvested_dividend'].sum()
+    total_reinvested_kwd = dividends_df['reinvested_kwd'].sum()
     unique_stocks = dividends_df['stock_symbol'].nunique()
+    dividend_count = len(dividends_df)
     
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        st.metric("💵 Total Cash Dividends", fmt_money(total_cash_div, "KWD"))
+        st.metric("💵 Total Cash Dividends Received", fmt_money(total_cash_div_kwd, "KWD"), 
+                  help=f"{dividend_count} dividend records. Cash dividends only - does NOT include reinvested amounts.")
     with col2:
-        st.metric("🎁 Total Bonus Shares", f"{total_bonus_shares:,.0f}")
+        st.metric("🎁 Total Bonus Shares", f"{total_bonus_shares:,.0f}",
+                  help="Total bonus shares received (share-based, not cash)")
     with col3:
-        st.metric("🔄 Total Reinvested", fmt_money(total_reinvested, "KWD"))
+        st.metric("🔄 Total Reinvested", fmt_money(total_reinvested_kwd, "KWD"),
+                  help="Dividends reinvested into shares (already converted to shares)")
     with col4:
         st.metric("📊 Dividend-Paying Stocks", f"{unique_stocks:,}")
     
@@ -8128,13 +8429,14 @@ def ui_dividends_tracker():
                     if row['reinvested_dividend'] > 0:
                         div_type.append(f"Reinvested: {row['reinvested_dividend']:.3f}")
                     div_info = " | ".join(div_type) if div_type else "No dividend data"
-                    label = f"{row['stock_symbol']} - {row['txn_date']} - {div_info}"
-                    delete_options.append((row['id'], label))
+                    source_label = "[Portfolio]" if row.get('source') == 'portfolio' else "[Trading]"
+                    label = f"{source_label} {row['stock_symbol']} - {row['txn_date']} - {div_info}"
+                    delete_options.append((row['id'], row.get('source', 'portfolio'), label))
                 
                 selected_delete = st.selectbox(
                     "Select dividend record to delete:",
                     options=delete_options,
-                    format_func=lambda x: x[1],
+                    format_func=lambda x: x[2],
                     key="div_delete_select"
                 )
                 
@@ -8144,28 +8446,38 @@ def ui_dividends_tracker():
                         if selected_delete:
                             try:
                                 record_id = selected_delete[0]
-                                # Clear only dividend fields, don't delete the transaction if it has other data
+                                source_table = selected_delete[1]
                                 conn = get_conn()
                                 cur = conn.cursor()
                                 
-                                # Check if this transaction has shares (Buy/Sell) - if so, only clear dividend fields
-                                db_execute(cur, "SELECT shares, purchase_cost, sell_value FROM transactions WHERE id = ? AND user_id = ?", (record_id, user_id))
-                                row = cur.fetchone()
-                                
-                                if row and (row[0] > 0 or row[1] > 0 or row[2] > 0):
-                                    # Has share data - only clear dividend fields
+                                if source_table == 'trading':
+                                    # For trading_history, just clear dividend fields
                                     db_execute(cur, """
-                                        UPDATE transactions 
-                                        SET cash_dividend = 0, bonus_shares = 0, reinvested_dividend = 0 
+                                        UPDATE trading_history 
+                                        SET cash_dividend = 0, bonus_shares = 0
                                         WHERE id = ? AND user_id = ?
                                     """, (record_id, user_id))
                                     conn.commit()
-                                    st.success("✅ Dividend data cleared from transaction (shares preserved).")
+                                    st.success("✅ Dividend data cleared from trading record.")
                                 else:
-                                    # No share data - delete entire record
-                                    db_execute(cur, "DELETE FROM transactions WHERE id = ? AND user_id = ?", (record_id, user_id))
-                                    conn.commit()
-                                    st.success("✅ Dividend record deleted permanently.")
+                                    # For transactions, check if it has shares
+                                    db_execute(cur, "SELECT shares, purchase_cost, sell_value FROM transactions WHERE id = ? AND user_id = ?", (record_id, user_id))
+                                    row = cur.fetchone()
+                                    
+                                    if row and (row[0] > 0 or row[1] > 0 or row[2] > 0):
+                                        # Has share data - only clear dividend fields
+                                        db_execute(cur, """
+                                            UPDATE transactions 
+                                            SET cash_dividend = 0, bonus_shares = 0, reinvested_dividend = 0 
+                                            WHERE id = ? AND user_id = ?
+                                        """, (record_id, user_id))
+                                        conn.commit()
+                                        st.success("✅ Dividend data cleared from transaction (shares preserved).")
+                                    else:
+                                        # No share data - delete entire record
+                                        db_execute(cur, "DELETE FROM transactions WHERE id = ? AND user_id = ?", (record_id, user_id))
+                                        conn.commit()
+                                        st.success("✅ Dividend record deleted permanently.")
                                 
                                 conn.close()
                                 time.sleep(0.5)
@@ -8179,22 +8491,24 @@ def ui_dividends_tracker():
         
         st.divider()
         
-        # Display all dividends with date
+        # Display all dividends with date and source
         display_df = dividends_df.copy()
         display_df['Date'] = pd.to_datetime(display_df['txn_date']).dt.strftime('%Y-%m-%d')
+        display_df['Source'] = display_df['source'].apply(lambda x: '📊 Portfolio' if x == 'portfolio' else '📈 Trading')
         display_df = display_df.rename(columns={
             'stock_symbol': 'Stock',
-            'cash_dividend': 'Cash Dividend (KWD)',
+            'cash_dividend_kwd': 'Cash Dividend (KWD)',
             'bonus_shares': 'Bonus Shares',
-            'reinvested_dividend': 'Reinvested (KWD)'
+            'reinvested_kwd': 'Reinvested (KWD)',
+            'currency': 'CCY'
         })
         
-        display_df = display_df[['Stock', 'Date', 'Cash Dividend (KWD)', 'Bonus Shares', 'Reinvested (KWD)']]
+        display_df = display_df[['Stock', 'Date', 'Cash Dividend (KWD)', 'Bonus Shares', 'Reinvested (KWD)', 'CCY', 'Source']]
         
-        # Format numbers
-        display_df['Cash Dividend (KWD)'] = display_df['Cash Dividend (KWD)'].apply(lambda x: fmt_money_plain(x, 3))
+        # Format numbers - no decimals for money values
+        display_df['Cash Dividend (KWD)'] = display_df['Cash Dividend (KWD)'].apply(lambda x: fmt_money_plain(x, 0))
         display_df['Bonus Shares'] = display_df['Bonus Shares'].apply(lambda x: f"{x:,.0f}" if x > 0 else "-")
-        display_df['Reinvested (KWD)'] = display_df['Reinvested (KWD)'].apply(lambda x: fmt_money_plain(x, 3) if x > 0 else "-")
+        display_df['Reinvested (KWD)'] = display_df['Reinvested (KWD)'].apply(lambda x: fmt_money_plain(x, 0) if x > 0 else "-")
         
         st.dataframe(display_df, width="stretch", hide_index=True)
         
@@ -8210,11 +8524,11 @@ def ui_dividends_tracker():
     with tab2:
         st.subheader("Summary by Stock")
         
-        # Group by stock
+        # Group by stock - use KWD converted values for consistency
         summary = dividends_df.groupby('stock_symbol').agg({
-            'cash_dividend': 'sum',
+            'cash_dividend_kwd': 'sum',
             'bonus_shares': 'sum',
-            'reinvested_dividend': 'sum',
+            'reinvested_kwd': 'sum',
             'txn_date': 'count'
         }).reset_index()
         
@@ -8230,21 +8544,23 @@ def ui_dividends_tracker():
             axis=1
         )
         
-        # Total dividends (cash + reinvested)
-        summary['Total Dividends'] = summary['Total Cash Dividend'] + summary['Total Reinvested']
+        # Total Dividends Received = Cash Dividends only (NOT reinvested - that's already converted to shares)
+        summary['Total Dividends Received'] = summary['Total Cash Dividend']
         
         # Format for display
         summary_display = summary[['Stock', 'Total Cash Dividend', 'Total Bonus Shares', 
-                                   'Total Reinvested', 'Total Dividends', 'Dividend Count', 
+                                   'Total Reinvested', 'Total Dividends Received', 'Dividend Count', 
                                    'Yield on Cost %']].copy()
         
-        # Format the display columns
-        summary_display['Total Cash Dividend'] = summary_display['Total Cash Dividend'].apply(lambda x: f"{x:,.3f} KWD")
+        # Format the display columns - no decimals for money
+        summary_display['Total Cash Dividend'] = summary_display['Total Cash Dividend'].apply(lambda x: f"{x:,.0f} KWD")
         summary_display['Total Bonus Shares'] = summary_display['Total Bonus Shares'].apply(lambda x: f"{x:,.0f}")
-        summary_display['Total Reinvested'] = summary_display['Total Reinvested'].apply(lambda x: f"{x:,.3f} KWD")
-        summary_display['Total Dividends'] = summary_display['Total Dividends'].apply(lambda x: f"{x:,.3f} KWD")
+        summary_display['Total Reinvested'] = summary_display['Total Reinvested'].apply(lambda x: f"{x:,.0f} KWD")
+        summary_display['Total Dividends Received'] = summary_display['Total Dividends Received'].apply(lambda x: f"{x:,.0f} KWD")
         summary_display['Dividend Count'] = summary_display['Dividend Count'].apply(lambda x: f"{x:,.0f}")
         summary_display['Yield on Cost %'] = summary_display['Yield on Cost %'].apply(lambda x: f"{x:.2f}%")
+        
+        st.caption("ℹ️ **Total Dividends Received** = Cash dividends only. Does not include reinvested amounts (already converted to shares).")
         
         st.dataframe(
             summary_display,
@@ -9457,7 +9773,30 @@ def ui_trading_section():
                  st.rerun()
 
     if view_mode == "📊 Read View":
-        render_styled_table(final_df, highlight_logic=True)
+        # Format columns for display
+        display_df = final_df.copy()
+        
+        # Price columns: 3 decimal places
+        for col in ['Price Cost', 'Sale Price', 'Current Price']:
+            if col in display_df.columns:
+                display_df[col] = display_df[col].apply(
+                    lambda x: f"{x:.3f}" if pd.notna(x) and x != 0 else ""
+                )
+        
+        # Value columns: NO decimals (rounded) with comma separators
+        for col in ['Cost Value', 'Value Price', 'Profit']:
+            if col in display_df.columns:
+                display_df[col] = display_df[col].apply(
+                    lambda x: f"{x:,.0f}" if pd.notna(x) else ""
+                )
+        
+        # Profit %: 2 decimal places
+        if 'Profit %' in display_df.columns:
+            display_df['Profit %'] = display_df['Profit %'].apply(
+                lambda x: f"{x:.2f}%" if pd.notna(x) else ""
+            )
+        
+        render_styled_table(display_df, highlight_logic=True)
         st.caption("ℹ️ Switch to **Edit Mode** to add, modify, or delete trades.")
         st.divider()
     else:
@@ -9503,13 +9842,13 @@ def ui_trading_section():
             "Sale Date": st.column_config.DateColumn("Sale Date", format="YYYY-MM-DD", help="Set date to mark as Realized"),
             "Sale Price": st.column_config.NumberColumn("Sale Price", min_value=0, format="%.3f"),
             
-            # Calculated / Read-only
+            # Calculated / Read-only - Money columns: no decimals
             "Current Price": st.column_config.NumberColumn("Current Price", format="%.3f", disabled=True),
-            "Cost Value": st.column_config.NumberColumn("Cost Value", format="%.1f", disabled=True),
-            "Value Price": st.column_config.NumberColumn("Mkt Value", format="%.1f", disabled=True),
-            "Profit": st.column_config.NumberColumn("Profit (KD)", format="%.1f", disabled=True),
-            "Profit %": st.column_config.NumberColumn("Profit %", format="%.1f%%", disabled=True),
-            "Dividends": st.column_config.NumberColumn("Divs", format="%.1f"),
+            "Cost Value": st.column_config.NumberColumn("Cost Value", format="%,.0f", disabled=True),
+            "Value Price": st.column_config.NumberColumn("Mkt Value", format="%,.0f", disabled=True),
+            "Profit": st.column_config.NumberColumn("Profit (KD)", format="%,.0f", disabled=True),
+            "Profit %": st.column_config.NumberColumn("Profit %", format="%.2f%%", disabled=True),
+            "Dividends": st.column_config.NumberColumn("Divs", format="%,.0f"),
             "Bonus": st.column_config.NumberColumn("Bonus", format="%.0f"),
             "Notes": st.column_config.TextColumn("Notes")
         }
@@ -10264,42 +10603,54 @@ def calculate_total_cash_dividends(user_id, debug=False):
         ORDER BY t.txn_date DESC
     """, (user_id,))
     
+    # Add source column for deduplication
+    if not dividends_df.empty:
+        dividends_df['source'] = 'portfolio'
+    if not trading_dividends_df.empty:
+        trading_dividends_df['source'] = 'trading'
+    
+    # Combine both sources for deduplication
+    combined_df = pd.DataFrame()
+    if not dividends_df.empty and not trading_dividends_df.empty:
+        combined_df = pd.concat([dividends_df, trading_dividends_df], ignore_index=True)
+    elif not dividends_df.empty:
+        combined_df = dividends_df
+    elif not trading_dividends_df.empty:
+        combined_df = trading_dividends_df
+    
     total_dividends_kwd = 0.0
     dividend_count = 0
     
-    # Process transactions table dividends
-    if not dividends_df.empty:
-        dividends_df["amount_in_kwd"] = dividends_df.apply(
+    if not combined_df.empty:
+        # DEDUPLICATION: Remove duplicates where same stock, date, and amount exist in both tables
+        combined_df['_dedup_key'] = (
+            combined_df['stock_symbol'].astype(str) + '_' + 
+            combined_df['txn_date'].astype(str) + '_' + 
+            combined_df['cash_dividend'].astype(str)
+        )
+        
+        # Sort so 'portfolio' comes before 'trading' (alphabetically), then drop duplicates keeping first
+        combined_df = combined_df.sort_values(['_dedup_key', 'source'])
+        combined_df = combined_df.drop_duplicates(subset=['_dedup_key'], keep='first')
+        combined_df = combined_df.drop(columns=['_dedup_key'])
+        
+        # Calculate KWD values
+        combined_df["amount_in_kwd"] = combined_df.apply(
             lambda row: convert_to_kwd(safe_float(row["cash_dividend"], 0), row.get("currency", "KWD")),
             axis=1
         )
-        total_dividends_kwd += dividends_df["amount_in_kwd"].sum()
-        dividend_count += len(dividends_df)
-    
-    # Process trading_history dividends (if any)
-    if not trading_dividends_df.empty:
-        trading_dividends_df["amount_in_kwd"] = trading_dividends_df.apply(
-            lambda row: convert_to_kwd(safe_float(row["cash_dividend"], 0), row.get("currency", "KWD")),
-            axis=1
-        )
-        total_dividends_kwd += trading_dividends_df["amount_in_kwd"].sum()
-        dividend_count += len(trading_dividends_df)
+        total_dividends_kwd = combined_df["amount_in_kwd"].sum()
+        dividend_count = len(combined_df)
     
     # Debug output
     debug_df = None
     if debug:
-        logger.debug(f"DEBUG – Dividend rows used (transactions): {len(dividends_df)}")
-        logger.debug(f"DEBUG – Dividend rows used (trading): {len(trading_dividends_df)}")
+        logger.debug(f"DEBUG – Dividend rows after dedup: {dividend_count}")
         logger.debug(f"DEBUG – Total cash dividends: {total_dividends_kwd:.2f} KWD")
-        if not dividends_df.empty:
-            logger.debug("Sample from transactions:")
-            logger.debug(dividends_df[['stock_symbol', 'txn_date', 'cash_dividend', 'currency', 'amount_in_kwd']].tail(5).to_string())
-        if not trading_dividends_df.empty:
-            logger.debug("Sample from trading_history:")
-            logger.debug(trading_dividends_df[['stock_symbol', 'txn_date', 'cash_dividend', 'currency', 'amount_in_kwd']].tail(5).to_string())
-        
-        # Combine for debug
-        debug_df = pd.concat([dividends_df, trading_dividends_df], ignore_index=True) if not trading_dividends_df.empty else dividends_df
+        if not combined_df.empty:
+            logger.debug("Sample dividends:")
+            logger.debug(combined_df[['stock_symbol', 'txn_date', 'cash_dividend', 'currency', 'amount_in_kwd', 'source']].tail(10).to_string())
+        debug_df = combined_df
     
     return total_dividends_kwd, dividend_count, debug_df
 
@@ -10519,12 +10870,12 @@ def ui_overview():
     col1, col2, col3, col4, col5 = st.columns(5)
     
     with col1:
-        # Show breakdown: Stocks + Cash
-        cash_text = f"Cash: {fmt_money_plain(manual_cash_kwd, 2)} KWD" if manual_cash_kwd > 0 else "Live prices"
+        # Show breakdown: Stocks + Cash (no decimals for money)
+        cash_text = f"Cash: {fmt_money_plain(manual_cash_kwd)} KWD" if manual_cash_kwd > 0 else "Live prices"
         st.markdown(f"""
         <div class="ov-card">
             <div class="ov-title">💼 Portfolio Value</div>
-            <div class="ov-value">{fmt_money_plain(live_portfolio_value, 3)} <span class="ov-currency">KWD</span></div>
+            <div class="ov-value">{fmt_money_plain(live_portfolio_value)} <span class="ov-currency">KWD</span></div>
             <div class="ov-sub">{cash_text}</div>
         </div>
         """, unsafe_allow_html=True)
@@ -10533,8 +10884,8 @@ def ui_overview():
         st.markdown(f"""
         <div class="ov-card">
             <div class="ov-title">💰 Total Cash Deposits</div>
-            <div class="ov-value">{fmt_money_plain(total_deposits_kwd, 3)} <span class="ov-currency">KWD</span></div>
-            <div class="ov-sub">In Analysis: {fmt_money_plain(deposits_in_analysis, 3)}</div>
+            <div class="ov-value">{fmt_money_plain(total_deposits_kwd)} <span class="ov-currency">KWD</span></div>
+            <div class="ov-sub">In Analysis: {fmt_money_plain(deposits_in_analysis)}</div>
         </div>
         """, unsafe_allow_html=True)
     
@@ -10549,7 +10900,7 @@ def ui_overview():
         st.markdown(f"""
         <div class="ov-card">
             <div class="ov-title">📈 Net Gain</div>
-            <div class="ov-value">{fmt_money_plain(net_gain, 3)} <span class="ov-currency">KWD</span></div>
+            <div class="ov-value">{fmt_money_plain(net_gain)} <span class="ov-currency">KWD</span></div>
             <div class="ov-sub">
                 <span class="{delta_class}">{delta_sign}{roi:.2f}% ROI</span>
             </div>
@@ -10574,7 +10925,7 @@ def ui_overview():
             st.markdown(f"""
             <div class="ov-card">
                 <div class="ov-title">📅 Daily Movement</div>
-                <div class="ov-value"><span class="{delta_class}">{delta_sign}{fmt_money_plain(abs(daily_change_value), 2)}</span> <span class="ov-currency">KWD</span></div>
+                <div class="ov-value"><span class="{delta_class}">{delta_sign}{fmt_money_plain(abs(daily_change_value))}</span> <span class="ov-currency">KWD</span></div>
                 <div class="ov-sub">
                     <span class="{delta_class}">{arrow} {delta_sign}{daily_change_pct:.2f}%</span> vs yesterday
                 </div>
@@ -10596,12 +10947,12 @@ def ui_overview():
     with col_r1:
         realized_class = "ov-delta-pos" if realized_profit_kwd >= 0 else "ov-delta-neg"
         realized_sign = "+" if realized_profit_kwd >= 0 else ""
-        # Show breakdown: Portfolio + Trading
-        breakdown_text = f"Portfolio: {fmt_money_plain(portfolio_realized_kwd, 1)} | Trading: {fmt_money_plain(trading_realized_kwd, 1)}"
+        # Show breakdown: Portfolio + Trading (no decimals)
+        breakdown_text = f"Portfolio: {fmt_money_plain(portfolio_realized_kwd)} | Trading: {fmt_money_plain(trading_realized_kwd)}"
         st.markdown(f"""
         <div class="ov-card">
             <div class="ov-title">💵 Realized Profit</div>
-            <div class="ov-value"><span class="{realized_class}">{realized_sign}{fmt_money_plain(realized_profit_kwd, 2)}</span> <span class="ov-currency">KWD</span></div>
+            <div class="ov-value"><span class="{realized_class}">{realized_sign}{fmt_money_plain(realized_profit_kwd)}</span> <span class="ov-currency">KWD</span></div>
             <div class="ov-sub">{breakdown_text}</div>
         </div>
         """, unsafe_allow_html=True)
@@ -10612,7 +10963,7 @@ def ui_overview():
         st.markdown(f"""
         <div class="ov-card">
             <div class="ov-title">📊 Unrealized Profit</div>
-            <div class="ov-value"><span class="{unrealized_class}">{unrealized_sign}{fmt_money_plain(unrealized_profit_kwd, 2)}</span> <span class="ov-currency">KWD</span></div>
+            <div class="ov-value"><span class="{unrealized_class}">{unrealized_sign}{fmt_money_plain(unrealized_profit_kwd)}</span> <span class="ov-currency">KWD</span></div>
             <div class="ov-sub">Current holdings</div>
         </div>
         """, unsafe_allow_html=True)
@@ -10621,12 +10972,12 @@ def ui_overview():
         total_profit = realized_profit_kwd + unrealized_profit_kwd + total_dividends_kwd
         total_class = "ov-delta-pos" if total_profit >= 0 else "ov-delta-neg"
         total_sign = "+" if total_profit >= 0 else ""
-        # Show dividend count for transparency
-        div_info = f"Dividends: {fmt_money_plain(total_dividends_kwd, 2)} KWD ({dividend_count} records)"
+        # Show dividend count for transparency (cash dividends only, no reinvested)
+        div_info = f"Cash Dividends: {fmt_money_plain(total_dividends_kwd)} KWD ({dividend_count} records)"
         st.markdown(f"""
         <div class="ov-card">
-            <div class="ov-title">🏆 Total Profit (incl. Dividends)</div>
-            <div class="ov-value"><span class="{total_class}">{total_sign}{fmt_money_plain(total_profit, 2)}</span> <span class="ov-currency">KWD</span></div>
+            <div class="ov-title">🏆 Total Profit (incl. Cash Dividends)</div>
+            <div class="ov-value"><span class="{total_class}">{total_sign}{fmt_money_plain(total_profit)}</span> <span class="ov-currency">KWD</span></div>
             <div class="ov-sub">{div_info}</div>
         </div>
         """, unsafe_allow_html=True)
@@ -10988,7 +11339,7 @@ def ui_overview():
             elif current_portfolio_value <= 0:
                 st.caption(f"⚠️ No current portfolio value (history rows: {len(portfolio_history)})")
             else:
-                st.caption(f"⚠️ Calculation failed (cf:{len(cash_flows_mwrr)}, val:{current_portfolio_value:.0f})")
+                st.caption(f"⚠️ Calculation failed (cf:{len(cash_flows_mwrr)}, val:{current_portfolio_value:,.0f})")
     
     with col3:
         if cagr is not None:
@@ -11012,7 +11363,7 @@ def ui_overview():
         st.write(f"**User ID:** {user_id}")
         st.write(f"**Portfolio History Rows:** {len(portfolio_history)}")
         st.write(f"**Cash Flows for MWRR:** {len(cash_flows_mwrr)}")
-        st.write(f"**Current Portfolio Value:** {current_portfolio_value:.2f}")
+        st.write(f"**Current Portfolio Value:** {current_portfolio_value:,.2f}")
         st.write(f"**Inception Date:** {inception_date}")
         st.write(f"**MWRR Result:** {mwrr}")
         if not cash_flows_mwrr.empty:
@@ -11463,21 +11814,154 @@ def calculate_peer_metrics(hist, info, financials):
 # =========================
 # UI - HELPERS
 # =========================
+def render_snapshot_table(df: pd.DataFrame) -> None:
+    """
+    Render Portfolio Snapshots with professional financial formatting.
+    
+    Formatting Rules:
+    - Value: 2 decimal places + thousands separator
+    - Daily Movement: 2 decimals, green/red coloring
+    - Beginning Diff: 2 decimals + thousands separator  
+    - Deposit Cash: No decimals, thousands separator
+    - Accumulated Cash: No decimals, thousands separator
+    - Net Gain: 2 decimals, green/red, parentheses for negative
+    - Change %: 2 decimals + %, green/red
+    - ROI %: 2 decimals + %, green/red
+    """
+    if df is None or df.empty:
+        st.info("No snapshot data to display.")
+        return
+
+    is_dark = st.session_state.get("theme", "light") == "dark"
+
+    # Theme Colors
+    c_bg_card = "rgba(17, 24, 39, 0.6)" if is_dark else "rgba(255, 255, 255, 0.8)"
+    c_border = "#1f2937" if is_dark else "#e5e7eb"
+    c_header_bg = "rgba(31, 41, 55, 0.5)" if is_dark else "#f9fafb"
+    c_text_p = "#ffffff" if is_dark else "#111827"
+    c_hover = "rgba(31, 41, 55, 0.3)" if is_dark else "rgba(243, 244, 246, 0.8)"
+    c_pos = "#10b981"  # Emerald Green
+    c_neg = "#ef4444"  # Red
+
+    css = f"""
+    <style>
+    .snap-table-wrap {{
+        background-color: {c_bg_card};
+        border: 1px solid {c_border};
+        border-radius: 12px;
+        overflow: hidden;
+        margin-bottom: 1rem;
+        box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
+        font-family: ui-sans-serif, system-ui, sans-serif;
+    }}
+    .snap-table-scroll {{ overflow-x: auto; }}
+    .snap-table {{ width: 100%; border-collapse: collapse; font-size: 0.85rem; }}
+    .snap-table th {{
+        text-align: right; padding: 12px 16px; background: {c_header_bg};
+        color: {c_text_p}; font-weight: 600; border-bottom: 1px solid {c_border};
+        white-space: nowrap;
+    }}
+    .snap-table th:first-child {{ text-align: left; }}
+    .snap-table td {{
+        padding: 10px 16px; color: {c_text_p}; border-bottom: 1px solid {c_border};
+        white-space: nowrap; text-align: right;
+    }}
+    .snap-table td:first-child {{ text-align: left; font-weight: 600; }}
+    .snap-table tr:hover td {{ background-color: {c_hover}; }}
+    .snap-pos {{ color: {c_pos} !important; font-weight: 600; }}
+    .snap-neg {{ color: {c_neg} !important; font-weight: 600; }}
+    </style>
+    """
+
+    # Column definitions with formatting rules
+    columns = [
+        ("snapshot_date", "Date", "date"),
+        ("portfolio_value", "Value", "money_2dp"),
+        ("daily_movement", "Daily Movement", "money_colored"),
+        ("beginning_difference", "Beginning Diff", "money_2dp"),
+        ("deposit_cash", "Deposit Cash", "money_0dp"),
+        ("accumulated_cash", "Accumulated Cash", "money_0dp"),
+        ("net_gain", "Net Gain", "money_colored"),
+        ("change_percent", "Change %", "percent_colored"),
+        ("roi_percent", "ROI %", "percent_colored"),
+    ]
+
+    # Build HTML
+    html_out = [
+        '<div class="snap-table-wrap"><div class="snap-table-scroll">',
+        '<table class="snap-table"><thead><tr>',
+    ]
+
+    # Headers
+    for col_key, col_label, _ in columns:
+        html_out.append(f"<th>{html.escape(col_label)}</th>")
+    html_out.append("</tr></thead><tbody>")
+
+    # Format value based on type
+    def fmt_snapshot_val(val, fmt_type):
+        if pd.isna(val) or val is None:
+            return "-", ""
+        
+        try:
+            num = float(val)
+        except (ValueError, TypeError):
+            return str(val), ""
+        
+        if fmt_type == "date":
+            return str(val)[:10], ""  # YYYY-MM-DD
+        
+        elif fmt_type == "money_2dp":
+            # 2 decimal places, thousands separator
+            return f"{num:,.2f}", ""
+        
+        elif fmt_type == "money_0dp":
+            # No decimals, thousands separator
+            return f"{num:,.0f}", ""
+        
+        elif fmt_type == "money_colored":
+            # 2 decimals, green/red coloring (no parentheses)
+            if num >= 0:
+                return f"{num:,.2f}", "snap-pos"
+            else:
+                return f"{num:,.2f}", "snap-neg"
+        
+        elif fmt_type == "percent_colored":
+            # 2 decimals with %, + sign for positive, green/red
+            if num >= 0:
+                return f"+{num:.2f}%", "snap-pos"
+            else:
+                return f"{num:.2f}%", "snap-neg"
+        
+        return str(val), ""
+
+    # Processing Rows
+    for _, row in df.iterrows():
+        html_out.append("<tr>")
+        for col_key, _, fmt_type in columns:
+            val = row.get(col_key, None)
+            formatted, css_class = fmt_snapshot_val(val, fmt_type)
+            
+            if css_class:
+                html_out.append(f'<td class="{css_class}">{html.escape(str(formatted))}</td>')
+            else:
+                html_out.append(f'<td>{html.escape(str(formatted))}</td>')
+        html_out.append("</tr>")
+
+    html_out.append("</tbody></table></div></div>")
+
+    st.markdown(css + "".join(html_out), unsafe_allow_html=True)
+
+
 def render_styled_table(df: pd.DataFrame, highlight_logic: bool = True) -> None:
     """
-    Unified renderer for DataFrames with Tailwind-like CSS.
-    Safe against XSS, optimized for speed, and robust column handling.
+    Unified renderer with GLOBAL AUTOMATIC FORMATTING.
+    Uses format_financial() and detect_column_type() for consistent styling.
     
-    Args:
-        df: DataFrame to render as a styled HTML table.
-        highlight_logic: If True, applies smart coloring based on column names and values.
-                        Status column: Realized → muted, Unrealized → accent
-                        Stock column: accent
-                        Profit/Change/Gain/Yield/% columns: positive → green, negative → red
-                        Current Price/Sale Price == 0: display "-" with muted color
-    
-    Returns:
-        None. Renders the table directly via st.markdown.
+    Formatting Rules:
+    - Quantity (shares, units): Thousands separator, no decimals
+    - Money (values, gains, P&L): Green/Red, no decimals, brackets for negative
+    - Price (market price, avg cost): 3 decimals, black
+    - Percent (ROI, yield, change): 2 decimals with %, Green/Red
     """
     if df is None or df.empty:
         st.info("No data to display.")
@@ -11485,15 +11969,12 @@ def render_styled_table(df: pd.DataFrame, highlight_logic: bool = True) -> None:
 
     is_dark = st.session_state.get("theme", "light") == "dark"
 
-    # Theme configuration (compact)
+    # Theme Colors
     c_bg_card = "rgba(17, 24, 39, 0.6)" if is_dark else "rgba(255, 255, 255, 0.8)"
     c_border = "#1f2937" if is_dark else "#e5e7eb"
     c_header_bg = "rgba(31, 41, 55, 0.5)" if is_dark else "#f9fafb"
     c_text_p = "#ffffff" if is_dark else "#111827"
     c_hover = "rgba(31, 41, 55, 0.3)" if is_dark else "rgba(243, 244, 246, 0.8)"
-    c_pos = "#34d399" if is_dark else "#16a34a"
-    c_neg = "#fb7185" if is_dark else "#dc2626"
-    c_accent = "#22d3ee" if is_dark else "#2563eb"
     c_muted = "rgba(156, 163, 175, 0.6)"
 
     css = f"""
@@ -11510,23 +11991,22 @@ def render_styled_table(df: pd.DataFrame, highlight_logic: bool = True) -> None:
     .univ-table-scroll {{ overflow-x: auto; }}
     .univ-table {{ width: 100%; border-collapse: collapse; font-size: 0.85rem; }}
     .univ-table th {{
-        text-align: left; padding: 12px 16px; background: {c_header_bg};
+        text-align: right; padding: 12px 16px; background: {c_header_bg};
         color: {c_text_p}; font-weight: 600; border-bottom: 1px solid {c_border};
         white-space: nowrap;
     }}
+    .univ-table th:first-child {{ text-align: left; }}
     .univ-table td {{
         padding: 10px 16px; color: {c_text_p}; border-bottom: 1px solid {c_border};
-        white-space: nowrap;
+        white-space: nowrap; text-align: right;
     }}
+    .univ-table td:first-child {{ text-align: left; font-weight: 600; }}
     .univ-table tr:hover td {{ background-color: {c_hover}; }}
-    .t-pos {{ color: {c_pos} !important; font-weight: 600; }}
-    .t-neg {{ color: {c_neg} !important; font-weight: 600; }}
-    .t-accent {{ color: {c_accent} !important; font-weight: 500; }}
     .t-muted {{ color: {c_muted} !important; }}
     </style>
     """
 
-    # Build HTML list
+    # Build HTML
     html_out = [
         '<div class="univ-table-wrap"><div class="univ-table-scroll">',
         '<table class="univ-table"><thead><tr>',
@@ -11536,54 +12016,42 @@ def render_styled_table(df: pd.DataFrame, highlight_logic: bool = True) -> None:
         html_out.append(f"<th>{html.escape(str(col))}</th>")
     html_out.append("</tr></thead><tbody>")
 
-    # Use index=False for speed, but access by integer index to avoid attribute naming issues
+    # Pre-detect column types for performance
+    col_types = {col: detect_column_type(col) for col in df.columns}
+
+    # Processing Rows
     for row in df.itertuples(index=False):
         html_out.append("<tr>")
         for col_idx, col_name in enumerate(df.columns):
-            # Access tuple by index: Faster and safer than getattr logic
             val = row[col_idx]
             
-            cls = ""
-            display_val = val
-
-            # Treat NaN/None as empty string
-            if pd.isna(display_val):
-                display_val = ""
-
-            # Special case for price fields being 0
-            if col_name in ("Current Price", "Sale Price") and (display_val == 0 or display_val == 0.0):
-                display_val = "-"
-                cls = "t-muted"
-
-            if highlight_logic and display_val != "-":
-                sval = str(display_val)
-
-                if col_name == "Status":
-                    if sval == "Realized":
+            # Handle None/NaN
+            if pd.isna(val) or val is None:
+                html_out.append(f'<td class="t-muted">-</td>')
+                continue
+            
+            # Get column type
+            col_type = col_types[col_name]
+            
+            # Format based on type
+            if highlight_logic and col_type != "text":
+                # Use format_financial for numeric columns
+                formatted = format_financial(val, col_type, for_html=True)
+                # format_financial returns HTML with spans, so don't escape it
+                html_out.append(f'<td>{formatted}</td>')
+            else:
+                # Text columns - escape and display as-is
+                display_val = str(val)
+                cls = ""
+                
+                # Special styling for Status column
+                col_lower = str(col_name).lower()
+                if 'status' in col_lower:
+                    if 'realized' in display_val.lower():
                         cls = "t-muted"
-                    elif sval == "Unrealized":
-                        cls = "t-accent"
-
-                elif col_name == "Stock":
-                    cls = "t-accent"
-
-                elif any(k in str(col_name) for k in ["Profit", "%", "Change", "Gain", "Yield"]):
-                    try:
-                        clean_val = float(
-                            sval.replace("%", "").replace(",", "").replace("x", "")
-                        )
-                        if clean_val > 0:
-                            cls = "t-pos"
-                        elif clean_val < 0:
-                            cls = "t-neg"
-                        else:
-                            cls = "t-muted"
-                    except (ValueError, TypeError):
-                        pass
-
-            html_out.append(
-                f'<td class="{cls}">{html.escape(str(display_val))}</td>'
-            )
+                
+                html_out.append(f'<td class="{cls}">{html.escape(display_val)}</td>')
+        
         html_out.append("</tr>")
 
     html_out.append("</tbody></table></div></div>")
@@ -11828,6 +12296,10 @@ def ui_peer_analysis():
                 df_table = pd.DataFrame(section_data).T 
                 df_table.columns = st.session_state.peer_tickers
                 
+                # FIX: Reset index so the Metric Name becomes a visible column
+                df_table = df_table.reset_index()
+                df_table = df_table.rename(columns={'index': 'Metric'})
+
                 # Render with custom styled UI
                 render_styled_table(df_table)
                 # st.dataframe(df_table, width="stretch") # Replaced
@@ -13635,7 +14107,7 @@ def get_full_financial_context(user_id):
                         avg_cost = buy_row['total_cost'] / bought if bought > 0 else 0
                         position_cost = remaining * avg_cost
                         open_cost += position_cost
-                        context_parts.append(f"    • {stock}: {remaining:.0f} shares open (Cost: {position_cost:,.3f} KWD)")
+                        context_parts.append(f"    • {stock}: {remaining:,.0f} shares open (Cost: {position_cost:,.3f} KWD)")
                 
                 if open_cost > 0:
                     context_parts.append(f"  Total Open Position Cost: {open_cost:,.3f} KWD (UNREALIZED)")

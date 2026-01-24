@@ -547,7 +547,7 @@ def save_snapshot(
     # net_gain = beginning_diff - accumulated_cash
     net_gain = beginning_difference - accumulated_cash
     
-    # ROI = net_gain / total_cash_deposits (from cash_deposits table, not accumulated_cash)
+    # ROI % = Net Gain / Total Cash Deposits * 100
     roi_percent = (net_gain / total_cash_deposits * 100) if total_cash_deposits > 0 else 0.0
     created_at = int(time.time())  # Unix timestamp
     
@@ -689,7 +689,7 @@ def take_daily_snapshot(
             
             # Save snapshot with correct formulas:
             #   net_gain = beginning_difference - accumulated_cash
-            #   roi_percent = net_gain / total_cash_deposits * 100
+            #   roi_percent = (portfolio_value - total_cash_deposits) / total_cash_deposits * 100
             success = save_snapshot(
                 user_id=user_id,
                 snapshot_date=snapshot_date,
