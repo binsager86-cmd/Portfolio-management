@@ -341,6 +341,33 @@ def get_total_deposits_for_date(user_id: int, date_str: str) -> float:
     finally:
         conn.close()
 
+def get_manual_cash_balance(user_id: int, usd_kwd_rate: float) -> float:
+    """Get total manual cash balance from portfolio_cash table, converted to KWD."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    total_kwd = 0.0
+    try:
+        cur.execute("""
+            SELECT balance, currency
+            FROM portfolio_cash 
+            WHERE user_id = ?
+        """, (user_id,))
+        rows = cur.fetchall()
+        for row in rows:
+            balance = float(row['balance']) if row['balance'] else 0.0
+            currency = row['currency'] or 'KWD'
+            if currency == 'USD':
+                total_kwd += balance * usd_kwd_rate
+            else:
+                total_kwd += balance
+        return total_kwd
+    except Exception as e:
+        # Table may not exist for all users
+        logger.debug(f"Manual cash lookup: {e}")
+        return 0.0
+    finally:
+        conn.close()
+
 def save_portfolio_snapshot(user_id: int, snapshot_data: Dict) -> bool:
     """Save or update portfolio snapshot."""
     conn = get_db_connection()
@@ -579,7 +606,14 @@ def run_price_update_job():
                     logger.error(f"    ❌ {symbol}: No price available")
         
         logger.info(f"  📈 Updated {updated_count}/{len(stocks)} prices")
-        logger.info(f"  💰 Portfolio Value: {portfolio_value:,.2f} KWD")
+        
+        # Add manual cash balances (portfolio_cash table) to portfolio value
+        manual_cash_kwd = get_manual_cash_balance(user_id, usd_kwd_rate)
+        portfolio_value += manual_cash_kwd
+        if manual_cash_kwd > 0:
+            logger.info(f"  💵 Manual Cash: {manual_cash_kwd:,.2f} KWD")
+        
+        logger.info(f"  💰 Total Portfolio Value: {portfolio_value:,.2f} KWD")
         
         # Save portfolio snapshot
         if portfolio_value > 0:
@@ -600,7 +634,9 @@ def run_price_update_job():
             # Calculate metrics
             daily_movement = portfolio_value - prev_value if prev_value > 0 else 0
             beginning_diff = portfolio_value - first_value
-            net_gain = portfolio_value - accumulated_cash if accumulated_cash > 0 else 0
+            # FIX: Net Gain = Beginning Difference - Accumulated Cash (matches UI formula)
+            # This gives actual profit = (Current - Baseline) - Deposits
+            net_gain = beginning_diff - accumulated_cash if accumulated_cash > 0 else beginning_diff
             change_percent = (daily_movement / prev_value * 100) if prev_value > 0 else 0
             roi_percent = (net_gain / accumulated_cash * 100) if accumulated_cash > 0 else 0
             
