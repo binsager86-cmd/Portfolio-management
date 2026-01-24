@@ -1,0 +1,26 @@
+name: portfolio-app
+
+services:
+  # Main Streamlit web app
+  - name: web
+    environment_slug: python
+    github:
+      branch: main
+      deploy_on_push: true
+    build_command: pip install -r requirements.txt
+    run_command: streamlit run ui.py --server.port=$PORT --server.address=0.0.0.0 --server.headless=true
+    http_port: 8501
+    instance_size_slug: basic-xxs
+    instance_count: 1
+
+workers:
+  # Background worker that runs the price scheduler at 2 PM Kuwait daily
+  - name: price-scheduler
+    environment_slug: python
+    github:
+      branch: main
+      deploy_on_push: true
+    build_command: pip install -r requirements.txt
+    run_command: python auto_price_scheduler.py
+    instance_size_slug: basic-xxs
+    instance_count: 1
