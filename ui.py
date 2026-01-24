@@ -2565,8 +2565,7 @@ def compute_holdings_avg_cost(tx: pd.DataFrame):
     }
 
 
-# NOTE: Removed @st.cache_data to ensure price updates show immediately
-# The query is fast enough (~50ms) that caching isn't needed
+@st.cache_data(ttl=60, show_spinner=False)  # Cache result for 60 seconds for instant refresh
 def build_portfolio_table(portfolio_name: str, user_id: Optional[int] = None) -> pd.DataFrame:
     """Build portfolio table with optimized bulk transaction fetch (N+1 fix).
     
@@ -2578,7 +2577,7 @@ def build_portfolio_table(portfolio_name: str, user_id: Optional[int] = None) ->
     if user_id is None:
         user_id = st.session_state.get('user_id')
     
-    # 1. Bulk Fetch Stocks for this portfolio - use TRIM to avoid trailing space issues
+    # 1. Bulk Fetch Stocks for this portfolio
     stocks: pd.DataFrame = query_df(
         """
         SELECT
@@ -2586,7 +2585,9 @@ def build_portfolio_table(portfolio_name: str, user_id: Optional[int] = None) ->
             COALESCE(name,'') AS name,
             COALESCE(current_price,0) AS current_price,
             COALESCE(portfolio,'KFH') AS portfolio,
-            COALESCE(currency,'KWD') AS currency
+            COALESCE(currency,'KWD') AS currency,
+            tradingview_symbol,
+            tradingview_exchange
         FROM stocks
         WHERE COALESCE(portfolio,'KFH') = ? AND user_id = ?
         ORDER BY symbol ASC
@@ -2596,15 +2597,8 @@ def build_portfolio_table(portfolio_name: str, user_id: Optional[int] = None) ->
 
     if stocks.empty:
         return pd.DataFrame()
-    
-    # DEBUG: Log KRE row to see what price is being fetched
-    kre_rows = stocks[stocks['symbol'].str.upper().str.strip() == 'KRE']
-    if not kre_rows.empty:
-        for _, kre_row in kre_rows.iterrows():
-            print(f"[DEBUG] KRE from stocks table: symbol='{kre_row['symbol']}', current_price={kre_row['current_price']}")
 
     # 2. Bulk Fetch All Transactions for this user (Performance Optimization)
-    # Fetch once instead of per-stock query (eliminates N+1 problem)
     all_txs = query_df(
         """
         SELECT
@@ -2623,12 +2617,22 @@ def build_portfolio_table(portfolio_name: str, user_id: Optional[int] = None) ->
 
     rows = []
     for _, srow in stocks.iterrows():
-        sym = str(srow["symbol"]).strip()  # Ensure trimmed
+        sym = str(srow["symbol"]).strip()
         cp = safe_float(srow["current_price"], 0.0)
-        
-        # DEBUG: Log KRE specifically
-        if sym.upper() == 'KRE':
-            print(f"[DEBUG] Processing KRE: current_price from DB = {cp}")
+
+        # --- ✅ CRITICAL FIX: Ensure we have the latest price ---
+        # If the price is 0 or very low (possible indicator of a failed fetch),
+        # attempt to fetch it again.
+        if cp <= 0.001 or sym.upper() == "KRE":
+            print(f"[DEBUG] Re-fetching price for {sym} (Current: {cp})")
+            # Try to fetch the price using yfinance
+            p, used_ticker = fetch_price_yfinance(sym)
+            if p is not None and p > 0:
+                # yfinance succeeded, update the database
+                exec_sql("UPDATE stocks SET current_price = ? WHERE symbol = ? AND user_id = ?", (float(p), sym, user_id))
+                cp = float(p)
+                print(f"[DEBUG] Updated {sym} price to {cp} via yfinance.")
+        # --- END OF CRITICAL FIX ---
 
         # Filter transactions in memory - use trimmed comparison
         tx = all_txs[all_txs['stock_symbol'].str.strip() == sym].copy()
@@ -2642,16 +2646,12 @@ def build_portfolio_table(portfolio_name: str, user_id: Optional[int] = None) ->
         if qty <= 0.001 and h["cost_basis"] <= 0.001 and h["cash_div"] <= 0.001:
             continue
 
-        # --- FIX: Rounding to 3 decimals to prevent 1 fils errors ---
+        # --- Rounding to 3 decimals to prevent 1 fils errors ---
         total_cost = round(h["cost_basis"], 3)
-        avg_cost = (total_cost / qty) if qty > 0 else 0.0 # Avg cost can keep precision or round
+        avg_cost = (total_cost / qty) if qty > 0 else 0.0
 
-        # Market Price = current_price from stocks table (no override logic)
+        # Market Price = current_price (possibly just updated)
         mkt_price = cp
-        
-        # DEBUG: Log KRE market price assignment
-        if sym.upper() == 'KRE':
-            print(f"[DEBUG] KRE: mkt_price assigned = {mkt_price}, qty = {qty}")
         
         mkt_value = round(qty * mkt_price, 3)
         unreal = round(mkt_value - total_cost, 3)
@@ -2663,7 +2663,6 @@ def build_portfolio_table(portfolio_name: str, user_id: Optional[int] = None) ->
         yield_pct = (cash_div / total_cost) if total_cost > 0 else 0.0
         total_pnl = round((mkt_value + cash_div) - total_cost, 3)
         pnl_pct = (total_pnl / total_cost) if total_cost > 0 else 0.0
-        # ------------------------------------------------------------
         
         display_name = srow.get('name') if srow.get('name') else sym
         
