@@ -6941,81 +6941,68 @@ def ui_portfolio_analysis():
                     if not _ensure_yfinance():
                         st.error("yfinance not installed.")
                     else:
-                        st.info(f"🚀 Batch fetching {len(unique_yf_tickers)} stocks...")
+                        st.info(f"🚀 Fetching {len(unique_yf_tickers)} stocks...")
                         progress = st.progress(0)
                         
                         try:
-                            conn = get_conn()
-                            cur = conn.cursor()
                             success_count = 0
                             success_details = []
                             failed_symbols = []
-                            debug_info = []
                             
-                            # ROBUST APPROACH: Fetch each ticker individually for reliability
-                            # This is slightly slower but far more reliable than batch with group_by
+                            # SIMPLE APPROACH: Fetch each ticker and update DB directly
                             for i, yf_tick in enumerate(unique_yf_tickers):
                                 stock_info = ticker_map[yf_tick]
                                 db_symbol = stock_info['symbol']
                                 db_ccy = stock_info['currency']
-                                price = None
                                 
                                 try:
-                                    # Fetch individual ticker data
-                                    ticker_data = yf.download(
-                                        yf_tick, period="5d", progress=False, threads=False
-                                    )
+                                    # Fetch price from Yahoo Finance
+                                    ticker_data = yf.download(yf_tick, period="5d", progress=False, threads=False)
                                     
                                     if not ticker_data.empty and 'Close' in ticker_data.columns:
                                         close_series = ticker_data['Close'].dropna()
                                         if not close_series.empty:
                                             raw_price = float(close_series.iloc[-1])
-                                            debug_info.append(f"{db_symbol}: raw={raw_price}")
                                             
                                             # Normalize Kuwait prices (Fils to KWD)
                                             if db_ccy == 'KWD':
                                                 price = normalize_kwd_price(raw_price, db_ccy)
-                                                debug_info[-1] += f" → normalized={price}"
                                             else:
                                                 price = raw_price
-                                    
-                                    if price and price > 0:
-                                        db_execute(cur, "UPDATE stocks SET current_price = ? WHERE symbol = ? AND user_id = ?", 
-                                                   (price, db_symbol, user_id))
-                                        success_count += 1
-                                        success_details.append(f"{db_symbol} = {price:,.3f} {db_ccy}")
+                                            
+                                            # DIRECT UPDATE using exec_sql (auto-commits)
+                                            exec_sql(
+                                                "UPDATE stocks SET current_price = ? WHERE symbol = ? AND user_id = ?",
+                                                (price, db_symbol, user_id)
+                                            )
+                                            success_count += 1
+                                            success_details.append(f"{db_symbol} = {price:,.3f} {db_ccy}")
+                                        else:
+                                            failed_symbols.append(db_symbol)
                                     else:
-                                        failed_symbols.append(f"{db_symbol} (no price)")
+                                        failed_symbols.append(db_symbol)
                                         
                                 except Exception as ticker_err:
-                                    failed_symbols.append(f"{db_symbol} ({str(ticker_err)[:30]})")
+                                    failed_symbols.append(f"{db_symbol}")
                                     
                                 progress.progress((i + 1) / len(unique_yf_tickers))
 
-                            conn.commit()
-                            conn.close()
                             progress.empty()
                             
-                            st.success(f"✅ Updated {success_count}/{len(unique_yf_tickers)} stocks.")
-                            
-                            if success_details:
-                                with st.expander("✓ Successfully fetched prices", expanded=True):
+                            # Show results
+                            if success_count > 0:
+                                st.success(f"✅ Updated {success_count} stock prices")
+                                with st.expander("View updated prices", expanded=True):
                                     for detail in success_details:
                                         st.text(detail)
                             
-                            if debug_info:
-                                with st.expander("🔍 Debug: Raw vs Normalized"):
-                                    for info in debug_info:
-                                        st.text(info)
-                            
                             if failed_symbols:
-                                with st.expander("⚠️ View skipped symbols"):
-                                    for sym in failed_symbols:
-                                        st.text(sym)
+                                st.warning(f"⚠️ Could not fetch: {', '.join(failed_symbols)}")
                             
-                            # Clear all caches and rerun to show new prices
+                            # Rerun to refresh the portfolio table with new prices
                             st.cache_data.clear()
                             st.rerun()
+                            
                         except Exception as e:
                             progress.empty()
                             st.error(f"Batch fetch failed: {e}")
