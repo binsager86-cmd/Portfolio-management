@@ -15161,6 +15161,15 @@ def main():
             return  # Exit if DB init fails
 
     # =============================
+    # PRE-WARMING SEQUENCE
+    # =============================
+    # Run once per session to load FX rates, validate connections, etc.
+    if "services_pre_warmed" not in st.session_state:
+        pre_warm_services()
+        st.session_state.services_pre_warmed = True
+        st.rerun()  # Refresh to hide pre-warm screen
+
+    # =============================
     # COOKIE-BASED USER PREFERENCES
     # =============================
     # Load user preferences from cookies (theme, privacy mode, etc.)
