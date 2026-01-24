@@ -6922,24 +6922,27 @@ def ui_portfolio_analysis():
                     for _, row in symbols_df.iterrows():
                         st.write(f"  - `{row['symbol']}` (currency: `{row.get('currency', 'N/A')}`)")
                     
-                    # Map Yahoo Ticker -> {DB Symbol, DB Currency}
+                    # Map Yahoo Ticker -> {DB Symbol (original case), DB Currency}
                     ticker_map = {}
                     
                     for _, row in symbols_df.iterrows():
-                        db_sym = str(row['symbol']).strip().upper()
+                        # Keep ORIGINAL symbol from DB for UPDATE (preserves case)
+                        db_sym_original = str(row['symbol']).strip()
+                        db_sym_upper = db_sym_original.upper()
                         # Default to KWD if currency is missing/null
                         ccy = str(row.get('currency', 'KWD') or 'KWD').strip().upper()
                         
-                        # Convert to yfinance ticker format
-                        if db_sym.endswith('.KW'):
-                            yf_sym = db_sym
-                        elif ccy == 'KWD' and '.' not in db_sym:
+                        # Convert to yfinance ticker format (use uppercase for Yahoo)
+                        if db_sym_upper.endswith('.KW'):
+                            yf_sym = db_sym_upper
+                        elif ccy == 'KWD' and '.' not in db_sym_upper:
                             # FORCE .KW suffix for KWD stocks
-                            yf_sym = f"{db_sym}.KW"
+                            yf_sym = f"{db_sym_upper}.KW"
                         else:
-                            yf_sym = db_sym
-                            
-                        ticker_map[yf_sym] = {'symbol': db_sym, 'currency': ccy}
+                            yf_sym = db_sym_upper
+                        
+                        # Store ORIGINAL symbol for DB update (case-sensitive match)
+                        ticker_map[yf_sym] = {'symbol': db_sym_original, 'currency': ccy}
 
                     unique_yf_tickers = list(ticker_map.keys())
                     
