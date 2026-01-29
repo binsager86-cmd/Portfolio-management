@@ -197,52 +197,32 @@ import streamlit as st
 # This block intercepts cron requests and returns plain text response.
 # It runs BEFORE any UI elements are rendered.
 
-def _run_daily_cron(action: str) -> str:
-    """
-    Helper to run daily cron tasks.
-    action = 'update_prices' or 'snapshot' or 'run_daily' or 'daily_update'
-    """
+# Get query params - Streamlit 1.30+ uses st.query_params (dict-like)
+_cron_action = st.query_params.get("cron", "")
+_cron_key = st.query_params.get("key", "")
+
+if _cron_action:  # If cron param exists
+    _expected_key = os.environ.get("CRON_SECRET_KEY", "")
+    
+    if not _expected_key:
+        st.text("ERROR: CRON_SECRET_KEY not configured on server")
+        st.stop()
+    
+    if _cron_key != _expected_key:
+        st.text("INVALID KEY")
+        st.stop()
+    
+    # Valid cron request - run the job
+    st.text(f"Starting cron job: {_cron_action}")
+    
     try:
         from auto_price_scheduler import run_price_update_job
-        run_price_update_job()  # This does both prices AND snapshots
-        return f"cron '{action}' executed successfully"
-    except ImportError as e:
-        return f"Import error: {e}"
+        run_price_update_job()
+        st.text(f"OK - cron '{_cron_action}' executed successfully")
     except Exception as e:
-        return f"Error: {e}"
-
-
-# Read query params once at startup (use deprecated API for compatibility)
-try:
-    _params = st.experimental_get_query_params()
-except AttributeError:
-    # Fallback for newer Streamlit versions
-    _params = dict(st.query_params)
-    # Convert to list format like experimental version
-    _params = {k: [v] if isinstance(v, str) else v for k, v in _params.items()}
-
-if "cron" in _params:
-    _action = _params.get("cron", [""])[0] if isinstance(_params.get("cron"), list) else _params.get("cron", "")
-    _key = _params.get("key", [""])[0] if isinstance(_params.get("key"), list) else _params.get("key", "")
-
-    expected = os.environ.get("CRON_SECRET_KEY")
-
-    if not expected:
-        st.write("ERROR: CRON_SECRET_KEY not configured on server")
-        st.stop()
-
-    if _key != expected:
-        st.write("INVALID KEY")
-        st.stop()
-
-    try:
-        _result = _run_daily_cron(_action)
-        st.write(f"OK - {_result}")
-    except Exception as e:
-        st.write(f"ERROR while running cron '{_action}': {e}")
-
-    # IMPORTANT: stop Streamlit here so it does NOT render the UI
-    st.stop()
+        st.text(f"ERROR: {e}")
+    
+    st.stop()  # CRITICAL: Stop here, do not render UI
 
 # ============================================================
 # END CRON ENDPOINT
