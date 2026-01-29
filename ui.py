@@ -4223,6 +4223,7 @@ def ui_transactions():
                     
                     if st.button("Import These Transactions", type="primary", key=f"import_btn_{selected_symbol}"):
                         # Process each row and assign to selected_symbol
+                        user_id = st.session_state.get('user_id', 1)
                         conn = get_conn()
                         cur = conn.cursor()
                         imported = 0
@@ -4246,11 +4247,11 @@ def ui_transactions():
                                 # Insert transaction for selected stock
                                 cur.execute("""
                                     INSERT INTO transactions
-                                    (stock_symbol, txn_date, txn_type, purchase_cost, sell_value, shares,
+                                    (user_id, stock_symbol, txn_date, txn_type, purchase_cost, sell_value, shares,
                                      bonus_shares, cash_dividend, reinvested_dividend, fees,
                                      broker, reference, notes, category, created_at)
-                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, '', '', '', 'portfolio', ?)
-                                """, (selected_symbol, iso_date, ttype, purchase_cost, sell_value, shares_val,
+                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, '', '', '', 'portfolio', ?)
+                                """, (user_id, selected_symbol, iso_date, ttype, purchase_cost, sell_value, shares_val,
                                       bonus_shares, cash_dividend, int(time.time())))
                                 imported += 1
                                 
@@ -4282,6 +4283,9 @@ def ui_transactions():
     s6.metric("Market Value", fmt_money_plain(market_value))
 
     st.divider()
+
+    # Get user_id for all transaction operations
+    user_id = st.session_state.get('user_id', 1)
 
     # Add transaction form
     with st.expander("➕ Add Transaction (more fields)", expanded=True):
@@ -4330,13 +4334,14 @@ def ui_transactions():
                     exec_sql(
                         """
                         INSERT INTO transactions
-                        (stock_symbol, txn_date, txn_type, purchase_cost, sell_value, shares,
+                        (user_id, stock_symbol, txn_date, txn_type, purchase_cost, sell_value, shares,
                          bonus_shares, cash_dividend,
                          price_override, planned_cum_shares, reinvested_dividend, fees,
                          broker, reference, notes, category, created_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
+                            user_id,
                             selected_symbol,
                             txn_date.isoformat(),
                             "DIVIDEND_ONLY",
@@ -4430,13 +4435,14 @@ def ui_transactions():
                         exec_sql(
                             """
                             INSERT INTO transactions
-                            (stock_symbol, txn_date, txn_type, purchase_cost, sell_value, shares,
+                            (user_id, stock_symbol, txn_date, txn_type, purchase_cost, sell_value, shares,
                              bonus_shares, cash_dividend,
                              price_override, planned_cum_shares, reinvested_dividend, fees,
                              broker, reference, notes, category, created_at)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                             """,
                             (
+                                user_id,
                                 selected_symbol,
                                 txn_date.isoformat(),
                                 txn_type,
@@ -6482,19 +6488,29 @@ def ui_backup_restore():
                                 df = pd.read_excel(uploaded_file, sheet_name='trading_history')
                                 for _, row in df.iterrows():
                                     try:
+                                        # Handle both old column names and new schema column names
+                                        stock_sym = safe_str(row.get('stock_symbol') or row.get('symbol'))
+                                        txn_date = safe_date(row.get('txn_date') or row.get('trade_date'))
+                                        txn_type = safe_str(row.get('txn_type') or row.get('trade_type'), 'Buy')
+                                        shares = safe_float(row.get('shares') or row.get('quantity'))
+                                        purchase_cost = safe_float(row.get('purchase_cost') or (row.get('price', 0) * shares if txn_type == 'Buy' else 0))
+                                        sell_value = safe_float(row.get('sell_value') or (row.get('total_value') if txn_type == 'Sell' else 0))
+                                        
                                         db_execute(cur, """
                                             INSERT INTO trading_history 
-                                            (user_id, symbol, trade_date, trade_type, quantity, 
-                                             price, total_value, notes, created_at)
-                                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                            (user_id, stock_symbol, txn_date, txn_type, shares, 
+                                             purchase_cost, sell_value, cash_dividend, bonus_shares, notes, created_at)
+                                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                                         """, (
                                             user_id,
-                                            safe_str(row.get('symbol')),
-                                            safe_date(row.get('trade_date')),
-                                            safe_str(row.get('trade_type'), 'Buy'),
-                                            safe_float(row.get('quantity')),
-                                            safe_float(row.get('price')),
-                                            safe_float(row.get('total_value')),
+                                            stock_sym,
+                                            txn_date,
+                                            txn_type,
+                                            shares,
+                                            purchase_cost,
+                                            sell_value,
+                                            safe_float(row.get('cash_dividend')),
+                                            safe_float(row.get('bonus_shares')),
                                             safe_str(row.get('notes')),
                                             int(time.time())
                                         ))
