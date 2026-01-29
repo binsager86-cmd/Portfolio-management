@@ -4463,7 +4463,22 @@ def ui_transactions():
                             ),
                         )
 
-                        st.success("Transaction saved.")
+                        # Update portfolio cash balance (ledger effect)
+                        stock_portfolio = stock_row.get('portfolio', 'KFH')
+                        stock_currency = stock_row.get('currency', 'KWD')
+                        
+                        if txn_type == "Sell" and float(sell_value) > 0:
+                            # Sell increases cash
+                            update_portfolio_cash(user_id, stock_portfolio, float(sell_value), stock_currency)
+                            st.success(f"Transaction saved. Cash +{sell_value:,.3f} {stock_currency}")
+                        elif txn_type == "Buy" and float(purchase_cost) > 0:
+                            # Buy decreases cash
+                            update_portfolio_cash(user_id, stock_portfolio, -float(purchase_cost), stock_currency)
+                            st.success(f"Transaction saved. Cash -{purchase_cost:,.3f} {stock_currency}")
+                        else:
+                            st.success("Transaction saved.")
+                        
+                        build_portfolio_table.clear()  # Clear cache to show updated cash
                         st.rerun()
 
     st.markdown("### Transactions Table")
@@ -4677,15 +4692,60 @@ def ui_transactions():
                                     tx_id,
                                 ),
                             )
+                            
+                            # Update portfolio cash: reverse old effect, apply new effect
+                            old_type = row['txn_type']
+                            old_sell = float(row.get('sell_value', 0) or 0)
+                            old_buy = float(row.get('purchase_cost', 0) or 0)
+                            
+                            # Get portfolio and currency from stock_row
+                            stock_portfolio = stock_row['portfolio'].values[0] if len(stock_row) > 0 else 'KFH'
+                            stock_currency = stock_row['currency'].values[0] if len(stock_row) > 0 else 'KWD'
+                            
+                            # Calculate old cash effect (what was added/subtracted before)
+                            old_cash_effect = 0.0
+                            if old_type == 'Sell':
+                                old_cash_effect = old_sell  # Sell added cash
+                            elif old_type == 'Buy':
+                                old_cash_effect = -old_buy  # Buy subtracted cash
+                            
+                            # Calculate new cash effect
+                            new_cash_effect = 0.0
+                            if edit_type == 'Sell':
+                                new_cash_effect = float(edit_sell_value)
+                            elif edit_type == 'Buy':
+                                new_cash_effect = -float(edit_purchase_cost)
+                            
+                            # Net delta = new effect - old effect
+                            net_delta = new_cash_effect - old_cash_effect
+                            if net_delta != 0:
+                                update_portfolio_cash(user_id, stock_portfolio, net_delta, stock_currency)
+                            
                             st.session_state.editing_tx_id = None
                             st.success(f"Transaction {tx_id} updated!")
+                            build_portfolio_table.clear()
                             st.rerun()
                 
                 with col_delete:
                     if st.button("🗑️ Delete", type="secondary", key=f"delete_{tx_id}"):
+                        # Reverse cash effect before deleting
+                        old_type = row.get('txn_type', '')
+                        old_sell = safe_float(row.get('sell_value'), 0)
+                        old_buy = safe_float(row.get('purchase_cost'), 0)
+                        stock_portfolio = stock_row.get('portfolio', 'KFH')
+                        stock_currency = stock_row.get('currency', 'KWD')
+                        
+                        if old_type == 'Sell' and old_sell > 0:
+                            # Reverse: Sell had added cash, so subtract it
+                            update_portfolio_cash(user_id, stock_portfolio, -old_sell, stock_currency)
+                        elif old_type == 'Buy' and old_buy > 0:
+                            # Reverse: Buy had subtracted cash, so add it back
+                            update_portfolio_cash(user_id, stock_portfolio, old_buy, stock_currency)
+                        
                         exec_sql("DELETE FROM transactions WHERE id = ? AND user_id = ?", (tx_id, user_id))
                         st.session_state.editing_tx_id = None
-                        st.success(f"Transaction {tx_id} deleted.")
+                        st.success(f"Transaction {tx_id} deleted. Cash balance adjusted.")
+                        build_portfolio_table.clear()
                         st.rerun()
                 
                 st.divider()
