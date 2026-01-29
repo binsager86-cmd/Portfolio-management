@@ -1,0 +1,30 @@
+name: Baseline Check
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  baseline-check:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Create test SQLite DB from migrations
+        run: |
+          sqlite3 portfolio_test.db ".read migrations/000_create_schema_sqlite.sql"
+          sqlite3 portfolio_test.db ".read migrations/seed_test_data.sql"
+
+      - name: Run baseline check
+        env:
+          PORTFOLIO_DB_PATH: portfolio_test.db
+        run: python baseline_check.py

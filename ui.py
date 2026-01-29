@@ -1646,6 +1646,16 @@ def init_db() -> None:
         # Composite indexes for common query patterns
         cur.execute("CREATE INDEX IF NOT EXISTS idx_txn_user_symbol ON transactions(user_id, stock_symbol)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_snapshots_user_date ON portfolio_snapshots(user_id, snapshot_date)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_txn_user_date ON transactions(user_id, txn_date)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_cash_deposits_user_date ON cash_deposits(user_id, deposit_date)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_trading_history_user_symbol ON trading_history(user_id, stock_symbol)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_stocks_user_portfolio ON stocks(user_id, portfolio)")
+        
+        # PFM table indexes
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_pfm_snapshots_user ON pfm_snapshots(user_id)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_pfm_income_expense_user ON pfm_income_expense_items(user_id)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_pfm_assets_user ON pfm_asset_items(user_id)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_pfm_liabilities_user ON pfm_liability_items(user_id)")
         
         conn.commit()
         logger.info("✅ Database indexes created for performance.")
@@ -3521,10 +3531,10 @@ def ui_cash_deposits():
                             st.rerun()
                     with action_cols[1]:
                         if st.button("🗑️", key=f"delete_{deposit_id}", help="Delete this deposit"):
-                            # Hard delete individual deposit
+                            # Hard delete individual deposit (with user_id security check)
                             conn = get_conn()
                             cur = conn.cursor()
-                            db_execute(cur, "DELETE FROM cash_deposits WHERE id = ?", (deposit_id,))
+                            db_execute(cur, "DELETE FROM cash_deposits WHERE id = ? AND user_id = ?", (deposit_id, user_id))
                             conn.commit()
                             conn.close()
                             build_portfolio_table.clear()  # Clear cache to show updated data
@@ -4170,10 +4180,10 @@ def ui_transactions():
             category,
             created_at
         FROM transactions
-        WHERE stock_symbol = ?
+        WHERE stock_symbol = ? AND user_id = ?
         ORDER BY txn_date ASC, created_at ASC, id ASC
         """,
-        (selected_symbol,),
+        (selected_symbol, user_id),
     )
     
     # Separate subset for metrics calculation (only 'portfolio' category)
@@ -4667,7 +4677,7 @@ def ui_transactions():
                 
                 with col_delete:
                     if st.button("🗑️ Delete", type="secondary", key=f"delete_{tx_id}"):
-                        exec_sql("DELETE FROM transactions WHERE id = ?", (tx_id,))
+                        exec_sql("DELETE FROM transactions WHERE id = ? AND user_id = ?", (tx_id, user_id))
                         st.session_state.editing_tx_id = None
                         st.success(f"Transaction {tx_id} deleted.")
                         st.rerun()
@@ -9991,13 +10001,14 @@ def ui_trading_section():
                     row_orig = final_df.loc[idx]
                     b_id = row_orig['_buy_id']
                     if pd.notna(b_id):
-                        # Delete Buy
-                        db_execute(cur, "DELETE FROM trading_history WHERE id = ?", (int(b_id),))
+                        # Delete Buy (with user_id security check)
+                        user_id = st.session_state.get('user_id', 1)
+                        db_execute(cur, "DELETE FROM trading_history WHERE id = ? AND user_id = ?", (int(b_id), user_id))
                         
-                        # Delete Sell
+                        # Delete Sell (with user_id security check)
                         s_id = row_orig.get('_sell_id')
                         if pd.notna(s_id):
-                            db_execute(cur, "DELETE FROM trading_history WHERE id = ?", (int(s_id),))
+                            db_execute(cur, "DELETE FROM trading_history WHERE id = ? AND user_id = ?", (int(s_id), user_id))
                         
                         changes_count += 1
     
@@ -10085,9 +10096,10 @@ def ui_trading_section():
                                     VALUES (?, ?, 'Sell', ?, ?, ?, ?)
                                 """, (symbol, s_date, qty, sell_val, int(time.time()), user_id))
                         else:
-                            # Transferred to Unrealized: Delete potential sell record
+                            # Transferred to Unrealized: Delete potential sell record (with user_id security check)
                             if pd.notna(sell_id):
-                                db_execute(cur, "DELETE FROM trading_history WHERE id = ?", (int(sell_id),))
+                                user_id = st.session_state.get('user_id', 1)
+                                db_execute(cur, "DELETE FROM trading_history WHERE id = ? AND user_id = ?", (int(sell_id), user_id))
                         
                         changes_count += 0.5 # Track updates lightly
                     
@@ -12892,10 +12904,11 @@ def ui_pfm():
                     try:
                         conn = get_conn()
                         cur = conn.cursor()
-                        db_execute(cur, "DELETE FROM pfm_income_expense_items WHERE snapshot_id = ?", (existing_snapshot["id"],))
-                        db_execute(cur, "DELETE FROM pfm_asset_items WHERE snapshot_id = ?", (existing_snapshot["id"],))
-                        db_execute(cur, "DELETE FROM pfm_liability_items WHERE snapshot_id = ?", (existing_snapshot["id"],))
-                        db_execute(cur, "DELETE FROM pfm_snapshots WHERE id = ?", (existing_snapshot["id"],))
+                        # Security: Add user_id filter to prevent cross-user deletion
+                        db_execute(cur, "DELETE FROM pfm_income_expense_items WHERE snapshot_id = ? AND user_id = ?", (existing_snapshot["id"], user_id))
+                        db_execute(cur, "DELETE FROM pfm_asset_items WHERE snapshot_id = ? AND user_id = ?", (existing_snapshot["id"], user_id))
+                        db_execute(cur, "DELETE FROM pfm_liability_items WHERE snapshot_id = ? AND user_id = ?", (existing_snapshot["id"], user_id))
+                        db_execute(cur, "DELETE FROM pfm_snapshots WHERE id = ? AND user_id = ?", (existing_snapshot["id"], user_id))
                         conn.commit()
                         conn.close()
                         for key in list(st.session_state.keys()):
@@ -13217,10 +13230,10 @@ def ui_pfm():
                 
                 if row:
                     snapshot_id = row[0]
-                    # Clear existing data
-                    db_execute(cur, "DELETE FROM pfm_income_expense_items WHERE snapshot_id = ?", (snapshot_id,))
-                    db_execute(cur, "DELETE FROM pfm_asset_items WHERE snapshot_id = ?", (snapshot_id,))
-                    db_execute(cur, "DELETE FROM pfm_liability_items WHERE snapshot_id = ?", (snapshot_id,))
+                    # Clear existing data (with user_id security check)
+                    db_execute(cur, "DELETE FROM pfm_income_expense_items WHERE snapshot_id = ? AND user_id = ?", (snapshot_id, user_id))
+                    db_execute(cur, "DELETE FROM pfm_asset_items WHERE snapshot_id = ? AND user_id = ?", (snapshot_id, user_id))
+                    db_execute(cur, "DELETE FROM pfm_liability_items WHERE snapshot_id = ? AND user_id = ?", (snapshot_id, user_id))
                 else:
                     db_execute(cur, """
                         INSERT INTO pfm_snapshots (user_id, snapshot_date, notes, created_at)

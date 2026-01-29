@@ -4,6 +4,9 @@ from datetime import date
 
 DB_NAME = "portfolio.db"
 
+# Default user_id for CLI usage (can be overridden)
+DEFAULT_USER_ID = 1
+
 
 def prompt_non_empty(label: str) -> str:
     while True:
@@ -39,21 +42,23 @@ def table_exists(cur, name: str) -> bool:
     return cur.fetchone() is not None
 
 
-def add_bank_txn(conn, bank_name: str, txn_date: str, amount: float, description: str, comments: str):
+def add_bank_txn(conn, user_id: int, bank_name: str, txn_date: str, amount: float, description: str, comments: str):
+    """Add a bank transaction with user_id for multi-user support."""
     cur = conn.cursor()
     cur.execute("""
-        INSERT INTO bank_cashflows (bank_name, txn_date, amount, description, comments)
-        VALUES (?, ?, ?, ?, ?)
-    """, (bank_name, txn_date, amount, description, comments))
+        INSERT INTO bank_cashflows (user_id, bank_name, txn_date, amount, description, comments)
+        VALUES (?, ?, ?, ?, ?, ?)
+    """, (user_id, bank_name, txn_date, amount, description, comments))
     conn.commit()
 
 
-def show_bank_totals(conn):
+def show_bank_totals(conn, user_id: int):
+    """Show bank totals filtered by user_id."""
     cur = conn.cursor()
-    cur.execute("SELECT bank_name, bank_total FROM bank_totals")
+    cur.execute("SELECT bank_name, bank_total FROM bank_totals WHERE user_id = ?", (user_id,))
     rows = cur.fetchall()
 
-    cur.execute("SELECT ROUND(SUM(amount), 3) FROM bank_cashflows")
+    cur.execute("SELECT ROUND(SUM(amount), 3) FROM bank_cashflows WHERE user_id = ?", (user_id,))
     grand = cur.fetchone()[0]
     grand = grand if grand is not None else 0.0
 
@@ -68,23 +73,25 @@ def show_bank_totals(conn):
     print(f"{'GRAND TOTAL':<25} {grand:>15,.3f}\n")
 
 
-def list_deposits(conn, bank_filter: Optional[str] = None, limit: int = 30):
+def list_deposits(conn, user_id: int, bank_filter: Optional[str] = None, limit: int = 30):
+    """List deposits filtered by user_id."""
     cur = conn.cursor()
     if bank_filter:
         cur.execute("""
             SELECT txn_date, bank_name, amount, COALESCE(description,''), COALESCE(comments,'')
             FROM bank_cashflows
-            WHERE bank_name = ?
+            WHERE user_id = ? AND bank_name = ?
             ORDER BY txn_date DESC, bank_txn_id DESC
             LIMIT ?
-        """, (bank_filter, limit))
+        """, (user_id, bank_filter, limit))
     else:
         cur.execute("""
             SELECT txn_date, bank_name, amount, COALESCE(description,''), COALESCE(comments,'')
             FROM bank_cashflows
+            WHERE user_id = ?
             ORDER BY txn_date DESC, bank_txn_id DESC
             LIMIT ?
-        """, (limit,))
+        """, (user_id, limit))
     rows = cur.fetchall()
 
     print("\n🧾 Latest bank transactions")
@@ -104,6 +111,7 @@ def list_deposits(conn, bank_filter: Optional[str] = None, limit: int = 30):
 
 def main():
     conn = sqlite3.connect(DB_NAME)
+    user_id = DEFAULT_USER_ID  # CLI uses default user
 
     # Safety: ensure schema exists
     cur = conn.cursor()
@@ -111,6 +119,8 @@ def main():
         conn.close()
         raise RuntimeError("bank_cashflows table not found. Run: python upgrade_banks.py")
 
+    print(f"📌 Operating as user_id={user_id}")
+    
     while True:
         print("=== BANK DEPOSITS MENU ===")
         print("1) Add deposit/withdrawal")
@@ -128,19 +138,19 @@ def main():
             desc = input("Description (optional): ").strip()
             com = input("Comments (optional): ").strip()
 
-            add_bank_txn(conn, bank, d, amt, desc, com)
+            add_bank_txn(conn, user_id, bank, d, amt, desc, com)
             print("✅ Saved.")
-            show_bank_totals(conn)
+            show_bank_totals(conn, user_id)
 
         elif choice == "2":
-            show_bank_totals(conn)
+            show_bank_totals(conn, user_id)
 
         elif choice == "3":
-            list_deposits(conn, bank_filter=None, limit=30)
+            list_deposits(conn, user_id, bank_filter=None, limit=30)
 
         elif choice == "4":
             bank = prompt_non_empty("Bank name")
-            list_deposits(conn, bank_filter=bank, limit=30)
+            list_deposits(conn, user_id, bank_filter=bank, limit=30)
 
         elif choice == "0":
             conn.close()
