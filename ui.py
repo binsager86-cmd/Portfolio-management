@@ -540,6 +540,200 @@ def map_to_tradingview(symbol: str, exchange: str = "KSE", limit: int = 20):
     return candidates
 
 # =========================
+# CRON ENDPOINT (MUST be before any UI rendering)
+# =========================
+# This block intercepts cron requests BEFORE any UI loads
+# Usage: ?cron=update_prices&key=SECRET or ?cron=snapshot&key=SECRET or ?cron=daily_update&key=SECRET
+
+def _run_cron_price_update():
+    """Run price update for all users - called by cron endpoint."""
+    try:
+        from db_layer import get_conn, query_df, exec_sql
+        
+        # Lazy-load yfinance
+        try:
+            import yfinance as yf
+        except ImportError:
+            return "ERROR: yfinance not available"
+        
+        all_users = query_df("SELECT DISTINCT user_id FROM stocks")
+        if all_users.empty:
+            return "No users with stocks found"
+        
+        total_updated = 0
+        total_failed = 0
+        
+        for _, user_row in all_users.iterrows():
+            uid = int(user_row['user_id'])
+            stocks_df = query_df("SELECT symbol, currency FROM stocks WHERE user_id = ?", (uid,))
+            
+            for _, stock_row in stocks_df.iterrows():
+                db_symbol = str(stock_row['symbol']).strip()
+                db_sym_upper = db_symbol.upper()
+                ccy = str(stock_row.get('currency', 'KWD') or 'KWD').strip().upper()
+                
+                if db_sym_upper.endswith('.KW'):
+                    yf_tick = db_sym_upper
+                elif ccy == 'KWD' and '.' not in db_sym_upper:
+                    yf_tick = f"{db_sym_upper}.KW"
+                else:
+                    yf_tick = db_sym_upper
+                
+                try:
+                    ticker_data = yf.download(yf_tick, period="5d", progress=False, threads=False)
+                    if not ticker_data.empty and 'Close' in ticker_data.columns:
+                        close_series = ticker_data['Close'].dropna()
+                        if not close_series.empty:
+                            raw_price = float(close_series.iloc[-1])
+                            price = normalize_kwd_price(raw_price, ccy) if ccy == 'KWD' else raw_price
+                            exec_sql("UPDATE stocks SET current_price = ? WHERE symbol = ? AND user_id = ?", (price, db_symbol, uid))
+                            total_updated += 1
+                        else:
+                            total_failed += 1
+                    else:
+                        total_failed += 1
+                except:
+                    total_failed += 1
+        
+        return f"Prices: Updated {total_updated}, Failed {total_failed}"
+    except Exception as e:
+        return f"ERROR: {e}"
+
+
+def _run_cron_snapshot():
+    """Save daily snapshot for all users - called by cron endpoint."""
+    try:
+        from db_layer import get_conn, query_df, exec_sql
+        from datetime import date
+        import time as _time
+        
+        all_users = query_df("SELECT DISTINCT id as user_id FROM users")
+        if all_users.empty:
+            all_users = query_df("SELECT DISTINCT user_id FROM stocks")
+        
+        if all_users.empty:
+            return "No users found"
+        
+        today_str = date.today().isoformat()
+        snapshots_saved = 0
+        snapshots_failed = 0
+        
+        for _, user_row in all_users.iterrows():
+            uid = int(user_row['user_id'])
+            try:
+                # Calculate portfolio value
+                stocks_df = query_df("""
+                    SELECT s.symbol, s.current_price, s.currency,
+                           COALESCE(SUM(CASE WHEN t.txn_type = 'Buy' THEN t.shares ELSE 0 END), 0) -
+                           COALESCE(SUM(CASE WHEN t.txn_type = 'Sell' THEN t.shares ELSE 0 END), 0) +
+                           COALESCE(SUM(t.bonus_shares), 0) as total_shares
+                    FROM stocks s
+                    LEFT JOIN transactions t ON s.symbol = t.stock_symbol AND s.user_id = t.user_id
+                    WHERE s.user_id = ?
+                    GROUP BY s.symbol, s.current_price, s.currency
+                """, (uid,))
+                
+                if stocks_df.empty:
+                    continue
+                
+                portfolio_value = 0.0
+                for _, row in stocks_df.iterrows():
+                    shares = float(row['total_shares']) if pd.notna(row['total_shares']) else 0
+                    price = float(row['current_price']) if pd.notna(row['current_price']) else 0
+                    portfolio_value += shares * price
+                
+                if portfolio_value <= 0:
+                    continue
+                
+                # Get previous snapshot
+                prev_snap = query_df(
+                    "SELECT portfolio_value, accumulated_cash FROM portfolio_snapshots WHERE user_id = ? ORDER BY snapshot_date DESC LIMIT 1",
+                    (uid,)
+                )
+                prev_value = float(prev_snap['portfolio_value'].iloc[0]) if not prev_snap.empty else 0.0
+                prev_accumulated = float(prev_snap['accumulated_cash'].iloc[0]) if not prev_snap.empty and pd.notna(prev_snap['accumulated_cash'].iloc[0]) else 0.0
+                
+                # Calculate metrics
+                daily_movement = portfolio_value - prev_value if prev_value > 0 else 0.0
+                accumulated_cash = prev_accumulated
+                
+                first_snap = query_df("SELECT portfolio_value FROM portfolio_snapshots WHERE user_id = ? ORDER BY snapshot_date ASC LIMIT 1", (uid,))
+                beginning_diff = portfolio_value - float(first_snap['portfolio_value'].iloc[0]) if not first_snap.empty else 0.0
+                
+                net_gain = beginning_diff - accumulated_cash
+                total_deps = query_df("SELECT SUM(amount) as total FROM cash_deposits WHERE user_id = ? AND include_in_analysis = 1", (uid,))
+                total_deposits = float(total_deps['total'].iloc[0]) if not total_deps.empty and pd.notna(total_deps['total'].iloc[0]) else 0
+                roi_percent = (net_gain / total_deposits * 100) if total_deposits > 0 else 0.0
+                change_percent = ((portfolio_value - prev_value) / prev_value * 100) if prev_value > 0 else 0.0
+                
+                # Check if exists
+                existing = query_df("SELECT id FROM portfolio_snapshots WHERE snapshot_date = ? AND user_id = ?", (today_str, uid))
+                
+                if not existing.empty:
+                    exec_sql("""
+                        UPDATE portfolio_snapshots
+                        SET portfolio_value = ?, daily_movement = ?, beginning_difference = ?,
+                            accumulated_cash = ?, net_gain = ?, change_percent = ?, roi_percent = ?, created_at = ?
+                        WHERE snapshot_date = ? AND user_id = ?
+                    """, (float(portfolio_value), float(daily_movement), float(beginning_diff),
+                          float(accumulated_cash), float(net_gain), float(change_percent), float(roi_percent),
+                          int(_time.time()), today_str, uid))
+                else:
+                    exec_sql("""
+                        INSERT INTO portfolio_snapshots 
+                        (user_id, snapshot_date, portfolio_value, daily_movement, beginning_difference, 
+                         deposit_cash, accumulated_cash, net_gain, change_percent, roi_percent, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (uid, today_str, float(portfolio_value), float(daily_movement), float(beginning_diff),
+                          0.0, float(accumulated_cash), float(net_gain), float(change_percent), float(roi_percent),
+                          int(_time.time())))
+                
+                snapshots_saved += 1
+            except:
+                snapshots_failed += 1
+        
+        return f"Snapshots: Saved {snapshots_saved}, Failed {snapshots_failed}"
+    except Exception as e:
+        return f"ERROR: {e}"
+
+
+# --- CRON REQUEST HANDLER (runs BEFORE any UI) ---
+try:
+    _cron_params = st.query_params
+    _cron_action = _cron_params.get("cron", "")
+    
+    if _cron_action in ["update_prices", "snapshot", "daily_update"]:
+        _cron_key = _cron_params.get("key", "")
+        _expected_key = os.environ.get("CRON_SECRET_KEY", "")
+        
+        if not _expected_key:
+            try:
+                _expected_key = st.secrets.get("CRON_SECRET_KEY", "")
+            except:
+                pass
+        
+        if not _expected_key:
+            st.write("ERROR: CRON_SECRET_KEY not configured")
+            st.stop()
+        
+        if _cron_key != _expected_key:
+            st.write("INVALID KEY")
+            st.stop()
+        
+        _results = []
+        
+        if _cron_action in ["update_prices", "daily_update"]:
+            _results.append(_run_cron_price_update())
+        
+        if _cron_action in ["snapshot", "daily_update"]:
+            _results.append(_run_cron_snapshot())
+        
+        st.write("OK - " + " | ".join(_results))
+        st.stop()
+except Exception as _cron_err:
+    pass  # If cron check fails, continue to normal UI
+
+# =========================
 # CONFIG
 # =========================
 # Only set page config if not already set (e.g., when run directly vs from app.py)
@@ -547,6 +741,7 @@ try:
     st.set_page_config(page_title="Portfolio App", layout="wide")
 except st.errors.StreamlitAPIException:
     pass  # Already set by app.py router
+
 
 # =========================
 # DATABASE LAYER (Supports SQLite & PostgreSQL/Supabase)
@@ -15082,226 +15277,8 @@ def main():
         st.write("OK")
         st.stop()
     
-    # =============================
-    # CRON ENDPOINT - Daily Price Update & Snapshot Trigger
-    # =============================
-    # Allows external schedulers (cron-job.org, etc.) to trigger updates
-    # Usage: 
-    #   ?cron=update_prices&key=SECRET  - Update prices only
-    #   ?cron=snapshot&key=SECRET       - Save snapshots only
-    #   ?cron=daily_update&key=SECRET   - Update prices AND save snapshots
-    # Set CRON_SECRET_KEY in environment or Streamlit secrets
-    cron_action = st.query_params.get("cron", "")
-    if cron_action in ["update_prices", "snapshot", "daily_update"]:
-        cron_key = st.query_params.get("key", "")
-        
-        # Get secret key from environment or secrets
-        expected_key = os.environ.get("CRON_SECRET_KEY", "")
-        if not expected_key:
-            try:
-                expected_key = st.secrets.get("CRON_SECRET_KEY", "")
-            except:
-                pass
-        
-        # Validate key (require a key to be set for security)
-        if not expected_key:
-            st.error("❌ CRON_SECRET_KEY not configured")
-            st.stop()
-        
-        if cron_key != expected_key:
-            st.error("❌ Invalid cron key")
-            st.stop()
-        
-        st.write(f"🔄 Starting cron job: {cron_action}...")
-        
-        try:
-            # Get all users
-            all_users = query_df("SELECT DISTINCT id as user_id FROM users")
-            if all_users.empty:
-                all_users = query_df("SELECT DISTINCT user_id FROM stocks")
-            
-            if all_users.empty:
-                st.write("No users found.")
-                st.stop()
-            
-            # ========== PRICE UPDATE ==========
-            if cron_action in ["update_prices", "daily_update"]:
-                st.write("📈 Updating prices...")
-                
-                # Lazy-load yfinance
-                if not _ensure_yfinance():
-                    st.error("❌ yfinance not available")
-                else:
-                    total_updated = 0
-                    total_failed = 0
-                    
-                    for _, user_row in all_users.iterrows():
-                        uid = int(user_row['user_id'])
-                        
-                        # Get all stocks for this user
-                        stocks_df = query_df("SELECT symbol, currency FROM stocks WHERE user_id = ?", (uid,))
-                        
-                        for _, stock_row in stocks_df.iterrows():
-                            db_symbol = str(stock_row['symbol']).strip()
-                            db_sym_upper = db_symbol.upper()
-                            ccy = str(stock_row.get('currency', 'KWD') or 'KWD').strip().upper()
-                            
-                            # Build Yahoo ticker
-                            if db_sym_upper.endswith('.KW'):
-                                yf_tick = db_sym_upper
-                            elif ccy == 'KWD' and '.' not in db_sym_upper:
-                                yf_tick = f"{db_sym_upper}.KW"
-                            else:
-                                yf_tick = db_sym_upper
-                            
-                            try:
-                                ticker_data = yf.download(yf_tick, period="5d", progress=False, threads=False)
-                                
-                                if not ticker_data.empty and 'Close' in ticker_data.columns:
-                                    close_series = ticker_data['Close'].dropna()
-                                    if not close_series.empty:
-                                        raw_price = float(close_series.iloc[-1])
-                                        
-                                        # Normalize Kuwait prices
-                                        if ccy == 'KWD':
-                                            price = normalize_kwd_price(raw_price, ccy)
-                                        else:
-                                            price = raw_price
-                                        
-                                        exec_sql(
-                                            "UPDATE stocks SET current_price = ? WHERE symbol = ? AND user_id = ?",
-                                            (price, db_symbol, uid)
-                                        )
-                                        total_updated += 1
-                                    else:
-                                        total_failed += 1
-                                else:
-                                    total_failed += 1
-                            except Exception as e:
-                                total_failed += 1
-                    
-                    st.write(f"✅ Prices: Updated {total_updated}, Failed {total_failed}")
-            
-            # ========== SNAPSHOT SAVE ==========
-            if cron_action in ["snapshot", "daily_update"]:
-                st.write("📊 Saving snapshots...")
-                
-                snapshots_saved = 0
-                snapshots_failed = 0
-                today_str = date.today().isoformat()
-                
-                for _, user_row in all_users.iterrows():
-                    uid = int(user_row['user_id'])
-                    
-                    try:
-                        # Calculate portfolio value for this user
-                        stocks_df = query_df("""
-                            SELECT s.symbol, s.current_price, s.currency,
-                                   COALESCE(SUM(CASE WHEN t.txn_type = 'Buy' THEN t.shares ELSE 0 END), 0) -
-                                   COALESCE(SUM(CASE WHEN t.txn_type = 'Sell' THEN t.shares ELSE 0 END), 0) +
-                                   COALESCE(SUM(t.bonus_shares), 0) as total_shares
-                            FROM stocks s
-                            LEFT JOIN transactions t ON s.symbol = t.stock_symbol AND s.user_id = t.user_id
-                            WHERE s.user_id = ?
-                            GROUP BY s.symbol, s.current_price, s.currency
-                        """, (uid,))
-                        
-                        if stocks_df.empty:
-                            continue
-                        
-                        # Calculate total portfolio value in KWD
-                        portfolio_value = 0.0
-                        for _, row in stocks_df.iterrows():
-                            shares = float(row['total_shares']) if pd.notna(row['total_shares']) else 0
-                            price = float(row['current_price']) if pd.notna(row['current_price']) else 0
-                            ccy = row.get('currency', 'KWD') or 'KWD'
-                            value = shares * price
-                            portfolio_value += convert_to_kwd(value, ccy)
-                        
-                        if portfolio_value <= 0:
-                            continue
-                        
-                        # Get previous snapshot
-                        prev_snap = query_df(
-                            "SELECT portfolio_value, accumulated_cash FROM portfolio_snapshots WHERE user_id = ? ORDER BY snapshot_date DESC LIMIT 1",
-                            (uid,)
-                        )
-                        
-                        prev_value = float(prev_snap['portfolio_value'].iloc[0]) if not prev_snap.empty else 0.0
-                        prev_accumulated = float(prev_snap['accumulated_cash'].iloc[0]) if not prev_snap.empty and pd.notna(prev_snap['accumulated_cash'].iloc[0]) else 0.0
-                        
-                        # Get today's deposits
-                        today_deps = query_df(
-                            "SELECT SUM(amount) as total, currency FROM cash_deposits WHERE user_id = ? AND deposit_date = ? AND include_in_analysis = 1 GROUP BY currency",
-                            (uid, today_str)
-                        )
-                        today_deposits_kwd = 0.0
-                        if not today_deps.empty:
-                            for _, dep_row in today_deps.iterrows():
-                                dep_amt = float(dep_row['total']) if pd.notna(dep_row['total']) else 0
-                                dep_ccy = dep_row.get('currency', 'KWD') or 'KWD'
-                                today_deposits_kwd += convert_to_kwd(dep_amt, dep_ccy)
-                        
-                        # Calculate metrics
-                        accumulated_cash = prev_accumulated + today_deposits_kwd
-                        daily_movement = portfolio_value - prev_value if prev_value > 0 else 0.0
-                        
-                        # Get first snapshot for beginning diff
-                        first_snap = query_df("SELECT portfolio_value FROM portfolio_snapshots WHERE user_id = ? ORDER BY snapshot_date ASC LIMIT 1", (uid,))
-                        if first_snap.empty:
-                            beginning_diff = 0.0
-                        else:
-                            baseline = float(first_snap['portfolio_value'].iloc[0])
-                            beginning_diff = portfolio_value - baseline
-                        
-                        net_gain = beginning_diff - accumulated_cash
-                        
-                        # Get total deposits for ROI
-                        total_deps = query_df("SELECT SUM(amount) as total FROM cash_deposits WHERE user_id = ? AND include_in_analysis = 1", (uid,))
-                        total_deposits = float(total_deps['total'].iloc[0]) if not total_deps.empty and pd.notna(total_deps['total'].iloc[0]) else 0
-                        
-                        roi_percent = (net_gain / total_deposits * 100) if total_deposits > 0 else 0.0
-                        change_percent = ((portfolio_value - prev_value) / prev_value * 100) if prev_value > 0 else 0.0
-                        
-                        # Check if snapshot exists for today
-                        existing = query_df("SELECT id FROM portfolio_snapshots WHERE snapshot_date = ? AND user_id = ?", (today_str, uid))
-                        
-                        if not existing.empty:
-                            # Update existing
-                            exec_sql("""
-                                UPDATE portfolio_snapshots
-                                SET portfolio_value = ?, daily_movement = ?, beginning_difference = ?,
-                                    deposit_cash = ?, accumulated_cash = ?, net_gain = ?, 
-                                    change_percent = ?, roi_percent = ?, created_at = ?
-                                WHERE snapshot_date = ? AND user_id = ?
-                            """, (float(portfolio_value), float(daily_movement), float(beginning_diff),
-                                  float(today_deposits_kwd), float(accumulated_cash), float(net_gain),
-                                  float(change_percent), float(roi_percent), int(time.time()),
-                                  today_str, uid))
-                        else:
-                            # Insert new
-                            exec_sql("""
-                                INSERT INTO portfolio_snapshots 
-                                (user_id, snapshot_date, portfolio_value, daily_movement, beginning_difference, 
-                                 deposit_cash, accumulated_cash, net_gain, change_percent, roi_percent, created_at)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                            """, (uid, today_str, float(portfolio_value), float(daily_movement), float(beginning_diff),
-                                  float(today_deposits_kwd), float(accumulated_cash), float(net_gain),
-                                  float(change_percent), float(roi_percent), int(time.time())))
-                        
-                        snapshots_saved += 1
-                        
-                    except Exception as e:
-                        snapshots_failed += 1
-                
-                st.write(f"✅ Snapshots: Saved {snapshots_saved}, Failed {snapshots_failed}")
-            
-            st.write(f"🎉 Completed at {datetime.now().isoformat()}")
-            
-        except Exception as e:
-            st.error(f"❌ Cron job failed: {e}")
-        
-        st.stop()
+    # NOTE: Cron endpoint moved to top of file (before st.set_page_config)
+    # to ensure no UI elements load before the cron response
     
     _log_startup("main() started - About to render UI")
     
