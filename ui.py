@@ -1,18 +1,17 @@
-# ===== EARLIEST POSSIBLE CRON HANDLER =====
 import os
 import streamlit as st
 
-# Get query params immediately - before ANY other imports or UI
+# EARLY CRON HANDLER – DO NOT MOVE
 _cron_action = st.query_params.get("cron", "")
 _cron_key = st.query_params.get("key", "")
+_expected_key = os.environ.get("CRON_SECRET_KEY", "")
 
 if _cron_action:
-    _expected_key = os.environ.get("CRON_SECRET_KEY", "")
     if not _expected_key:
-        st.text("ERROR: CRON_SECRET_KEY not configured")
+        st.text("ERROR: CRON_SECRET_KEY not set in environment")
         st.stop()
     if _cron_key != _expected_key:
-        st.text("INVALID KEY")
+        st.text("ERROR: Invalid cron key")
         st.stop()
     
     st.text(f"Starting cron job: {_cron_action}")
@@ -21,9 +20,9 @@ if _cron_action:
         run_price_update_job()
         st.text(f"OK - cron '{_cron_action}' executed successfully")
     except Exception as e:
-        st.text(f"ERROR: {e}")
-    st.stop()  # MUST stop here — no UI allowed
-# ===== END CRON — NOW SAFE TO IMPORT & RENDER UI =====
+        st.text(f"ERROR in cron job: {str(e)}")
+    st.stop()
+# END CRON – safe to continue with UI
 
 from typing import Optional
 import sqlite3
