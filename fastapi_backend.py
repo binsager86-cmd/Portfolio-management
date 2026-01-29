@@ -338,6 +338,49 @@ async def get_frequencies():
     }
 
 
+# ============================================
+# CRON ENDPOINT - For automated daily updates
+# ============================================
+
+@app.get("/cron/{action}")
+async def cron_endpoint(action: str, key: str = ""):
+    """
+    Cron endpoint for automated daily price updates and snapshots.
+    
+    Usage:
+        GET /cron/update_prices?key=YOUR_SECRET_KEY
+        GET /cron/snapshot?key=YOUR_SECRET_KEY  
+        GET /cron/daily_update?key=YOUR_SECRET_KEY (both prices + snapshot)
+    """
+    import os
+    
+    # Validate secret key
+    expected_key = os.environ.get("CRON_SECRET_KEY", "")
+    if not expected_key:
+        raise HTTPException(status_code=500, detail="CRON_SECRET_KEY not configured on server")
+    
+    if key != expected_key:
+        raise HTTPException(status_code=401, detail="Invalid key")
+    
+    if action not in ["update_prices", "snapshot", "daily_update"]:
+        raise HTTPException(status_code=400, detail=f"Invalid action: {action}. Use: update_prices, snapshot, or daily_update")
+    
+    try:
+        from auto_price_scheduler import run_price_update_job
+        run_price_update_job()
+        return {"status": "OK", "action": action, "message": f"Cron '{action}' executed successfully"}
+    except ImportError as e:
+        raise HTTPException(status_code=500, detail=f"Import error: {e}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error: {e}")
+
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint"""
+    return {"status": "healthy", "timestamp": datetime.now().isoformat()}
+
+
 if __name__ == "__main__":
     import uvicorn
     print("🚀 Starting FastAPI Financial Planner Backend...")
