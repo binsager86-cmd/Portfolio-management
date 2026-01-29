@@ -1,2 +1,3 @@
 web: streamlit run app.py --server.port=$PORT --server.address=0.0.0.0 --server.headless=true
 worker: python auto_price_scheduler.py
+cron: python cron_update.py
