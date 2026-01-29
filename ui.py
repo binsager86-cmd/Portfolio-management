@@ -15082,6 +15082,104 @@ def main():
         st.write("OK")
         st.stop()
     
+    # =============================
+    # CRON ENDPOINT - Daily Price Update Trigger
+    # =============================
+    # Allows external schedulers (cron-job.org, etc.) to trigger price updates
+    # Usage: ?cron=update_prices&key=YOUR_SECRET_KEY
+    # Set CRON_SECRET_KEY in environment or Streamlit secrets
+    if st.query_params.get("cron") == "update_prices":
+        cron_key = st.query_params.get("key", "")
+        
+        # Get secret key from environment or secrets
+        expected_key = os.environ.get("CRON_SECRET_KEY", "")
+        if not expected_key:
+            try:
+                expected_key = st.secrets.get("CRON_SECRET_KEY", "")
+            except:
+                pass
+        
+        # Validate key (require a key to be set for security)
+        if not expected_key:
+            st.error("❌ CRON_SECRET_KEY not configured")
+            st.stop()
+        
+        if cron_key != expected_key:
+            st.error("❌ Invalid cron key")
+            st.stop()
+        
+        # Run price update for all users
+        st.write("🔄 Starting automated price update...")
+        
+        try:
+            # Get all users with stocks
+            all_users = query_df("SELECT DISTINCT user_id FROM stocks")
+            
+            if all_users.empty:
+                st.write("No users with stocks found.")
+                st.stop()
+            
+            # Lazy-load yfinance
+            if not _ensure_yfinance():
+                st.error("❌ yfinance not available")
+                st.stop()
+            
+            total_updated = 0
+            total_failed = 0
+            
+            for _, user_row in all_users.iterrows():
+                uid = int(user_row['user_id'])
+                
+                # Get all stocks for this user
+                stocks_df = query_df("SELECT symbol, currency FROM stocks WHERE user_id = ?", (uid,))
+                
+                for _, stock_row in stocks_df.iterrows():
+                    db_symbol = str(stock_row['symbol']).strip()
+                    db_sym_upper = db_symbol.upper()
+                    ccy = str(stock_row.get('currency', 'KWD') or 'KWD').strip().upper()
+                    
+                    # Build Yahoo ticker
+                    if db_sym_upper.endswith('.KW'):
+                        yf_tick = db_sym_upper
+                    elif ccy == 'KWD' and '.' not in db_sym_upper:
+                        yf_tick = f"{db_sym_upper}.KW"
+                    else:
+                        yf_tick = db_sym_upper
+                    
+                    try:
+                        ticker_data = yf.download(yf_tick, period="5d", progress=False, threads=False)
+                        
+                        if not ticker_data.empty and 'Close' in ticker_data.columns:
+                            close_series = ticker_data['Close'].dropna()
+                            if not close_series.empty:
+                                raw_price = float(close_series.iloc[-1])
+                                
+                                # Normalize Kuwait prices
+                                if ccy == 'KWD':
+                                    price = normalize_kwd_price(raw_price, ccy)
+                                else:
+                                    price = raw_price
+                                
+                                exec_sql(
+                                    "UPDATE stocks SET current_price = ? WHERE symbol = ? AND user_id = ?",
+                                    (price, db_symbol, uid)
+                                )
+                                total_updated += 1
+                            else:
+                                total_failed += 1
+                        else:
+                            total_failed += 1
+                    except Exception as e:
+                        total_failed += 1
+            
+            st.write(f"✅ Updated {total_updated} prices, ⚠️ Failed: {total_failed}")
+            st.write(f"Completed at {datetime.now().isoformat()}")
+            
+        except Exception as e:
+            st.error(f"❌ Cron job failed: {e}")
+        
+        st.stop()
+    
     _log_startup("main() started - About to render UI")
     
     # Inject Google Analytics (runs once per session)
