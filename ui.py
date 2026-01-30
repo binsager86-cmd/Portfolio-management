@@ -9044,1445 +9044,341 @@ def ui_dividends_tracker():
 
 
 def ui_trading_section():
-    """Trading Section - Short-term trades with date filtering"""
-    st.subheader("📈 Trading Section - Short Term Trades")
+    """Trading Section - Filtered view of Buy/Sell transactions from main transactions table.
     
-    # Single Trade Entry
-    with st.expander("➕ Add Single Trade", expanded=False):
-        is_closed = st.checkbox("This is a closed trade (Buy + Sell)", value=False)
-        
-        with st.form("add_single_trade_form"):
-            col1, col2 = st.columns(2)
-            with col1:
-                stock_symbol = st.text_input("Stock Symbol", max_chars=20).strip().upper()
-                quantity = st.number_input("Quantity", min_value=0.0, step=1.0, format="%.0f")
-            with col2:
-                purchase_date = st.date_input("Purchase Date", value=date.today())
-                purchase_price = st.number_input("Purchase Price (per share)", min_value=0.0, step=0.001, format="%.3f")
-            
-            sale_date = None
-            sale_price = 0.0
-            cash_div = 0.0
-            bonus_shares = 0.0
-            
-            if is_closed:
-                st.divider()
-                st.markdown("**Sale Details**")
-                col3, col4 = st.columns(2)
-                with col3:
-                    sale_date = st.date_input("Sale Date", value=date.today())
-                    sale_price = st.number_input("Sale Price (per share)", min_value=0.0, step=0.001, format="%.3f")
-                with col4:
-                    cash_div = st.number_input("Cash Dividend", min_value=0.0, step=0.001, format="%.3f")
-                    bonus_shares = st.number_input("Bonus Shares", min_value=0.0, step=1.0, format="%.0f")
-            
-            submitted = st.form_submit_button("💾 Save Trade")
-            
-            if submitted:
-                # Validate stock symbol
-                is_valid, validation_error = validate_stock_symbol(stock_symbol)
-                if not is_valid:
-                    st.error(f"Invalid symbol: {validation_error}")
-                elif quantity <= 0:
-                    st.error("Quantity must be greater than 0")
-                elif purchase_price <= 0:
-                    st.error("Purchase Price must be greater than 0")
-                elif is_closed and sale_price <= 0:
-                    st.error("Sale Price must be greater than 0 for closed trades")
-                else:
-                    # CFA Compliance: Check stock exclusivity (cannot be in both Portfolio and Trading)
-                    user_id = st.session_state.get('user_id', 1)
-                    is_exclusive, excl_err = check_stock_exclusivity(stock_symbol, 'trading', user_id)
-                    if not is_exclusive:
-                        st.error(excl_err)
-                    else:
-                        try:
-                            conn = get_conn()
-                            cur = conn.cursor()
-                            
-                            # Check/Add Stock
-                            db_execute(cur, "SELECT id FROM stocks WHERE symbol = ? AND user_id = ?", (stock_symbol, user_id))
-                            if not cur.fetchone():
-                                db_execute(cur,
-                                    "INSERT INTO stocks (symbol, name, portfolio, currency, user_id) VALUES (?, ?, ?, ?, ?)",
-                                    (stock_symbol, stock_symbol, "KFH", "KWD", user_id)
-                                )
-                            
-                            # Calculate totals
-                            total_purchase_cost = purchase_price * quantity
-                            total_sell_value = sale_price * quantity if is_closed else 0
-                            
-                            # Insert Buy
-                            db_execute(cur, """
-                                INSERT INTO trading_history 
-                                (stock_symbol, txn_date, txn_type, purchase_cost, sell_value, shares, 
-                                 cash_dividend, bonus_shares, created_at, user_id)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                            """, (stock_symbol, purchase_date.strftime("%Y-%m-%d"), 'Buy', total_purchase_cost, 0, quantity, 0, 0, int(time.time()), user_id))
-                            
-                            # Insert Sell if applicable
-                            if is_closed:
-                                db_execute(cur, """
-                                    INSERT INTO trading_history 
-                                    (stock_symbol, txn_date, txn_type, purchase_cost, sell_value, shares, 
-                                     cash_dividend, bonus_shares, created_at, user_id)
-                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                """, (stock_symbol, sale_date.strftime("%Y-%m-%d"), 'Sell', 0, total_sell_value, quantity, cash_div, bonus_shares, int(time.time()), user_id))
-                                st.success(f"✅ Added closed trade for {stock_symbol} (Buy + Sell)")
-                            else:
-                                st.success(f"✅ Added open position for {stock_symbol} (Buy only)")
-                            
-                            conn.commit()
-                            conn.close()
-                            build_portfolio_table.clear()  # Clear cache to show updated data
-                            time.sleep(1)
-                            st.rerun()
-                            
-                        except Exception as e:
-                            st.error(f"Error saving trade: {e}")
+    Key changes from old version:
+    - NO data entry - all new trades must use "Add Transactions" tab
+    - Queries from 'transactions' table (not separate trading_history)
+    - Edits UPDATE the 'transactions' table directly
+    - Admin section to clean up legacy trading_history records
+    """
+    st.subheader("📈 Trading Section - Buy/Sell History")
     
-    # Excel Upload Section
-    with st.expander("📥 Upload Trading Data (Excel)", expanded=False):
-        st.markdown("""
-        **Upload Format:** Excel file with columns:
-        - `Purchase date` (dd-MMM-yy, e.g., 3-Mar-25)
-        - `Stock` (stock symbol)
-        - `Quantity` (number of shares)
-        - `Price cost` (price per share for purchase)
-        - `Sale Date` (dd-MMM-yy)
-        - `Sale price` (price per share for sale)
-        - `cash Div` (optional, dividends)
-        - `Bonus shares` (optional)
-        
-        **Note:** Duplicates are automatically rejected (same stock, date, quantity, and cost).
-        """)
-        
-        # Remove Duplicates Button
-        col_dup1, col_dup2 = st.columns([1, 3])
-        with col_dup1:
-            if st.button("🧹 Remove Existing Duplicates", help="Removes duplicate transactions from Trading History"):
-                try:
-                    conn = get_conn()
-                    cur = conn.cursor()
-                    user_id = st.session_state.get('user_id', 1)
-                    
-                    # Find and remove duplicate Buy transactions for current user
-                    db_execute(cur, """
-                        DELETE FROM trading_history 
-                        WHERE id NOT IN (
-                            SELECT MIN(id) 
-                            FROM trading_history 
-                            WHERE txn_type = 'Buy' AND user_id = ?
-                            GROUP BY stock_symbol, txn_date, shares, purchase_cost
-                        ) AND txn_type = 'Buy' AND user_id = ?
-                    """, (user_id, user_id))
-                    buy_dupes = cur.rowcount
-                    
-                    # Find and remove duplicate Sell transactions for current user
-                    db_execute(cur, """
-                        DELETE FROM trading_history 
-                        WHERE id NOT IN (
-                            SELECT MIN(id) 
-                            FROM trading_history 
-                            WHERE txn_type = 'Sell' AND user_id = ?
-                            GROUP BY stock_symbol, txn_date, shares, sell_value
-                        ) AND txn_type = 'Sell' AND user_id = ?
-                    """, (user_id, user_id))
-                    sell_dupes = cur.rowcount
-                    
-                    conn.commit()
-                    conn.close()
-                    
-                    total_removed = buy_dupes + sell_dupes
-                    if total_removed > 0:
-                        st.success(f"✅ Removed {total_removed} duplicate transactions ({buy_dupes} buys, {sell_dupes} sells)")
-                        time.sleep(2)
-                        st.rerun()
-                    else:
-                        st.info("✨ No duplicates found!")
-                except Exception as e:
-                    st.error(f"Error removing duplicates: {e}")
-        
-        st.divider()
-        
-        # Sample Template Download
-        from io import BytesIO
-        sample_data = {
-            'Purchase date': ['3-Mar-25', '17-Apr-25'],
-            'Stock': ['KIB', 'KIB'],
-            'Quantity': [31500, 95455],
-            'Price cost': [0.120, 0.20974],
-            'Cost value': [3787, 20021],
-            'Sale Date': ['24-Feb-25', '27-Jul-25'],
-            'Current Price': [0, 0.284],
-            'Sale price': [0.172, 0.284],
-            'Value price': [5418, 27109],
-            'trading Profit': [1631, 7089],
-            'cash Div': [0, 455],
-            'Bonus shares': [0, 4545],
-            'Profit%': [-19.62, 37.68],
-            'Period in days': [138, 101],
-            'Months': [5, 3.4]
-        }
-        sample_df = pd.DataFrame(sample_data)
-        
-        output = BytesIO()
-        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            sample_df.to_excel(writer, sheet_name='Trading Data', index=False)
-        
-        st.download_button(
-            label="📄 Download Sample Template",
-            data=output.getvalue(),
-            file_name="trading_template.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            key="download_trading_template"
-        )
-        
-        st.divider()
-        
-        # File Upload
-        uploaded_file = st.file_uploader("Choose Excel file", type=['xlsx', 'xls'], key="trading_upload")
-        
-        if uploaded_file is not None:
-            try:
-                import openpyxl
-                from datetime import datetime
-                xl = pd.ExcelFile(uploaded_file)
-                sheet = "Trading Data" if "Trading Data" in xl.sheet_names else xl.sheet_names[0]
-                df = pd.read_excel(uploaded_file, sheet_name=sheet)
-                
-                # Clean column names (strip spaces, normalize case)
-                df.columns = df.columns.str.strip()
-                
-                # Replace NaN and empty strings with None for better handling
-                df = df.replace({pd.NA: None, '': None})
-                df = df.where(pd.notna(df), None)
-                
-                # Remove completely empty rows
-                df = df.dropna(how='all')
-                
-                # VALIDATION: Check each row and create error tracking
-                validation_errors = {}
-                error_summary = []
-                
-                # Helper function to parse numeric values
-                def parse_number(val, field_name):
-                    if val is None or pd.isna(val):
-                        return None
-                    if isinstance(val, (int, float)):
-                        return float(val)
-                    val_str = str(val).strip().replace(',', '').replace('$', '').replace('KWD', '').replace('%', '')
-                    if val_str == '' or val_str == '-':
-                        return None
-                    try:
-                        return float(val_str)
-                    except:
-                        return None
-                
-                # Validate each row
-                for idx, row in df.iterrows():
-                    row_errors = []
-                    
-                    # Check Stock
-                    stock_val = row.get('Stock')
-                    if stock_val is None or (isinstance(stock_val, str) and stock_val.strip() == '') or pd.isna(stock_val):
-                        row_errors.append('Stock')
-                        error_summary.append(f"Row {idx+2}: Missing Stock name")
-                    
-                    # Check Purchase date
-                    purchase_date_val = row.get('Purchase date')
-                    if purchase_date_val is None or pd.isna(purchase_date_val):
-                        row_errors.append('Purchase date')
-                        error_summary.append(f"Row {idx+2}: Missing Purchase date")
-                    else:
-                        # Try to parse date
-                        try:
-                            if isinstance(purchase_date_val, str):
-                                parsed = False
-                                for fmt in ['%d-%b-%y', '%d-%m-%Y', '%Y-%m-%d', '%m/%d/%Y', '%d/%m/%Y']:
-                                    try:
-                                        pd.to_datetime(purchase_date_val, format=fmt)
-                                        parsed = True
-                                        break
-                                    except:
-                                        continue
-                                if not parsed:
-                                    pd.to_datetime(purchase_date_val)
-                        except:
-                            row_errors.append('Purchase date')
-                            error_summary.append(f"Row {idx+2}: Invalid Purchase date format '{purchase_date_val}'")
-                    
-                    # Check Quantity - Allow zero/None for dividend-only transactions
-                    quantity = parse_number(row.get('Quantity'), 'Quantity')
-                    cash_div_preview = parse_number(row.get('cash Div'), 'cash Div') or 0
-                    bonus_preview = parse_number(row.get('Bonus shares'), 'Bonus shares') or 0
-                    reinvested_preview = parse_number(row.get('reinvested_dividend'), 'reinvested_dividend') or 0
-                    
-                    # Check if this is a dividend-only transaction (has dividends but may have zero shares)
-                    has_dividends = cash_div_preview > 0 or bonus_preview > 0 or reinvested_preview > 0
-                    
-                    # Only validate quantity if there are no dividends
-                    if not has_dividends:
-                        if quantity is None or quantity <= 0:
-                            row_errors.append('Quantity')
-                            error_summary.append(f"Row {idx+2}: Quantity is empty or zero (zero allowed only with dividends)")
-                    
-                    # Check Price cost (or try to calculate from Cost value)
-                    price_cost = parse_number(row.get('Price cost'), 'Price cost')
-                    cost_value = parse_number(row.get('Cost value'), 'Cost value')
-                    
-                    # Only validate cost if there are no dividends and quantity > 0
-                    if not has_dividends:
-                        if (price_cost is None or price_cost <= 0) and (cost_value is None or cost_value <= 0):
-                            # Check if at least we have a quantity (could be bonus/free shares)
-                            if quantity is None or quantity <= 0:
-                                row_errors.append('Price cost')
-                                row_errors.append('Cost value')
-                            error_summary.append(f"Row {idx+2}: Both Price cost and Cost value are invalid (zero allowed for dividends/bonus shares)")
-                    
-                    # Check Sale Date if present
-                    sale_date_val = row.get('Sale Date')
-                    has_sale = False
-                    if pd.notna(sale_date_val) and sale_date_val is not None:
-                        if isinstance(sale_date_val, str):
-                            sale_date_str = sale_date_val.strip()
-                            has_sale = sale_date_str != '' and sale_date_str != '-' and sale_date_str != '0'
-                            if has_sale:
-                                # Validate sale date format
-                                try:
-                                    if isinstance(sale_date_val, str):
-                                        parsed = False
-                                        for fmt in ['%d-%b-%y', '%d-%m-%Y', '%Y-%m-%d', '%m/%d/%Y', '%d/%m/%Y']:
-                                            try:
-                                                pd.to_datetime(sale_date_val, format=fmt)
-                                                parsed = True
-                                                break
-                                            except:
-                                                continue
-                                        if not parsed:
-                                            pd.to_datetime(sale_date_val)
-                                except:
-                                    row_errors.append('Sale Date')
-                                    error_summary.append(f"Row {idx+2}: Invalid Sale Date format '{sale_date_val}'")
-                        elif isinstance(sale_date_val, (int, float)):
-                            has_sale = sale_date_val != 0
-                        else:
-                            has_sale = True
-                    
-                    # Check Sale price if Sale Date exists
-                    if has_sale:
-                        sale_price = parse_number(row.get('Sale price'), 'Sale price')
-                        value_price = parse_number(row.get('Value price'), 'Value price')
-                        
-                        if (sale_price is None or sale_price <= 0) and (value_price is None or value_price <= 0):
-                            row_errors.append('Sale price')
-                            row_errors.append('Value price')
-                            error_summary.append(f"Row {idx+2}: Sale Date provided but both Sale price and Value price are invalid")
-                    
-                    if row_errors:
-                        validation_errors[idx] = row_errors
-                
-                # Display validation results
-                if validation_errors:
-                    st.error(f"❌ Found {len(validation_errors)} rows with errors out of {len(df)} total rows.")
-                    
-                    # Show error summary
-                    with st.expander("📋 View All Errors", expanded=True):
-                        for err in error_summary:
-                            st.text(err)
-                    
-                    st.divider()
-                    st.write("**Data Preview with Errors Highlighted:**")
-                    
-                    # Create styled dataframe with red highlighting
-                    def highlight_errors(row):
-                        row_idx = row.name
-                        if row_idx in validation_errors:
-                            error_cols = validation_errors[row_idx]
-                            return ['background-color: #ffcccc' if col in error_cols else '' for col in df.columns]
-                        return ['' for _ in df.columns]
-                    
-                    styled_df = df.style.apply(highlight_errors, axis=1)
-                    st.dataframe(styled_df, width="stretch", height=400)
-                    
-                    st.divider()
-                    
-                    # Show options: Proceed or Cancel
-                    st.warning(f"⚠️ You have 2 options:")
-                    
-                    col_opt1, col_opt2, col_opt3 = st.columns([1, 1, 2])
-                    
-                    with col_opt1:
-                        proceed_with_errors = st.button(
-                            f"✅ Import {len(df) - len(validation_errors)} Valid Rows", 
-                            type="primary",
-                            help=f"Skip {len(validation_errors)} problematic rows and import only valid data",
-                            key="proceed_with_errors"
-                        )
-                    
-                    with col_opt2:
-                        cancel_import = st.button(
-                            "❌ Cancel & Fix Excel",
-                            help="Fix the highlighted cells in your Excel file and re-upload",
-                            key="cancel_import"
-                        )
-                    
-                    if cancel_import:
-                        st.info("💡 Fix the red-highlighted cells in your Excel file and upload again.")
-                        st.stop()
-                    
-                    if not proceed_with_errors:
-                        st.stop()  # Wait for user to choose an option
-                    
-                    # User chose to proceed - filter out error rows
-                    st.info(f"⏳ Importing {len(df) - len(validation_errors)} valid rows (skipping {len(validation_errors)} error rows)...")
-                    valid_indices = [idx for idx in df.index if idx not in validation_errors]
-                    df = df.loc[valid_indices].reset_index(drop=True)
-                    
-                else:
-                    st.success(f"✅ Validation passed! All {len(df)} rows are valid.")
-                    st.write(f"**Preview** ({len(df):,} rows from sheet '{sheet}'):")
-                    st.dataframe(df, width="stretch", height=300)
-                    proceed_with_errors = False  # Initialize for valid data path
-                
-                if st.button("✅ Import Trading Data", key="import_trades") or proceed_with_errors:
-                    imported = 0
-                    errors = []
-                    success_rows = []
-                    buy_count = 0
-                    sell_count = 0
-                    
-                    # Get count before import
-                    conn = get_conn()
-                    cur = conn.cursor()
-                    user_id = st.session_state.get('user_id', 1)
-                    db_execute(cur, "SELECT COUNT(*) FROM trading_history WHERE user_id = ?", (user_id,))
-                    transactions_before = cur.fetchone()[0]
-                    
-                    st.info(f"📊 Current database: {transactions_before} transactions | Starting import...")
-                    
-                    # Validate required columns first
-                    required_cols = ['Purchase date', 'Stock', 'Quantity', 'Price cost']
-                    missing_cols = [col for col in required_cols if col not in df.columns]
-                    
-                    if missing_cols:
-                        st.error(f"❌ Missing required columns: {', '.join(missing_cols)}")
-                        st.info("Required columns: Purchase date, Stock, Quantity, Price cost (Sale Date and Sale price are optional)")
-                    else:
-                        st.info(f"🔄 Processing {len(df)} rows from Excel file...")
-                        
-                        for idx, row in df.iterrows():
-                            row_num = idx + 2  # Excel row number (accounting for header)
-                            try:
-                                # Debug: Show what we're processing
-                                row_stock = row.get('Stock', 'N/A')
-                                row_purchase_date = row.get('Purchase date', 'N/A')
-                                row_sale_date = row.get('Sale Date', 'N/A')
-                                # Validate row data - check for empty/null values
-                                stock_val = row.get('Stock')
-                                if stock_val is None or (isinstance(stock_val, str) and stock_val.strip() == '') or pd.isna(stock_val):
-                                    errors.append(f"Row {row_num}: Stock name is missing")
-                                    continue
-                                
-                                purchase_date_val = row.get('Purchase date')
-                                if purchase_date_val is None or pd.isna(purchase_date_val):
-                                    errors.append(f"Row {row_num}: Purchase date is missing")
-                                    continue
-                                
-                                stock = str(row['Stock']).strip()
-                                
-                                # Check if this is a closed trade (has Sale Date) or open position
-                                # Handle various "empty" values: NaN, None, 0, '-', empty string
-                                sale_date_val = row.get('Sale Date')
-                                has_sale = False
-                                if pd.notna(sale_date_val) and sale_date_val is not None:
-                                    if isinstance(sale_date_val, str):
-                                        sale_date_str = sale_date_val.strip()
-                                        has_sale = sale_date_str != '' and sale_date_str != '-' and sale_date_str != '0'
-                                    elif isinstance(sale_date_val, (int, float)):
-                                        has_sale = sale_date_val != 0
-                                    else:
-                                        # It's a datetime object
-                                        has_sale = True
-                                
-                                # Parse dates - handle multiple formats
-                                try:
-                                    pd_val = row['Purchase date']
-                                    if isinstance(pd_val, pd.Timestamp) or isinstance(pd_val, datetime):
-                                        # Excel already converted to datetime
-                                        purchase_date = pd_val.strftime('%Y-%m-%d')
-                                    elif isinstance(pd_val, str):
-                                        # Try multiple string formats
-                                        for fmt in ['%d-%b-%y', '%d-%m-%Y', '%Y-%m-%d', '%m/%d/%Y', '%d/%m/%Y']:
-                                            try:
-                                                purchase_date = pd.to_datetime(pd_val, format=fmt).strftime('%Y-%m-%d')
-                                                break
-                                            except:
-                                                continue
-                                        else:
-                                            # Last resort - let pandas infer
-                                            purchase_date = pd.to_datetime(pd_val).strftime('%Y-%m-%d')
-                                    else:
-                                        purchase_date = pd.to_datetime(pd_val).strftime('%Y-%m-%d')
-                                except Exception as e:
-                                    errors.append(f"Row {row_num}: Invalid Purchase date '{row['Purchase date']}' - {str(e)}")
-                                    continue
-                                
-                                sale_date = None
-                                if has_sale:
-                                    try:
-                                        sd_val = row['Sale Date']
-                                        if isinstance(sd_val, pd.Timestamp) or isinstance(sd_val, datetime):
-                                            sale_date = sd_val.strftime('%Y-%m-%d')
-                                        elif isinstance(sd_val, str):
-                                            for fmt in ['%d-%b-%y', '%d-%m-%Y', '%Y-%m-%d', '%m/%d/%Y', '%d/%m/%Y']:
-                                                try:
-                                                    sale_date = pd.to_datetime(sd_val, format=fmt).strftime('%Y-%m-%d')
-                                                    break
-                                                except:
-                                                    continue
-                                            else:
-                                                sale_date = pd.to_datetime(sd_val).strftime('%Y-%m-%d')
-                                        else:
-                                            sale_date = pd.to_datetime(sd_val).strftime('%Y-%m-%d')
-                                    except Exception as e:
-                                        errors.append(f"Row {row_num}: Invalid Sale Date '{row['Sale Date']}' - {str(e)}")
-                                        continue
-                                
-                                stock = str(row['Stock']).strip()
-                                
-                                # Helper function to parse numeric values
-                                def parse_number(val, field_name):
-                                    if val is None or pd.isna(val):
-                                        return None  # Return None instead of 0 for missing values
-                                    if isinstance(val, (int, float)):
-                                        return float(val)
-                                    # Handle string numbers with commas, currency symbols
-                                    val_str = str(val).strip().replace(',', '').replace('$', '').replace('KWD', '').replace('%', '')
-                                    if val_str == '' or val_str == '-':
-                                        return None  # Return None instead of 0 for empty strings
-                                    try:
-                                        return float(val_str)
-                                    except:
-                                        raise ValueError(f"{field_name} '{val}' is not a valid number")
-                                
-                                # Validate numeric fields - Allow zero for dividend-only transactions
-                                try:
-                                    quantity = parse_number(row['Quantity'], 'Quantity')
-                                    cash_div = parse_number(row.get('cash Div', 0), 'cash Div') or 0
-                                    bonus_shares = parse_number(row.get('Bonus shares', 0), 'Bonus shares') or 0
-                                    
-                                    # Check if this is a dividend-only transaction
-                                    is_dividend_only = cash_div > 0 or bonus_shares > 0
-                                    
-                                    if (quantity is None or quantity <= 0) and not is_dividend_only:
-                                        errors.append(f"Row {row_num}: Quantity is missing or invalid (got '{row['Quantity']}') - zero allowed only for dividend transactions")
-                                        continue
-                                    
-                                    # Default to 0 if this is dividend-only
-                                    if quantity is None or quantity <= 0:
-                                        quantity = 0.0
-                                        
-                                except ValueError as e:
-                                    errors.append(f"Row {row_num}: {str(e)}")
-                                    continue
-                                
-                                try:
-                                    price_cost = parse_number(row.get('Price cost'), 'Price cost')
-                                    
-                                    # Check if this is bonus shares or dividend-only (zero cost is valid)
-                                    if (price_cost is None or price_cost == 0):
-                                        cost_value = parse_number(row.get('Cost value'), 'Cost value')
-                                        
-                                        if cost_value is not None and cost_value > 0 and quantity > 0:
-                                            # Calculate from Cost value
-                                            price_cost = cost_value / quantity
-                                            success_rows.append(f"Row {row_num}: Calculated Price cost = {price_cost:.3f} (Cost value {cost_value} / Quantity {quantity})")
-                                        elif is_dividend_only:
-                                            # Dividend-only transaction with zero cost
-                                            price_cost = 0.0
-                                            success_rows.append(f"Row {row_num}: {stock} - Dividend-only transaction (zero shares/cost recorded)")
-                                        else:
-                                            # Treat as bonus/free shares with zero cost
-                                            price_cost = 0.0
-                                            success_rows.append(f"Row {row_num}: {stock} - Bonus/Free shares (zero cost recorded)")
-                                except ValueError as e:
-                                    errors.append(f"Row {row_num}: {str(e)}")
-                                    continue
-                                
-                                # Validate sale price only if sale date exists
-                                sale_price = 0
-                                if has_sale:
-                                    try:
-                                        sale_price = parse_number(row.get('Sale price', 0), 'Sale price')
-                                        
-                                        # If Sale price is missing, try to calculate from Value price / Quantity
-                                        if sale_price is None or sale_price <= 0:
-                                            value_price = parse_number(row.get('Value price'), 'Value price')
-                                            if value_price is not None and value_price > 0 and quantity > 0:
-                                                sale_price = value_price / quantity
-                                            else:
-                                                errors.append(f"Row {row_num}: Sale price is missing/invalid and cannot calculate from Value price (got '{row.get('Sale price')}')")
-                                                continue
-                                    except ValueError as e:
-                                        errors.append(f"Row {row_num}: {str(e)}")
-                                        continue
-                                else:
-                                    sale_price = 0
-                                
-                                # Calculate totals
-                                purchase_cost = price_cost * quantity if quantity > 0 else 0
-                                sell_value = sale_price * quantity if has_sale and quantity > 0 else 0
-                                
-                                # Check for duplicates with STRICT matching (stock, date, quantity, cost)
-                                user_id = st.session_state.get('user_id', 1)
-                                db_execute(cur, """
-                                    SELECT id FROM trading_history 
-                                    WHERE stock_symbol = ? AND txn_date = ? AND txn_type = 'Buy' 
-                                    AND shares = ? AND purchase_cost = ? AND user_id = ?
-                                """, (stock, purchase_date, quantity, purchase_cost, user_id))
-                                
-                                existing_buy = cur.fetchone()
-                                buy_exists = existing_buy is not None
-                                
-                                # Check for Sell duplicate only if sale date exists
-                                sell_exists = False
-                                existing_sell = None
-                                if has_sale:
-                                    db_execute(cur, """
-                                        SELECT id FROM trading_history 
-                                        WHERE stock_symbol = ? AND txn_date = ? AND txn_type = 'Sell' 
-                                        AND shares = ? AND sell_value = ? AND user_id = ?
-                                    """, (stock, sale_date, quantity, sell_value, user_id))
-                                    
-                                    existing_sell = cur.fetchone()
-                                    sell_exists = existing_sell is not None
-                                
-                                # STRICT duplicate handling - reject any duplicate
-                                if buy_exists and has_sale and sell_exists:
-                                    # Both buy and sell exist - complete duplicate
-                                    errors.append(f"Row {row_num}: DUPLICATE REJECTED - {stock} trade already exists (Date: {purchase_date}, Qty: {quantity:,.0f}, Cost: {purchase_cost:,.2f})")
-                                    continue
-                                elif buy_exists and not has_sale:
-                                    # Buy exists and this is also just a buy (no sell) - duplicate
-                                    errors.append(f"Row {row_num}: DUPLICATE REJECTED - {stock} purchase already exists (Date: {purchase_date}, Qty: {quantity:,.0f}, Cost: {purchase_cost:,.2f})")
-                                    continue
-                                elif buy_exists and has_sale and not sell_exists:
-                                    # Buy exists but sell doesn't - just add the sell transaction
-                                    db_execute(cur, """
-                                        INSERT INTO trading_history 
-                                        (stock_symbol, txn_date, txn_type, purchase_cost, sell_value, shares, 
-                                         cash_dividend, bonus_shares, created_at, user_id)
-                                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                    """, (stock, sale_date, 'Sell', 0, sell_value, quantity, cash_div, bonus_shares, int(time.time()), user_id))
-                                    
-                                    imported += 1
-                                    success_rows.append(f"Row {row_num}: {stock} - Added sell transaction only (buy already exists)")
-                                    continue
-                                
-                                # Check if stock exists in stocks table
-                                user_id = st.session_state.get('user_id', 1)
-                                db_execute(cur, "SELECT id FROM stocks WHERE symbol = ? AND user_id = ?", (stock, user_id))
-                                if not cur.fetchone():
-                                    # Add stock if missing
-                                    db_execute(cur,
-                                        "INSERT INTO stocks (symbol, name, portfolio, currency, user_id) VALUES (?, ?, ?, ?, ?)",
-                                        (stock, stock, "KFH", "KWD", user_id)
-                                    )
-                                
-                                # Insert Buy transaction (always)
-                                db_execute(cur, """
-                                    INSERT INTO trading_history 
-                                    (stock_symbol, txn_date, txn_type, purchase_cost, sell_value, shares, 
-                                     cash_dividend, bonus_shares, created_at, user_id)
-                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                """, (stock, purchase_date, 'Buy', purchase_cost, 0, quantity, 0, 0, int(time.time()), user_id))
-                                buy_count += 1
-                                
-                                # Insert Sell transaction only if sale date exists
-                                if has_sale:
-                                    db_execute(cur, """
-                                        INSERT INTO trading_history 
-                                        (stock_symbol, txn_date, txn_type, purchase_cost, sell_value, shares, 
-                                         cash_dividend, bonus_shares, created_at, user_id)
-                                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                    """, (stock, sale_date, 'Sell', 0, sell_value, quantity, cash_div, bonus_shares, int(time.time()), user_id))
-                                    sell_count += 1
-                                
-                                imported += 1
-                                status = f"closed trade (1 buy + 1 sell = 2 transactions)" if has_sale else "open position (1 buy transaction)"
-                                success_rows.append(f"Row {row_num}: {stock} - {quantity:,.0f} shares ({status})")
-                                
-                            except Exception as e:
-                                errors.append(f"Row {row_num}: Unexpected error - {str(e)}")
-                        
-                        conn.commit()
-                        conn.close()
-                        
-                        # Get count after import
-                        conn2 = get_conn()
-                        cur2 = conn2.cursor()
-                        user_id = st.session_state.get('user_id', 1)
-                        db_execute(cur2, "SELECT COUNT(*) FROM trading_history WHERE user_id = ?", (user_id,))
-                        transactions_after = cur2.fetchone()[0]
-                        conn2.close()
-                        
-                        transactions_created = transactions_after - transactions_before
-                        
-                        # Display detailed results summary
-                        st.divider()
-                        st.subheader("📊 Import Summary")
-                        
-                        col_summary1, col_summary2, col_summary3, col_summary4 = st.columns(4)
-                        with col_summary1:
-                            st.metric("📥 Excel Rows Imported", f"{imported:,}")
-                        with col_summary2:
-                            st.metric("✅ Buy Transactions Created", f"{buy_count:,}", delta="Database records")
-                        with col_summary3:
-                            st.metric("✅ Sell Transactions Created", f"{sell_count:,}", delta="Database records")
-                        with col_summary4:
-                            st.metric("📊 Total DB Transactions", f"{transactions_after:,}", delta=f"+{transactions_created:,}")
-                        
-                        st.info(f"ℹ️ **Explanation:** Each closed trade creates 2 database transactions (1 Buy + 1 Sell). You imported {imported:,} Excel rows which created {transactions_created:,} database transactions.")
-                        
-                        st.divider()
-                        
-                        st.divider()
-                        
-                        # Display results
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            if imported > 0:
-                                st.success(f"✅ Successfully imported {imported} out of {len(df)} trades")
-                                with st.expander(f"📋 View {imported} successful imports", expanded=False):
-                                    for success in success_rows:
-                                        st.text(success)
-                        
-                        with col2:
-                            if errors:
-                                st.error(f"❌ Failed to import {len(errors)} rows")
-                                with st.expander(f"⚠️ View {len(errors)} errors and how to fix", expanded=True):
-                                    st.markdown("**Common fixes:**")
-                                    st.markdown("- Dates must be in format: `dd-MMM-yy` (e.g., 3-Mar-25)")
-                                    st.markdown("- All numeric fields must be numbers (no text)")
-                                    st.markdown("- Stock name cannot be empty")
-                                    st.markdown("- Quantity, Price cost, Sale price must be > 0")
-                                    st.markdown("- **Duplicates:** If a buy already exists, you can't import the same buy again")
-                                    st.divider()
-                                    for err in errors:
-                                        st.text(err)
-                        
-                        # Show row-by-row breakdown
-                        with st.expander("📋 Detailed Row-by-Row Breakdown", expanded=(len(errors) > 0)):
-                            st.markdown("**Legend:** ✅ = Success | ❌ = Failed/Skipped")
-                            st.divider()
-                            
-                            for idx in range(len(df)):
-                                row_num = idx + 2
-                                row = df.iloc[idx]
-                                stock_name = row.get('Stock', 'N/A')
-                                
-                                # Check if this row succeeded or failed
-                                success_msg = [msg for msg in success_rows if msg.startswith(f"Row {row_num}:")]
-                                error_msg = [msg for msg in errors if msg.startswith(f"Row {row_num}:")]
-                                
-                                if success_msg:
-                                    st.success(f"✅ {success_msg[0]}")
-                                elif error_msg:
-                                    st.error(f"❌ {error_msg[0]}")
-                                else:
-                                    st.warning(f"⚠️ Row {row_num}: {stock_name} - Status unknown")
-                        
-                        st.divider()
-                        
-                        # Display results
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            if imported > 0:
-                                st.success(f"✅ Successfully imported {imported} out of {len(df)} trades")
-                                with st.expander(f"📋 View {imported} successful imports", expanded=False):
-                                    for success in success_rows:
-                                        st.text(success)
-                        
-                        with col2:
-                            if errors:
-                                st.error(f"❌ Failed to import {len(errors)} rows")
-                                with st.expander(f"⚠️ View {len(errors)} errors and how to fix", expanded=True):
-                                    st.markdown("**Common fixes:**")
-                                    st.markdown("- Dates must be in format: `dd-MMM-yy` (e.g., 3-Mar-25)")
-                                    st.markdown("- All numeric fields must be numbers (no text)")
-                                    st.markdown("- Stock name cannot be empty")
-                                    st.markdown("- Quantity, Price cost, Sale price must be > 0")
-                                    st.markdown("- **Duplicates:** If a buy already exists, you can't import the same buy again")
-                                    st.divider()
-                                    for err in errors:
-                                        st.text(err)
-                        
-                        # Add close button instead of auto-refresh
-                        st.divider()
-                        col_close1, col_close2, col_close3 = st.columns([1, 1, 4])
-                        with col_close1:
-                            if st.button("✅ Done - Refresh Data", type="primary", key="close_import_done"):
-                                # Clear the uploaded file from session state
-                                if "trading_upload" in st.session_state:
-                                    del st.session_state["trading_upload"]
-                                st.rerun()
-                        
-                        with col_close2:
-                            if st.button("❌ Close Results", key="close_import_cancel"):
-                                # Clear the uploaded file and results without refreshing
-                                if "trading_upload" in st.session_state:
-                                    del st.session_state["trading_upload"]
-                                st.rerun()
-                        
-                        # Stop here - don't auto-refresh
-                        st.stop()
-                        
-            except Exception as e:
-                st.error(f"Error reading Excel file: {e}")
+    st.info("""
+    **📋 This is a filtered view of your Buy/Sell transactions.**
     
-    st.divider()
+    • To add new trades, use the **"Add Transactions"** tab.
+    • All trades shown here are from the main `transactions` table.
+    • You can **edit** existing trades here, which updates the main transaction record.
+    • Portfolio positions and cash are calculated from the same data.
+    """)
+    
+    user_id = st.session_state.get('user_id', 1)
     
     # Date range filter
+    st.divider()
     col1, col2, col3, col4 = st.columns([2, 2, 1, 1])
     with col1:
-        start_date = st.date_input("From Date", value=date(2025, 1, 1), key="trade_start")
+        start_date = st.date_input("From Date", value=date(2024, 1, 1), key="trading_start")
     with col2:
-        end_date = st.date_input("To Date", value=date.today(), key="trade_end")
+        end_date = st.date_input("To Date", value=date.today(), key="trading_end")
     with col3:
         st.write("")
         st.write("")
-        if st.button("🔍 Filter", width="stretch"):
-            st.session_state['apply_date_filter'] = True
+        apply_filter = st.button("🔍 Filter", key="trading_filter_btn")
     with col4:
         st.write("")
         st.write("")
-        if st.button("🔄 Show All", width="stretch"):
-            st.session_state['apply_date_filter'] = False
+        show_all = st.button("🔄 Show All", key="trading_show_all_btn")
     
-    # Check if we should apply date filter
-    apply_filter = st.session_state.get('apply_date_filter', False)
+    # Track filter state
+    if apply_filter:
+        st.session_state['trading_date_filter'] = True
+    if show_all:
+        st.session_state['trading_date_filter'] = False
     
-    # Query completed trades (both buy and sell dates exist)
+    use_filter = st.session_state.get('trading_date_filter', False)
+    
+    # Query Buy/Sell transactions from the main transactions table
     conn = get_conn()
     
-    # First, check total trading transactions in database for debugging
-    cur = conn.cursor()
-    user_id = st.session_state.get('user_id', 1)
-    db_execute(cur, "SELECT COUNT(*) FROM trading_history WHERE user_id = ?", (user_id,))
-    total_txns = cur.fetchone()[0]
-    
-    if total_txns == 0:
-        st.warning(f"⚠️ No transactions found in database. Please upload your trading data using the Excel upload above.")
-        conn.close()
-        return
-    
-    # Show debug info with filter status
-    if apply_filter:
-        st.caption(f"📊 Showing filtered data from {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')} | Database has {total_txns} raw transactions (Buy+Sell counted separately)")
-    else:
-        st.caption(f"📊 Showing all data | Database has {total_txns} raw transactions (Buy+Sell counted separately)")
-    
-    # Show explanation
-    st.info(f"ℹ️ **Note:** The database stores Buy and Sell as separate transactions. A closed trade = 1 Buy + 1 Sell = 2 database records. The table below shows them combined as single trades.")
-    
-    # Build query based on filter - use raw column names for cross-platform compatibility
-    # Column renaming done via pandas after loading (SQL aliases don't work reliably on all platforms)
-    column_renames = {
-        'stock_symbol': 'Stock',
-        'shares': 'Quantity',
-        'purchase_cost': 'Price cost',
-        'sell_value': 'Sale price',
-        'cash_dividend': 'cash Div',
-        'bonus_shares': 'Bonus shares'
-    }
-    
-    if apply_filter:
+    if use_filter:
         query = """
             SELECT 
                 t.id,
-                t.stock_symbol,
-                t.txn_date,
-                t.txn_type,
-                t.shares,
+                t.stock_symbol AS symbol,
+                t.txn_date AS date,
+                COALESCE(t.portfolio, s.portfolio, 'KFH') AS portfolio,
+                t.txn_type AS type,
+                t.shares AS quantity,
                 t.purchase_cost,
                 t.sell_value,
-                t.cash_dividend,
-                t.bonus_shares,
+                t.fees,
+                t.cash_dividend AS dividend,
                 t.notes
-            FROM trading_history t
-            WHERE t.user_id = ? AND t.txn_date BETWEEN ? AND ?
-            ORDER BY t.txn_date, t.stock_symbol, t.txn_type
+            FROM transactions t
+            LEFT JOIN stocks s ON t.stock_symbol = s.symbol AND t.user_id = s.user_id
+            WHERE t.user_id = ? 
+              AND t.txn_type IN ('Buy', 'Sell')
+              AND COALESCE(t.category, 'portfolio') = 'portfolio'
+              AND t.txn_date BETWEEN ? AND ?
+            ORDER BY t.txn_date DESC, t.id DESC
         """
         df = pd.read_sql_query(
             convert_sql_placeholders(query),
             conn,
             params=(user_id, start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d"))
         )
+        st.caption(f"📊 Showing transactions from {start_date} to {end_date}")
     else:
         query = """
             SELECT 
                 t.id,
-                t.stock_symbol,
-                t.txn_date,
-                t.txn_type,
-                t.shares,
+                t.stock_symbol AS symbol,
+                t.txn_date AS date,
+                COALESCE(t.portfolio, s.portfolio, 'KFH') AS portfolio,
+                t.txn_type AS type,
+                t.shares AS quantity,
                 t.purchase_cost,
                 t.sell_value,
-                t.cash_dividend,
-                t.bonus_shares,
+                t.fees,
+                t.cash_dividend AS dividend,
                 t.notes
-            FROM trading_history t
-            WHERE t.user_id = ?
-            ORDER BY t.txn_date, t.stock_symbol, t.txn_type
+            FROM transactions t
+            LEFT JOIN stocks s ON t.stock_symbol = s.symbol AND t.user_id = s.user_id
+            WHERE t.user_id = ? 
+              AND t.txn_type IN ('Buy', 'Sell')
+              AND COALESCE(t.category, 'portfolio') = 'portfolio'
+            ORDER BY t.txn_date DESC, t.id DESC
         """
         df = pd.read_sql_query(convert_sql_placeholders(query), conn, params=(user_id,))
-    
-    # Rename columns using pandas for cross-platform compatibility
-    df = df.rename(columns=column_renames)
+        st.caption(f"📊 Showing all Buy/Sell transactions")
     
     conn.close()
     
-    # --- Normalize Stock column and add safety check ---
-    if df is None:
-        st.info("📭 No trading data available yet. Please add transactions first.")
-        return
-
-    # DEBUG: Show actual column names from database
-    # st.caption(f"DEBUG: df.columns = {list(df.columns)}")
-    
-    # Try to normalize any variant of 'stock' / 'stock_symbol' to 'Stock'
-    lower_map = {c.lower(): c for c in df.columns}
-
-    # If there is a lowercase 'stock' column but not exact 'Stock', rename it
-    if "stock" in lower_map and "Stock" not in df.columns:
-        df.rename(columns={lower_map["stock"]: "Stock"}, inplace=True)
-
-    # Or if we only have stock_symbol, normalize that
-    if "stock_symbol" in lower_map and "Stock" not in df.columns:
-        df.rename(columns={lower_map["stock_symbol"]: "Stock"}, inplace=True)
-
-    # Final safety check – if still no 'Stock', show an error instead of crashing
-    if "Stock" not in df.columns:
-        st.error(f"Internal error: expected a 'Stock' column in trading data, but found columns: {list(df.columns)}")
-        return
-    
     if df.empty:
-        if apply_filter:
-            st.warning(f"⚠️ No trades found between {start_date.strftime('%Y-%m-%d')} and {end_date.strftime('%Y-%m-%d')}.")
-            st.info("💡 Click '🔄 Show All' to see all transactions or adjust the date range.")
-        else:
-            st.warning(f"⚠️ No trades found in the database.")
-        
-        # Show date range of existing trading transactions
-        conn2 = get_conn()
-        user_id = st.session_state.get('user_id', 1)
-        date_range_query = "SELECT MIN(txn_date) as min_date, MAX(txn_date) as max_date FROM trading_history WHERE user_id = ?"
-        date_df = pd.read_sql_query(convert_sql_placeholders(date_range_query), conn2, params=(user_id,))
-        conn2.close()
-        
-        if not date_df.empty and date_df['min_date'].iloc[0]:
-            st.info(f"📅 Your transactions date range: {date_df['min_date'].iloc[0]} to {date_df['max_date'].iloc[0]}")
-        
+        st.warning("No Buy/Sell transactions found. Use **Add Transactions** tab to record trades.")
+        _show_trading_admin_cleanup(user_id)
         return
     
-    # --- 1. RECONSTRUCT TRADES (Pair Buys & Sells) ---
-    realized_trades = []  # Completed trades with sell
-    unrealized_positions = []  # Open positions without sell
-    all_tickers_for_fetch = set()
+    # Calculate derived columns
+    df['price'] = df.apply(lambda r: 
+        r['purchase_cost'] / r['quantity'] if r['type'] == 'Buy' and r['quantity'] > 0 else
+        r['sell_value'] / r['quantity'] if r['type'] == 'Sell' and r['quantity'] > 0 else 0, 
+        axis=1
+    )
+    df['value'] = df.apply(lambda r: 
+        r['purchase_cost'] if r['type'] == 'Buy' else r['sell_value'], 
+        axis=1
+    )
     
-    # Process by Stock to pair transactions
-    for stock in sorted(df["Stock"].dropna().unique()):
-        stock_df = df[df['Stock'] == stock].sort_values('txn_date').reset_index(drop=True)
-        
-        buys = stock_df[stock_df['txn_type'] == 'Buy'].copy()
-        sells = stock_df[stock_df['txn_type'] == 'Sell'].copy()
-        
-        # Track matches
-        matched_buy_ids = set()
-        matched_sell_ids = set()
-        
-        # Match Sells to Buys (FIFO/Best Match)
-        for _, sell in sells.iterrows():
-            if sell['id'] in matched_sell_ids:
-                continue
-                
-            # Find closest buy with same quantity
-            matching_buys = buys[
-                (buys['Quantity'] == sell['Quantity']) & 
-                (~buys['id'].isin(matched_buy_ids)) &
-                (buys['txn_date'] <= sell['txn_date'])
-            ]
-            
-            if not matching_buys.empty:
-                buy = matching_buys.iloc[-1] # Use most recent buy before sell
-                matched_buy_ids.add(buy['id'])
-                matched_sell_ids.add(sell['id'])
-                
-                # Metric Data
-                q = sell['Quantity']
-                buy_price = buy['Price cost'] / q if q > 0 else 0
-                sell_price = sell['Sale price'] / q if q > 0 else 0
-                
-                realized_trades.append({
-                    '_buy_id': buy['id'],
-                    '_sell_id': sell['id'],
-                    'Status': 'Realized',
-                    'Stock': stock,
-                    'Purchase Date': pd.to_datetime(buy['txn_date']).date(),
-                    'Quantity': q,
-                    'Price Cost': buy_price,
-                    # Realized Fields
-                    'Sale Date': pd.to_datetime(sell['txn_date']).date(),
-                    'Sale Price': sell_price,
-                    # Extras
-                    'Dividends': sell['cash Div'] or 0,
-                    'Bonus': sell['Bonus shares'] or 0,
-                    'Notes': sell['notes'],
-                    # Placeholders (Calculated later)
-                    'Current Price': None, 
-                })
-
-        # Process Unmatched Buys (Unrealized)
-        for _, buy in buys.iterrows():
-            if buy['id'] not in matched_buy_ids:
-                q = buy['Quantity']
-                buy_price = buy['Price cost'] / q if q > 0 else 0
-                
-                unrealized_positions.append({
-                    '_buy_id': buy['id'],
-                    '_sell_id': None,
-                    'Status': 'Unrealized',
-                    'Stock': stock,
-                    'Purchase Date': pd.to_datetime(buy['txn_date']).date(),
-                    'Quantity': q,
-                    'Price Cost': buy_price,
-                    # Realized Fields (Empty)
-                    'Sale Date': None,
-                    'Sale Price': 0,
-                    # Extras
-                    'Dividends': buy['cash Div'] or 0,
-                    'Bonus': buy['Bonus shares'] or 0,
-                    'Notes': buy['notes'],
-                    # For Batch Fetch
-                    'Current Price': 0
-                })
-                all_tickers_for_fetch.add(stock)
-
-    # --- 2. BATCH FETCH PRICES (Unrealized Only) ---
-    live_prices = {}
-    if all_tickers_for_fetch and _ensure_yfinance():
-        tickers_list = list(all_tickers_for_fetch)
-        # Filter for valid tickers only (simple heuristic)
-        valid_tickers = [t for t in tickers_list if "." in t or t.isupper()]
-        
-        if valid_tickers:
-            with st.spinner(f"Fetching prices for {len(valid_tickers)} stocks..."):
-                try:
-                    # Use Tickers for batch
-                    # yf.download is efficient for multiple tickers
-                    data = yf.download(valid_tickers, period="1d", progress=False)['Close']
-                    
-                    if not data.empty:
-                        # Handle single vs multiple result structure
-                        if len(valid_tickers) == 1:
-                            # data is Series or DataFrame with 1 col
-                            val = data.iloc[-1]
-                            if isinstance(val, pd.Series): val = val.iloc[0]
-                            # Apply /1000 Logic for Kuwait stocks (assuming .KW suffix)
-                            raw_val = float(val)
-                            t = valid_tickers[0]
-                            # Normalize Kuwait stock prices (Fils to KWD)
-                            if t.endswith('.KW'):
-                                raw_val = normalize_kwd_price(raw_val, 'KWD')
-                            live_prices[t] = raw_val
-                        else:
-                            # data is DataFrame, columns are tickers
-                            last_row = data.iloc[-1]
-                            for t in valid_tickers:
-                                if t in last_row.index:
-                                    val = last_row[t]
-                                    if pd.notna(val):
-                                        raw_val = float(val)
-                                        # Normalize Kuwait stock prices (Fils to KWD)
-                                        if t.endswith('.KW'):
-                                            raw_val = normalize_kwd_price(raw_val, 'KWD')
-                                        live_prices[t] = raw_val
-                except Exception as e:
-                    # Fallback or silent fail
-                    logger.debug(f"Batch fetch error: {e}")
-
-    # --- 3. BUILD DATAFRAME & CALCULATE METRICS ---
-    combined_data = realized_trades + unrealized_positions
-    if not combined_data:
-        st.info("No trades to display.")
-        return
-
-    trade_df = pd.DataFrame(combined_data)
+    # Summary metrics
+    st.divider()
+    buy_df = df[df['type'] == 'Buy']
+    sell_df = df[df['type'] == 'Sell']
     
-    # Helper: Safe Float
-    def _safe_float(x):
-        try: return float(x)
-        except: return 0.0
-
-    # Enrich with Calculations
-    enriched_rows = []
+    total_buys = buy_df['purchase_cost'].sum() if not buy_df.empty else 0
+    total_sells = sell_df['sell_value'].sum() if not sell_df.empty else 0
+    total_fees = df['fees'].sum() if 'fees' in df.columns else 0
+    net_cash_flow = total_sells - total_buys - total_fees
     
-    total_realized_profit = 0.0
-    total_unrealized_profit = 0.0
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("🛒 Total Buys", f"{total_buys:,.0f}", f"{len(buy_df)} txns")
+    k2.metric("💰 Total Sells", f"{total_sells:,.0f}", f"{len(sell_df)} txns")
+    k3.metric("📊 Fees", f"{total_fees:,.2f}")
+    k4.metric("💵 Net Cash Flow", f"{net_cash_flow:+,.0f}", 
+              delta_color="normal" if net_cash_flow >= 0 else "inverse")
     
-    for idx, row in trade_df.iterrows():
-        status = row['Status'] # Initial status
-        
-        # Logic: Status is derived from Sale Date existence
-        if pd.notna(row['Sale Date']):
-            status = 'Realized'
-            current_price = 0 # Not relevant for realized
-        else:
-            status = 'Unrealized'
-            current_price = live_prices.get(row['Stock'], 0.0)
-            
-        qty = _safe_float(row['Quantity'])
-        buy_price = _safe_float(row['Price Cost'])
-        sale_price = _safe_float(row['Sale Price']) if status == 'Realized' else 0
-        
-        cost_value = qty * buy_price
-        
-        # Profit Logic
-        profit = 0.0
-        profit_pct = 0.0
-        
-        if status == 'Realized':
-            sale_value = qty * sale_price
-            profit = sale_value - cost_value
-            value_price = sale_value
-        else:
-            # Unrealized
-            value_price = qty * current_price
-            profit = value_price - cost_value
-            
-        if cost_value > 0:
-            profit_pct = (profit / cost_value) * 100
-            
-        # Add to totals
-        if status == 'Realized':
-            total_realized_profit += profit
-        else:
-            total_unrealized_profit += profit
-
-        row['Status'] = status
-        row['Current Price'] = current_price if status == 'Unrealized' else None
-        row['Cost Value'] = cost_value
-        row['Value Price'] = value_price
-        row['Profit'] = profit
-        row['Profit %'] = profit_pct
-        
-        enriched_rows.append(row)
-        
-    final_df = pd.DataFrame(enriched_rows)
-    # Sort: Realized (by Sale Date desc), then Unrealized (by Buy Date desc)
-    final_df.sort_values('Purchase Date', ascending=False, inplace=True)
-    
-    # Display summary metrics
     st.divider()
     
-    # --- 4. KPI CARDS ---
-    st.divider()
-    k1, k2, k3 = st.columns(3)
-    k1.metric("💰 Realized Profit", fmt_money_plain(total_realized_profit), 
-              delta=f"{total_realized_profit:,.2f}", delta_color="normal")
-    k2.metric("📊 Unrealized Profit", fmt_money_plain(total_unrealized_profit), 
-              delta=f"{total_unrealized_profit:,.2f}", delta_color="off")
-    k3.metric("📈 Total P&L", fmt_money_plain(total_realized_profit + total_unrealized_profit))
-    st.divider()
-    
-    # --- 5. EDITABLE TABLE (Inline Editing) ---
-    col_mode, col_act = st.columns([2, 1])
+    # View/Edit mode toggle
+    col_mode, col_refresh = st.columns([3, 1])
     with col_mode:
-        view_mode = st.radio(" ", ["📊 Read View", "✏️ Edit Mode"], horizontal=True, label_visibility="collapsed")
-    with col_act:
-        if st.button("🔄 Update Prices"):
-             with st.spinner("Fetching..."):
-                 time.sleep(1)
-                 st.rerun()
-
-    if view_mode == "📊 Read View":
-        # Format columns for display
-        display_df = final_df.copy()
+        view_mode = st.radio("", ["📊 View", "✏️ Edit"], horizontal=True, label_visibility="collapsed", key="trading_view_mode")
+    with col_refresh:
+        if st.button("🔄 Refresh", key="trading_refresh"):
+            build_portfolio_table.clear()
+            st.rerun()
+    
+    if view_mode == "📊 View":
+        # Display table (read-only)
+        display_df = df[['id', 'date', 'symbol', 'portfolio', 'type', 'quantity', 'price', 'value', 'fees', 'dividend', 'notes']].copy()
         
-        # Price columns: 3 decimal places
-        for col in ['Price Cost', 'Sale Price', 'Current Price']:
-            if col in display_df.columns:
-                display_df[col] = display_df[col].apply(
-                    lambda x: f"{x:.3f}" if pd.notna(x) and x != 0 else ""
-                )
+        # Format for display
+        display_df['quantity'] = display_df['quantity'].apply(lambda x: f"{x:,.0f}" if pd.notna(x) else "")
+        display_df['price'] = display_df['price'].apply(lambda x: f"{x:.3f}" if pd.notna(x) and x > 0 else "")
+        display_df['value'] = display_df['value'].apply(lambda x: f"{x:,.2f}" if pd.notna(x) else "")
+        display_df['fees'] = display_df['fees'].apply(lambda x: f"{x:.2f}" if pd.notna(x) and x > 0 else "")
+        display_df['dividend'] = display_df['dividend'].apply(lambda x: f"{x:.2f}" if pd.notna(x) and x > 0 else "")
         
-        # Value columns: NO decimals (rounded) with comma separators
-        for col in ['Cost Value', 'Value Price', 'Profit']:
-            if col in display_df.columns:
-                display_df[col] = display_df[col].apply(
-                    lambda x: f"{x:,.0f}" if pd.notna(x) else ""
-                )
+        st.dataframe(display_df, hide_index=True, use_container_width=True)
+        st.caption("Switch to **Edit** mode to modify transactions.")
         
-        # Profit %: 2 decimal places
-        if 'Profit %' in display_df.columns:
-            display_df['Profit %'] = display_df['Profit %'].apply(
-                lambda x: f"{x:.2f}%" if pd.notna(x) else ""
-            )
-        
-        render_styled_table(display_df, highlight_logic=True)
-        st.caption("ℹ️ Switch to **Edit Mode** to add, modify, or delete trades.")
-        st.divider()
     else:
-        col_info, col_btn = st.columns([5, 1])
-        with col_info:
-            st.caption("📝 **Editor Mode:** Edit trades directly below. Set 'Sale Date' to mark as Realized. Clear it to revert to Unrealized.")
-            st.caption("💡 **Tip:** Kuwait stocks should end with `.KW` (e.g., `KFH.KW`).")
-        with col_btn:
-            if st.button("🔄 Update Prices", help="Fetch latest prices from Yahoo Finance"):
-                st.rerun()
-    
-        # Reorder DataFrame Columns - Move Current Price after Buy Price
-        desired_cols = [
-            "Status", "Stock", "Purchase Date", "Quantity", "Price Cost", 
-            "Current Price", "Cost Value", 
-            "Sale Date", "Sale Price", 
-            "Value Price", "Profit", "Profit %", 
-            "Dividends", "Bonus", "Notes", 
-            "_buy_id", "_sell_id"
-        ]
-        # Filter to existing columns and reorder
-        final_df = final_df[[c for c in desired_cols if c in final_df.columns] + [c for c in final_df.columns if c not in desired_cols]]
-    
-        # Config for Editor
-        # Build Stock List from KUWAIT_STOCKS (Use YFinance Tickers)
-        known_tickers = [s.get('yf_ticker', s['symbol']) for s in KUWAIT_STOCKS]
-        stock_options = sorted(list(set(known_tickers + list(final_df['Stock'].unique()))))
-    
+        # Editable table
+        st.warning("⚠️ Editing here updates the main transactions table. Changes affect portfolio positions and cash.")
+        
+        edit_df = df[['id', 'date', 'symbol', 'portfolio', 'type', 'quantity', 'price', 'fees', 'notes']].copy()
+        
         column_config = {
-            "_buy_id": None, 
-            "_sell_id": None,
-            "Status": st.column_config.TextColumn("Status", disabled=True, width="small"),
-            "Stock": st.column_config.SelectboxColumn(
-                "Stock", 
-                options=stock_options,
-                required=True,
-                width="medium",
-                help="Select valid ticker (e.g. KFH.KW)"
-            ),
-            "Purchase Date": st.column_config.DateColumn("Purchase Date", format="YYYY-MM-DD", required=True),
-            "Quantity": st.column_config.NumberColumn("Quantity", min_value=1, format="%.0f", required=True),
-            "Price Cost": st.column_config.NumberColumn("Buy Price", min_value=0, format="%.3f", required=True),
-            "Sale Date": st.column_config.DateColumn("Sale Date", format="YYYY-MM-DD", help="Set date to mark as Realized"),
-            "Sale Price": st.column_config.NumberColumn("Sale Price", min_value=0, format="%.3f"),
-            
-            # Calculated / Read-only - Money columns: no decimals
-            "Current Price": st.column_config.NumberColumn("Current Price", format="%.3f", disabled=True),
-            "Cost Value": st.column_config.NumberColumn("Cost Value", format="%,.0f", disabled=True),
-            "Value Price": st.column_config.NumberColumn("Mkt Value", format="%,.0f", disabled=True),
-            "Profit": st.column_config.NumberColumn("Profit (KD)", format="%,.0f", disabled=True),
-            "Profit %": st.column_config.NumberColumn("Profit %", format="%.2f%%", disabled=True),
-            "Dividends": st.column_config.NumberColumn("Divs", format="%,.0f"),
-            "Bonus": st.column_config.NumberColumn("Bonus", format="%.0f"),
-            "Notes": st.column_config.TextColumn("Notes")
+            "id": st.column_config.NumberColumn("ID", disabled=True, width="small"),
+            "date": st.column_config.DateColumn("Date", format="YYYY-MM-DD"),
+            "symbol": st.column_config.TextColumn("Symbol"),
+            "portfolio": st.column_config.SelectboxColumn("Portfolio", options=["KFH", "BBYN", "USA"]),
+            "type": st.column_config.SelectboxColumn("Type", options=["Buy", "Sell"], disabled=True),
+            "quantity": st.column_config.NumberColumn("Qty", min_value=0, format="%.0f"),
+            "price": st.column_config.NumberColumn("Price", min_value=0, format="%.3f"),
+            "fees": st.column_config.NumberColumn("Fees", min_value=0, format="%.3f"),
+            "notes": st.column_config.TextColumn("Notes"),
         }
         
-        st.warning("⚠️ **IMPORTANT:** Kuwait stocks must use `.KW` suffix (e.g., NIH → **NIH.KW**, KRE → **KRE.KW**). US stocks use standard tickers (AAPL, TSLA). Double-click Stock cell to edit, then click 💾 Save.")
-        
-        st.divider()
-        
-            # Display editable table inside a form to prevent auto-refresh on edit
-        with st.form("trading_table_form", clear_on_submit=False):
+        with st.form("trading_edit_form"):
             edited_df = st.data_editor(
-                final_df,
+                edit_df,
                 column_config=column_config,
-                width="stretch",
                 hide_index=True,
-                num_rows="dynamic",
-                key="trading_editor_v2"
+                use_container_width=True,
+                num_rows="fixed",  # No adding/deleting rows here
+                key="trading_editor"
             )
-    
-            st.caption("ℹ️ **Usage:** Click `+` to add rows. Set 'Sale Date' to mark as Sold. Clear it to set as Holding. Select rows and press Delete to remove.")
-            st.write("") # Spacer
-            submitted = st.form_submit_button("💾 Save Changes", type="primary", width="stretch")
-    
-        if submitted:
+            
+            save_btn = st.form_submit_button("💾 Save Changes", type="primary")
+        
+        if save_btn:
             try:
                 conn = get_conn()
                 cur = conn.cursor()
-                changes_count = 0
-    
-                # 1. Identify Deletions using DataFrame Index
-                # (Robust against hidden columns)
-                original_indexes = set(final_df.index)
-                current_indexes = set(edited_df.index)
-                indexes_to_delete = original_indexes - current_indexes
+                changes = 0
                 
-                for idx in indexes_to_delete:
-                    row_orig = final_df.loc[idx]
-                    b_id = row_orig['_buy_id']
-                    if pd.notna(b_id):
-                        # Delete Buy (with user_id security check)
-                        user_id = st.session_state.get('user_id', 1)
-                        db_execute(cur, "DELETE FROM trading_history WHERE id = ? AND user_id = ?", (int(b_id), user_id))
+                for idx in range(len(edited_df)):
+                    row = edited_df.iloc[idx]
+                    orig_row = edit_df.iloc[idx]
+                    
+                    # Check if anything changed
+                    changed = False
+                    for col in ['date', 'symbol', 'portfolio', 'quantity', 'price', 'fees', 'notes']:
+                        if str(row.get(col, '')) != str(orig_row.get(col, '')):
+                            changed = True
+                            break
+                    
+                    if changed:
+                        txn_id = int(row['id'])
+                        txn_type = row['type']
+                        qty = float(row['quantity']) if pd.notna(row['quantity']) else 0
+                        price = float(row['price']) if pd.notna(row['price']) else 0
+                        fees = float(row['fees']) if pd.notna(row['fees']) else 0
                         
-                        # Delete Sell (with user_id security check)
-                        s_id = row_orig.get('_sell_id')
-                        if pd.notna(s_id):
-                            db_execute(cur, "DELETE FROM trading_history WHERE id = ? AND user_id = ?", (int(s_id), user_id))
+                        # Calculate purchase_cost or sell_value
+                        if txn_type == 'Buy':
+                            purchase_cost = qty * price
+                            sell_value = 0
+                        else:  # Sell
+                            purchase_cost = 0
+                            sell_value = qty * price
                         
-                        changes_count += 1
-    
-                # 2. Handle Insertions and Updates
-                for index, row in edited_df.iterrows():
-                    # Determine Identity
-                    buy_id = None
-                    sell_id = None
-                    
-                    if index in final_df.index:
-                        # Existing Record: Retrieve IDs reliably from source info
-                        # (Even if hidden in editor)
-                        buy_id = final_df.loc[index, '_buy_id']
-                        sell_id = final_df.loc[index, '_sell_id']
-                    
-                    # Extract values
-                    symbol = str(row['Stock']).strip()
-                    # Correction
-                    if len(symbol) <= 4 and symbol.isalpha():
-                         symbol = f"{symbol}.KW"
-                    
-                    # Date Parsing
-                    try:
-                        p_date_raw = row['Purchase Date']
-                        if pd.isna(p_date_raw) or str(p_date_raw).strip() == '':
-                            p_date = time.strftime('%Y-%m-%d')
-                        else:
-                            try:
-                                p_date = pd.to_datetime(p_date_raw).strftime('%Y-%m-%d')
-                                # Handle NaT
-                                if p_date == 'NaT': p_date = time.strftime('%Y-%m-%d')
-                            except:
-                                p_date = str(p_date_raw)
-                    except:
-                        p_date = time.strftime('%Y-%m-%d')
-    
-                    qty = float(row['Quantity']) if pd.notna(row['Quantity']) else 0.0
-                    # Use 'Price Cost' (internal name) not 'Buy Price' (display label)
-                    p_price = float(row['Price Cost']) if pd.notna(row.get('Price Cost')) else 0.0
-                    p_cost = p_price * qty
-                    
-                    # Check for Sale
-                    s_date_raw = row['Sale Date']
-                    is_realized = False
-                    s_date = None
-                    s_price = 0.0
-                    
-                    # Logic: If Sale Date is set, it's Realized
-                    if pd.notna(s_date_raw) and str(s_date_raw).strip() != '' and str(s_date_raw).strip().lower() != 'none':
-                         try:
-                             # Check strict NaT
-                             dt = pd.to_datetime(s_date_raw)
-                             if pd.notna(dt):
-                                 s_date = dt.strftime('%Y-%m-%d')
-                                 is_realized = True
-                                 s_price = float(row['Sale Price']) if pd.notna(row['Sale Price']) else 0.0
-                         except:
-                             pass
-    
-                    
-                    # -- EXISTING RECORD (UPDATE) --
-                    if pd.notna(buy_id):
-                        buy_id = int(buy_id)
-                        # Update Buy
+                        # Update the transaction
                         db_execute(cur, """
-                            UPDATE trading_history
-                            SET stock_symbol = ?, txn_date = ?, shares = ?, purchase_cost = ?
-                            WHERE id = ?
-                        """, (symbol, p_date, qty, p_cost, buy_id))
-                        
-                        if is_realized:
-                            sell_val = s_price * qty
-                            if pd.notna(sell_id):
-                                # Update existing Sell
-                                db_execute(cur, """
-                                    UPDATE trading_history
-                                    SET stock_symbol = ?, txn_date = ?, shares = ?, sell_value = ?
-                                    WHERE id = ?
-                                """, (symbol, s_date, qty, sell_val, int(sell_id)))
-                            else:
-                                # Insert NEW Sell (Transition to Realized)
-                                user_id = st.session_state.get('user_id', 1)
-                                db_execute(cur, """
-                                    INSERT INTO trading_history (stock_symbol, txn_date, txn_type, shares, sell_value, created_at, user_id)
-                                    VALUES (?, ?, 'Sell', ?, ?, ?, ?)
-                                """, (symbol, s_date, qty, sell_val, int(time.time()), user_id))
-                        else:
-                            # Transferred to Unrealized: Delete potential sell record (with user_id security check)
-                            if pd.notna(sell_id):
-                                user_id = st.session_state.get('user_id', 1)
-                                db_execute(cur, "DELETE FROM trading_history WHERE id = ? AND user_id = ?", (int(sell_id), user_id))
-                        
-                        changes_count += 0.5 # Track updates lightly
-                    
-                    # -- NEW RECORD (INSERT) --
-                    else:
-                        # Insert Buy
-                        user_id = st.session_state.get('user_id', 1)
-                        db_execute(cur, """
-                            INSERT INTO trading_history (stock_symbol, txn_date, txn_type, shares, purchase_cost, created_at, user_id)
-                            VALUES (?, ?, 'Buy', ?, ?, ?, ?)
-                        """, (symbol, p_date, qty, p_cost, int(time.time()), user_id))
-                        
-                        # If Realized, Insert Sell
-                        if is_realized:
-                            sell_val = s_price * qty
-                            db_execute(cur, """
-                                INSERT INTO trading_history (stock_symbol, txn_date, txn_type, shares, sell_value, created_at, user_id)
-                                VALUES (?, ?, 'Sell', ?, ?, ?, ?)
-                            """, (symbol, s_date, qty, sell_val, int(time.time()), user_id))
-                        
-                        changes_count += 1
+                            UPDATE transactions 
+                            SET txn_date = ?, 
+                                stock_symbol = ?,
+                                portfolio = ?,
+                                shares = ?,
+                                purchase_cost = ?,
+                                sell_value = ?,
+                                fees = ?,
+                                notes = ?
+                            WHERE id = ? AND user_id = ?
+                        """, (
+                            pd.to_datetime(row['date']).strftime('%Y-%m-%d') if pd.notna(row['date']) else None,
+                            row['symbol'],
+                            row['portfolio'],
+                            qty,
+                            purchase_cost,
+                            sell_value,
+                            fees,
+                            row['notes'] if pd.notna(row['notes']) else '',
+                            txn_id,
+                            user_id
+                        ))
+                        changes += 1
                 
                 conn.commit()
                 conn.close()
-                st.toast(f"✅ Changes saved!", icon="🎉")
-                time.sleep(1)
-                st.rerun()
-    
+                
+                if changes > 0:
+                    st.success(f"✅ Updated {changes} transaction(s)")
+                    # Recalculate cash after edits
+                    recalc_portfolio_cash(user_id)
+                    build_portfolio_table.clear()
+                    time.sleep(1)
+                    st.rerun()
+                else:
+                    st.info("No changes detected")
+                    
             except Exception as e:
-                st.error(f"Error saving changes: {e}")
-                # st.write(e) # Debug
+                st.error(f"Error saving: {e}")
     
-        st.divider()
+    # Admin cleanup section
+    _show_trading_admin_cleanup(user_id)
     
-    # Prepare DataFrames for Export
-    all_df = final_df
-    realized_df = final_df[final_df['Status'] == 'Realized']
-    unrealized_df = final_df[final_df['Status'] == 'Unrealized']
-
-    # Download as Excel
+    # Download section
     st.divider()
-    
     from io import BytesIO
     output = BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        # Export all trades
-        all_df.to_excel(writer, sheet_name='All Trades', index=False)
-        
-        # Export realized trades only
-        if not realized_df.empty:
-            realized_df.to_excel(writer, sheet_name='Realized', index=False)
-        
-        # Export unrealized positions only
-        if not unrealized_df.empty:
-            unrealized_df.to_excel(writer, sheet_name='Unrealized', index=False)
+        df.to_excel(writer, sheet_name='Trading History', index=False)
     
     st.download_button(
-        label="📥 Download Trading Report (Excel)",
+        label="📥 Download Trading History (Excel)",
         data=output.getvalue(),
-        file_name=f"trading_report_{start_date}_to_{end_date}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        file_name=f"trading_history_{date.today()}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        key="trading_download"
     )
+
+
+def _show_trading_admin_cleanup(user_id):
+    """Admin section to review and delete legacy trading_history records."""
+    st.divider()
+    with st.expander("🔧 Admin: Legacy Trading Data Cleanup", expanded=False):
+        st.warning("""
+        **Legacy Data Notice**
+        
+        The old Trading tab used a separate `trading_history` table that is NOT connected to 
+        portfolio calculations. Any records there do NOT affect your cash or positions.
+        
+        If you have test/sandbox trades from the old system, review and delete them below.
+        """)
+        
+        try:
+            conn = get_conn()
+            legacy_query = """
+                SELECT id, stock_symbol, txn_date, txn_type, shares, purchase_cost, sell_value
+                FROM trading_history 
+                WHERE user_id = ?
+                ORDER BY txn_date DESC
+            """
+            legacy_df = pd.read_sql_query(convert_sql_placeholders(legacy_query), conn, params=(user_id,))
+            conn.close()
+            
+            if legacy_df.empty:
+                st.success("✅ No legacy trading_history records found. You're all clean!")
+            else:
+                st.warning(f"⚠️ Found {len(legacy_df)} records in legacy trading_history table")
+                st.dataframe(legacy_df, hide_index=True, use_container_width=True)
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("🗑️ Delete ALL Legacy Records", type="secondary", key="delete_legacy"):
+                        try:
+                            conn = get_conn()
+                            cur = conn.cursor()
+                            db_execute(cur, "DELETE FROM trading_history WHERE user_id = ?", (user_id,))
+                            deleted = cur.rowcount
+                            conn.commit()
+                            conn.close()
+                            st.success(f"✅ Deleted {deleted} legacy records")
+                            time.sleep(1)
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error: {e}")
+                            
+                with col2:
+                    st.caption("This will permanently delete all trading_history records. This data is NOT used in portfolio calculations.")
+                    
+        except Exception as e:
+            st.info(f"No legacy trading_history table found: {e}")
+
 
 
 # =========================
