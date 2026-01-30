@@ -1,5 +1,10 @@
 import os
+import logging
 import streamlit as st
+
+# Setup minimal logging for cron
+logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
+_cron_logger = logging.getLogger("cron_handler")
 
 # EARLY CRON HANDLER – DO NOT MOVE
 _cron_action = st.query_params.get("cron", "")
@@ -7,21 +12,32 @@ _cron_key = st.query_params.get("key", "")
 _expected_key = os.environ.get("CRON_SECRET_KEY", "")
 
 if _cron_action:
+    _cron_logger.info(f"Cron action: '{_cron_action}', key: '{_cron_key}'")
+    
     if not _expected_key:
+        _cron_logger.error("CRON_SECRET_KEY not set in environment")
         st.text("ERROR: CRON_SECRET_KEY not set in environment")
         st.stop()
     if _cron_key != _expected_key:
+        _cron_logger.error(f"Invalid cron key provided")
         st.text("ERROR: Invalid cron key")
         st.stop()
     
-    st.text(f"Starting cron job: {_cron_action}")
-    try:
-        from auto_price_scheduler import run_price_update_job
-        run_price_update_job()
-        st.text(f"OK - cron '{_cron_action}' executed successfully")
-    except Exception as e:
-        st.text(f"ERROR in cron job: {str(e)}")
-    st.stop()
+    if _cron_action == "update_prices":
+        _cron_logger.info("✅ Cron validated — running price update...")
+        try:
+            from auto_price_scheduler import run_price_update_job
+            run_price_update_job()
+            _cron_logger.info("✅ Price update completed successfully")
+            st.text("SUCCESS: Prices updated.")
+        except Exception as e:
+            _cron_logger.error(f"Cron job failed: {str(e)}")
+            st.text(f"ERROR in cron job: {str(e)}")
+        st.stop()
+    else:
+        _cron_logger.error(f"Unknown cron action: '{_cron_action}'")
+        st.text(f"ERROR: Unknown cron action '{_cron_action}'")
+        st.stop()
 # END CRON – safe to continue with UI
 
 from typing import Optional
@@ -30,8 +46,9 @@ import time
 import uuid
 import html
 import warnings
-import logging
 import re
+
+# Re-import logging for rest of app (already configured above)
 
 # ====== LOGGING SETUP ======
 logging.basicConfig(
