@@ -4519,23 +4519,15 @@ def ui_transactions():
         # Conditional fields based on transaction type
         if txn_type == "Dividend only":
             # DIVIDEND ONLY MODE - Show only dividend-related fields
-            st.info("ℹ️ Recording dividends only (no trade/shares impact)")
+            st.info("ℹ️ Recording dividends only (no trade/shares impact). Dividends will increase your cash balance.")
             
             d1, d2, d3 = st.columns([1, 1, 1])
             cash_dividend = d1.number_input("Cash Dividend received (KD)", min_value=0.0, step=1.0, format="%.3f", key="txn_cash_dividend")
             reinv = d2.number_input("Reinvested Dividend (KD)", min_value=0.0, step=1.0, format="%.3f", key="txn_reinv")
             bonus_shares = d3.number_input("Bonus Shares (stock dividend)", min_value=0.0, step=1.0, format="%.0f", key="txn_bonus_shares")
             
-            # Option to include in portfolio analysis or keep as record only
-            include_in_portfolio = st.radio(
-                "Include in Portfolio Analysis?",
-                ["Yes (Add to holdings/analysis)", "No (Record only)"],
-                index=0,
-                horizontal=True,
-                key="txn_include_portfolio",
-                help="If 'Yes', bonus shares will increase your holdings and dividends will appear in analysis. If 'No', this is just for record keeping."
-            )
-            category_val = 'portfolio' if include_in_portfolio.startswith("Yes") else 'record'
+            # Dividends always affect portfolio - no record-only option
+            category_val = 'portfolio'
             
             notes = st.text_area("Notes (optional)", key="txn_notes")
             
@@ -4585,14 +4577,14 @@ def ui_transactions():
                         ),
                     )
                     
-                    # Update portfolio cash: DIVIDEND increases cash
-                    if category_val == 'portfolio' and float(cash_dividend) > 0:
+                    # Update portfolio cash: DIVIDEND always increases cash
+                    if float(cash_dividend) > 0:
                         stock_portfolio = stock_row.get('portfolio', 'KFH')
                         stock_currency = stock_row.get('currency', 'KWD')
                         update_portfolio_cash(user_id, stock_portfolio, float(cash_dividend), stock_currency)
-                        st.success(f"Dividend transaction saved. Cash +{cash_dividend:,.3f} {stock_currency}")
+                        st.success(f"✅ Dividend saved. Cash +{cash_dividend:,.3f} {stock_currency}")
                     else:
-                        st.success(f"Dividend transaction saved ({'Portfolio' if category_val == 'portfolio' else 'Record only'}).")
+                        st.success("✅ Dividend transaction saved.")
                     st.rerun()
         
         else:
@@ -4808,15 +4800,8 @@ def ui_transactions():
                     if pd.isna(current_category) or current_category == '':
                         current_category = 'portfolio'
                         
-                    edit_include_in_portfolio = st.radio(
-                        "Include in Portfolio Analysis?",
-                        ["Yes (Add to holdings/analysis)", "No (Record only)"],
-                        index=0 if current_category == 'portfolio' else 1,
-                        horizontal=True,
-                        key=f"edit_include_portfolio_{tx_id}",
-                        help="If 'Yes', bonus shares will increase your holdings and dividends will appear in analysis. If 'No', this is just for record keeping."
-                    )
-                    edit_category_val = 'portfolio' if edit_include_in_portfolio.startswith("Yes") else 'record'
+                    # Dividends always affect portfolio - no record-only option
+                    edit_category_val = 'portfolio'
                     
                     edit_notes = st.text_area("Notes", value=str(row.get('notes', '')), key=f"edit_notes_{tx_id}")
                     
