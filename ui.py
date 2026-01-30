@@ -3660,6 +3660,7 @@ def recalc_portfolio_cash(user_id: int, conn=None):
         # Step B: Aggregation Query using UNION ALL
         # NOTE: We JOIN transactions with stocks to get the portfolio, because
         # older transactions may not have the portfolio column populated
+        # IMPORTANT: PostgreSQL requires alias for derived tables
         aggregation_sql = """
             SELECT portfolio, SUM(net_change) as total_change
             FROM (
@@ -3699,7 +3700,7 @@ def recalc_portfolio_cash(user_id: int, conn=None):
                 FROM transactions t
                 LEFT JOIN stocks s ON t.stock_symbol = s.symbol AND t.user_id = s.user_id
                 WHERE t.user_id = ? AND COALESCE(t.fees, 0) > 0 AND COALESCE(t.category, 'portfolio') = 'portfolio'
-            )
+            ) AS cash_movements
             GROUP BY portfolio
         """
         
