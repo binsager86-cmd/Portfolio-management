@@ -7285,19 +7285,12 @@ def ui_portfolio_analysis():
     # CASH MANAGEMENT (Inline Editor)
     # ----------------------------------------------------
     st.subheader("💵 Cash Management")
-    st.caption("Manually update your available cash balance per portfolio. 'Total Capital' is calculated from deposits.")
+    st.caption("Cash balances are automatically calculated from deposits, buys, sells, dividends, and fees.")
 
     _user_id = st.session_state.get('user_id')
     
-    # Add Recalculate button to rebuild cash from ledger
-    col_recalc1, col_recalc2 = st.columns([3, 1])
-    with col_recalc2:
-        if st.button("🔄 Recalculate from Ledger", help="Rebuild cash balances from all deposits, buys, sells, dividends, and fees"):
-            with st.spinner("Recalculating cash balances..."):
-                recalc_portfolio_cash(_user_id)
-                st.success("✅ Cash balances recalculated from ledger!")
-                time.sleep(1)
-                st.rerun()
+    # Auto-recalculate cash on page load (ensures accuracy)
+    recalc_portfolio_cash(_user_id)
 
     # 1. Fetch Summary Data
     cash_data = []
