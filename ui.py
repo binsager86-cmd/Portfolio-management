@@ -2975,6 +2975,10 @@ def ui_cash_deposits():
                         ),
                     )
                     
+                    # Update portfolio cash: DEPOSIT increases cash
+                    if include_in_analysis:
+                        update_portfolio_cash(user_id, portfolio, float(amount), currency)
+                    
                     # Only sync to portfolio_snapshots if include_in_analysis is True
                     if include_in_analysis:
                         # Check if snapshot already exists for this date
@@ -3742,13 +3746,51 @@ def recalc_portfolio_cash(user_id: int, conn=None):
 
 def update_portfolio_cash(user_id: int, portfolio: str, delta: float, currency="KWD"):
     """
-    DEPRECATED: Use recalc_portfolio_cash() instead for accurate balances.
+    Updates cash balance by applying a delta (positive or negative).
     
-    This function is kept for backwards compatibility but now calls recalc_portfolio_cash
-    to ensure the ledger is always accurate.
+    Cash Rules:
+    - BUY: delta = -(quantity * price + fees)  [cash decreases]
+    - SELL: delta = +(quantity * price - fees) [cash increases]
+    - DIVIDEND: delta = +dividend_amount       [cash increases]
+    - DEPOSIT: delta = +deposit_amount         [cash increases]
+    - WITHDRAW: delta = -withdrawal_amount     [cash decreases]
+    
+    Args:
+        user_id: User ID
+        portfolio: Portfolio name (KFH, BBYN, USA)
+        delta: Amount to add (positive) or subtract (negative)
+        currency: Currency code (KWD, USD)
     """
-    # Instead of incremental update, do a full recalculation for accuracy
-    recalc_portfolio_cash(user_id)
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        ts = int(time.time())
+        
+        # Check if record exists
+        db_execute(cur, "SELECT balance FROM portfolio_cash WHERE user_id = ? AND portfolio = ?",
+                   (user_id, portfolio))
+        row = cur.fetchone()
+        
+        if row:
+            # Update existing balance by adding delta
+            new_balance = float(row[0]) + delta
+            db_execute(cur, 
+                "UPDATE portfolio_cash SET balance = ?, last_updated = ? WHERE user_id = ? AND portfolio = ?",
+                (new_balance, ts, user_id, portfolio))
+        else:
+            # Insert new record with delta as initial balance
+            db_execute(cur,
+                "INSERT INTO portfolio_cash (user_id, portfolio, balance, currency, last_updated) VALUES (?, ?, ?, ?, ?)",
+                (user_id, portfolio, delta, currency, ts))
+        
+        conn.commit()
+        logger.info(f"💰 Cash updated for {portfolio}: delta={delta:+,.2f} {currency}")
+        
+    except Exception as e:
+        logger.error(f"Error updating cash for {portfolio}: {e}")
+        raise
+    finally:
+        conn.close()
 
 
 @st.cache_data(ttl=300)
@@ -4542,7 +4584,15 @@ def ui_transactions():
                             int(time.time()),
                         ),
                     )
-                    st.success(f"Dividend transaction saved ({'Portfolio' if category_val == 'portfolio' else 'Record only'}).")
+                    
+                    # Update portfolio cash: DIVIDEND increases cash
+                    if category_val == 'portfolio' and float(cash_dividend) > 0:
+                        stock_portfolio = stock_row.get('portfolio', 'KFH')
+                        stock_currency = stock_row.get('currency', 'KWD')
+                        update_portfolio_cash(user_id, stock_portfolio, float(cash_dividend), stock_currency)
+                        st.success(f"Dividend transaction saved. Cash +{cash_dividend:,.3f} {stock_currency}")
+                    else:
+                        st.success(f"Dividend transaction saved ({'Portfolio' if category_val == 'portfolio' else 'Record only'}).")
                     st.rerun()
         
         else:
@@ -4648,16 +4698,29 @@ def ui_transactions():
                         stock_portfolio = stock_row.get('portfolio', 'KFH')
                         stock_currency = stock_row.get('currency', 'KWD')
                         
+                        # Cash Rules:
+                        # - SELL: cash += (sell_value - fees)
+                        # - BUY: cash -= (purchase_cost + fees)
+                        # - DIVIDEND: cash += cash_dividend (handled separately)
+                        
+                        cash_delta = 0.0
                         if txn_type == "Sell" and float(sell_value) > 0:
-                            # Sell increases cash
-                            update_portfolio_cash(user_id, stock_portfolio, float(sell_value), stock_currency)
-                            st.success(f"Transaction saved. Cash +{sell_value:,.3f} {stock_currency}")
+                            # Sell increases cash (minus fees)
+                            cash_delta = float(sell_value) - float(fees)
+                            update_portfolio_cash(user_id, stock_portfolio, cash_delta, stock_currency)
+                            st.success(f"Transaction saved. Cash +{cash_delta:,.3f} {stock_currency}")
                         elif txn_type == "Buy" and float(purchase_cost) > 0:
-                            # Buy decreases cash
-                            update_portfolio_cash(user_id, stock_portfolio, -float(purchase_cost), stock_currency)
-                            st.success(f"Transaction saved. Cash -{purchase_cost:,.3f} {stock_currency}")
+                            # Buy decreases cash (plus fees)
+                            cash_delta = -(float(purchase_cost) + float(fees))
+                            update_portfolio_cash(user_id, stock_portfolio, cash_delta, stock_currency)
+                            st.success(f"Transaction saved. Cash {cash_delta:,.3f} {stock_currency}")
                         else:
-                            st.success("Transaction saved.")
+                            # Handle dividend on Buy/Sell transactions
+                            if float(cash_dividend) > 0:
+                                update_portfolio_cash(user_id, stock_portfolio, float(cash_dividend), stock_currency)
+                                st.success(f"Transaction saved. Cash +{cash_dividend:,.3f} {stock_currency} (dividend)")
+                            else:
+                                st.success("Transaction saved.")
                         
                         build_portfolio_table.clear()  # Clear cache to show updated cash
                         st.rerun()
@@ -7286,12 +7349,9 @@ def ui_portfolio_analysis():
     # CASH MANAGEMENT (Inline Editor)
     # ----------------------------------------------------
     st.subheader("💵 Cash Management")
-    st.caption("Cash balances are automatically calculated from deposits, buys, sells, dividends, and fees.")
+    st.caption("Edit cash balances manually below. Future transactions (Buy/Sell/Dividend/Deposit) will automatically update these balances.")
 
     _user_id = st.session_state.get('user_id')
-    
-    # Auto-recalculate cash on page load (ensures accuracy)
-    recalc_portfolio_cash(_user_id)
 
     # 1. Fetch Summary Data
     cash_data = []
