@@ -109,6 +109,8 @@ def recalc_portfolio_cash_standalone(conn, user_id: int):
     )
     
     # Step B: Aggregation Query using UNION ALL
+    # NOTE: We JOIN transactions with stocks to get the portfolio, because
+    # older transactions may not have the portfolio column populated
     aggregation_sql = f"""
         SELECT portfolio, SUM(net_change) as total_change
         FROM (
@@ -119,31 +121,35 @@ def recalc_portfolio_cash_standalone(conn, user_id: int):
 
             UNION ALL
 
-            -- 2. Buys (Outflow - negative)
-            SELECT portfolio, -1 * COALESCE(purchase_cost, 0) as net_change
-            FROM transactions
-            WHERE user_id = {ph} AND txn_type = 'Buy' AND COALESCE(category, 'portfolio') = 'portfolio'
+            -- 2. Buys (Outflow - negative) - JOIN with stocks to get portfolio
+            SELECT COALESCE(t.portfolio, s.portfolio, 'KFH') as portfolio, -1 * COALESCE(t.purchase_cost, 0) as net_change
+            FROM transactions t
+            LEFT JOIN stocks s ON t.stock_symbol = s.symbol AND t.user_id = s.user_id
+            WHERE t.user_id = {ph} AND t.txn_type = 'Buy' AND COALESCE(t.category, 'portfolio') = 'portfolio'
 
             UNION ALL
 
-            -- 3. Sells (Inflow - positive)
-            SELECT portfolio, COALESCE(sell_value, 0) as net_change
-            FROM transactions
-            WHERE user_id = {ph} AND txn_type = 'Sell' AND COALESCE(category, 'portfolio') = 'portfolio'
+            -- 3. Sells (Inflow - positive) - JOIN with stocks to get portfolio
+            SELECT COALESCE(t.portfolio, s.portfolio, 'KFH') as portfolio, COALESCE(t.sell_value, 0) as net_change
+            FROM transactions t
+            LEFT JOIN stocks s ON t.stock_symbol = s.symbol AND t.user_id = s.user_id
+            WHERE t.user_id = {ph} AND t.txn_type = 'Sell' AND COALESCE(t.category, 'portfolio') = 'portfolio'
 
             UNION ALL
 
-            -- 4. Dividends (Inflow - positive)
-            SELECT portfolio, COALESCE(cash_dividend, 0) as net_change
-            FROM transactions
-            WHERE user_id = {ph} AND COALESCE(cash_dividend, 0) > 0 AND COALESCE(category, 'portfolio') = 'portfolio'
+            -- 4. Dividends (Inflow - positive) - JOIN with stocks to get portfolio
+            SELECT COALESCE(t.portfolio, s.portfolio, 'KFH') as portfolio, COALESCE(t.cash_dividend, 0) as net_change
+            FROM transactions t
+            LEFT JOIN stocks s ON t.stock_symbol = s.symbol AND t.user_id = s.user_id
+            WHERE t.user_id = {ph} AND COALESCE(t.cash_dividend, 0) > 0 AND COALESCE(t.category, 'portfolio') = 'portfolio'
 
             UNION ALL
 
-            -- 5. Fees (Outflow - negative, applies to all transaction types)
-            SELECT portfolio, -1 * COALESCE(fees, 0) as net_change
-            FROM transactions
-            WHERE user_id = {ph} AND COALESCE(fees, 0) > 0 AND COALESCE(category, 'portfolio') = 'portfolio'
+            -- 5. Fees (Outflow - negative, applies to all transaction types) - JOIN with stocks to get portfolio
+            SELECT COALESCE(t.portfolio, s.portfolio, 'KFH') as portfolio, -1 * COALESCE(t.fees, 0) as net_change
+            FROM transactions t
+            LEFT JOIN stocks s ON t.stock_symbol = s.symbol AND t.user_id = s.user_id
+            WHERE t.user_id = {ph} AND COALESCE(t.fees, 0) > 0 AND COALESCE(t.category, 'portfolio') = 'portfolio'
         ) subquery
         GROUP BY portfolio
     """
