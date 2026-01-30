@@ -3623,33 +3623,127 @@ def ui_cash_deposits():
                 
                 st.divider()
 
-def update_portfolio_cash(user_id: int, portfolio: str, delta: float, currency="KWD"):
+
+# =============================================================================
+# CASH LEDGER RECALCULATION - SINGLE SOURCE OF TRUTH
+# =============================================================================
+
+def recalc_portfolio_cash(user_id: int, conn=None):
     """
-    Updates the cached cash balance (General Ledger).
-    delta > 0: Deposit/Sell proceeds
-    delta < 0: Withdrawal/Buy cost
+    Recalculates the absolute cash balance for ALL portfolios of a user.
+    This is the Single Source of Truth for cash balances.
+    
+    The calculation aggregates:
+    - Deposits/Withdrawals from cash_deposits (where include_in_analysis=1)
+    - Sell proceeds (+sell_value)
+    - Buy costs (-purchase_cost)
+    - Fees (-fees on all transactions)
+    - Dividends (+cash_dividend)
+    
+    Args:
+        user_id: The user ID to recalculate cash for
+        conn: Optional database connection. If None, creates new connection.
     """
-    try:
+    close_conn = False
+    if conn is None:
         conn = get_conn()
+        close_conn = True
+    
+    try:
         cur = conn.cursor()
         
-        # Check current balance
-        db_execute(cur, "SELECT balance FROM portfolio_cash WHERE user_id=? AND portfolio=?", (user_id, portfolio))
-        row = cur.fetchone()
+        # Step A: Reset ALL portfolio balances to 0 for this user
+        # This ensures deleted portfolios/transactions correctly revert to 0
+        db_execute(cur, "UPDATE portfolio_cash SET balance = 0, last_updated = ? WHERE user_id = ?",
+                   (int(time.time()), user_id))
         
-        if row:
-            new_bal = row[0] + delta
-            db_execute(cur, "UPDATE portfolio_cash SET balance=?, last_updated=? WHERE user_id=? AND portfolio=?", 
-                       (new_bal, int(time.time()), user_id, portfolio))
-        else:
-            # Initialize if missing
-            db_execute(cur, "INSERT INTO portfolio_cash (user_id, portfolio, balance, currency, last_updated) VALUES (?, ?, ?, ?, ?)",
-                       (user_id, portfolio, delta, currency, int(time.time())))
+        # Step B: Aggregation Query using UNION ALL
+        # This is a single optimized query to get net movement per portfolio
+        aggregation_sql = """
+            SELECT portfolio, SUM(net_change) as total_change
+            FROM (
+                -- 1. Deposits & Withdrawals (amount can be + or -)
+                SELECT portfolio, COALESCE(amount, 0) as net_change
+                FROM cash_deposits
+                WHERE user_id = ? AND include_in_analysis = 1
+
+                UNION ALL
+
+                -- 2. Buys (Outflow - negative)
+                SELECT portfolio, -1 * COALESCE(purchase_cost, 0) as net_change
+                FROM transactions
+                WHERE user_id = ? AND txn_type = 'Buy' AND COALESCE(category, 'portfolio') = 'portfolio'
+
+                UNION ALL
+
+                -- 3. Sells (Inflow - positive)
+                SELECT portfolio, COALESCE(sell_value, 0) as net_change
+                FROM transactions
+                WHERE user_id = ? AND txn_type = 'Sell' AND COALESCE(category, 'portfolio') = 'portfolio'
+
+                UNION ALL
+
+                -- 4. Dividends (Inflow - positive)
+                SELECT portfolio, COALESCE(cash_dividend, 0) as net_change
+                FROM transactions
+                WHERE user_id = ? AND COALESCE(cash_dividend, 0) > 0 AND COALESCE(category, 'portfolio') = 'portfolio'
+
+                UNION ALL
+
+                -- 5. Fees (Outflow - negative, applies to all transaction types)
+                SELECT portfolio, -1 * COALESCE(fees, 0) as net_change
+                FROM transactions
+                WHERE user_id = ? AND COALESCE(fees, 0) > 0 AND COALESCE(category, 'portfolio') = 'portfolio'
+            )
+            GROUP BY portfolio
+        """
+        
+        db_execute(cur, aggregation_sql, (user_id, user_id, user_id, user_id, user_id))
+        results = cur.fetchall()
+        
+        # Step C: Upsert balances for each portfolio
+        for row in results:
+            portfolio = row[0]
+            total_balance = float(row[1]) if row[1] else 0.0
+            
+            if portfolio is None:
+                continue  # Skip null portfolios
+            
+            # Check if record exists
+            db_execute(cur, "SELECT 1 FROM portfolio_cash WHERE user_id = ? AND portfolio = ?",
+                       (user_id, portfolio))
+            exists = cur.fetchone()
+            
+            if exists:
+                db_execute(cur, 
+                    "UPDATE portfolio_cash SET balance = ?, last_updated = ? WHERE user_id = ? AND portfolio = ?",
+                    (total_balance, int(time.time()), user_id, portfolio))
+            else:
+                db_execute(cur,
+                    "INSERT INTO portfolio_cash (user_id, portfolio, balance, currency, last_updated) VALUES (?, ?, ?, 'KWD', ?)",
+                    (user_id, portfolio, total_balance, int(time.time())))
         
         conn.commit()
-        conn.close()
+        logger.info(f"✅ Cash ledger recalculated for user {user_id}: {len(results)} portfolios updated")
+        
     except Exception as e:
-        st.error(f"Cash Update Error: {e}")
+        logger.error(f"Error recalculating cash ledger for user {user_id}: {e}")
+        raise
+    finally:
+        if close_conn:
+            conn.close()
+
+
+def update_portfolio_cash(user_id: int, portfolio: str, delta: float, currency="KWD"):
+    """
+    DEPRECATED: Use recalc_portfolio_cash() instead for accurate balances.
+    
+    This function is kept for backwards compatibility but now calls recalc_portfolio_cash
+    to ensure the ledger is always accurate.
+    """
+    # Instead of incremental update, do a full recalculation for accuracy
+    recalc_portfolio_cash(user_id)
+
 
 @st.cache_data(ttl=300)
 def load_stocks_master():
