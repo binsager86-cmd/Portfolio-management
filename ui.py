@@ -3658,7 +3658,8 @@ def recalc_portfolio_cash(user_id: int, conn=None):
                    (int(time.time()), user_id))
         
         # Step B: Aggregation Query using UNION ALL
-        # This is a single optimized query to get net movement per portfolio
+        # NOTE: We JOIN transactions with stocks to get the portfolio, because
+        # older transactions may not have the portfolio column populated
         aggregation_sql = """
             SELECT portfolio, SUM(net_change) as total_change
             FROM (
@@ -3669,31 +3670,35 @@ def recalc_portfolio_cash(user_id: int, conn=None):
 
                 UNION ALL
 
-                -- 2. Buys (Outflow - negative)
-                SELECT portfolio, -1 * COALESCE(purchase_cost, 0) as net_change
-                FROM transactions
-                WHERE user_id = ? AND txn_type = 'Buy' AND COALESCE(category, 'portfolio') = 'portfolio'
+                -- 2. Buys (Outflow - negative) - JOIN with stocks to get portfolio
+                SELECT COALESCE(t.portfolio, s.portfolio, 'KFH') as portfolio, -1 * COALESCE(t.purchase_cost, 0) as net_change
+                FROM transactions t
+                LEFT JOIN stocks s ON t.stock_symbol = s.symbol AND t.user_id = s.user_id
+                WHERE t.user_id = ? AND t.txn_type = 'Buy' AND COALESCE(t.category, 'portfolio') = 'portfolio'
 
                 UNION ALL
 
-                -- 3. Sells (Inflow - positive)
-                SELECT portfolio, COALESCE(sell_value, 0) as net_change
-                FROM transactions
-                WHERE user_id = ? AND txn_type = 'Sell' AND COALESCE(category, 'portfolio') = 'portfolio'
+                -- 3. Sells (Inflow - positive) - JOIN with stocks to get portfolio
+                SELECT COALESCE(t.portfolio, s.portfolio, 'KFH') as portfolio, COALESCE(t.sell_value, 0) as net_change
+                FROM transactions t
+                LEFT JOIN stocks s ON t.stock_symbol = s.symbol AND t.user_id = s.user_id
+                WHERE t.user_id = ? AND t.txn_type = 'Sell' AND COALESCE(t.category, 'portfolio') = 'portfolio'
 
                 UNION ALL
 
-                -- 4. Dividends (Inflow - positive)
-                SELECT portfolio, COALESCE(cash_dividend, 0) as net_change
-                FROM transactions
-                WHERE user_id = ? AND COALESCE(cash_dividend, 0) > 0 AND COALESCE(category, 'portfolio') = 'portfolio'
+                -- 4. Dividends (Inflow - positive) - JOIN with stocks to get portfolio
+                SELECT COALESCE(t.portfolio, s.portfolio, 'KFH') as portfolio, COALESCE(t.cash_dividend, 0) as net_change
+                FROM transactions t
+                LEFT JOIN stocks s ON t.stock_symbol = s.symbol AND t.user_id = s.user_id
+                WHERE t.user_id = ? AND COALESCE(t.cash_dividend, 0) > 0 AND COALESCE(t.category, 'portfolio') = 'portfolio'
 
                 UNION ALL
 
-                -- 5. Fees (Outflow - negative, applies to all transaction types)
-                SELECT portfolio, -1 * COALESCE(fees, 0) as net_change
-                FROM transactions
-                WHERE user_id = ? AND COALESCE(fees, 0) > 0 AND COALESCE(category, 'portfolio') = 'portfolio'
+                -- 5. Fees (Outflow - negative, applies to all transaction types) - JOIN with stocks to get portfolio
+                SELECT COALESCE(t.portfolio, s.portfolio, 'KFH') as portfolio, -1 * COALESCE(t.fees, 0) as net_change
+                FROM transactions t
+                LEFT JOIN stocks s ON t.stock_symbol = s.symbol AND t.user_id = s.user_id
+                WHERE t.user_id = ? AND COALESCE(t.fees, 0) > 0 AND COALESCE(t.category, 'portfolio') = 'portfolio'
             )
             GROUP BY portfolio
         """
@@ -7282,11 +7287,22 @@ def ui_portfolio_analysis():
     st.subheader("💵 Cash Management")
     st.caption("Manually update your available cash balance per portfolio. 'Total Capital' is calculated from deposits.")
 
+    _user_id = st.session_state.get('user_id')
+    
+    # Add Recalculate button to rebuild cash from ledger
+    col_recalc1, col_recalc2 = st.columns([3, 1])
+    with col_recalc2:
+        if st.button("🔄 Recalculate from Ledger", help="Rebuild cash balances from all deposits, buys, sells, dividends, and fees"):
+            with st.spinner("Recalculating cash balances..."):
+                recalc_portfolio_cash(_user_id)
+                st.success("✅ Cash balances recalculated from ledger!")
+                time.sleep(1)
+                st.rerun()
+
     # 1. Fetch Summary Data
     cash_data = []
     _cash_portfolios = ["KFH", "BBYN", "USA"]
     
-    _user_id = st.session_state.get('user_id')
     for p in _cash_portfolios:
         # A. Total Deposited (Read-only Reference)
         _total_dep = query_val("SELECT SUM(amount) FROM cash_deposits WHERE portfolio=? AND user_id=?", (p, _user_id)) 
