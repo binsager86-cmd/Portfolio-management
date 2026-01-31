@@ -50,11 +50,17 @@ if "cron" in _QUERY_PARAMS:
                 'portfolio.db'  # Fallback
             ]
             
+            # Debug: Log all paths being checked
+            _logger.info(f"🔍 Current working dir: {os.getcwd()}")
+            _logger.info(f"🔍 Script dir: {os.path.dirname(os.path.abspath(__file__))}")
+            for p in db_paths:
+                _logger.info(f"🔍 Checking DB path: {p} (exists: {os.path.exists(p)}, abs: {os.path.abspath(p)})")
+            
             conn = None
             for db_path in db_paths:
                 if os.path.exists(db_path):
                     conn = sqlite3.connect(db_path)
-                    _logger.info(f"📂 Connected to DB: {db_path}")
+                    _logger.info(f"📂 Connected to DB: {os.path.abspath(db_path)}")
                     break
             
             if conn is None:
