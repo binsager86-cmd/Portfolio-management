@@ -204,7 +204,7 @@ def _load_valid_symbols_cache() -> None:
                 _VALID_SYMBOLS_CACHE.add(row[0].upper())
         
         # Get aliases from security_aliases
-        db_execute(cursor, "SELECT alias FROM security_aliases")
+        db_execute(cursor, "SELECT alias_name FROM security_aliases")
         for row in cursor.fetchall():
             if row[0]:
                 _VALID_SYMBOLS_CACHE.add(row[0].upper())
@@ -1119,7 +1119,8 @@ def create_security(
     currency: str = None,
     country: str = None,
     sector: str = None,
-    aliases: list = None
+    aliases: list = None,
+    user_id: int = 1
 ) -> str:
     """
     Create a new security in the securities master table.
@@ -1133,6 +1134,7 @@ def create_security(
         country: Country code (defaults to exchange default)
         sector: Sector classification
         aliases: List of alias names to register
+        user_id: User ID for per-user security isolation
         
     Returns:
         security_id of the created security
@@ -1154,8 +1156,8 @@ def create_security(
     try:
         db_execute(cur, """
             INSERT OR IGNORE INTO securities_master 
-            (security_id, exchange, canonical_ticker, display_name, isin, currency, country, sector, status, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)
+            (security_id, exchange, canonical_ticker, display_name, isin, currency, country, sector, status, user_id, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)
         """, (
             security_id,
             exchange.upper(),
@@ -1165,6 +1167,7 @@ def create_security(
             currency,
             country,
             sector,
+            user_id,
             int(time.time()),
             int(time.time())
         ))
@@ -1187,7 +1190,7 @@ def create_security(
         
         # Register all aliases
         for alias in set(default_aliases):
-            register_alias(security_id, alias, "official", cur=cur)
+            register_alias(security_id, alias, "official", user_id=user_id, cur=cur)
         
         conn.commit()
         return security_id
@@ -1206,6 +1209,7 @@ def register_alias(
     alias_type: str = "user_input",
     valid_from: str = None,
     valid_until: str = None,
+    user_id: int = 1,
     cur=None
 ):
     """
@@ -1217,6 +1221,7 @@ def register_alias(
         alias_type: Type of alias (user_input, broker_format, official, legacy)
         valid_from: Date alias became valid (YYYY-MM-DD)
         valid_until: Date alias expired (NULL = still valid)
+        user_id: User ID for per-user alias isolation
         cur: Optional cursor for transaction batching
     """
     close_conn = False
@@ -1228,14 +1233,15 @@ def register_alias(
     try:
         db_execute(cur, """
             INSERT OR IGNORE INTO security_aliases 
-            (security_id, alias_name, alias_type, valid_from, valid_until, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            (security_id, alias_name, alias_type, valid_from, valid_until, user_id, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
         """, (
             security_id,
             alias_name.strip(),
             alias_type,
             valid_from or date.today().isoformat(),
             valid_until,
+            user_id,
             int(time.time())
         ))
         
@@ -1276,25 +1282,30 @@ def resolve_symbol_to_security(raw_symbol: str, portfolio: str = None) -> dict:
     
     try:
         # Step 1: Check alias table (case-insensitive)
-        db_execute(cur, """
-            SELECT sm.security_id, sm.canonical_ticker, sm.exchange, sm.currency, sm.display_name
-            FROM security_aliases sa
-            JOIN securities_master sm ON sa.security_id = sm.security_id
-            WHERE LOWER(sa.alias_name) = LOWER(?)
-              AND (sa.valid_until IS NULL OR sa.valid_until >= date('now'))
-              AND sm.status = 'active'
-            LIMIT 1
-        """, (clean_symbol,))
-        
-        row = cur.fetchone()
-        if row:
-            return {
-                "security_id": row[0],
-                "canonical_ticker": row[1],
-                "exchange": row[2],
-                "currency": row[3],
-                "display_name": row[4]
-            }
+        # Tables may not exist yet, so wrap in try-except
+        try:
+            db_execute(cur, """
+                SELECT sm.security_id, sm.canonical_ticker, sm.exchange, sm.currency, sm.display_name
+                FROM security_aliases sa
+                JOIN securities_master sm ON sa.security_id = sm.security_id
+                WHERE LOWER(sa.alias_name) = LOWER(?)
+                  AND (sa.valid_until IS NULL OR sa.valid_until >= date('now'))
+                  AND sm.status = 'active'
+                LIMIT 1
+            """, (clean_symbol,))
+            
+            row = cur.fetchone()
+            if row:
+                return {
+                    "security_id": row[0],
+                    "canonical_ticker": row[1],
+                    "exchange": row[2],
+                    "currency": row[3],
+                    "display_name": row[4]
+                }
+        except Exception:
+            # Tables don't exist yet - that's fine, continue to other lookups
+            pass
         
         # Step 2: Direct canonical_ticker match
         # Infer exchange from portfolio if provided
@@ -1306,34 +1317,38 @@ def resolve_symbol_to_security(raw_symbol: str, portfolio: str = None) -> dict:
             elif portfolio_upper == "USA":
                 exchanges = ("NYSE", "NASDAQ", "AMEX")
         
-        if exchanges:
-            placeholders = ",".join("?" * len(exchanges))
-            db_execute(cur, f"""
-                SELECT security_id, canonical_ticker, exchange, currency, display_name
-                FROM securities_master
-                WHERE UPPER(canonical_ticker) = UPPER(?)
-                  AND exchange IN ({placeholders})
-                  AND status = 'active'
-                LIMIT 1
-            """, (clean_symbol.split('.')[0],) + exchanges)
-        else:
-            db_execute(cur, """
-                SELECT security_id, canonical_ticker, exchange, currency, display_name
-                FROM securities_master
-                WHERE UPPER(canonical_ticker) = UPPER(?)
-                  AND status = 'active'
-                LIMIT 1
-            """, (clean_symbol.split('.')[0],))
-        
-        row = cur.fetchone()
-        if row:
-            return {
-                "security_id": row[0],
-                "canonical_ticker": row[1],
-                "exchange": row[2],
-                "currency": row[3],
-                "display_name": row[4]
-            }
+        try:
+            if exchanges:
+                placeholders = ",".join("?" * len(exchanges))
+                db_execute(cur, f"""
+                    SELECT security_id, canonical_ticker, exchange, currency, display_name
+                    FROM securities_master
+                    WHERE UPPER(canonical_ticker) = UPPER(?)
+                      AND exchange IN ({placeholders})
+                      AND status = 'active'
+                    LIMIT 1
+                """, (clean_symbol.split('.')[0],) + exchanges)
+            else:
+                db_execute(cur, """
+                    SELECT security_id, canonical_ticker, exchange, currency, display_name
+                    FROM securities_master
+                    WHERE UPPER(canonical_ticker) = UPPER(?)
+                      AND status = 'active'
+                    LIMIT 1
+                """, (clean_symbol.split('.')[0],))
+            
+            row = cur.fetchone()
+            if row:
+                return {
+                    "security_id": row[0],
+                    "canonical_ticker": row[1],
+                    "exchange": row[2],
+                    "currency": row[3],
+                    "display_name": row[4]
+                }
+        except Exception:
+            # Table doesn't exist yet
+            pass
         
         return None
         
@@ -1467,7 +1482,7 @@ def migrate_transactions_to_security_id(user_id: int = None):
         conn.close()
 
 
-def auto_create_security_from_stock(symbol: str, portfolio: str = None, display_name: str = None):
+def auto_create_security_from_stock(symbol: str, portfolio: str = None, display_name: str = None, user_id: int = 1):
     """
     Automatically create a security from a stock symbol if it doesn't exist.
     
@@ -1496,7 +1511,8 @@ def auto_create_security_from_stock(symbol: str, portfolio: str = None, display_
         canonical_ticker=clean_ticker,
         exchange=exchange,
         display_name=display_name or clean_ticker,
-        aliases=[symbol]  # Register original input as alias
+        aliases=[symbol],  # Register original input as alias
+        user_id=user_id
     )
     
     return security_id
@@ -1549,7 +1565,7 @@ def backfill_security_ids(user_id: int = None, auto_create: bool = False) -> dic
                     conn.close()
                     
                     # Auto-create the security
-                    new_security_id = auto_create_security_from_stock(symbol, portfolio)
+                    new_security_id = auto_create_security_from_stock(symbol, portfolio, user_id=user_id or 1)
                     if new_security_id:
                         result["auto_created_count"] += 1
                         logger.info(f"✅ Auto-created security for: {symbol}")
@@ -1569,7 +1585,7 @@ def backfill_security_ids(user_id: int = None, auto_create: bool = False) -> dic
     return result
 
 
-def seed_default_securities():
+def seed_default_securities(user_id: int = 1):
     """
     Seed the securities master with common stocks from Kuwait, Bahrain, and US markets.
     
@@ -1632,7 +1648,7 @@ def seed_default_securities():
     # Create KSE securities
     for ticker, name in kse_securities:
         try:
-            create_security(ticker, "KSE", name)
+            create_security(ticker, "KSE", name, user_id=user_id)
             created_count += 1
         except Exception:
             pass  # Already exists
@@ -1640,7 +1656,7 @@ def seed_default_securities():
     # Create BSE securities
     for ticker, name in bse_securities:
         try:
-            create_security(ticker, "BSE", name)
+            create_security(ticker, "BSE", name, user_id=user_id)
             created_count += 1
         except Exception:
             pass
@@ -1648,7 +1664,7 @@ def seed_default_securities():
     # Create US securities
     for exchange, ticker, name in us_securities:
         try:
-            create_security(ticker, exchange, name)
+            create_security(ticker, exchange, name, user_id=user_id)
             created_count += 1
         except Exception:
             pass
@@ -1689,11 +1705,11 @@ def populate_aliases_from_transactions(user_id: int = None):
             
             if security:
                 # Security exists, just register this as an alias
-                register_alias(security["security_id"], stock_symbol, "legacy")
+                register_alias(security["security_id"], stock_symbol, "legacy", user_id=user_id or 1)
                 aliases_created += 1
             else:
                 # Auto-create security from this symbol
-                auto_create_security_from_stock(stock_symbol, portfolio)
+                auto_create_security_from_stock(stock_symbol, portfolio, user_id=user_id or 1)
                 aliases_created += 1
         
         logger.info(f"✅ Processed {aliases_created} symbol aliases")
@@ -1996,6 +2012,75 @@ def fetch_price_tradingview_by_tv_symbol(tv_exchange: str, tv_symbol: str, sessi
     return None, " | ".join(debug_parts) if debug_parts else "No price found"
 
 
+def _ensure_securities_tables() -> None:
+    """Ensure securities_master and security_aliases tables exist.
+    
+    This is called on every DB init to ensure these tables exist even for 
+    databases created before the securities master feature was added.
+    """
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        
+        # Layer 1: Securities Master - Canonical source of truth for all securities (per user)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS securities_master (
+                security_id TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL DEFAULT 1,
+                exchange TEXT NOT NULL,
+                canonical_ticker TEXT NOT NULL,
+                display_name TEXT,
+                isin TEXT,
+                currency TEXT NOT NULL DEFAULT 'KWD',
+                country TEXT NOT NULL DEFAULT 'KW',
+                status TEXT DEFAULT 'active' CHECK(status IN ('active', 'delisted', 'suspended')),
+                sector TEXT,
+                created_at INTEGER,
+                updated_at INTEGER,
+                UNIQUE(canonical_ticker, exchange, user_id)
+            )
+        """)
+        
+        # Add user_id column if missing (migration for existing tables)
+        add_column_if_missing("securities_master", "user_id", "INTEGER DEFAULT 1")
+        
+        # Layer 2: Security Aliases - Maps raw symbols to security_id (per user)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS security_aliases (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL DEFAULT 1,
+                security_id TEXT NOT NULL,
+                alias_name TEXT NOT NULL,
+                alias_type TEXT DEFAULT 'user_input' CHECK(alias_type IN ('user_input', 'broker_format', 'official', 'legacy')),
+                valid_from TEXT,
+                valid_until TEXT,
+                created_at INTEGER,
+                FOREIGN KEY (security_id) REFERENCES securities_master(security_id),
+                UNIQUE(alias_name, security_id, user_id)
+            )
+        """)
+        
+        # Add user_id column if missing (migration for existing tables)
+        add_column_if_missing("security_aliases", "user_id", "INTEGER DEFAULT 1")
+        
+        # Add security_id column to transactions table for proper linking
+        add_column_if_missing("transactions", "security_id", "TEXT")
+        
+        # Create indexes for securities lookup performance
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_securities_exchange ON securities_master(exchange)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_securities_ticker ON securities_master(canonical_ticker)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_securities_country ON securities_master(country)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_aliases_name ON security_aliases(alias_name COLLATE NOCASE)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_aliases_security ON security_aliases(security_id)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_txn_security_id ON transactions(security_id)")
+        
+        conn.commit()
+        conn.close()
+        logger.debug("✅ Securities tables verified/created")
+    except Exception as e:
+        logger.warning(f"Note ensuring securities tables: {e}")
+
+
 def init_db() -> None:
     """Initialize database schema. Handles both SQLite and PostgreSQL."""
     
@@ -2013,6 +2098,8 @@ def init_db() -> None:
                 # Still ensure critical columns exist (fast operation)
                 for tbl in ["stocks", "transactions", "portfolio_cash", "cash_deposits"]:
                     add_column_if_missing(tbl, "user_id", "INTEGER DEFAULT 1")
+                # Ensure securities tables exist (added later in development)
+                _ensure_securities_tables()
                 return
         else:
             # For SQLite, check sqlite_master
@@ -2022,6 +2109,8 @@ def init_db() -> None:
             if cur.fetchone():
                 conn.close()
                 _log_startup("SQLite DB already initialized - skipping full setup")
+                # Ensure securities tables exist (added later in development)
+                _ensure_securities_tables()
                 return
             conn.close()
     except Exception as e:
@@ -2659,10 +2748,11 @@ def init_db() -> None:
     conn = get_conn()
     cur = conn.cursor()
     
-    # Layer 1: Securities Master - Canonical source of truth for all securities
+    # Layer 1: Securities Master - Canonical source of truth for all securities (per user)
     cur.execute("""
         CREATE TABLE IF NOT EXISTS securities_master (
             security_id TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL DEFAULT 1,
             exchange TEXT NOT NULL,
             canonical_ticker TEXT NOT NULL,
             display_name TEXT,
@@ -2673,14 +2763,18 @@ def init_db() -> None:
             sector TEXT,
             created_at INTEGER,
             updated_at INTEGER,
-            UNIQUE(canonical_ticker, exchange)
+            UNIQUE(canonical_ticker, exchange, user_id)
         )
     """)
     
-    # Layer 2: Security Aliases - Maps raw symbols to security_id
+    # Add user_id column if missing (migration for existing tables)
+    add_column_if_missing("securities_master", "user_id", "INTEGER DEFAULT 1")
+    
+    # Layer 2: Security Aliases - Maps raw symbols to security_id (per user)
     cur.execute("""
         CREATE TABLE IF NOT EXISTS security_aliases (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
             security_id TEXT NOT NULL,
             alias_name TEXT NOT NULL,
             alias_type TEXT DEFAULT 'user_input' CHECK(alias_type IN ('user_input', 'broker_format', 'official', 'legacy')),
@@ -2688,9 +2782,12 @@ def init_db() -> None:
             valid_until TEXT,
             created_at INTEGER,
             FOREIGN KEY (security_id) REFERENCES securities_master(security_id),
-            UNIQUE(alias_name, security_id)
+            UNIQUE(alias_name, security_id, user_id)
         )
     """)
+    
+    # Add user_id column if missing (migration for existing tables)
+    add_column_if_missing("security_aliases", "user_id", "INTEGER DEFAULT 1")
     
     # Add security_id column to transactions table for proper linking
     add_column_if_missing("transactions", "security_id", "TEXT")
@@ -5886,10 +5983,12 @@ def ui_transactions():
         
         with col_export:
             st.markdown("### 📤 Export (Backup)")
-            st.caption("Download a complete list of all transactions.")
+            st.caption("Download a complete list of all YOUR transactions.")
             
-            # Fetch data
-            export_sql = """
+            # Fetch data - filter by user_id and exclude soft-deleted
+            user_id = st.session_state.get('user_id', 1)
+            soft_del = _soft_delete_filter("t")
+            export_sql = f"""
                 SELECT 
                     t.id, t.stock_symbol, s.name as stock_name, s.portfolio, s.currency,
                     t.txn_date, t.txn_type, t.category,
@@ -5897,10 +5996,11 @@ def ui_transactions():
                     t.cash_dividend, t.reinvested_dividend, t.bonus_shares,
                     t.fees, t.broker, t.reference, t.notes, t.created_at
                 FROM transactions t
-                LEFT JOIN stocks s ON t.stock_symbol = s.symbol
+                LEFT JOIN stocks s ON t.stock_symbol = s.symbol AND s.user_id = t.user_id
+                WHERE t.user_id = ?{soft_del}
                 ORDER BY t.txn_date DESC
             """
-            df_export = query_df(export_sql)
+            df_export = query_df(export_sql, (user_id,))
             
             if not df_export.empty:
                 # Convert to Excel buffer
@@ -8185,13 +8285,17 @@ def ui_securities_master():
     with tab1:
         st.subheader("All Securities")
         
-        # Get all securities
-        securities_df = query_df("""
-            SELECT security_id, exchange, canonical_ticker, display_name, 
-                   currency, country, status, sector
-            FROM securities_master
-            ORDER BY exchange, canonical_ticker
-        """)
+        # Get all securities for this user (table may not exist yet)
+        try:
+            securities_df = query_df("""
+                SELECT security_id, exchange, canonical_ticker, display_name, 
+                       currency, country, status, sector
+                FROM securities_master
+                WHERE user_id = ?
+                ORDER BY exchange, canonical_ticker
+            """, (user_id,))
+        except Exception:
+            securities_df = pd.DataFrame()
         
         if securities_df.empty:
             st.warning("No securities in master table. Use **Add Security** tab or **Migration Tools** to populate.")
@@ -8271,7 +8375,8 @@ def ui_securities_master():
                                 currency=new_currency,
                                 country=new_country,
                                 sector=new_sector,
-                                aliases=aliases_list
+                                aliases=aliases_list,
+                                user_id=user_id
                             )
                             # Refresh the symbols cache
                             refresh_valid_symbols_cache()
@@ -8284,14 +8389,18 @@ def ui_securities_master():
         st.subheader("Security Aliases")
         st.caption("Aliases map raw symbol variations to canonical security_id for consistent data resolution.")
         
-        # Get all aliases with security info
-        aliases_df = query_df("""
-            SELECT sa.alias_name, sa.alias_type, sa.security_id,
-                   sm.canonical_ticker, sm.exchange, sm.display_name
-            FROM security_aliases sa
-            JOIN securities_master sm ON sa.security_id = sm.security_id
-            ORDER BY sa.alias_name
-        """)
+        # Get all aliases with security info (tables may not exist yet)
+        try:
+            aliases_df = query_df("""
+                SELECT sa.alias_name, sa.alias_type, sa.security_id,
+                       sm.canonical_ticker, sm.exchange, sm.display_name
+                FROM security_aliases sa
+                JOIN securities_master sm ON sa.security_id = sm.security_id
+                WHERE sa.user_id = ? AND sm.user_id = ?
+                ORDER BY sa.alias_name
+            """, (user_id, user_id))
+        except Exception:
+            aliases_df = pd.DataFrame()
         
         if aliases_df.empty:
             st.info("No aliases registered yet. Use the **Add New Alias** section below or **Migration Tools**.")
@@ -8320,8 +8429,11 @@ def ui_securities_master():
         st.divider()
         st.subheader("Add New Alias")
         
-        # Get securities for dropdown
-        securities_list = query_df("SELECT security_id, canonical_ticker, exchange FROM securities_master ORDER BY canonical_ticker")
+        # Get securities for dropdown (table may not exist yet)
+        try:
+            securities_list = query_df("SELECT security_id, canonical_ticker, exchange FROM securities_master WHERE user_id = ? ORDER BY canonical_ticker", (user_id,))
+        except Exception:
+            securities_list = pd.DataFrame()
         
         if not securities_list.empty:
             security_options = {
@@ -8342,7 +8454,8 @@ def ui_securities_master():
                         register_alias(
                             security_id=security_options[selected_security],
                             alias_name=alias_text,
-                            alias_type=alias_type
+                            alias_type=alias_type,
+                            user_id=user_id
                         )
                         st.success(f"✅ Registered alias '{alias_text}' → {selected_security}")
                         st.rerun()
@@ -8363,7 +8476,7 @@ def ui_securities_master():
             st.caption("Populate the securities master with common stocks from Kuwait, Bahrain, and US markets.")
             if st.button("🌱 Seed Default Securities", type="secondary"):
                 with st.spinner("Seeding securities..."):
-                    count = seed_default_securities()
+                    count = seed_default_securities(user_id)
                     st.success(f"✅ Seeded {count} securities")
                     st.rerun()
         
@@ -8502,23 +8615,27 @@ def ui_backup_restore():
     
     def get_all_user_data():
         """Fetch all data tables for the current user (excluding id and user_id for clean backup)."""
+        # Build soft-delete filters (empty string if column doesn't exist)
+        soft_del_txn = _soft_delete_filter()
+        soft_del_dep = _soft_delete_filter_deposits()
+        
         data = {
             'stocks': safe_query("""
                 SELECT symbol, name, portfolio, currency, current_price, sector, 
                        tradingview_symbol, notes, created_at 
                 FROM stocks WHERE user_id = ? ORDER BY symbol
             """, (user_id,)),
-            'transactions': safe_query("""
-                SELECT portfolio, stock_symbol, security_id, txn_date, txn_type, category, shares, 
+            'transactions': safe_query(f"""
+                SELECT portfolio, stock_symbol, txn_date, txn_type, category, shares, 
                        purchase_cost, sell_value, cash_dividend, reinvested_dividend, 
                        bonus_shares, fees, broker, reference, notes, price_override, 
                        planned_cum_shares, created_at 
-                FROM transactions WHERE user_id = ? ORDER BY txn_date DESC
+                FROM transactions WHERE user_id = ?{soft_del_txn} ORDER BY txn_date DESC
             """, (user_id,)),
-            'cash_deposits': safe_query("""
+            'cash_deposits': safe_query(f"""
                 SELECT portfolio, amount, currency, deposit_date, source, notes, 
                        include_in_analysis, created_at 
-                FROM cash_deposits WHERE user_id = ? ORDER BY deposit_date DESC
+                FROM cash_deposits WHERE user_id = ?{soft_del_dep} ORDER BY deposit_date DESC
             """, (user_id,)),
             'portfolio_cash': safe_query("""
                 SELECT portfolio, balance, currency, last_updated 
@@ -8532,12 +8649,12 @@ def ui_backup_restore():
             'securities_master': safe_query("""
                 SELECT security_id, exchange, canonical_ticker, display_name, isin, 
                        currency, country, status, sector, created_at, updated_at 
-                FROM securities_master ORDER BY canonical_ticker
-            """, ()),
+                FROM securities_master WHERE user_id = ? ORDER BY canonical_ticker
+            """, (user_id,)),
             'security_aliases': safe_query("""
                 SELECT security_id, alias_name, alias_type, valid_from, valid_until, created_at 
-                FROM security_aliases ORDER BY security_id, alias_name
-            """, ()),
+                FROM security_aliases WHERE user_id = ? ORDER BY security_id, alias_name
+            """, (user_id,)),
         }
         return data
     
@@ -8588,29 +8705,9 @@ def ui_backup_restore():
         # Fetch all data
         all_data = get_all_user_data()
         
-        # Extract dividends from transactions for a dedicated sheet
-        dividends_df = pd.DataFrame()
-        txn_df = all_data['transactions']
-        if not txn_df.empty:
-            # Filter transactions that have dividends or bonus shares
-            div_mask = pd.Series([False] * len(txn_df))
-            if 'cash_dividend' in txn_df.columns:
-                div_mask = div_mask | (txn_df['cash_dividend'].fillna(0) > 0)
-            if 'bonus_shares' in txn_df.columns:
-                div_mask = div_mask | (txn_df['bonus_shares'].fillna(0) > 0)
-            if 'reinvested_dividend' in txn_df.columns:
-                div_mask = div_mask | (txn_df['reinvested_dividend'].fillna(0) > 0)
-            
-            dividends_df = txn_df[div_mask].copy()
-            if not dividends_df.empty:
-                # Select relevant columns for dividend sheet
-                div_cols = ['portfolio', 'stock_symbol', 'txn_date', 'cash_dividend', 'bonus_shares', 
-                           'reinvested_dividend', 'notes']
-                available_cols = [c for c in div_cols if c in dividends_df.columns]
-                dividends_df = dividends_df[available_cols]
-        
-        # Add dividends to all_data for export
-        all_data['dividends'] = dividends_df
+        # NOTE: Dividends are stored in the transactions table (master storage)
+        # No separate dividends sheet needed - they're included in transactions
+        # with cash_dividend, bonus_shares, reinvested_dividend columns
         
         # Calculate statistics
         stats = {name: len(df) for name, df in all_data.items()}
@@ -8624,8 +8721,7 @@ def ui_backup_restore():
         with col1:
             st.markdown("**📈 Portfolio Data**")
             st.metric("Stocks Tracked", stats['stocks'], help="Unique stocks in your portfolio")
-            st.metric("Transactions", stats['transactions'], help="Buy, Sell, Dividend, Bonus transactions")
-            st.metric("Dividends & Bonus", stats['dividends'], help="Cash dividends, bonus shares, reinvested dividends")
+            st.metric("Transactions", stats['transactions'], help="Buy, Sell, Dividend, Bonus transactions (all in master storage)")
         
         with col2:
             st.markdown("**💰 Cash Management**")
@@ -8645,17 +8741,13 @@ def ui_backup_restore():
         if stats['stocks'] > 0:
             included_items.append(f"✅ **Stocks** ({stats['stocks']}) - Symbols, names, currency, sectors, TradingView mappings")
         if stats['transactions'] > 0:
-            included_items.append(f"✅ **Transactions** ({stats['transactions']}) - All Buy/Sell transactions with costs, fees, notes")
-        if stats['dividends'] > 0:
-            # Calculate totals
-            total_cash_div = 0
-            total_bonus = 0
-            if not dividends_df.empty:
-                if 'cash_dividend' in dividends_df.columns:
-                    total_cash_div = dividends_df['cash_dividend'].fillna(0).sum()
-                if 'bonus_shares' in dividends_df.columns:
-                    total_bonus = dividends_df['bonus_shares'].fillna(0).sum()
-            included_items.append(f"✅ **Dividends** ({stats['dividends']}) - Cash: {total_cash_div:,.2f}, Bonus shares: {total_bonus:,.0f}")
+            # Count dividends within transactions
+            txn_df = all_data['transactions']
+            div_count = 0
+            if not txn_df.empty:
+                if 'cash_dividend' in txn_df.columns:
+                    div_count = (txn_df['cash_dividend'].fillna(0) > 0).sum()
+            included_items.append(f"✅ **Transactions** ({stats['transactions']}) - All Buy/Sell/Dividend records (includes {div_count} dividend entries)")
         if stats['cash_deposits'] > 0:
             included_items.append(f"✅ **Cash Deposits** ({stats['cash_deposits']}) - Capital injections history")
         if stats['portfolio_cash'] > 0:
@@ -8705,13 +8797,13 @@ def ui_backup_restore():
                 metadata = pd.DataFrame({
                     'key': [
                         'backup_version', 'backup_date', 'backup_time', 'username',
-                        'stocks_count', 'transactions_count', 'dividends_count', 'cash_deposits_count',
+                        'stocks_count', 'transactions_count', 'cash_deposits_count',
                         'portfolio_cash_count', 'portfolio_snapshots_count',
                         'total_records'
                     ],
                     'value': [
-                        '3.2', str(date.today()), datetime.now().strftime('%H:%M:%S'), username,
-                        stats['stocks'], stats['transactions'], stats['dividends'], stats['cash_deposits'],
+                        '3.3', str(date.today()), datetime.now().strftime('%H:%M:%S'), username,
+                        stats['stocks'], stats['transactions'], stats['cash_deposits'],
                         stats['portfolio_cash'], stats['portfolio_snapshots'],
                         total_records
                     ]
@@ -11627,33 +11719,12 @@ def ui_portfolio_tracker():
 def ui_dividends_tracker():
     st.subheader("💰 Dividends Tracker")
     
-    # Query all dividend data - include ALL rows to check what's available
     user_id = st.session_state.get('user_id', 1)
-    all_transactions = query_df("""
-        SELECT 
-            stock_symbol,
-            txn_date,
-            txn_type,
-            COALESCE(cash_dividend, 0) as cash_dividend,
-            COALESCE(bonus_shares, 0) as bonus_shares,
-            COALESCE(reinvested_dividend, 0) as reinvested_dividend
-        FROM transactions
-        WHERE user_id = ?
-        ORDER BY txn_date DESC
-        LIMIT 10
-    """, (user_id,))
+    soft_del = _soft_delete_filter("t")
     
-    # Debug: Show sample data
-    with st.expander("🔍 Debug: Sample Transaction Data", expanded=False):
-        st.write("**Last 10 transactions (all fields):**")
-        st.dataframe(all_transactions)
-        st.write("**Column names available:**", list(all_transactions.columns) if not all_transactions.empty else "No data")
-    
-    # Query dividend data from transactions table (single source of truth)
+    # Query dividend data from transactions table (master storage - single source of truth)
     # This matches the logic in calculate_total_cash_dividends()
-    
-    # 1. Transactions table dividends
-    dividends_df = query_df("""
+    dividends_df = query_df(f"""
         SELECT 
             t.id,
             t.stock_symbol,
@@ -11662,31 +11733,20 @@ def ui_dividends_tracker():
             COALESCE(t.bonus_shares, 0) as bonus_shares,
             COALESCE(t.reinvested_dividend, 0) as reinvested_dividend,
             COALESCE(s.currency, 'KWD') as currency,
+            t.notes,
             'portfolio' as source
         FROM transactions t
         LEFT JOIN stocks s ON t.stock_symbol = s.symbol AND s.user_id = t.user_id
-        WHERE t.user_id = ? AND (
+        WHERE t.user_id = ?{soft_del} AND (
             COALESCE(t.cash_dividend, 0) > 0 
            OR COALESCE(t.bonus_shares, 0) > 0
            OR COALESCE(t.reinvested_dividend, 0) > 0
         )
-        ORDER BY t.stock_symbol, t.txn_date
+        ORDER BY t.txn_date DESC, t.stock_symbol
     """, (user_id,))
     
-    # NOTE: Trading history dividends are NOT included here - they are tracked separately in Trading Section
-    
     if dividends_df.empty:
-        st.info("📊 No dividend data yet. Add transactions with cash dividends or bonus shares.")
-        
-        # Show count of transactions with reinvested dividends
-        reinvested_count = query_df("""
-            SELECT COUNT(*) as count 
-            FROM transactions 
-            WHERE COALESCE(reinvested_dividend, 0) > 0
-        """)
-        if not reinvested_count.empty:
-            count = reinvested_count['count'].iloc[0]
-            st.warning(f"⚠️ Found {count} transactions with reinvested_dividend > 0, but query returned empty. Check data.")
+        st.info("📊 No dividend data found. Dividends are stored with your transactions - add cash dividends, bonus shares, or reinvested dividends when recording transactions.")
         return
     
     # Convert cash_dividend to KWD for consistent totals
@@ -11700,13 +11760,15 @@ def ui_dividends_tracker():
     )
     
     # Get cost basis for yield calculation
-    cost_df = query_df("""
+    soft_del_cost = _soft_delete_filter()
+    cost_df = query_df(f"""
         SELECT 
             stock_symbol,
             SUM(CASE WHEN txn_type = 'Buy' THEN purchase_cost ELSE 0 END) as total_cost
         FROM transactions
+        WHERE user_id = ?{soft_del_cost}
         GROUP BY stock_symbol
-    """)
+    """, (user_id,))
     
     # Summary Cards - USE CONVERTED KWD VALUES (matches Overview tab)
     total_cash_div_kwd = dividends_df['cash_dividend_kwd'].sum()
