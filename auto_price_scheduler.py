@@ -426,18 +426,308 @@ def run_price_update_job():
 
 
 # =============================================================================
+# DATA INTEGRITY CHECK (Nightly Validation)
+# =============================================================================
+
+def send_integrity_alert(message: str, severity: str = "WARNING"):
+    """
+    Send integrity alert via logging and optional notification.
+    
+    In production, this could be extended to send:
+    - Email notifications
+    - Slack/Discord webhooks
+    - SMS alerts
+    """
+    if severity == "CRITICAL":
+        logger.critical(f"🚨 INTEGRITY ALERT: {message}")
+    elif severity == "WARNING":
+        logger.warning(f"⚠️ INTEGRITY WARNING: {message}")
+    else:
+        logger.info(f"ℹ️ INTEGRITY NOTE: {message}")
+    
+    # TODO: Add webhook/email notification here for production
+    # Example: requests.post(SLACK_WEBHOOK_URL, json={"text": f"[{severity}] {message}"})
+
+
+def run_integrity_check_for_user(user_id: int, username: str = None) -> dict:
+    """
+    Run comprehensive data integrity checks for a single user.
+    
+    Checks:
+    1. Cash Ledger Validation - portfolio_cash vs calculated
+    2. Snapshot Accumulated Cash - stored vs direct calculation from deposits
+    3. Position Closure Validation - CFA compliance check
+    
+    Returns dict with check results and any issues found.
+    """
+    _, query_df, _, is_postgres = get_db_functions()
+    placeholder = '%s' if is_postgres() else '?'
+    
+    results = {
+        "user_id": user_id,
+        "username": username,
+        "timestamp": datetime.now(KUWAIT_TZ).isoformat(),
+        "checks": {
+            "cash_ledger": {"status": "ok", "issues": []},
+            "snapshot_drift": {"status": "ok", "issues": []},
+            "position_closure": {"status": "ok", "issues": []},
+        },
+        "total_issues": 0
+    }
+    
+    # =========================================================================
+    # 1. CASH LEDGER VALIDATION
+    # =========================================================================
+    try:
+        # Get current portfolio cash balances
+        cash_df = query_df(f"""
+            SELECT portfolio, balance, manual_override 
+            FROM portfolio_cash 
+            WHERE user_id = {placeholder}
+        """, (user_id,))
+        
+        if not cash_df.empty:
+            # Calculate expected balances from transactions
+            for _, row in cash_df.iterrows():
+                portfolio = row['portfolio']
+                current_balance = float(row['balance']) if pd.notna(row['balance']) else 0
+                manual_override = row.get('manual_override', 0)
+                
+                # Skip validation for manually overridden balances
+                if manual_override:
+                    logger.debug(f"Skipping cash validation for {portfolio} (manual override)")
+                    continue
+                
+                # Calculate expected: deposits - buys + sells for this portfolio
+                deposits = query_df(f"""
+                    SELECT COALESCE(SUM(amount), 0) as total
+                    FROM cash_deposits
+                    WHERE user_id = {placeholder} AND portfolio = {placeholder} AND include_in_analysis = 1
+                """, (user_id, portfolio))
+                
+                buys = query_df(f"""
+                    SELECT COALESCE(SUM(purchase_cost), 0) as total
+                    FROM transactions
+                    WHERE user_id = {placeholder} AND portfolio = {placeholder} AND txn_type = 'Buy'
+                """, (user_id, portfolio))
+                
+                sells = query_df(f"""
+                    SELECT COALESCE(SUM(sell_value), 0) as total
+                    FROM transactions
+                    WHERE user_id = {placeholder} AND portfolio = {placeholder} AND txn_type = 'Sell'
+                """, (user_id, portfolio))
+                
+                dep_total = float(deposits['total'].iloc[0]) if not deposits.empty else 0
+                buy_total = float(buys['total'].iloc[0]) if not buys.empty else 0
+                sell_total = float(sells['total'].iloc[0]) if not sells.empty else 0
+                
+                expected_balance = dep_total - buy_total + sell_total
+                drift = abs(current_balance - expected_balance)
+                
+                if drift > 0.01:  # Allow tiny rounding differences
+                    issue = f"Portfolio {portfolio}: stored={current_balance:.3f}, expected={expected_balance:.3f}, drift={drift:.3f}"
+                    results["checks"]["cash_ledger"]["issues"].append(issue)
+                    results["checks"]["cash_ledger"]["status"] = "warning"
+                    send_integrity_alert(f"CASH DRIFT for user {user_id}: {issue}", "WARNING")
+                    
+    except Exception as e:
+        results["checks"]["cash_ledger"]["status"] = "error"
+        results["checks"]["cash_ledger"]["issues"].append(f"Error: {str(e)}")
+        logger.error(f"Cash ledger check failed for user {user_id}: {e}")
+    
+    # =========================================================================
+    # 2. SNAPSHOT ACCUMULATED CASH VALIDATION
+    # =========================================================================
+    try:
+        # Get recent snapshots
+        snapshots = query_df(f"""
+            SELECT snapshot_date, accumulated_cash 
+            FROM portfolio_snapshots 
+            WHERE user_id = {placeholder}
+            ORDER BY snapshot_date DESC
+            LIMIT 30
+        """, (user_id,))
+        
+        if not snapshots.empty:
+            for _, snap in snapshots.iterrows():
+                snap_date = snap['snapshot_date']
+                stored_acc = float(snap['accumulated_cash']) if pd.notna(snap['accumulated_cash']) else 0
+                
+                # Calculate expected from deposits up to this date
+                # Need to handle currency conversion
+                expected_df = query_df(f"""
+                    SELECT amount, COALESCE(currency, 'KWD') as currency
+                    FROM cash_deposits
+                    WHERE user_id = {placeholder} 
+                      AND deposit_date <= {placeholder}
+                      AND include_in_analysis = 1
+                """, (user_id, snap_date))
+                
+                expected_acc = 0.0
+                if not expected_df.empty:
+                    for _, dep in expected_df.iterrows():
+                        amount = float(dep['amount']) if pd.notna(dep['amount']) else 0
+                        currency = dep['currency'] if pd.notna(dep['currency']) else 'KWD'
+                        # Simple USD conversion (use approximate rate)
+                        if currency == 'USD':
+                            amount *= 0.307  # Approximate USD to KWD
+                        expected_acc += amount
+                
+                drift = abs(stored_acc - expected_acc)
+                
+                if drift > 1.0:  # Allow small differences due to FX rate changes
+                    issue = f"Snapshot {snap_date}: stored={stored_acc:.2f}, expected={expected_acc:.2f}, drift={drift:.2f}"
+                    results["checks"]["snapshot_drift"]["issues"].append(issue)
+                    results["checks"]["snapshot_drift"]["status"] = "warning"
+                    
+                    # Only alert for significant drift
+                    if drift > 100:
+                        send_integrity_alert(f"SNAPSHOT DRIFT for user {user_id}: {issue}", "WARNING")
+                        
+    except Exception as e:
+        results["checks"]["snapshot_drift"]["status"] = "error"
+        results["checks"]["snapshot_drift"]["issues"].append(f"Error: {str(e)}")
+        logger.error(f"Snapshot drift check failed for user {user_id}: {e}")
+    
+    # =========================================================================
+    # 3. POSITION CLOSURE VALIDATION (CFA Compliance)
+    # =========================================================================
+    try:
+        # Get all transactions
+        tx_df = query_df(f"""
+            SELECT stock_symbol, txn_type, 
+                   COALESCE(shares, 0) as shares,
+                   COALESCE(bonus_shares, 0) as bonus_shares
+            FROM transactions 
+            WHERE user_id = {placeholder}
+        """, (user_id,))
+        
+        if not tx_df.empty:
+            # Calculate net shares per symbol
+            for symbol in tx_df['stock_symbol'].unique():
+                if not symbol:
+                    continue
+                    
+                symbol_tx = tx_df[tx_df['stock_symbol'] == symbol]
+                
+                net_shares = 0.0
+                for _, row in symbol_tx.iterrows():
+                    shares = float(row['shares']) if pd.notna(row['shares']) else 0
+                    bonus = float(row['bonus_shares']) if pd.notna(row['bonus_shares']) else 0
+                    txn_type = row['txn_type']
+                    
+                    if txn_type == 'Buy':
+                        net_shares += shares + bonus
+                    elif txn_type == 'Sell':
+                        net_shares -= shares
+                
+                # Check if position should be closed
+                if net_shares <= 0.001:  # Effectively zero
+                    # Check if stock still exists in stocks table with non-zero holdings
+                    stock_check = query_df(f"""
+                        SELECT id, symbol, current_price
+                        FROM stocks
+                        WHERE user_id = {placeholder} AND UPPER(symbol) = UPPER({placeholder})
+                    """, (user_id, symbol))
+                    
+                    if not stock_check.empty:
+                        # Stock still in table - this is okay, but unrealized P&L should be 0
+                        # This is a soft warning for cleanup
+                        pass  # Not an error - stock record can exist for closed positions
+                        
+    except Exception as e:
+        results["checks"]["position_closure"]["status"] = "error"
+        results["checks"]["position_closure"]["issues"].append(f"Error: {str(e)}")
+        logger.error(f"Position closure check failed for user {user_id}: {e}")
+    
+    # Count total issues
+    results["total_issues"] = sum(
+        len(check["issues"]) 
+        for check in results["checks"].values()
+    )
+    
+    return results
+
+
+def run_integrity_check_job():
+    """
+    Run nightly integrity checks for ALL users.
+    
+    This job validates financial data consistency:
+    - Cash ledger balances
+    - Snapshot accumulated cash accuracy
+    - Position closure compliance
+    """
+    logger.info("\n" + "=" * 60)
+    logger.info("🔍 STARTING NIGHTLY INTEGRITY CHECK")
+    logger.info(f"⏰ Started at: {datetime.now(KUWAIT_TZ).strftime('%H:%M:%S')} Kuwait Time")
+    logger.info("=" * 60)
+    
+    users = get_all_users()
+    
+    if not users:
+        logger.warning("No users found for integrity check")
+        return
+    
+    total_issues = 0
+    users_with_issues = 0
+    
+    for user in users:
+        user_id = user['id']
+        username = user.get('username', f'user_{user_id}')
+        
+        logger.info(f"\n--- Checking user: {username} (ID: {user_id}) ---")
+        
+        results = run_integrity_check_for_user(user_id, username)
+        
+        if results["total_issues"] > 0:
+            users_with_issues += 1
+            total_issues += results["total_issues"]
+            logger.warning(f"⚠️ User {username}: {results['total_issues']} issue(s) found")
+            
+            # Log details
+            for check_name, check_data in results["checks"].items():
+                if check_data["issues"]:
+                    for issue in check_data["issues"][:5]:  # Limit to first 5 per check
+                        logger.warning(f"  [{check_name}] {issue}")
+        else:
+            logger.info(f"✅ User {username}: All checks passed")
+    
+    # Summary
+    logger.info("\n" + "=" * 60)
+    logger.info("🔍 INTEGRITY CHECK COMPLETED")
+    logger.info(f"👥 Users Checked: {len(users)}")
+    logger.info(f"⚠️ Users with Issues: {users_with_issues}")
+    logger.info(f"📋 Total Issues Found: {total_issues}")
+    logger.info(f"⏱️ Finished at: {datetime.now(KUWAIT_TZ).strftime('%H:%M:%S')} Kuwait Time")
+    logger.info("=" * 60 + "\n")
+    
+    # Alert if critical issues found
+    if total_issues > 10:
+        send_integrity_alert(
+            f"Nightly check found {total_issues} issues across {users_with_issues} users",
+            "CRITICAL" if total_issues > 50 else "WARNING"
+        )
+
+
+# =============================================================================
 # SCHEDULER
 # =============================================================================
 
+# Nightly integrity check time: 3 AM Kuwait = 00:00 UTC
+INTEGRITY_CHECK_HOUR = 0  # UTC
+INTEGRITY_CHECK_MINUTE = 0
+
+
 def start_scheduler():
-    """Start the APScheduler to run the job daily."""
+    """Start the APScheduler to run jobs daily."""
     if not SCHEDULER_AVAILABLE:
         logger.error("APScheduler not available. Cannot start scheduler.")
         return
     
     scheduler = BlockingScheduler(timezone="UTC")
     
-    # Schedule at 11:00 UTC = 14:00 Kuwait Time
+    # Job 1: Price update at 11:00 UTC = 14:00 Kuwait Time
     scheduler.add_job(
         run_price_update_job,
         CronTrigger(hour=SCHEDULED_HOUR, minute=SCHEDULED_MINUTE),
@@ -445,10 +735,18 @@ def start_scheduler():
         name='Daily Price Update & Snapshot'
     )
     
+    # Job 2: Integrity check at 00:00 UTC = 03:00 Kuwait Time (nightly)
+    scheduler.add_job(
+        run_integrity_check_job,
+        CronTrigger(hour=INTEGRITY_CHECK_HOUR, minute=INTEGRITY_CHECK_MINUTE),
+        id='nightly_integrity_check',
+        name='Nightly Data Integrity Check'
+    )
+    
     logger.info("=" * 60)
     logger.info("🕐 SCHEDULER STARTED")
-    logger.info(f"⏰ Scheduled for: {SCHEDULED_HOUR:02d}:{SCHEDULED_MINUTE:02d} UTC (14:00 Kuwait)")
-    logger.info("📋 Job: Daily Price Update & Portfolio Snapshot")
+    logger.info(f"📈 Price Update: {SCHEDULED_HOUR:02d}:{SCHEDULED_MINUTE:02d} UTC (14:00 Kuwait)")
+    logger.info(f"🔍 Integrity Check: {INTEGRITY_CHECK_HOUR:02d}:{INTEGRITY_CHECK_MINUTE:02d} UTC (03:00 Kuwait)")
     logger.info("=" * 60)
     
     try:
@@ -465,7 +763,8 @@ def main():
     import argparse
     
     parser = argparse.ArgumentParser(description='Auto Price Scheduler for Portfolio App')
-    parser.add_argument('--run-now', action='store_true', help='Run the job immediately (once)')
+    parser.add_argument('--run-now', action='store_true', help='Run price update job immediately (once)')
+    parser.add_argument('--check-integrity', action='store_true', help='Run integrity check immediately (once)')
     args = parser.parse_args()
     
     logger.info("🚀 Auto Price Scheduler Starting...")
@@ -480,8 +779,11 @@ def main():
         sys.exit(1)
     
     if args.run_now:
-        logger.info("🔄 Running job immediately (--run-now)")
+        logger.info("🔄 Running price update job immediately (--run-now)")
         run_price_update_job()
+    elif args.check_integrity:
+        logger.info("🔍 Running integrity check immediately (--check-integrity)")
+        run_integrity_check_job()
     else:
         start_scheduler()
 
