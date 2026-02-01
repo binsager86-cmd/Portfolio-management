@@ -174,8 +174,61 @@ def normalize_kwd_price(raw_price: float, currency: str) -> float:
     return raw_price
 
 
-def fetch_price(symbol: str) -> tuple:
+def resolve_symbol_via_securities_master(symbol: str, currency: str = None) -> tuple:
+    """
+    Resolve symbol through Securities Master for proper API ticker.
+    
+    Returns:
+        (api_symbol, exchange) or (None, None) if not found
+    """
+    _, query_df, _, is_postgres = get_db_functions()
+    placeholder = '%s' if is_postgres() else '?'
+    
+    try:
+        # First check alias table
+        alias_sql = f"""
+            SELECT sm.canonical_ticker, sm.exchange
+            FROM security_aliases sa
+            JOIN securities_master sm ON sa.security_id = sm.security_id
+            WHERE LOWER(sa.alias_name) = LOWER({placeholder})
+              AND sm.status = 'active'
+            LIMIT 1
+        """
+        result = query_df(alias_sql, (symbol,))
+        if not result.empty:
+            ticker = result['canonical_ticker'].iloc[0]
+            exchange = result['exchange'].iloc[0]
+            # Apply exchange suffix
+            if exchange == 'KSE':
+                return f"{ticker}.KW", exchange
+            return ticker, exchange
+        
+        # Then check canonical_ticker directly
+        canon_sql = f"""
+            SELECT canonical_ticker, exchange
+            FROM securities_master
+            WHERE UPPER(canonical_ticker) = UPPER({placeholder})
+              AND status = 'active'
+            LIMIT 1
+        """
+        result = query_df(canon_sql, (symbol.split('.')[0],))
+        if not result.empty:
+            ticker = result['canonical_ticker'].iloc[0]
+            exchange = result['exchange'].iloc[0]
+            if exchange == 'KSE':
+                return f"{ticker}.KW", exchange
+            return ticker, exchange
+            
+    except Exception as e:
+        logger.debug(f"Securities Master lookup failed for {symbol}: {e}")
+    
+    return None, None
+
+
+def fetch_price(symbol: str, currency: str = None) -> tuple:
     """Fetch current price for a stock symbol.
+    
+    Now integrates with Securities Master for proper symbol resolution.
     
     Returns:
         (price, ticker_used) or (None, None) if failed
@@ -186,16 +239,30 @@ def fetch_price(symbol: str) -> tuple:
     
     symbol_upper = symbol.upper().strip()
     
-    # Try different ticker formats
+    # ✅ NEW: Try Securities Master resolution first
+    sm_ticker, sm_exchange = resolve_symbol_via_securities_master(symbol, currency)
+    
+    # Build list of tickers to try
     tickers_to_try = []
     
+    if sm_ticker:
+        # Securities Master found a match - use it first
+        tickers_to_try.append(sm_ticker)
+    
+    # Then add fallback formats
     if symbol_upper.endswith('.KW'):
-        tickers_to_try = [symbol_upper]
+        if symbol_upper not in tickers_to_try:
+            tickers_to_try.append(symbol_upper)
     elif '.' not in symbol_upper:
         # Try Kuwait suffix first, then plain
-        tickers_to_try = [f"{symbol_upper}.KW", symbol_upper]
+        kw_ticker = f"{symbol_upper}.KW"
+        if kw_ticker not in tickers_to_try:
+            tickers_to_try.append(kw_ticker)
+        if symbol_upper not in tickers_to_try:
+            tickers_to_try.append(symbol_upper)
     else:
-        tickers_to_try = [symbol_upper]
+        if symbol_upper not in tickers_to_try:
+            tickers_to_try.append(symbol_upper)
     
     for ticker in tickers_to_try:
         try:
@@ -375,8 +442,8 @@ def run_price_update_job():
             currency = stock.get('currency', 'KWD') or 'KWD'
             shares = float(stock.get('shares', 0) or 0)
             
-            # Fetch price
-            price, used_ticker = fetch_price(symbol)
+            # Fetch price (pass currency for Securities Master resolution)
+            price, used_ticker = fetch_price(symbol, currency=currency)
             
             if price is not None:
                 # Normalize Kuwait prices
