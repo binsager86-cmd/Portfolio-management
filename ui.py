@@ -2022,57 +2022,97 @@ def _ensure_securities_tables() -> None:
         conn = get_conn()
         cur = conn.cursor()
         
-        # Layer 1: Securities Master - Canonical source of truth for all securities (per user)
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS securities_master (
-                security_id TEXT PRIMARY KEY,
-                user_id INTEGER NOT NULL DEFAULT 1,
-                exchange TEXT NOT NULL,
-                canonical_ticker TEXT NOT NULL,
-                display_name TEXT,
-                isin TEXT,
-                currency TEXT NOT NULL DEFAULT 'KWD',
-                country TEXT NOT NULL DEFAULT 'KW',
-                status TEXT DEFAULT 'active' CHECK(status IN ('active', 'delisted', 'suspended')),
-                sector TEXT,
-                created_at INTEGER,
-                updated_at INTEGER,
-                UNIQUE(canonical_ticker, exchange, user_id)
-            )
-        """)
+        if is_postgres():
+            # PostgreSQL syntax
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS securities_master (
+                    security_id TEXT PRIMARY KEY,
+                    user_id INTEGER NOT NULL DEFAULT 1,
+                    exchange TEXT NOT NULL,
+                    canonical_ticker TEXT NOT NULL,
+                    display_name TEXT,
+                    isin TEXT,
+                    currency TEXT NOT NULL DEFAULT 'KWD',
+                    country TEXT NOT NULL DEFAULT 'KW',
+                    status TEXT DEFAULT 'active' CHECK(status IN ('active', 'delisted', 'suspended')),
+                    sector TEXT,
+                    created_at INTEGER,
+                    updated_at INTEGER,
+                    UNIQUE(canonical_ticker, exchange, user_id)
+                )
+            """)
+            
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS security_aliases (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER NOT NULL DEFAULT 1,
+                    security_id TEXT NOT NULL,
+                    alias_name TEXT NOT NULL,
+                    alias_type TEXT DEFAULT 'user_input' CHECK(alias_type IN ('user_input', 'broker_format', 'official', 'legacy')),
+                    valid_from TEXT,
+                    valid_until TEXT,
+                    created_at INTEGER,
+                    FOREIGN KEY (security_id) REFERENCES securities_master(security_id),
+                    UNIQUE(alias_name, security_id, user_id)
+                )
+            """)
+            
+            # PostgreSQL indexes (no COLLATE NOCASE - use LOWER() function instead)
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_securities_exchange ON securities_master(exchange)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_securities_ticker ON securities_master(canonical_ticker)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_securities_country ON securities_master(country)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_aliases_name ON security_aliases(LOWER(alias_name))")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_aliases_security ON security_aliases(security_id)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_txn_security_id ON transactions(security_id)")
+        else:
+            # SQLite syntax
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS securities_master (
+                    security_id TEXT PRIMARY KEY,
+                    user_id INTEGER NOT NULL DEFAULT 1,
+                    exchange TEXT NOT NULL,
+                    canonical_ticker TEXT NOT NULL,
+                    display_name TEXT,
+                    isin TEXT,
+                    currency TEXT NOT NULL DEFAULT 'KWD',
+                    country TEXT NOT NULL DEFAULT 'KW',
+                    status TEXT DEFAULT 'active' CHECK(status IN ('active', 'delisted', 'suspended')),
+                    sector TEXT,
+                    created_at INTEGER,
+                    updated_at INTEGER,
+                    UNIQUE(canonical_ticker, exchange, user_id)
+                )
+            """)
+            
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS security_aliases (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL DEFAULT 1,
+                    security_id TEXT NOT NULL,
+                    alias_name TEXT NOT NULL,
+                    alias_type TEXT DEFAULT 'user_input' CHECK(alias_type IN ('user_input', 'broker_format', 'official', 'legacy')),
+                    valid_from TEXT,
+                    valid_until TEXT,
+                    created_at INTEGER,
+                    FOREIGN KEY (security_id) REFERENCES securities_master(security_id),
+                    UNIQUE(alias_name, security_id, user_id)
+                )
+            """)
+            
+            # SQLite indexes
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_securities_exchange ON securities_master(exchange)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_securities_ticker ON securities_master(canonical_ticker)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_securities_country ON securities_master(country)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_aliases_name ON security_aliases(alias_name COLLATE NOCASE)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_aliases_security ON security_aliases(security_id)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_txn_security_id ON transactions(security_id)")
         
         # Add user_id column if missing (migration for existing tables)
         add_column_if_missing("securities_master", "user_id", "INTEGER DEFAULT 1")
-        
-        # Layer 2: Security Aliases - Maps raw symbols to security_id (per user)
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS security_aliases (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL DEFAULT 1,
-                security_id TEXT NOT NULL,
-                alias_name TEXT NOT NULL,
-                alias_type TEXT DEFAULT 'user_input' CHECK(alias_type IN ('user_input', 'broker_format', 'official', 'legacy')),
-                valid_from TEXT,
-                valid_until TEXT,
-                created_at INTEGER,
-                FOREIGN KEY (security_id) REFERENCES securities_master(security_id),
-                UNIQUE(alias_name, security_id, user_id)
-            )
-        """)
-        
-        # Add user_id column if missing (migration for existing tables)
         add_column_if_missing("security_aliases", "user_id", "INTEGER DEFAULT 1")
         
         # Add security_id column to transactions table for proper linking
         add_column_if_missing("transactions", "security_id", "TEXT")
-        
-        # Create indexes for securities lookup performance
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_securities_exchange ON securities_master(exchange)")
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_securities_ticker ON securities_master(canonical_ticker)")
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_securities_country ON securities_master(country)")
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_aliases_name ON security_aliases(alias_name COLLATE NOCASE)")
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_aliases_security ON security_aliases(security_id)")
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_txn_security_id ON transactions(security_id)")
         
         conn.commit()
         conn.close()
@@ -2136,6 +2176,8 @@ def init_db() -> None:
         add_column_if_missing("stocks", "tradingview_exchange", "TEXT")
         add_column_if_missing("transactions", "portfolio", "TEXT DEFAULT 'KFH'")
         add_column_if_missing("transactions", "category", "TEXT DEFAULT 'portfolio'")
+        # Ensure securities tables exist (added later in development)
+        _ensure_securities_tables()
         logger.info("✅ PostgreSQL schema ready")
         return
     
