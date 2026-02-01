@@ -1823,12 +1823,19 @@ def get_yf_ticker(symbol: str):
     return symbol
 
 
-def fetch_price_yfinance(symbol: str, max_retries: int = 3):
+def fetch_price_yfinance(symbol: str, max_retries: int = 3, portfolio: str = None):
     """Fetch price using yfinance with correct Kuwait stock ticker mapping.
     
     Uses exponential backoff to avoid Yahoo Finance rate limits.
     Kuwait stock prices are divided by 1000 (fils to KWD conversion).
     Includes strict validation to reject obviously wrong prices.
+    
+    Now integrates with Securities Master for proper symbol resolution.
+    
+    Args:
+        symbol: Stock symbol to fetch price for
+        max_retries: Number of retry attempts
+        portfolio: Optional portfolio name to infer exchange (KFH/BBYN → KSE, USA → NYSE/NASDAQ)
     
     Returns (price: float or None, used_ticker: str or None)
     """
@@ -1839,9 +1846,23 @@ def fetch_price_yfinance(symbol: str, max_retries: int = 3):
     import time
     import random
     
-    # Get the correct Yahoo Finance ticker (e.g., KRE -> KRE.KW)
-    yf_ticker = get_yf_ticker(symbol)
-    is_kuwait_stock = yf_ticker.endswith('.KW')
+    # ✅ NEW: Try to resolve symbol through Securities Master first
+    security = resolve_symbol_to_security(symbol, portfolio=portfolio)
+    
+    if security:
+        # Get properly suffixed ticker for yfinance from Securities Master
+        api_symbol, exchange, currency = get_price_fetch_symbol(security["security_id"])
+        if api_symbol:
+            yf_ticker = api_symbol
+            is_kuwait_stock = exchange == "KSE"
+        else:
+            # Fallback if get_price_fetch_symbol fails
+            yf_ticker = get_yf_ticker(symbol)
+            is_kuwait_stock = yf_ticker.endswith('.KW')
+    else:
+        # Fallback to legacy mapping (for migration period or unregistered symbols)
+        yf_ticker = get_yf_ticker(symbol)
+        is_kuwait_stock = yf_ticker.endswith('.KW')
     
     # Only try the mapped ticker + one fallback
     variants = [yf_ticker]
@@ -6375,12 +6396,13 @@ def ui_transactions():
     with cpx2:
         if st.button("Fetch Current Price", type="primary"):
                 with st.spinner(f"Fetching price for {selected_symbol}..."):
-                    # Use Yahoo Finance only
-                    p, used_ticker = fetch_price_yfinance(selected_symbol)
+                    # ✅ Use Securities Master resolution for proper symbol mapping
+                    portfolio = stock_row.get('portfolio') if 'portfolio' in stock_row.index else None
+                    p, used_ticker = fetch_price_yfinance(selected_symbol, portfolio=portfolio)
 
                 if p is None:
                     st.error("Price fetch failed from Yahoo Finance")
-                    st.info("Check if ticker is correctly mapped in stock_data.py (e.g., KRE -> KRE.KW)")
+                    st.info("Check if ticker is registered in Securities Master or mapped in stock_data.py (e.g., KRE -> KRE.KW)")
                 else:
                     try:
                         user_id = st.session_state.get('user_id', 1)
