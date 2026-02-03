@@ -15195,10 +15195,11 @@ def ui_portfolio_analysis():
         )
         
     with _c2:
-        # Mini Total
+        # Mini Total - use edited_cash to show current values (including any edits)
         _total_cash_kwd = 0.0
         _rate = st.session_state.get("usd_to_kwd", 0.307)
-        for _, r in cash_df_display.iterrows():
+        # Use edited_cash (current editor values) instead of cash_df_display (pre-edit values)
+        for _, r in edited_cash.iterrows():
             if r["Currency"] == "USD":
                 _total_cash_kwd += r["Available Cash"] * _rate
             else:
@@ -15305,14 +15306,12 @@ def ui_portfolio_analysis():
 
     if overall_total_cost > 0:
         overall_total_pnl_pct = overall_total_pnl / overall_total_cost
-        overall_dividend_yield = overall_total_cash_div / overall_total_cost
         
         # Calculate performance metrics (Equity Only)
         mv_change_pct = ((overall_total_mv - overall_total_cost) / overall_total_cost * 100)
         unreal_change_pct = (overall_total_unreal / overall_total_cost * 100)
-        realized_change_pct = (overall_total_realized / overall_total_cost * 100) if overall_total_cost > 0 else 0
         
-        col1, col2, col3, col4, col5, col6, col7, col8 = st.columns(8)
+        col1, col2, col3, col4, col5, col6 = st.columns(6)
         with col1:
             kpi_card("Total Cost", fmt_money(overall_total_cost, "KWD"))
         with col2:
@@ -15324,15 +15323,11 @@ def ui_portfolio_analysis():
         with col4:
             kpi_card("Unrealized P/L", fmt_money(overall_total_unreal, "KWD"), f"▲ {unreal_change_pct:.2f}%")
         with col5:
-            kpi_card("Realized P/L", fmt_money(overall_total_realized, "KWD"), f"▲ {realized_change_pct:.2f}%")
-        with col6:
-            kpi_card("Cash Dividends", fmt_money(overall_total_cash_div, "KWD"), "Income received")
-        with col7:
             kpi_card("Total PNL", fmt_money(overall_total_pnl, "KWD"), f"▲ {overall_total_pnl_pct:.2%}")
-        with col8:
+        with col6:
             kpi_card("PNL %", pct(overall_total_pnl_pct))
         
-        st.caption(f"💰 Dividend Yield on Cost (overall) = {pct(overall_dividend_yield)} | All values in KWD. USA portfolio converted at USD→KWD rate: {st.session_state.usd_to_kwd:.6f}")
+        st.caption(f"All values in KWD. USA portfolio converted at USD→KWD rate: {st.session_state.usd_to_kwd:.6f}")
     else:
         st.info("No portfolio data available yet.")
     
@@ -15378,12 +15373,10 @@ def ui_portfolio_analysis():
         port_cost = float(df["Total Cost"].sum())
         port_mv = float(df["Market Value"].sum())
         port_unreal = float(df["Unrealized P/L"].sum())
-        port_realized = float(df["Realized P/L"].sum()) if "Realized P/L" in df.columns else 0.0
-        port_cash_div = float(df["Cash Dividends"].sum())
         port_pnl = float(df["Total PNL"].sum())
         port_pnl_pct = (port_pnl / port_cost) if port_cost > 0 else 0.0
         
-        col1, col2, col3, col4, col5, col6 = st.columns(6)
+        col1, col2, col3, col4 = st.columns(4)
         with col1:
             kpi_card("Total Cost", fmt_money(port_cost, portfolio_ccy))
         with col2:
@@ -15391,10 +15384,6 @@ def ui_portfolio_analysis():
         with col3:
             kpi_card("Unrealized P/L", fmt_money(port_unreal, portfolio_ccy))
         with col4:
-            kpi_card("Realized P/L", fmt_money(port_realized, portfolio_ccy))
-        with col5:
-            kpi_card("Cash Dividends", fmt_money(port_cash_div, portfolio_ccy))
-        with col6:
             kpi_card("Total PNL", fmt_money(port_pnl, portfolio_ccy), f"{port_pnl_pct:.2%}")
         
         st.markdown("")  # Spacing
@@ -16687,6 +16676,64 @@ def ui_portfolio_tracker():
                 st.caption("⚠️ This action cannot be undone.")
         else:
             st.info("No snapshots to delete.")
+    
+    # === RECALCULATE ACCUMULATED CASH ===
+    with st.expander("🔄 Recalculate Accumulated Cash", expanded=False):
+        st.caption("""
+        **Accumulated Cash** = Running total of deposit_cash column.
+        
+        Logic: For each snapshot (in date order):
+        - accumulated_cash = deposit_cash + previous_accumulated_cash
+        
+        This also updates Net Gain and ROI % accordingly.
+        """)
+        
+        if st.button("🔄 Recalculate All Snapshots", type="primary", key="recalc_accumulated_cash"):
+            with st.spinner("Recalculating accumulated cash for all snapshots..."):
+                try:
+                    # Get all snapshots for this user, ordered by date ASC
+                    all_snaps = query_df(
+                        "SELECT id, snapshot_date, portfolio_value, beginning_difference, deposit_cash FROM portfolio_snapshots WHERE user_id = ? ORDER BY snapshot_date ASC",
+                        (user_id,)
+                    )
+                    
+                    if all_snaps.empty:
+                        st.warning("No snapshots found to recalculate.")
+                    else:
+                        updated_count = 0
+                        running_accumulated = 0.0  # Start from 0
+                        
+                        for _, snap_row in all_snaps.iterrows():
+                            snap_id = int(snap_row['id'])
+                            beginning_diff = float(snap_row['beginning_difference']) if pd.notna(snap_row['beginning_difference']) else 0.0
+                            deposit_cash = float(snap_row['deposit_cash']) if pd.notna(snap_row['deposit_cash']) else 0.0
+                            
+                            # accumulated_cash = deposit_cash + previous_accumulated_cash
+                            running_accumulated += deposit_cash
+                            correct_accumulated = running_accumulated
+                            
+                            # Calculate Net Gain = Beginning Diff - Accumulated Cash
+                            new_net_gain = beginning_diff - correct_accumulated
+                            
+                            # Calculate ROI % = Net Gain / Accumulated Cash * 100
+                            new_roi = (new_net_gain / correct_accumulated * 100) if correct_accumulated > 0 else 0.0
+                            
+                            # Update the snapshot
+                            exec_sql("""
+                                UPDATE portfolio_snapshots 
+                                SET accumulated_cash = ?, net_gain = ?, roi_percent = ?
+                                WHERE id = ?
+                            """, (float(correct_accumulated), float(new_net_gain), float(new_roi), snap_id))
+                            
+                            updated_count += 1
+                        
+                        st.success(f"✅ Recalculated {updated_count} snapshots!")
+                        time.sleep(1)
+                        st.rerun()
+                        
+                except Exception as e:
+                    st.error(f"Error: {e}")
+                    logger.error(f"Error recalculating accumulated cash: {e}")
     
     # View Mode Toggle (like Trading Section)
     col_mode, col_spacer = st.columns([2, 3])
