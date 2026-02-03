@@ -151,6 +151,7 @@ import uuid
 import html
 import warnings
 import re
+import pandas as pd
 
 # Re-import logging for rest of app (already configured above)
 
@@ -278,6 +279,2038 @@ def validate_stock_symbol(symbol: str, allow_new: bool = True) -> tuple[bool, st
         return False, "Invalid symbol format. Use uppercase letters/numbers (e.g., AAPL, MSFT, NBK.KW)"
     
     return True, ""
+
+
+def normalize_stock_symbol(raw_symbol: str, portfolio: str = 'KFH') -> str:
+    """
+    Normalize a stock symbol using built-in mappings and the symbol_mappings table.
+    
+    This provides automatic resolution of user-entered variations to canonical tickers.
+    E.g., 'agility kuwait' -> 'AGILITY', 'mabanee' -> 'MABANEE', 'AGLTY' -> 'AGILITY'
+    
+    Args:
+        raw_symbol: The raw user input (any case, may include spaces)
+        portfolio: The portfolio context (to determine exchange for new symbols)
+        
+    Returns:
+        Canonical ticker (uppercase, cleaned) or raw_symbol if no mapping found
+    """
+    if not raw_symbol:
+        return ""
+    
+    # Clean the input
+    sym = str(raw_symbol).strip().upper()
+    
+    # =========================================================================
+    # BUILT-IN SYMBOL VARIATIONS (checked BEFORE database lookup for speed)
+    # =========================================================================
+    # These are common variations seen in Excel uploads
+    
+    # Kuwait stock variations
+    KUWAIT_VARIATIONS = {
+        # AGILITY variations
+        'AGLTY': 'AGILITY',
+        'AGILITY PLC': 'AGILITY',
+        'AGILITYPLC': 'AGILITY',
+        'AGILITY KUWAIT': 'AGILITY',
+        'AGILITY.KW': 'AGILITY',
+        
+        # MABANEE variations
+        'MABNEE': 'MABANEE',
+        'MABNE': 'MABANEE',
+        'MABAN': 'MABANEE',
+        'MABANEE.KW': 'MABANEE',
+        
+        # OOREDOO variations
+        'OORED': 'OOREDOO',
+        'OREDOO': 'OOREDOO',
+        'ORODOO': 'OOREDOO',
+        'OOREDOO KUWAIT': 'OOREDOO',
+        'OOREDOO.KW': 'OOREDOO',
+        
+        # HUMANSOFT variations
+        'HUMAN SOFT': 'HUMANSOFT',
+        'H-SOFT': 'HUMANSOFT',
+        'HSOFT': 'HUMANSOFT',
+        'HUMANSOFT.KW': 'HUMANSOFT',
+        
+        # SANAM variations
+        'SANAM BUSINESS': 'SANAM',
+        'SANAM SYS': 'SANAM',
+        'SANAM SYSTEMS': 'SANAM',
+        'SANAM.KW': 'SANAM',
+        
+        # KFH variations
+        'KUWAIT FINANCE HOUSE': 'KFH',
+        'KFH.KW': 'KFH',
+        
+        # ZAIN variations
+        'ZAIN KUWAIT': 'ZAIN',
+        'ZAIN.KW': 'ZAIN',
+        
+        # GFH variations
+        'GFH FINANCIAL': 'GFH',
+        'GFH.BH': 'GFH',
+        
+        # NIH variations
+        'NATIONAL INVESTMENTS': 'NIH',
+        'NIH.KW': 'NIH',
+        
+        # KRE variations
+        'KUWAIT REAL ESTATE': 'KRE',
+        'KRE.KW': 'KRE',
+        
+        # BPCC variations
+        'BOUBYAN PETROCHEMICAL': 'BPCC',
+        'BPCC.KW': 'BPCC',
+        
+        # KIB variations
+        'KUWAIT INTERNATIONAL BANK': 'KIB',
+        'KIB.KW': 'KIB',
+        
+        # MUNSHAAT variations
+        'MUNSHAAT.KW': 'MUNSHAAT',
+        
+        # ALG variations
+        'ALG.KW': 'ALG',
+    }
+    
+    # US stock variations (common typos/variations)
+    US_VARIATIONS = {
+        'INCYTE': 'INCY',
+        'INCYTE CORP': 'INCY',
+        'INCYTE CORPORATION': 'INCY',
+    }
+    
+    # Check built-in variations first (fast, no DB query)
+    if sym in KUWAIT_VARIATIONS:
+        return KUWAIT_VARIATIONS[sym]
+    if sym in US_VARIATIONS:
+        return US_VARIATIONS[sym]
+    
+    # Remove common suffixes and try again
+    for suffix in ['.KW', '.BH', '.US', ' KW', ' BH']:
+        if sym.endswith(suffix):
+            base_sym = sym[:-len(suffix)]
+            if base_sym in KUWAIT_VARIATIONS:
+                return KUWAIT_VARIATIONS[base_sym]
+            # Return the base symbol if it's clean
+            if base_sym.isalpha():
+                sym = base_sym
+                break
+    
+    # =========================================================================
+    # DATABASE LOOKUP (for user-defined mappings)
+    # =========================================================================
+    try:
+        conn = get_conn()
+        cursor = conn.cursor()
+        
+        # Check symbol_mappings table first (case-insensitive match via COLLATE NOCASE)
+        db_execute(cursor, """
+            SELECT canonical_ticker FROM symbol_mappings 
+            WHERE user_input = ? COLLATE NOCASE
+        """, (raw_symbol,))
+        result = cursor.fetchone()
+        
+        if result:
+            canonical = result[0]
+            conn.close()
+            return canonical
+        
+        # Check stocks_master table directly (case-insensitive)
+        db_execute(cursor, """
+            SELECT ticker FROM stocks_master 
+            WHERE UPPER(ticker) = ? OR UPPER(name) = ?
+        """, (sym, sym))
+        result = cursor.fetchone()
+        
+        if result:
+            canonical = result[0]
+            conn.close()
+            return canonical
+        
+        # Check securities_master table (existing fallback)
+        db_execute(cursor, """
+            SELECT ticker FROM securities_master 
+            WHERE UPPER(ticker) = ? OR UPPER(name) = ?
+        """, (sym, sym))
+        result = cursor.fetchone()
+        
+        if result:
+            canonical = result[0]
+            conn.close()
+            return canonical
+            
+        conn.close()
+        
+    except Exception as e:
+        logger.debug(f"Error normalizing symbol '{raw_symbol}': {e}")
+    
+    # Fallback: return cleaned uppercase version
+    return sym
+
+
+def fix_transaction_symbols(transactions_df: pd.DataFrame, portfolio: str = 'KFH') -> pd.DataFrame:
+    """
+    Normalize ALL symbol variations in a transaction DataFrame before upload.
+    
+    This is the PRIMARY ENTRY POINT for symbol normalization during uploads.
+    Call this on your DataFrame BEFORE inserting into the database.
+    
+    Args:
+        transactions_df: DataFrame with stock_symbol or symbol column
+        portfolio: Portfolio context for normalization
+        
+    Returns:
+        DataFrame with normalized symbols
+    """
+    fixed_df = transactions_df.copy()
+    
+    # Normalize stock_symbol column
+    if 'stock_symbol' in fixed_df.columns:
+        fixed_df['stock_symbol'] = fixed_df['stock_symbol'].apply(
+            lambda x: normalize_stock_symbol(str(x), portfolio) if pd.notna(x) and str(x).strip() else ""
+        )
+    
+    # Also fix 'symbol' column if present
+    if 'symbol' in fixed_df.columns:
+        fixed_df['symbol'] = fixed_df['symbol'].apply(
+            lambda x: normalize_stock_symbol(str(x), portfolio) if pd.notna(x) and str(x).strip() else ""
+        )
+    
+    # Also fix 'ticker' column if present
+    if 'ticker' in fixed_df.columns:
+        fixed_df['ticker'] = fixed_df['ticker'].apply(
+            lambda x: normalize_stock_symbol(str(x), portfolio) if pd.notna(x) and str(x).strip() else ""
+        )
+    
+    return fixed_df
+
+
+def upload_transactions_fixed(
+    user_id: int, 
+    excel_file, 
+    portfolio_id: int,
+    stock_symbol: str = None,
+    debug_log: list = None
+) -> dict:
+    """
+    FIXED UPLOAD HANDLER - Handles all symbol/date/data issues.
+    
+    This is the COMPLETE upload handler that:
+    1. Reads Excel file
+    2. Fixes dates (critical for position calculation)
+    3. Normalizes symbols (handles AGLTY -> AGILITY, MABNEE -> MABANEE, etc.)
+    4. Fixes zero-share bonus transactions
+    5. Fixes missing purchase cost
+    6. Soft-deletes previous uploads from same file (preserves manual entries)
+    7. Inserts fixed transactions
+    8. Refreshes position snapshots
+    
+    Args:
+        user_id: User ID
+        excel_file: File object or path to Excel file
+        portfolio_id: Portfolio ID (KFH=1, BBYN=2, USA=3)
+        stock_symbol: Optional - if provided, all transactions go to this symbol
+        debug_log: Optional list to append debug messages to
+        
+    Returns:
+        Dict with 'success', 'uploaded', 'errors', 'soft_deleted', 'debug_log'
+    """
+    if debug_log is None:
+        debug_log = []
+    
+    result = {
+        'success': False,
+        'uploaded': 0,
+        'soft_deleted': 0,
+        'errors': [],
+        'debug_log': debug_log
+    }
+    
+    try:
+        # 1. Read Excel
+        debug_log.append(f"[UPLOAD] Starting fixed upload for user={user_id}, portfolio={portfolio_id}")
+        
+        if hasattr(excel_file, 'read'):
+            # File-like object
+            df = pd.read_excel(excel_file)
+            filename = getattr(excel_file, 'name', 'upload')
+        else:
+            # File path
+            df = pd.read_excel(excel_file)
+            filename = str(excel_file).split('/')[-1].split('\\')[-1]
+        
+        if df.empty:
+            result['errors'].append("Excel file is empty")
+            return result
+        
+        # Normalize column names
+        df.columns = [str(c).strip().lower().replace(' ', '_') for c in df.columns]
+        debug_log.append(f"[UPLOAD] Rows: {len(df)}, Columns: {list(df.columns)}")
+        
+        # Map portfolio ID to name
+        portfolio_map = {1: 'KFH', 2: 'BBYN', 3: 'USA'}
+        portfolio_name = portfolio_map.get(portfolio_id, 'KFH')
+        
+        # 2. FIX DATES FIRST (critical for position calculation)
+        date_col = None
+        for col in ['txn_date', 'date', 'trade_date']:
+            if col in df.columns:
+                date_col = col
+                break
+        
+        if date_col:
+            debug_log.append(f"[UPLOAD] Found date column: {date_col}")
+            df['txn_date'] = df[date_col].apply(_parse_date)
+        else:
+            # No date column - use today
+            df['txn_date'] = time.strftime('%Y-%m-%d')
+            debug_log.append("[UPLOAD] No date column found, using today's date")
+        
+        # 3. FIX SYMBOLS (primary fix for variations)
+        symbol_col = None
+        for col in ['stock_symbol', 'symbol', 'ticker']:
+            if col in df.columns:
+                symbol_col = col
+                break
+        
+        if stock_symbol:
+            # All transactions go to specified symbol
+            df['stock_symbol'] = stock_symbol
+            debug_log.append(f"[UPLOAD] Using fixed symbol: {stock_symbol}")
+        elif symbol_col:
+            # Normalize each symbol
+            df['stock_symbol'] = df[symbol_col].apply(
+                lambda x: normalize_stock_symbol(str(x).strip(), portfolio_name) if pd.notna(x) else ''
+            )
+            debug_log.append(f"[UPLOAD] Normalized symbols from column: {symbol_col}")
+            
+            # Log first few symbol normalizations
+            for i, row in df.head(3).iterrows():
+                raw = row.get(symbol_col) if symbol_col else ''
+                normalized = row.get('stock_symbol', '')
+                debug_log.append(f"  [ROW {i+2}] symbol: {raw!r} -> {normalized}")
+        else:
+            result['errors'].append("No symbol/ticker column found in Excel")
+            return result
+        
+        # 4. EXTRACT TXN_TYPE
+        type_col = None
+        for col in ['txn_type', 'type', 'side', 'transaction_type']:
+            if col in df.columns:
+                type_col = col
+                break
+        
+        if type_col:
+            df['txn_type'] = df[type_col].apply(lambda x: str(x).strip().title() if pd.notna(x) else 'Buy')
+        else:
+            df['txn_type'] = 'Buy'
+            debug_log.append("[UPLOAD] No txn_type column found, defaulting to Buy")
+        
+        # 5. EXTRACT SHARES
+        shares_col = None
+        for col in ['shares', 'quantity', 'qty']:
+            if col in df.columns:
+                shares_col = col
+                break
+        
+        if shares_col:
+            df['shares'] = pd.to_numeric(df[shares_col], errors='coerce').fillna(0)
+        else:
+            df['shares'] = 0
+            debug_log.append("[UPLOAD] No shares column found")
+        
+        # 6. EXTRACT BONUS_SHARES
+        bonus_col = None
+        for col in ['bonus_shares', 'bonus']:
+            if col in df.columns:
+                bonus_col = col
+                break
+        
+        if bonus_col:
+            df['bonus_shares'] = pd.to_numeric(df[bonus_col], errors='coerce').fillna(0)
+        else:
+            df['bonus_shares'] = 0
+        
+        # 7. FIX ZERO-SHARE BONUS TRANSACTIONS
+        # If bonus_shares > 0 but shares == 0, treat as Buy with bonus shares
+        mask_bonus = (df['bonus_shares'] > 0) & (df['shares'] == 0)
+        if mask_bonus.any():
+            count = mask_bonus.sum()
+            df.loc[mask_bonus, 'shares'] = df.loc[mask_bonus, 'bonus_shares']
+            df.loc[mask_bonus, 'txn_type'] = 'Buy'  # Must be Buy to add shares
+            debug_log.append(f"[UPLOAD] Fixed {count} zero-share bonus transactions")
+        
+        # 8. EXTRACT COSTS/VALUES
+        purchase_col = None
+        for col in ['purchase_cost', 'buy_cost', 'cost', 'amount']:
+            if col in df.columns:
+                purchase_col = col
+                break
+        
+        if purchase_col:
+            df['purchase_cost'] = pd.to_numeric(df[purchase_col], errors='coerce').fillna(0)
+        else:
+            df['purchase_cost'] = 0
+        
+        sell_col = None
+        for col in ['sell_value', 'proceeds', 'sale_value']:
+            if col in df.columns:
+                sell_col = col
+                break
+        
+        if sell_col:
+            df['sell_value'] = pd.to_numeric(df[sell_col], errors='coerce').fillna(0)
+        else:
+            df['sell_value'] = 0
+        
+        # 9. FIX MISSING PURCHASE COST for buys with price
+        price_col = None
+        for col in ['price', 'unit_price', 'avg_price']:
+            if col in df.columns:
+                price_col = col
+                break
+        
+        if price_col:
+            df['price'] = pd.to_numeric(df[price_col], errors='coerce').fillna(0)
+            
+            # If purchase_cost is 0 but we have price and shares, calculate it
+            mask_missing_cost = (df['txn_type'] == 'Buy') & (df['purchase_cost'] == 0) & (df['price'] > 0) & (df['shares'] > 0)
+            if mask_missing_cost.any():
+                df.loc[mask_missing_cost, 'purchase_cost'] = (
+                    df.loc[mask_missing_cost, 'shares'] * df.loc[mask_missing_cost, 'price']
+                )
+                debug_log.append(f"[UPLOAD] Calculated purchase_cost for {mask_missing_cost.sum()} rows from price*shares")
+        
+        # 10. EXTRACT OTHER FIELDS
+        cash_div_col = None
+        for col in ['cash_dividend', 'dividend']:
+            if col in df.columns:
+                cash_div_col = col
+                break
+        
+        if cash_div_col:
+            df['cash_dividend'] = pd.to_numeric(df[cash_div_col], errors='coerce').fillna(0)
+        else:
+            df['cash_dividend'] = 0
+        
+        reinv_col = None
+        for col in ['reinvested_dividend', 'reinvested']:
+            if col in df.columns:
+                reinv_col = col
+                break
+        
+        if reinv_col:
+            df['reinvested_dividend'] = pd.to_numeric(df[reinv_col], errors='coerce').fillna(0)
+        else:
+            df['reinvested_dividend'] = 0
+        
+        fees_col = None
+        for col in ['fees', 'commission', 'brokerage']:
+            if col in df.columns:
+                fees_col = col
+                break
+        
+        if fees_col:
+            df['fees'] = pd.to_numeric(df[fees_col], errors='coerce').fillna(0)
+        else:
+            df['fees'] = 0
+        
+        # 11. SOFT DELETE PREVIOUS UPLOADS (preserve manual entries)
+        conn = get_conn()
+        cur = conn.cursor()
+        
+        # Only delete previous uploads from SAME file (not manual entries)
+        db_execute(cur, """
+            UPDATE transactions
+            SET is_deleted = 1, deleted_at = ?, deleted_by = ?
+            WHERE user_id = ?
+            AND source = 'UPLOAD'
+            AND source_reference LIKE ?
+            AND (is_deleted = 0 OR is_deleted IS NULL)
+        """, (int(time.time()), user_id, user_id, f"{filename}%"))
+        
+        soft_deleted = cur.rowcount
+        if soft_deleted > 0:
+            debug_log.append(f"[UPLOAD] Soft-deleted {soft_deleted} previous entries from '{filename}'")
+        result['soft_deleted'] = soft_deleted
+        
+        # 11b. AUTO-CREATE STOCKS ENTRIES (critical for Trading Section display)
+        # Get unique symbols from the upload and ensure they exist in stocks table
+        unique_symbols = df['stock_symbol'].dropna().unique()
+        stocks_created = 0
+        
+        # Currency mapping
+        portfolio_currency = {'KFH': 'KWD', 'BBYN': 'KWD', 'USA': 'USD'}
+        currency = portfolio_currency.get(portfolio_name, 'KWD')
+        
+        for symbol in unique_symbols:
+            if not symbol:
+                continue
+            # Check if stock exists
+            db_execute(cur, "SELECT id FROM stocks WHERE symbol = ? AND user_id = ?", (symbol, user_id))
+            if not cur.fetchone():
+                # Create stock entry
+                try:
+                    db_execute(cur, """
+                        INSERT INTO stocks (symbol, name, current_price, portfolio, currency, user_id)
+                        VALUES (?, ?, 0, ?, ?, ?)
+                    """, (symbol, symbol, portfolio_name, currency, user_id))
+                    stocks_created += 1
+                except Exception as e:
+                    debug_log.append(f"[UPLOAD] Warning: Could not create stock {symbol}: {e}")
+        
+        if stocks_created > 0:
+            debug_log.append(f"[UPLOAD] Auto-created {stocks_created} stock entries")
+        
+        # 12. INSERT FIXED TRANSACTIONS
+        current_fx = get_current_fx_rate()
+        inserted = 0
+        
+        for idx, row in df.iterrows():
+            try:
+                # Skip invalid rows
+                symbol = row.get('stock_symbol', '')
+                txn_date = row.get('txn_date', '')
+                txn_type = row.get('txn_type', '')
+                
+                if not symbol or not txn_date:
+                    result['errors'].append(f"Row {idx+2}: Missing symbol or date")
+                    continue
+                
+                if txn_type not in ['Buy', 'Sell']:
+                    result['errors'].append(f"Row {idx+2}: Invalid txn_type '{txn_type}'")
+                    continue
+                
+                # Source reference with timestamp for uniqueness
+                source_ref = f"{filename}:row{idx+2}:{int(time.time())}"
+                
+                db_execute(cur, """
+                    INSERT INTO transactions (
+                        user_id, portfolio, stock_symbol, txn_date, txn_type,
+                        shares, purchase_cost, sell_value, cash_dividend,
+                        bonus_shares, reinvested_dividend, fees,
+                        category, fx_rate_at_txn,
+                        source, source_reference, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'portfolio', ?, 'UPLOAD', ?, ?)
+                """, (
+                    user_id,
+                    portfolio_name,
+                    symbol,
+                    txn_date,
+                    txn_type,
+                    float(row.get('shares', 0) or 0),
+                    float(row.get('purchase_cost', 0) or 0),
+                    float(row.get('sell_value', 0) or 0),
+                    float(row.get('cash_dividend', 0) or 0),
+                    float(row.get('bonus_shares', 0) or 0),
+                    float(row.get('reinvested_dividend', 0) or 0),
+                    float(row.get('fees', 0) or 0),
+                    current_fx,
+                    source_ref,
+                    int(time.time())
+                ))
+                inserted += 1
+                
+            except Exception as e:
+                result['errors'].append(f"Row {idx+2}: {str(e)}")
+        
+        conn.commit()
+        conn.close()
+        
+        result['uploaded'] = inserted
+        result['success'] = inserted > 0
+        debug_log.append(f"[UPLOAD COMPLETE] Inserted {inserted} transactions, {len(result['errors'])} errors")
+        
+        # 13. REFRESH POSITION SNAPSHOTS (critical!)
+        if inserted > 0:
+            try:
+                refresh_result = refresh_all_position_snapshots(user_id)
+                debug_log.append(f"[UPLOAD] Refreshed position snapshots: {refresh_result}")
+            except Exception as e:
+                debug_log.append(f"[UPLOAD] Warning: Failed to refresh snapshots: {e}")
+        
+        return result
+        
+    except Exception as e:
+        result['errors'].append(str(e))
+        debug_log.append(f"[UPLOAD ERROR] {str(e)}")
+        logger.error(f"upload_transactions_fixed error: {e}")
+        return result
+
+
+def add_symbol_mapping(user_input: str, canonical_ticker: str, stock_id: int = None) -> bool:
+    """
+    Add a new symbol mapping to the symbol_mappings table.
+    
+    Args:
+        user_input: The variation (e.g., 'agility kuwait', 'AGLTY')
+        canonical_ticker: The canonical ticker (e.g., 'AGILITY')
+        stock_id: Optional reference to stocks_master.id
+        
+    Returns:
+        True if successful, False otherwise
+    """
+    if not user_input or not canonical_ticker:
+        return False
+        
+    try:
+        conn = get_conn()
+        cursor = conn.cursor()
+        ts = int(time.time())
+        
+        db_execute(cursor, """
+            INSERT OR REPLACE INTO symbol_mappings 
+            (user_input, canonical_ticker, stock_id, created_at)
+            VALUES (?, ?, ?, ?)
+        """, (user_input.strip(), canonical_ticker.strip().upper(), stock_id, ts))
+        
+        conn.commit()
+        conn.close()
+        return True
+        
+    except Exception as e:
+        logger.warning(f"Failed to add symbol mapping: {e}")
+        return False
+
+
+# ============================================================================
+# PHASE 2: CASH FLOW RECONCILIATION
+# ============================================================================
+
+# Valid cash flow types
+CASH_FLOW_TYPES = [
+    'DEPOSIT',           # Cash deposited into account
+    'WITHDRAWAL',        # Cash withdrawn from account
+    'DIVIDEND_RECEIVED', # Dividend payment received
+    'SALE_PROCEEDS',     # Cash from selling stocks
+    'PURCHASE_PAYMENT',  # Cash paid to buy stocks
+    'FEE',               # Broker fees, commissions
+    'TRANSFER_IN',       # Transfer from another account
+    'TRANSFER_OUT',      # Transfer to another account
+    'INTEREST',          # Interest earned
+    'TAX',               # Tax payment
+    'ADJUSTMENT',        # Manual adjustment
+]
+
+
+def record_cash_flow(
+    user_id: int,
+    account_id: int,
+    flow_type: str,
+    amount: float,
+    flow_date: str,
+    currency: str = 'KWD',
+    related_txn_id: int = None,
+    description: str = None
+) -> int:
+    """
+    Record a cash flow entry for an external account.
+    
+    Cash flows track all money movements:
+    - DEPOSIT/WITHDRAWAL: Direct cash movements
+    - DIVIDEND_RECEIVED: Cash dividends from stocks
+    - SALE_PROCEEDS: Cash received from selling stocks (positive)
+    - PURCHASE_PAYMENT: Cash spent buying stocks (negative)
+    - FEE: Broker fees (negative)
+    
+    Args:
+        user_id: User ID
+        account_id: External account ID (from external_accounts table)
+        flow_type: One of CASH_FLOW_TYPES
+        amount: Amount (positive for inflows, negative for outflows)
+        flow_date: Date of flow (ISO format: YYYY-MM-DD)
+        currency: Currency code (default: KWD)
+        related_txn_id: Optional link to transactions.id
+        description: Optional description
+        
+    Returns:
+        The new cash_flows.id, or -1 on error
+    """
+    if flow_type not in CASH_FLOW_TYPES:
+        logger.warning(f"Invalid flow type: {flow_type}")
+        return -1
+    
+    try:
+        conn = get_conn()
+        cursor = conn.cursor()
+        ts = int(time.time())
+        
+        db_execute(cursor, """
+            INSERT INTO cash_flows 
+            (user_id, account_id, flow_type, amount, currency, related_txn_id, flow_date, description, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (user_id, account_id, flow_type, amount, currency, related_txn_id, flow_date, description, ts))
+        
+        # Get the inserted ID
+        if is_postgres():
+            cursor.execute("SELECT lastval()")
+        else:
+            cursor.execute("SELECT last_insert_rowid()")
+        result = cursor.fetchone()
+        new_id = result[0] if result else -1
+        
+        conn.commit()
+        conn.close()
+        return new_id
+        
+    except Exception as e:
+        logger.warning(f"Failed to record cash flow: {e}")
+        return -1
+
+
+def get_account_cash_flows(user_id: int, account_id: int = None, start_date: str = None, end_date: str = None) -> pd.DataFrame:
+    """
+    Get cash flows for a user's accounts.
+    
+    Args:
+        user_id: User ID
+        account_id: Optional filter by specific account
+        start_date: Optional start date filter (ISO format)
+        end_date: Optional end date filter (ISO format)
+        
+    Returns:
+        DataFrame with cash flows
+    """
+    query = """
+        SELECT cf.id, cf.account_id, ea.name as account_name, 
+               cf.flow_type, cf.amount, cf.currency, 
+               cf.flow_date, cf.description, cf.related_txn_id, cf.reconciled
+        FROM cash_flows cf
+        LEFT JOIN external_accounts ea ON cf.account_id = ea.id
+        WHERE cf.user_id = ?
+    """
+    params = [user_id]
+    
+    if account_id:
+        query += " AND cf.account_id = ?"
+        params.append(account_id)
+    
+    if start_date:
+        query += " AND cf.flow_date >= ?"
+        params.append(start_date)
+    
+    if end_date:
+        query += " AND cf.flow_date <= ?"
+        params.append(end_date)
+    
+    query += " ORDER BY cf.flow_date DESC, cf.id DESC"
+    
+    return query_df(query, tuple(params))
+
+
+def reconcile_accounts(user_id: int) -> pd.DataFrame:
+    """
+    Reconcile external accounts by comparing system balance vs calculated balance.
+    
+    This performs the reconciliation query:
+    - System Balance: current_balance from external_accounts (user-entered)
+    - Calculated Balance: SUM of all cash_flows for that account
+    - Variance: Difference (should be 0 if fully reconciled)
+    
+    Args:
+        user_id: User ID
+        
+    Returns:
+        DataFrame with reconciliation results
+    """
+    query = """
+        SELECT 
+            ea.id as account_id,
+            ea.name as account_name,
+            ea.currency,
+            ea.current_balance as system_balance,
+            COALESCE((
+                SELECT SUM(amount) 
+                FROM cash_flows 
+                WHERE account_id = ea.id AND user_id = ?
+            ), 0) as calculated_balance,
+            ea.current_balance - COALESCE((
+                SELECT SUM(amount) 
+                FROM cash_flows 
+                WHERE account_id = ea.id AND user_id = ?
+            ), 0) as variance,
+            ea.last_reconciled_date
+        FROM external_accounts ea
+        WHERE ea.user_id = ?
+        ORDER BY ea.name
+    """
+    return query_df(query, (user_id, user_id, user_id))
+
+
+def auto_generate_cash_flows_from_transactions(user_id: int) -> dict:
+    """
+    Auto-generate cash flow entries from existing transactions.
+    
+    This analyzes transactions and creates corresponding cash_flows:
+    - Buy transactions -> PURCHASE_PAYMENT (negative)
+    - Sell transactions -> SALE_PROCEEDS (positive)
+    - Dividends -> DIVIDEND_RECEIVED (positive)
+    - Fees -> FEE (negative)
+    
+    Returns:
+        Dict with stats: flows_created, errors
+    """
+    stats = {'flows_created': 0, 'skipped': 0, 'errors': []}
+    
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        ts = int(time.time())
+        
+        # Get account IDs mapping by portfolio
+        db_execute(cur, """
+            SELECT ea.id, p.name as portfolio_name, ea.currency
+            FROM external_accounts ea
+            JOIN portfolios p ON ea.portfolio_id = p.id
+            WHERE ea.user_id = ?
+        """, (user_id,))
+        account_map = {row[1]: {'id': row[0], 'currency': row[2]} for row in cur.fetchall()}
+        
+        if not account_map:
+            stats['errors'].append("No external accounts found. Run migration first.")
+            conn.close()
+            return stats
+        
+        # Get transactions that don't have linked cash flows
+        soft_del = _soft_delete_filter()
+        db_execute(cur, f"""
+            SELECT t.id, t.portfolio, t.txn_type, t.txn_date, 
+                   t.purchase_cost, t.sell_value, t.cash_dividend, t.fees, t.stock_symbol
+            FROM transactions t
+            WHERE t.user_id = ? {soft_del}
+            AND NOT EXISTS (
+                SELECT 1 FROM cash_flows cf WHERE cf.related_txn_id = t.id
+            )
+            ORDER BY t.txn_date
+        """, (user_id,))
+        
+        transactions = cur.fetchall()
+        
+        for txn in transactions:
+            txn_id, portfolio, txn_type, txn_date, purchase_cost, sell_value, cash_div, fees, symbol = txn
+            
+            account_info = account_map.get(portfolio)
+            if not account_info:
+                stats['skipped'] += 1
+                continue
+            
+            account_id = account_info['id']
+            currency = account_info['currency']
+            
+            # Generate cash flows based on transaction type
+            flows_to_create = []
+            
+            if txn_type == 'Buy' and purchase_cost and float(purchase_cost) > 0:
+                # Purchase payment (outflow - negative)
+                flows_to_create.append({
+                    'flow_type': 'PURCHASE_PAYMENT',
+                    'amount': -abs(float(purchase_cost)),
+                    'description': f"Purchase: {symbol}"
+                })
+            
+            if txn_type == 'Sell' and sell_value and float(sell_value) > 0:
+                # Sale proceeds (inflow - positive)
+                flows_to_create.append({
+                    'flow_type': 'SALE_PROCEEDS',
+                    'amount': abs(float(sell_value)),
+                    'description': f"Sale: {symbol}"
+                })
+            
+            if cash_div and float(cash_div) > 0:
+                # Dividend received (inflow - positive)
+                flows_to_create.append({
+                    'flow_type': 'DIVIDEND_RECEIVED',
+                    'amount': abs(float(cash_div)),
+                    'description': f"Dividend: {symbol}"
+                })
+            
+            if fees and float(fees) > 0:
+                # Fee (outflow - negative)
+                flows_to_create.append({
+                    'flow_type': 'FEE',
+                    'amount': -abs(float(fees)),
+                    'description': f"Fee: {symbol}"
+                })
+            
+            # Insert all flows for this transaction
+            for flow in flows_to_create:
+                try:
+                    db_execute(cur, """
+                        INSERT INTO cash_flows 
+                        (user_id, account_id, flow_type, amount, currency, related_txn_id, flow_date, description, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (user_id, account_id, flow['flow_type'], flow['amount'], currency, txn_id, txn_date, flow['description'], ts))
+                    stats['flows_created'] += 1
+                except Exception as e:
+                    stats['errors'].append(f"Txn {txn_id}: {e}")
+        
+        # Also generate flows from cash_deposits table
+        db_execute(cur, """
+            SELECT cd.id, cd.portfolio, cd.deposit_date, cd.amount, cd.currency, cd.description
+            FROM cash_deposits cd
+            WHERE cd.user_id = ?
+            AND NOT EXISTS (
+                SELECT 1 FROM cash_flows cf 
+                WHERE cf.description LIKE 'Deposit ID:%' || cd.id || '%'
+            )
+        """, (user_id,))
+        
+        deposits = cur.fetchall()
+        for dep in deposits:
+            dep_id, portfolio, dep_date, amount, currency, desc = dep
+            account_info = account_map.get(portfolio)
+            if not account_info:
+                continue
+            
+            try:
+                db_execute(cur, """
+                    INSERT INTO cash_flows 
+                    (user_id, account_id, flow_type, amount, currency, flow_date, description, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (user_id, account_info['id'], 'DEPOSIT', abs(float(amount)), currency or account_info['currency'], 
+                      dep_date, f"Deposit ID:{dep_id} - {desc or 'Cash Deposit'}", ts))
+                stats['flows_created'] += 1
+            except Exception as e:
+                stats['errors'].append(f"Deposit {dep_id}: {e}")
+        
+        conn.commit()
+        conn.close()
+        
+    except Exception as e:
+        stats['errors'].append(str(e))
+    
+    return stats
+
+
+def update_account_balance(user_id: int, account_id: int, new_balance: float, reconcile_date: str = None) -> bool:
+    """
+    Update an external account's current balance and mark as reconciled.
+    
+    Args:
+        user_id: User ID
+        account_id: External account ID
+        new_balance: New balance amount
+        reconcile_date: Date of reconciliation (defaults to today)
+        
+    Returns:
+        True if successful
+    """
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        
+        if not reconcile_date:
+            reconcile_date = date.today().isoformat()
+        
+        db_execute(cur, """
+            UPDATE external_accounts 
+            SET current_balance = ?, last_reconciled_date = ?
+            WHERE id = ? AND user_id = ?
+        """, (new_balance, reconcile_date, account_id, user_id))
+        
+        conn.commit()
+        conn.close()
+        return True
+        
+    except Exception as e:
+        logger.warning(f"Failed to update account balance: {e}")
+        return False
+
+
+# ============================================================================
+# STEP 1: DATA AUDIT & PRE-UPLOAD VALIDATION LAYER
+# ============================================================================
+
+def validate_stock_upload(raw_data: list, user_id: int = None) -> dict:
+    """
+    Pre-upload validation layer for stock/transaction data.
+    
+    Validates each row against master data before import:
+    1. Match by ISIN first (most reliable)
+    2. If no ISIN, match by ticker + exchange
+    3. Try symbol_mappings for known variations
+    4. If still no match, flag for manual review
+    
+    Args:
+        raw_data: List of dicts with keys like 'ticker', 'isin', 'exchange', 'stock_symbol', etc.
+        user_id: Optional user ID for user-specific lookups
+        
+    Returns:
+        {
+            'validated': [...],  # Rows with stock_id resolved
+            'errors': [...],     # Rows needing manual review
+            'stats': {...}       # Summary statistics
+        }
+    """
+    validated = []
+    errors = []
+    stats = {
+        'total_rows': len(raw_data),
+        'matched_by_isin': 0,
+        'matched_by_ticker': 0,
+        'matched_by_mapping': 0,
+        'matched_by_case': 0,
+        'auto_created': 0,
+        'unresolved': 0
+    }
+    
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        
+        for idx, row in enumerate(raw_data):
+            row_num = idx + 1
+            stock_id = None
+            match_method = None
+            
+            # Extract possible identifiers from row
+            isin = str(row.get('isin', '') or '').strip().upper()
+            ticker = str(row.get('ticker') or row.get('stock_symbol') or row.get('symbol', '')).strip()
+            exchange = str(row.get('exchange', 'KSE')).strip().upper()
+            portfolio = str(row.get('portfolio', 'KFH')).strip()
+            
+            # Infer exchange from portfolio
+            if portfolio == 'USA':
+                exchange = 'NASDAQ' if exchange == 'KSE' else exchange
+            
+            # 1. Match by ISIN first (most reliable)
+            if isin and len(isin) == 12:
+                db_execute(cur, "SELECT id, ticker FROM stocks_master WHERE isin = ?", (isin,))
+                result = cur.fetchone()
+                if result:
+                    stock_id = result[0]
+                    ticker = result[1]  # Use canonical ticker
+                    match_method = 'isin'
+                    stats['matched_by_isin'] += 1
+            
+            # 2. If no ISIN match, try ticker + exchange
+            if not stock_id and ticker:
+                # First try exact match
+                db_execute(cur, """
+                    SELECT id, ticker FROM stocks_master 
+                    WHERE ticker = ? AND exchange = ?
+                """, (ticker.upper(), exchange))
+                result = cur.fetchone()
+                if result:
+                    stock_id = result[0]
+                    ticker = result[1]
+                    match_method = 'ticker'
+                    stats['matched_by_ticker'] += 1
+            
+            # 3. Try symbol_mappings for known variations
+            if not stock_id and ticker:
+                db_execute(cur, """
+                    SELECT sm.stock_id, sm.canonical_ticker 
+                    FROM symbol_mappings sm 
+                    WHERE sm.user_input = ? COLLATE NOCASE
+                """, (ticker,))
+                result = cur.fetchone()
+                if result and result[0]:
+                    stock_id = result[0]
+                    ticker = result[1]
+                    match_method = 'mapping'
+                    stats['matched_by_mapping'] += 1
+                elif result:
+                    # Mapping exists but no stock_id, try to find by canonical ticker
+                    canonical = result[1]
+                    db_execute(cur, "SELECT id FROM stocks_master WHERE ticker = ?", (canonical,))
+                    sm_result = cur.fetchone()
+                    if sm_result:
+                        stock_id = sm_result[0]
+                        ticker = canonical
+                        match_method = 'mapping'
+                        stats['matched_by_mapping'] += 1
+            
+            # 4. Try case-insensitive ticker match
+            if not stock_id and ticker:
+                db_execute(cur, """
+                    SELECT id, ticker FROM stocks_master 
+                    WHERE UPPER(ticker) = ?
+                """, (ticker.upper(),))
+                result = cur.fetchone()
+                if result:
+                    stock_id = result[0]
+                    ticker = result[1]
+                    match_method = 'case_match'
+                    stats['matched_by_case'] += 1
+                    
+                    # Auto-add mapping for future
+                    if ticker.upper() != row.get('ticker', '').upper():
+                        add_symbol_mapping(row.get('ticker', ''), ticker)
+            
+            # 5. If still no match, flag for review
+            if not stock_id:
+                stats['unresolved'] += 1
+                errors.append({
+                    'row_number': row_num,
+                    'ticker': ticker,
+                    'isin': isin,
+                    'exchange': exchange,
+                    'issue': 'No matching stock found',
+                    'suggested_action': 'Add to stocks_master or correct ticker/ISIN',
+                    'original_data': row
+                })
+            else:
+                # Add stock_id to validated row
+                validated_row = dict(row)
+                validated_row['stock_id'] = stock_id
+                validated_row['canonical_ticker'] = ticker
+                validated_row['match_method'] = match_method
+                validated.append(validated_row)
+        
+        conn.close()
+        
+    except Exception as e:
+        logger.error(f"Validation error: {e}")
+        errors.append({
+            'row_number': 0,
+            'issue': f'Validation system error: {str(e)}',
+            'suggested_action': 'Contact support'
+        })
+    
+    return {
+        'validated': validated,
+        'errors': errors,
+        'stats': stats
+    }
+
+
+def auto_create_missing_stocks(errors: list, user_id: int, auto_create: bool = False) -> dict:
+    """
+    Attempt to auto-create stocks_master entries for unresolved symbols.
+    
+    Args:
+        errors: List of error dicts from validate_stock_upload
+        user_id: User ID
+        auto_create: If True, automatically create entries. If False, just return suggestions.
+        
+    Returns:
+        {
+            'created': [...],    # Successfully created stocks
+            'skipped': [...],    # Skipped (validation failed or already exists)
+            'suggestions': [...] # Suggested entries if auto_create=False
+        }
+    """
+    result = {'created': [], 'skipped': [], 'suggestions': []}
+    
+    if not errors:
+        return result
+    
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        ts = int(time.time())
+        
+        for err in errors:
+            ticker = str(err.get('ticker', '')).strip().upper()
+            exchange = err.get('exchange', 'KSE')
+            isin = err.get('isin', '')
+            original = err.get('original_data', {})
+            
+            if not ticker:
+                result['skipped'].append({'error': err, 'reason': 'No ticker provided'})
+                continue
+            
+            # Validate ticker format
+            is_valid, msg = validate_stock_symbol(ticker, allow_new=True)
+            if not is_valid:
+                result['skipped'].append({'error': err, 'reason': msg})
+                continue
+            
+            # Check if already exists
+            db_execute(cur, "SELECT id FROM stocks_master WHERE ticker = ? AND exchange = ?", (ticker, exchange))
+            if cur.fetchone():
+                result['skipped'].append({'error': err, 'reason': 'Already exists'})
+                continue
+            
+            # Prepare suggestion/creation
+            currency = 'USD' if exchange in ('NASDAQ', 'NYSE', 'AMEX') else 'KWD'
+            country = 'US' if currency == 'USD' else 'KW'
+            name = original.get('stock_name') or original.get('name') or ticker
+            
+            suggestion = {
+                'ticker': ticker,
+                'name': name,
+                'exchange': exchange,
+                'currency': currency,
+                'isin': isin,
+                'country': country
+            }
+            
+            if auto_create:
+                try:
+                    db_execute(cur, """
+                        INSERT INTO stocks_master (ticker, name, exchange, currency, isin, country, status, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?)
+                    """, (ticker, name, exchange, currency, isin or None, country, ts, ts))
+                    
+                    # Get the new ID
+                    db_execute(cur, "SELECT id FROM stocks_master WHERE ticker = ? AND exchange = ?", (ticker, exchange))
+                    new_id = cur.fetchone()[0]
+                    suggestion['stock_id'] = new_id
+                    result['created'].append(suggestion)
+                    
+                except Exception as e:
+                    result['skipped'].append({'error': err, 'reason': str(e)})
+            else:
+                result['suggestions'].append(suggestion)
+        
+        if auto_create:
+            conn.commit()
+        conn.close()
+        
+    except Exception as e:
+        logger.error(f"Auto-create error: {e}")
+    
+    return result
+
+
+def run_data_audit(user_id: int) -> dict:
+    """
+    Run comprehensive data audit to find issues.
+    
+    Checks for:
+    1. Orphaned transactions (no matching stock in stocks_master)
+    2. Positions with zero shares but still OPEN
+    3. Cash flow mismatches
+    4. Unlinked transactions (no cash_flows entry)
+    
+    Args:
+        user_id: User ID to audit
+        
+    Returns:
+        Dict with audit results
+    """
+    audit = {
+        'orphaned_transactions': [],
+        'zero_share_open_positions': [],
+        'cash_flow_mismatches': [],
+        'unlinked_transactions': [],
+        'symbol_summary': [],
+        'is_healthy': True
+    }
+    
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        
+        # 1. Orphaned transactions
+        db_execute(cur, """
+            SELECT t.id, t.stock_symbol, t.portfolio, t.txn_type, t.txn_date
+            FROM transactions t
+            WHERE t.user_id = ?
+            AND t.stock_symbol NOT IN (SELECT ticker FROM stocks_master)
+        """, (user_id,))
+        orphans = cur.fetchall()
+        audit['orphaned_transactions'] = [
+            {'id': r[0], 'symbol': r[1], 'portfolio': r[2], 'type': r[3], 'date': r[4]}
+            for r in orphans
+        ]
+        if orphans:
+            audit['is_healthy'] = False
+        
+        # 2. Zero-share open positions (check position_snapshots if exists)
+        try:
+            db_execute(cur, """
+                SELECT ps.id, sm.ticker, ps.total_shares, ps.status
+                FROM position_snapshots ps
+                LEFT JOIN stocks_master sm ON ps.stock_id = sm.id
+                WHERE ps.user_id = ? AND ps.total_shares = 0 AND ps.status = 'OPEN'
+            """, (user_id,))
+            zero_open = cur.fetchall()
+            audit['zero_share_open_positions'] = [
+                {'id': r[0], 'ticker': r[1], 'shares': r[2], 'status': r[3]}
+                for r in zero_open
+            ]
+        except:
+            pass  # Table may not exist yet
+        
+        # 3. Cash flow mismatches
+        db_execute(cur, """
+            SELECT 
+                ea.id, ea.name, ea.currency, ea.current_balance,
+                COALESCE((SELECT SUM(amount) FROM cash_flows WHERE account_id = ea.id), 0) as calc_balance
+            FROM external_accounts ea
+            WHERE ea.user_id = ?
+        """, (user_id,))
+        for r in cur.fetchall():
+            variance = r[3] - r[4]
+            if abs(variance) > 0.01:
+                audit['cash_flow_mismatches'].append({
+                    'account_id': r[0],
+                    'account_name': r[1],
+                    'currency': r[2],
+                    'system_balance': r[3],
+                    'calculated_balance': r[4],
+                    'variance': variance
+                })
+                audit['is_healthy'] = False
+        
+        # 4. Unlinked transactions
+        db_execute(cur, """
+            SELECT t.id, t.stock_symbol, t.txn_type, t.txn_date
+            FROM transactions t
+            WHERE t.user_id = ?
+            AND NOT EXISTS (SELECT 1 FROM cash_flows cf WHERE cf.related_txn_id = t.id)
+        """, (user_id,))
+        unlinked = cur.fetchall()
+        audit['unlinked_transactions'] = [
+            {'id': r[0], 'symbol': r[1], 'type': r[2], 'date': r[3]}
+            for r in unlinked
+        ]
+        
+        # 5. Symbol summary
+        db_execute(cur, """
+            SELECT stock_symbol, 
+                   SUM(CASE WHEN txn_type='Buy' THEN shares ELSE 0 END) as bought,
+                   SUM(CASE WHEN txn_type='Sell' THEN shares ELSE 0 END) as sold
+            FROM transactions WHERE user_id = ?
+            GROUP BY stock_symbol
+        """, (user_id,))
+        for r in cur.fetchall():
+            net = r[1] - r[2]
+            audit['symbol_summary'].append({
+                'symbol': r[0],
+                'bought': r[1],
+                'sold': r[2],
+                'net': net,
+                'status': 'CLOSED' if abs(net) < 0.001 else 'OPEN'
+            })
+        
+        conn.close()
+        
+    except Exception as e:
+        audit['error'] = str(e)
+        audit['is_healthy'] = False
+    
+    return audit
+
+
+def fix_orphaned_transactions(user_id: int) -> dict:
+    """
+    Attempt to fix orphaned transactions by normalizing symbols.
+    
+    Uses symbol_mappings and case-insensitive matching to resolve orphans.
+    
+    Args:
+        user_id: User ID
+        
+    Returns:
+        Stats dict with fixes applied
+    """
+    stats = {'fixed': 0, 'remaining': [], 'mappings_added': 0}
+    
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        ts = int(time.time())
+        
+        # Get all mappings
+        db_execute(cur, "SELECT user_input, canonical_ticker FROM symbol_mappings")
+        mappings = {row[0].lower(): row[1] for row in cur.fetchall()}
+        
+        # Get orphaned symbols
+        db_execute(cur, """
+            SELECT DISTINCT stock_symbol FROM transactions 
+            WHERE user_id = ? AND stock_symbol NOT IN (SELECT ticker FROM stocks_master)
+        """, (user_id,))
+        orphan_symbols = [row[0] for row in cur.fetchall()]
+        
+        for sym in orphan_symbols:
+            canonical = None
+            
+            # Try mapping
+            canonical = mappings.get(sym.lower())
+            
+            # Try case-insensitive match
+            if not canonical:
+                db_execute(cur, "SELECT ticker FROM stocks_master WHERE UPPER(ticker) = ?", (sym.upper(),))
+                result = cur.fetchone()
+                if result:
+                    canonical = result[0]
+                    # Add mapping for future
+                    db_execute(cur, """
+                        INSERT OR IGNORE INTO symbol_mappings (user_input, canonical_ticker, created_at)
+                        VALUES (?, ?, ?)
+                    """, (sym, canonical, ts))
+                    stats['mappings_added'] += 1
+            
+            if canonical:
+                db_execute(cur, """
+                    UPDATE transactions SET stock_symbol = ?
+                    WHERE stock_symbol = ? AND user_id = ?
+                """, (canonical, sym, user_id))
+                stats['fixed'] += cur.rowcount
+            else:
+                stats['remaining'].append(sym)
+        
+        conn.commit()
+        conn.close()
+        
+    except Exception as e:
+        stats['error'] = str(e)
+    
+    return stats
+
+
+# ============================================================================
+# STEP 3: POSITION CLOSURE LOGIC
+# ============================================================================
+
+def apply_transaction_to_position(user_id: int, txn_id: int, txn_data: dict = None) -> dict:
+    """
+    Apply a transaction and update the position snapshot.
+    
+    This implements proper position state management:
+    - Updates total_shares, total_cost, avg_cost
+    - Calculates realized P&L on sells
+    - Marks position as CLOSED when shares reach 0
+    
+    Args:
+        user_id: User ID
+        txn_id: Transaction ID to apply
+        txn_data: Optional pre-fetched transaction data
+        
+    Returns:
+        New position state dict
+    """
+    result = {
+        'success': False,
+        'position_id': None,
+        'new_state': {},
+        'status_changed': False
+    }
+    
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        ts = int(time.time())
+        
+        # Fetch transaction if not provided
+        if not txn_data:
+            db_execute(cur, """
+                SELECT id, stock_symbol, portfolio, txn_type, txn_date, shares, 
+                       purchase_cost, sell_value, cash_dividend, bonus_shares
+                FROM transactions WHERE id = ? AND user_id = ?
+            """, (txn_id, user_id))
+            row = cur.fetchone()
+            if not row:
+                result['error'] = f"Transaction {txn_id} not found"
+                conn.close()
+                return result
+            
+            txn_data = {
+                'id': row[0], 'stock_symbol': row[1], 'portfolio': row[2],
+                'txn_type': row[3], 'txn_date': row[4], 'shares': row[5] or 0,
+                'purchase_cost': row[6] or 0, 'sell_value': row[7] or 0,
+                'cash_dividend': row[8] or 0, 'bonus_shares': row[9] or 0
+            }
+        
+        symbol = txn_data['stock_symbol']
+        portfolio = txn_data['portfolio']
+        txn_type = txn_data['txn_type']
+        shares = float(txn_data.get('shares', 0))
+        cost = float(txn_data.get('purchase_cost', 0))
+        proceeds = float(txn_data.get('sell_value', 0))
+        dividend = float(txn_data.get('cash_dividend', 0))
+        bonus = float(txn_data.get('bonus_shares', 0))
+        
+        # Get stock_id and portfolio_id
+        db_execute(cur, "SELECT id FROM stocks_master WHERE ticker = ?", (symbol,))
+        stock_row = cur.fetchone()
+        stock_id = stock_row[0] if stock_row else None
+        
+        db_execute(cur, "SELECT id FROM portfolios WHERE user_id = ? AND name = ?", (user_id, portfolio))
+        port_row = cur.fetchone()
+        portfolio_id = port_row[0] if port_row else None
+        
+        # Get current position state (most recent snapshot)
+        db_execute(cur, """
+            SELECT id, total_shares, total_cost, avg_cost, realized_pnl, 
+                   cash_dividends_received, status
+            FROM position_snapshots 
+            WHERE user_id = ? AND stock_symbol = ? AND portfolio_id = ?
+            ORDER BY snapshot_date DESC, id DESC
+            LIMIT 1
+        """, (user_id, symbol, portfolio_id))
+        
+        pos_row = cur.fetchone()
+        
+        if pos_row:
+            # Existing position
+            pos_id = pos_row[0]
+            old_shares = float(pos_row[1] or 0)
+            old_cost = float(pos_row[2] or 0)
+            old_avg = float(pos_row[3] or 0)
+            old_realized = float(pos_row[4] or 0)
+            old_dividends = float(pos_row[5] or 0)
+            old_status = pos_row[6]
+        else:
+            # New position
+            pos_id = None
+            old_shares = 0
+            old_cost = 0
+            old_avg = 0
+            old_realized = 0
+            old_dividends = 0
+            old_status = 'OPEN'
+        
+        # Calculate new state based on transaction type
+        new_shares = old_shares
+        new_cost = old_cost
+        new_realized = old_realized
+        new_dividends = old_dividends
+        
+        if txn_type == 'Buy':
+            new_shares = old_shares + shares + bonus
+            new_cost = old_cost + cost
+        
+        elif txn_type == 'Sell':
+            # Realized P&L = proceeds - (avg_cost * shares_sold)
+            realized_on_sale = proceeds - (old_avg * shares) if old_avg > 0 else proceeds
+            new_shares = old_shares - shares
+            new_realized = old_realized + realized_on_sale
+            # Cost basis reduces proportionally (optional - depends on accounting method)
+            # For WAC, we don't reduce cost basis, just track shares
+        
+        elif txn_type == 'DIVIDEND_ONLY':
+            new_dividends = old_dividends + dividend
+        
+        # Calculate new average cost
+        if new_shares > 0:
+            new_avg = new_cost / new_shares if new_cost > 0 else old_avg
+        else:
+            new_avg = 0
+        
+        # Determine new status
+        if abs(new_shares) < 0.001:
+            new_status = 'CLOSED'
+        else:
+            new_status = 'OPEN'
+        
+        status_changed = new_status != old_status
+        
+        # Update or insert position snapshot
+        today = txn_data.get('txn_date', time.strftime('%Y-%m-%d'))
+        
+        if pos_id:
+            # Update existing
+            db_execute(cur, """
+                UPDATE position_snapshots 
+                SET total_shares = ?, total_cost = ?, avg_cost = ?, 
+                    realized_pnl = ?, cash_dividends_received = ?, 
+                    status = ?, txn_id = ?, snapshot_date = ?
+                WHERE id = ?
+            """, (new_shares, new_cost, new_avg, new_realized, new_dividends, 
+                  new_status, txn_id, today, pos_id))
+            result['position_id'] = pos_id
+        else:
+            # Insert new
+            db_execute(cur, """
+                INSERT INTO position_snapshots 
+                (user_id, stock_id, portfolio_id, stock_symbol, txn_id, snapshot_date,
+                 total_shares, total_cost, avg_cost, realized_pnl, 
+                 cash_dividends_received, status, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (user_id, stock_id, portfolio_id, symbol, txn_id, today,
+                  new_shares, new_cost, new_avg, new_realized, new_dividends, new_status, ts))
+            
+            if is_postgres():
+                cur.execute("SELECT lastval()")
+            else:
+                cur.execute("SELECT last_insert_rowid()")
+            result['position_id'] = cur.fetchone()[0]
+        
+        conn.commit()
+        conn.close()
+        
+        result['success'] = True
+        result['status_changed'] = status_changed
+        result['new_state'] = {
+            'total_shares': new_shares,
+            'total_cost': new_cost,
+            'avg_cost': new_avg,
+            'realized_pnl': new_realized,
+            'cash_dividends': new_dividends,
+            'status': new_status
+        }
+        
+        if status_changed:
+            logger.info(f"Position {symbol} status changed: {old_status} -> {new_status}")
+        
+    except Exception as e:
+        result['error'] = str(e)
+        logger.error(f"Error applying transaction: {e}")
+    
+    return result
+
+
+def calculate_portfolio_pnl(user_id: int, portfolio_id: int = None, include_closed: bool = False) -> dict:
+    """
+    Calculate portfolio P&L using position snapshots.
+    
+    Only calculates unrealized P&L for OPEN positions.
+    Closed positions only contribute realized P&L.
+    
+    Args:
+        user_id: User ID
+        portfolio_id: Optional filter by portfolio
+        include_closed: If True, include closed positions in summary
+        
+    Returns:
+        Dict with position-level and portfolio-level P&L
+    """
+    result = {
+        'positions': [],
+        'summary': {
+            'total_unrealized_pnl': 0,
+            'total_realized_pnl': 0,
+            'total_dividends': 0,
+            'total_pnl': 0,
+            'open_positions': 0,
+            'closed_positions': 0
+        }
+    }
+    
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        
+        # Build query
+        status_filter = "" if include_closed else "AND ps.status = 'OPEN'"
+        portfolio_filter = "AND ps.portfolio_id = ?" if portfolio_id else ""
+        
+        query = f"""
+            SELECT ps.id, ps.stock_symbol, ps.portfolio_id, p.name as portfolio_name,
+                   ps.total_shares, ps.avg_cost, ps.realized_pnl, 
+                   ps.cash_dividends_received, ps.status,
+                   COALESCE(sm.current_price, s.current_price, 0) as current_price
+            FROM position_snapshots ps
+            LEFT JOIN portfolios p ON ps.portfolio_id = p.id
+            LEFT JOIN stocks_master sm ON ps.stock_id = sm.id
+            LEFT JOIN stocks s ON ps.stock_symbol = s.symbol AND s.user_id = ps.user_id
+            WHERE ps.user_id = ? {status_filter} {portfolio_filter}
+            ORDER BY ps.status, ps.stock_symbol
+        """
+        
+        params = [user_id]
+        if portfolio_id:
+            params.append(portfolio_id)
+        
+        db_execute(cur, query, tuple(params))
+        
+        for row in cur.fetchall():
+            pos_id, symbol, port_id, port_name, shares, avg_cost, realized, dividends, status, price = row
+            
+            shares = float(shares or 0)
+            avg_cost = float(avg_cost or 0)
+            realized = float(realized or 0)
+            dividends = float(dividends or 0)
+            price = float(price or 0)
+            
+            # Calculate unrealized P&L (only for OPEN positions with shares)
+            if status == 'OPEN' and shares > 0 and price > 0:
+                unrealized = (price - avg_cost) * shares
+            else:
+                unrealized = 0
+            
+            total_pnl = realized + unrealized + dividends
+            
+            position_data = {
+                'position_id': pos_id,
+                'stock_symbol': symbol,
+                'portfolio_id': port_id,
+                'portfolio_name': port_name or 'Unknown',
+                'total_shares': shares,
+                'avg_cost': avg_cost,
+                'current_price': price,
+                'unrealized_pnl': unrealized,
+                'realized_pnl': realized,
+                'dividends': dividends,
+                'total_pnl': total_pnl,
+                'status': status
+            }
+            
+            result['positions'].append(position_data)
+            
+            # Update summary
+            result['summary']['total_unrealized_pnl'] += unrealized
+            result['summary']['total_realized_pnl'] += realized
+            result['summary']['total_dividends'] += dividends
+            
+            if status == 'OPEN':
+                result['summary']['open_positions'] += 1
+            else:
+                result['summary']['closed_positions'] += 1
+        
+        result['summary']['total_pnl'] = (
+            result['summary']['total_unrealized_pnl'] + 
+            result['summary']['total_realized_pnl'] + 
+            result['summary']['total_dividends']
+        )
+        
+        conn.close()
+        
+    except Exception as e:
+        result['error'] = str(e)
+        logger.error(f"Error calculating portfolio P&L: {e}")
+    
+    return result
+
+
+def close_position(user_id: int, stock_symbol: str, portfolio_id: int) -> bool:
+    """
+    Manually close a position (mark as CLOSED).
+    
+    Use when shares are 0 but status wasn't auto-updated.
+    
+    Args:
+        user_id: User ID
+        stock_symbol: Stock symbol
+        portfolio_id: Portfolio ID
+        
+    Returns:
+        True if successful
+    """
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        
+        db_execute(cur, """
+            UPDATE position_snapshots 
+            SET status = 'CLOSED'
+            WHERE user_id = ? AND stock_symbol = ? AND portfolio_id = ?
+            AND total_shares = 0
+        """, (user_id, stock_symbol, portfolio_id))
+        
+        updated = cur.rowcount
+        conn.commit()
+        conn.close()
+        
+        if updated > 0:
+            logger.info(f"Closed position: {stock_symbol}")
+        return updated > 0
+        
+    except Exception as e:
+        logger.error(f"Error closing position: {e}")
+        return False
+
+
+def reopen_position(user_id: int, stock_symbol: str, portfolio_id: int) -> bool:
+    """
+    Reopen a closed position (mark as OPEN).
+    
+    Use when adding shares back to a previously closed position.
+    
+    Args:
+        user_id: User ID
+        stock_symbol: Stock symbol
+        portfolio_id: Portfolio ID
+        
+    Returns:
+        True if successful
+    """
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        
+        db_execute(cur, """
+            UPDATE position_snapshots 
+            SET status = 'OPEN'
+            WHERE user_id = ? AND stock_symbol = ? AND portfolio_id = ?
+            AND total_shares > 0
+        """, (user_id, stock_symbol, portfolio_id))
+        
+        updated = cur.rowcount
+        conn.commit()
+        conn.close()
+        
+        if updated > 0:
+            logger.info(f"Reopened position: {stock_symbol}")
+        return updated > 0
+        
+    except Exception as e:
+        logger.error(f"Error reopening position: {e}")
+        return False
+
+
+def refresh_all_position_snapshots(user_id: int) -> dict:
+    """
+    Recalculate all position snapshots from transactions.
+    
+    Use to fix inconsistencies or after bulk imports.
+    
+    Args:
+        user_id: User ID
+        
+    Returns:
+        Stats dict
+    """
+    stats = {'updated': 0, 'created': 0, 'errors': []}
+    
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        ts = int(time.time())
+        today = time.strftime('%Y-%m-%d')
+        
+        # Get portfolio and stock mappings
+        db_execute(cur, "SELECT id, name FROM portfolios WHERE user_id = ?", (user_id,))
+        portfolio_map = {row[1]: row[0] for row in cur.fetchall()}
+        
+        db_execute(cur, "SELECT id, ticker FROM stocks_master")
+        stock_map = {row[1]: row[0] for row in cur.fetchall()}
+        
+        # Calculate current state from transactions
+        soft_del = _soft_delete_filter()
+        db_execute(cur, f"""
+            SELECT 
+                stock_symbol, portfolio,
+                SUM(CASE WHEN txn_type = 'Buy' THEN shares ELSE 0 END) as bought,
+                SUM(CASE WHEN txn_type = 'Sell' THEN shares ELSE 0 END) as sold,
+                SUM(CASE WHEN txn_type = 'Buy' THEN purchase_cost ELSE 0 END) as cost,
+                SUM(CASE WHEN txn_type = 'Sell' THEN sell_value ELSE 0 END) as proceeds,
+                SUM(COALESCE(cash_dividend, 0)) as dividends,
+                SUM(COALESCE(bonus_shares, 0)) as bonus
+            FROM transactions
+            WHERE user_id = ? {soft_del}
+            GROUP BY stock_symbol, portfolio
+        """, (user_id,))
+        
+        positions = cur.fetchall()
+        
+        for pos in positions:
+            symbol, portfolio, bought, sold, cost, proceeds, dividends, bonus = pos
+            
+            bought = float(bought or 0)
+            sold = float(sold or 0)
+            cost = float(cost or 0)
+            proceeds = float(proceeds or 0)
+            dividends = float(dividends or 0)
+            bonus = float(bonus or 0)
+            
+            # Calculate net shares including bonus
+            net_shares = bought - sold + bonus
+            stock_id = stock_map.get(symbol)
+            portfolio_id = portfolio_map.get(portfolio)
+            
+            # Calculate average cost using WAC method
+            # Total shares acquired = bought + bonus
+            # Avg cost = total_cost / total_shares_acquired (before sells)
+            total_shares_acquired = bought + bonus
+            if total_shares_acquired > 0:
+                avg_cost_at_acquisition = cost / total_shares_acquired
+            else:
+                avg_cost_at_acquisition = 0.0
+            
+            # Realized P&L = proceeds - (avg_cost × shares_sold)
+            realized_pnl = proceeds - (avg_cost_at_acquisition * sold) if sold > 0 else 0.0
+            
+            # Remaining cost basis = original_cost - (avg_cost × shares_sold)
+            remaining_cost = cost - (avg_cost_at_acquisition * sold) if sold > 0 else cost
+            remaining_cost = max(remaining_cost, 0.0)
+            
+            # Current average cost for remaining shares
+            avg_cost = remaining_cost / net_shares if net_shares > 0.001 else 0.0
+            
+            status = 'CLOSED' if abs(net_shares) < 0.001 else 'OPEN'
+            
+            # Check if snapshot exists
+            db_execute(cur, """
+                SELECT id FROM position_snapshots 
+                WHERE user_id = ? AND stock_symbol = ? AND portfolio_id = ?
+            """, (user_id, symbol, portfolio_id))
+            
+            existing = cur.fetchone()
+            
+            if existing:
+                # Update with remaining cost (after sells)
+                db_execute(cur, """
+                    UPDATE position_snapshots 
+                    SET total_shares = ?, total_cost = ?, avg_cost = ?,
+                        realized_pnl = ?, cash_dividends_received = ?,
+                        status = ?, snapshot_date = ?
+                    WHERE id = ?
+                """, (net_shares, remaining_cost, avg_cost, realized_pnl, dividends, status, today, existing[0]))
+                stats['updated'] += 1
+            else:
+                # Insert with remaining cost (after sells)
+                db_execute(cur, """
+                    INSERT INTO position_snapshots 
+                    (user_id, stock_id, portfolio_id, stock_symbol, snapshot_date,
+                     total_shares, total_cost, avg_cost, realized_pnl,
+                     cash_dividends_received, status, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (user_id, stock_id, portfolio_id, symbol, today,
+                      net_shares, remaining_cost, avg_cost, realized_pnl, dividends, status, ts))
+                stats['created'] += 1
+        
+        conn.commit()
+        conn.close()
+        
+    except Exception as e:
+        stats['errors'].append(str(e))
+        logger.error(f"Error refreshing position snapshots: {e}")
+    
+    return stats
+
+
+# ============================================================================
+# AVG COST BACKFILL - Store avg_cost in transactions for historical accuracy
+# ============================================================================
+
+def recalculate_and_store_avg_costs(user_id: int) -> dict:
+    """
+    Backfill avg_cost_at_txn, realized_pnl_at_txn for ALL transactions.
+    
+    This function processes all transactions chronologically per (symbol, portfolio)
+    and stores the weighted average cost (WAC) at the time of each transaction.
+    This ensures that even for closed positions, we have accurate historical
+    cost basis for P&L calculations.
+    
+    IMPORTANT: Avg cost is calculated PER PORTFOLIO - the same stock in different
+    portfolios will have independent avg cost calculations.
+    
+    CFA/IFRS Compliant Weighted Average Cost Method:
+    - Buy: avg_cost = total_cost / total_shares (includes fees)
+    - Sell: realized_pnl = proceeds - (avg_cost × shares_sold)
+    - Bonus: shares increase, cost unchanged (dilutes avg_cost)
+    - Dividend: No cost basis impact
+    
+    Args:
+        user_id: User ID to recalculate
+        
+    Returns:
+        Dict with stats: {'updated': int, 'errors': list}
+    """
+    stats = {'updated': 0, 'positions_processed': 0, 'errors': []}
+    
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        
+        # Get all distinct (symbol, portfolio) combinations with transactions
+        soft_del = _soft_delete_filter()
+        db_execute(cur, f"""
+            SELECT DISTINCT stock_symbol, portfolio 
+            FROM transactions 
+            WHERE user_id = ? {soft_del} 
+            AND stock_symbol IS NOT NULL AND stock_symbol != ''
+        """, (user_id,))
+        positions = cur.fetchall()
+        
+        for symbol, portfolio in positions:
+            try:
+                # Get all transactions for this (symbol, portfolio), sorted chronologically
+                db_execute(cur, f"""
+                    SELECT id, txn_type, txn_date, shares, purchase_cost, sell_value, 
+                           fees, bonus_shares, cash_dividend
+                    FROM transactions
+                    WHERE user_id = ? AND stock_symbol = ? AND portfolio = ? {soft_del}
+                    ORDER BY txn_date ASC, id ASC
+                """, (user_id, symbol, portfolio))
+                
+                txns = cur.fetchall()
+                
+                # Track running state for this (symbol, portfolio)
+                total_shares = 0.0
+                total_cost = 0.0
+                
+                for txn in txns:
+                    txn_id, txn_type, txn_date, shares, purchase_cost, sell_value, fees, bonus_shares, cash_dividend = txn
+                    
+                    shares = float(shares or 0)
+                    purchase_cost = float(purchase_cost or 0)
+                    sell_value = float(sell_value or 0)
+                    fees = float(fees or 0)
+                    bonus_shares = float(bonus_shares or 0)
+                    
+                    realized_pnl = 0.0
+                    avg_cost = 0.0
+                    txn_type_upper = (txn_type or '').upper()
+                    
+                    if txn_type_upper == 'BUY':
+                        # BUY: Add cost + shares (fees increase cost basis)
+                        buy_cost = purchase_cost + fees
+                        total_cost += buy_cost
+                        total_shares += shares
+                        
+                        # Handle bonus shares if present on buy transaction
+                        if bonus_shares > 0:
+                            total_shares += bonus_shares
+                        
+                        avg_cost = total_cost / total_shares if total_shares > 0 else 0
+                    
+                    elif txn_type_upper == 'SELL':
+                        # SELL: Calculate realized P&L using WAC at time of sale
+                        if total_shares > 0 and shares > 0:
+                            avg_cost_before_sale = total_cost / total_shares
+                            proceeds = sell_value - fees
+                            cost_of_shares_sold = avg_cost_before_sale * shares
+                            realized_pnl = proceeds - cost_of_shares_sold
+                            
+                            # Reduce state
+                            total_cost -= cost_of_shares_sold
+                            total_shares -= shares
+                            
+                            # Keep the avg_cost_before_sale for this sell transaction
+                            avg_cost = avg_cost_before_sale
+                        else:
+                            # No shares to sell - unusual but store 0
+                            avg_cost = 0
+                    
+                    elif txn_type_upper in ('BONUS SHARES', 'BONUS', 'DIVIDEND_ONLY', 'DIVIDEND', 'STOCK SPLIT'):
+                        # Check for bonus shares attached to ANY of these transaction types
+                        # DIVIDEND_ONLY can have bonus_shares (stock dividend) attached
+                        if bonus_shares > 0:
+                            total_shares += bonus_shares
+                        elif txn_type_upper in ('BONUS SHARES', 'BONUS', 'STOCK SPLIT') and shares > 0:
+                            # Fallback: use shares field for dedicated bonus transactions
+                            total_shares += shares
+                        
+                        # Recalculate avg_cost after adding bonus shares (cost unchanged)
+                        avg_cost = total_cost / total_shares if total_shares > 0 else 0
+                    
+                    else:
+                        # Other types (Deposit, Withdrawal) - just record current state
+                        avg_cost = total_cost / total_shares if total_shares > 0 else 0
+                    
+                    # Ensure non-negative values
+                    total_cost = max(total_cost, 0)
+                    total_shares = max(total_shares, 0)
+                    
+                    # Update the transaction with calculated values
+                    db_execute(cur, """
+                        UPDATE transactions 
+                        SET avg_cost_at_txn = ?,
+                            realized_pnl_at_txn = ?,
+                            cost_basis_at_txn = ?,
+                            shares_held_at_txn = ?
+                        WHERE id = ?
+                    """, (round(avg_cost, 8), round(realized_pnl, 4), 
+                          round(total_cost, 4), round(total_shares, 6), txn_id))
+                    
+                    stats['updated'] += 1
+                
+                stats['positions_processed'] += 1
+                
+            except Exception as e:
+                stats['errors'].append(f"{symbol}/{portfolio}: {str(e)}")
+                logger.error(f"Error processing {symbol}/{portfolio}: {e}")
+        
+        conn.commit()
+        conn.close()
+        
+        logger.info(f"✅ Backfilled avg_cost for {stats['positions_processed']} positions, {stats['updated']} transactions")
+        
+    except Exception as e:
+        stats['errors'].append(str(e))
+        logger.error(f"Error in avg_cost backfill: {e}")
+    
+    return stats
 
 
 def check_stock_exclusivity(symbol: str, target_mode: str, user_id: int) -> tuple[bool, str]:
@@ -2135,11 +4168,2620 @@ def _ensure_securities_tables() -> None:
         # Add security_id column to transactions table for proper linking
         add_column_if_missing("transactions", "security_id", "TEXT")
         
+        # =====================================================================
+        # STEP 2: Upload Logic Enhancement - Add source tracking & soft delete
+        # =====================================================================
+        # Source tracking columns for transactions
+        add_column_if_missing("transactions", "source", "TEXT DEFAULT 'MANUAL'")
+        add_column_if_missing("transactions", "source_reference", "TEXT")
+        
+        # Soft delete columns for transactions (preserve data during re-upload)
+        add_column_if_missing("transactions", "is_deleted", "INTEGER DEFAULT 0")
+        add_column_if_missing("transactions", "deleted_at", "INTEGER")
+        add_column_if_missing("transactions", "deleted_by", "INTEGER")
+        
+        # Same for cash_deposits table
+        add_column_if_missing("cash_deposits", "source", "TEXT DEFAULT 'MANUAL'")
+        add_column_if_missing("cash_deposits", "source_reference", "TEXT")
+        add_column_if_missing("cash_deposits", "is_deleted", "INTEGER DEFAULT 0")
+        add_column_if_missing("cash_deposits", "deleted_at", "INTEGER")
+        add_column_if_missing("cash_deposits", "deleted_by", "INTEGER")
+        
+        # =====================================================================
+        # STEP 3: Avg Cost Tracking - Store avg_cost at transaction time
+        # =====================================================================
+        # These columns store the weighted average cost at time of transaction
+        # This ensures P&L can be calculated accurately even for closed positions
+        add_column_if_missing("transactions", "avg_cost_at_txn", "REAL")  # WAC at time of this txn
+        add_column_if_missing("transactions", "realized_pnl_at_txn", "REAL")  # Realized P&L for sells
+        add_column_if_missing("transactions", "cost_basis_at_txn", "REAL")  # Total cost basis at txn time
+        add_column_if_missing("transactions", "shares_held_at_txn", "REAL")  # Shares held after this txn
+        
+        # Create indexes for source tracking
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_txn_source ON transactions(source)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_txn_source_ref ON transactions(source_reference)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_txn_deleted ON transactions(is_deleted)")
+        
         conn.commit()
         conn.close()
         logger.debug("✅ Securities tables verified/created")
     except Exception as e:
         logger.warning(f"Note ensuring securities tables: {e}")
+
+
+def _ensure_normalized_schema() -> None:
+    """
+    Phase 1: Core Normalized Tables for proper data integrity.
+    
+    This implements a properly normalized database schema with:
+    - stocks_master: Canonical stock reference (single source of truth)
+    - portfolios: User portfolio grouping
+    - external_accounts: Bank/brokerage accounts (KFH, BBYN, USD)
+    - position_snapshots: Immutable position state after each transaction
+    """
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        
+        # 1. STOCKS_MASTER - Global stock reference (not user-specific)
+        if is_postgres():
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS stocks_master (
+                    id SERIAL PRIMARY KEY,
+                    ticker VARCHAR(20) NOT NULL,
+                    name VARCHAR(200),
+                    exchange VARCHAR(50) DEFAULT 'KSE',
+                    currency VARCHAR(3) DEFAULT 'KWD',
+                    isin VARCHAR(12),
+                    sector VARCHAR(50),
+                    country VARCHAR(3) DEFAULT 'KW',
+                    status VARCHAR(20) DEFAULT 'active',
+                    created_at INTEGER,
+                    updated_at INTEGER,
+                    UNIQUE(ticker, exchange)
+                )
+            """)
+        else:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS stocks_master (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ticker TEXT NOT NULL,
+                    name TEXT,
+                    exchange TEXT DEFAULT 'KSE',
+                    currency TEXT DEFAULT 'KWD',
+                    isin TEXT,
+                    sector TEXT,
+                    country TEXT DEFAULT 'KW',
+                    status TEXT DEFAULT 'active',
+                    created_at INTEGER,
+                    updated_at INTEGER,
+                    UNIQUE(ticker, exchange)
+                )
+            """)
+        
+        # 2. PORTFOLIOS - User portfolio grouping
+        if is_postgres():
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS portfolios (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    name VARCHAR(100) NOT NULL,
+                    base_currency VARCHAR(3) DEFAULT 'KWD',
+                    description TEXT,
+                    created_at INTEGER,
+                    UNIQUE(user_id, name)
+                )
+            """)
+        else:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS portfolios (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    name TEXT NOT NULL,
+                    base_currency TEXT DEFAULT 'KWD',
+                    description TEXT,
+                    created_at INTEGER,
+                    UNIQUE(user_id, name)
+                )
+            """)
+        
+        # 3. EXTERNAL_ACCOUNTS - Bank/brokerage accounts (KFH, BBYN, USD Cash)
+        if is_postgres():
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS external_accounts (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    portfolio_id INTEGER REFERENCES portfolios(id),
+                    name VARCHAR(100) NOT NULL,
+                    account_number VARCHAR(50),
+                    currency VARCHAR(3) DEFAULT 'KWD',
+                    account_type VARCHAR(20) DEFAULT 'BROKERAGE',
+                    current_balance DECIMAL(18,6) DEFAULT 0,
+                    last_reconciled_date DATE,
+                    created_at INTEGER,
+                    UNIQUE(user_id, name)
+                )
+            """)
+        else:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS external_accounts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    portfolio_id INTEGER,
+                    name TEXT NOT NULL,
+                    account_number TEXT,
+                    currency TEXT DEFAULT 'KWD',
+                    account_type TEXT DEFAULT 'BROKERAGE',
+                    current_balance REAL DEFAULT 0,
+                    last_reconciled_date TEXT,
+                    created_at INTEGER,
+                    UNIQUE(user_id, name),
+                    FOREIGN KEY (portfolio_id) REFERENCES portfolios(id)
+                )
+            """)
+        
+        # 4. POSITION_SNAPSHOTS - Immutable position state after each transaction
+        if is_postgres():
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS position_snapshots (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    stock_id INTEGER REFERENCES stocks_master(id),
+                    portfolio_id INTEGER REFERENCES portfolios(id),
+                    txn_id INTEGER,
+                    snapshot_date DATE NOT NULL,
+                    total_shares DECIMAL(15,6) DEFAULT 0,
+                    total_cost DECIMAL(18,6) DEFAULT 0,
+                    avg_cost DECIMAL(15,6) DEFAULT 0,
+                    realized_pnl DECIMAL(18,6) DEFAULT 0,
+                    cash_dividends_received DECIMAL(18,6) DEFAULT 0,
+                    status VARCHAR(20) DEFAULT 'OPEN',
+                    created_at INTEGER,
+                    UNIQUE(stock_id, portfolio_id, user_id, snapshot_date)
+                )
+            """)
+        else:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS position_snapshots (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    stock_id INTEGER,
+                    portfolio_id INTEGER,
+                    txn_id INTEGER,
+                    snapshot_date TEXT NOT NULL,
+                    total_shares REAL DEFAULT 0,
+                    total_cost REAL DEFAULT 0,
+                    avg_cost REAL DEFAULT 0,
+                    realized_pnl REAL DEFAULT 0,
+                    cash_dividends_received REAL DEFAULT 0,
+                    status TEXT DEFAULT 'OPEN',
+                    created_at INTEGER,
+                    UNIQUE(stock_id, portfolio_id, user_id, snapshot_date),
+                    FOREIGN KEY (stock_id) REFERENCES stocks_master(id),
+                    FOREIGN KEY (portfolio_id) REFERENCES portfolios(id)
+                )
+            """)
+        
+        # 5. SYMBOL_MAPPINGS - Map user input variations to canonical symbols
+        if is_postgres():
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS symbol_mappings (
+                    id SERIAL PRIMARY KEY,
+                    user_input TEXT NOT NULL,
+                    canonical_ticker TEXT NOT NULL,
+                    stock_id INTEGER REFERENCES stocks_master(id),
+                    created_at INTEGER,
+                    UNIQUE(user_input)
+                )
+            """)
+        else:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS symbol_mappings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_input TEXT NOT NULL COLLATE NOCASE,
+                    canonical_ticker TEXT NOT NULL,
+                    stock_id INTEGER,
+                    created_at INTEGER,
+                    UNIQUE(user_input),
+                    FOREIGN KEY (stock_id) REFERENCES stocks_master(id)
+                )
+            """)
+        
+        # 6. CASH_FLOWS - Track all cash movements (Phase 2: Cash Flow Reconciliation)
+        if is_postgres():
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS cash_flows (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    account_id INTEGER REFERENCES external_accounts(id),
+                    flow_type VARCHAR(30) NOT NULL,
+                    amount DECIMAL(18,6) NOT NULL,
+                    currency VARCHAR(3) DEFAULT 'KWD',
+                    related_txn_id INTEGER,
+                    flow_date DATE NOT NULL,
+                    description VARCHAR(200),
+                    reconciled BOOLEAN DEFAULT FALSE,
+                    created_at INTEGER
+                )
+            """)
+        else:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS cash_flows (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    account_id INTEGER,
+                    flow_type TEXT NOT NULL,
+                    amount REAL NOT NULL,
+                    currency TEXT DEFAULT 'KWD',
+                    related_txn_id INTEGER,
+                    flow_date TEXT NOT NULL,
+                    description TEXT,
+                    reconciled INTEGER DEFAULT 0,
+                    created_at INTEGER,
+                    FOREIGN KEY (account_id) REFERENCES external_accounts(id),
+                    FOREIGN KEY (related_txn_id) REFERENCES transactions(id)
+                )
+            """)
+        
+        # 7. PORTFOLIO_TRANSACTIONS - Unified transaction table with source tracking
+        # ✅ RECOMMENDED: Single table consolidating all transaction types
+        if is_postgres():
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS portfolio_transactions (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    portfolio_id INTEGER NOT NULL REFERENCES portfolios(id),
+                    txn_type VARCHAR(20) NOT NULL,
+                    source VARCHAR(20) NOT NULL DEFAULT 'MANUAL',
+                    source_reference VARCHAR(100),
+                    stock_id INTEGER REFERENCES stocks_master(id),
+                    account_id INTEGER REFERENCES external_accounts(id),
+                    shares DECIMAL(15,6),
+                    price DECIMAL(15,6),
+                    amount DECIMAL(18,6) NOT NULL,
+                    fees DECIMAL(15,6) DEFAULT 0,
+                    txn_date DATE NOT NULL,
+                    notes TEXT,
+                    legacy_txn_id INTEGER,
+                    created_at INTEGER,
+                    created_by INTEGER,
+                    is_deleted INTEGER DEFAULT 0
+                )
+            """)
+        else:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS portfolio_transactions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    portfolio_id INTEGER NOT NULL,
+                    txn_type TEXT NOT NULL,
+                    source TEXT NOT NULL DEFAULT 'MANUAL',
+                    source_reference TEXT,
+                    stock_id INTEGER,
+                    account_id INTEGER,
+                    shares REAL,
+                    price REAL,
+                    amount REAL NOT NULL,
+                    fees REAL DEFAULT 0,
+                    txn_date TEXT NOT NULL,
+                    notes TEXT,
+                    legacy_txn_id INTEGER,
+                    created_at INTEGER,
+                    created_by INTEGER,
+                    is_deleted INTEGER DEFAULT 0,
+                    FOREIGN KEY (portfolio_id) REFERENCES portfolios(id),
+                    FOREIGN KEY (stock_id) REFERENCES stocks_master(id),
+                    FOREIGN KEY (account_id) REFERENCES external_accounts(id)
+                )
+            """)
+        
+        # Add foreign key columns to transactions table (if not exists)
+        add_column_if_missing("transactions", "stock_master_id", "INTEGER")
+        add_column_if_missing("transactions", "portfolio_id", "INTEGER")
+        add_column_if_missing("transactions", "account_id", "INTEGER")
+        
+        # Create indexes for performance
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_stocks_master_ticker ON stocks_master(ticker)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_portfolios_user ON portfolios(user_id)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_ext_accounts_user ON external_accounts(user_id)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_pos_snapshots_stock ON position_snapshots(stock_id)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_pos_snapshots_date ON position_snapshots(snapshot_date)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_symbol_mappings_input ON symbol_mappings(user_input)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_cash_flows_account ON cash_flows(account_id)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_cash_flows_date ON cash_flows(flow_date)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_cash_flows_type ON cash_flows(flow_type)")
+        # Indexes for portfolio_transactions (unified table)
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_ptxn_portfolio_source ON portfolio_transactions(portfolio_id, source)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_ptxn_portfolio_type ON portfolio_transactions(portfolio_id, txn_type)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_ptxn_user ON portfolio_transactions(user_id)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_ptxn_date ON portfolio_transactions(txn_date)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_ptxn_stock ON portfolio_transactions(stock_id)")
+        
+        # 8. DATABASE VIEWS - Aggregation views for reporting
+        
+        # View: Portfolio Deposit Summary
+        # Always shows total deposits regardless of upload status
+        cur.execute("DROP VIEW IF EXISTS portfolio_deposit_summary")
+        cur.execute("""
+            CREATE VIEW portfolio_deposit_summary AS
+            SELECT 
+                pt.user_id,
+                pt.portfolio_id,
+                p.name as portfolio_name,
+                SUM(CASE WHEN pt.txn_type = 'DEPOSIT' THEN pt.amount ELSE 0 END) as total_deposits,
+                SUM(CASE WHEN pt.txn_type = 'WITHDRAWAL' THEN pt.amount ELSE 0 END) as total_withdrawals,
+                SUM(CASE WHEN pt.txn_type = 'DEPOSIT' THEN pt.amount ELSE 0 END) -
+                SUM(CASE WHEN pt.txn_type = 'WITHDRAWAL' THEN pt.amount ELSE 0 END) as net_deposits,
+                COUNT(CASE WHEN pt.txn_type = 'DEPOSIT' THEN 1 END) as deposit_count,
+                COUNT(CASE WHEN pt.txn_type = 'WITHDRAWAL' THEN 1 END) as withdrawal_count,
+                MIN(CASE WHEN pt.txn_type = 'DEPOSIT' THEN pt.txn_date END) as first_deposit_date,
+                MAX(CASE WHEN pt.txn_type = 'DEPOSIT' THEN pt.txn_date END) as last_deposit_date
+            FROM portfolio_transactions pt
+            LEFT JOIN portfolios p ON pt.portfolio_id = p.id
+            WHERE (pt.is_deleted = 0 OR pt.is_deleted IS NULL)
+            GROUP BY pt.user_id, pt.portfolio_id, p.name
+        """)
+        
+        # View: Portfolio Cash Summary (all cash movements)
+        cur.execute("DROP VIEW IF EXISTS portfolio_cash_summary")
+        cur.execute("""
+            CREATE VIEW portfolio_cash_summary AS
+            SELECT 
+                pt.user_id,
+                pt.portfolio_id,
+                p.name as portfolio_name,
+                SUM(CASE WHEN pt.txn_type = 'BUY' THEN pt.amount ELSE 0 END) as total_buys,
+                SUM(CASE WHEN pt.txn_type = 'SELL' THEN pt.amount ELSE 0 END) as total_sells,
+                SUM(CASE WHEN pt.txn_type = 'DIVIDEND' THEN pt.amount ELSE 0 END) as total_dividends,
+                SUM(CASE WHEN pt.txn_type = 'DEPOSIT' THEN pt.amount ELSE 0 END) as total_deposits,
+                SUM(CASE WHEN pt.txn_type = 'WITHDRAWAL' THEN pt.amount ELSE 0 END) as total_withdrawals,
+                SUM(pt.amount) as cash_balance,
+                SUM(COALESCE(pt.fees, 0)) as total_fees,
+                COUNT(*) as transaction_count
+            FROM portfolio_transactions pt
+            LEFT JOIN portfolios p ON pt.portfolio_id = p.id
+            WHERE (pt.is_deleted = 0 OR pt.is_deleted IS NULL)
+            GROUP BY pt.user_id, pt.portfolio_id, p.name
+        """)
+        
+        # View: Stock Position Summary
+        cur.execute("DROP VIEW IF EXISTS stock_position_summary")
+        cur.execute("""
+            CREATE VIEW stock_position_summary AS
+            SELECT 
+                pt.user_id,
+                pt.portfolio_id,
+                p.name as portfolio_name,
+                pt.stock_id,
+                sm.ticker as stock_symbol,
+                sm.name as stock_name,
+                SUM(CASE WHEN pt.txn_type = 'BUY' THEN pt.shares ELSE 0 END) as shares_bought,
+                SUM(CASE WHEN pt.txn_type = 'SELL' THEN pt.shares ELSE 0 END) as shares_sold,
+                SUM(CASE WHEN pt.txn_type = 'BUY' THEN pt.shares ELSE 0 END) -
+                SUM(CASE WHEN pt.txn_type = 'SELL' THEN pt.shares ELSE 0 END) as current_shares,
+                SUM(CASE WHEN pt.txn_type = 'BUY' THEN -pt.amount ELSE 0 END) as total_cost,
+                SUM(CASE WHEN pt.txn_type = 'SELL' THEN pt.amount ELSE 0 END) as total_proceeds,
+                SUM(CASE WHEN pt.txn_type = 'DIVIDEND' THEN pt.amount ELSE 0 END) as total_dividends,
+                COUNT(CASE WHEN pt.txn_type = 'BUY' THEN 1 END) as buy_count,
+                COUNT(CASE WHEN pt.txn_type = 'SELL' THEN 1 END) as sell_count,
+                MIN(pt.txn_date) as first_trade_date,
+                MAX(pt.txn_date) as last_trade_date
+            FROM portfolio_transactions pt
+            LEFT JOIN portfolios p ON pt.portfolio_id = p.id
+            LEFT JOIN stocks_master sm ON pt.stock_id = sm.id
+            WHERE pt.stock_id IS NOT NULL 
+            AND (pt.is_deleted = 0 OR pt.is_deleted IS NULL)
+            GROUP BY pt.user_id, pt.portfolio_id, p.name, pt.stock_id, sm.ticker, sm.name
+        """)
+        
+        conn.commit()
+        conn.close()
+        logger.debug("✅ Normalized schema tables created/verified")
+    except Exception as e:
+        logger.warning(f"Note ensuring normalized schema: {e}")
+
+
+def _migrate_to_normalized_schema(user_id: int) -> dict:
+    """
+    Migrate existing data to the normalized schema.
+    
+    This function:
+    1. Creates portfolio records for KFH, BBYN, USA
+    2. Creates external account records
+    3. Populates stocks_master from unique symbols
+    4. Creates symbol mappings for variations
+    5. Links transactions to normalized tables
+    
+    Returns migration stats dict.
+    """
+    stats = {
+        'portfolios_created': 0,
+        'accounts_created': 0,
+        'stocks_created': 0,
+        'mappings_created': 0,
+        'transactions_linked': 0,
+        'errors': []
+    }
+    
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        ts = int(time.time())
+        
+        # 1. Create portfolio records
+        portfolios_config = [
+            ('KFH', 'KWD', 'Kuwait Finance House Portfolio'),
+            ('BBYN', 'KWD', 'Boubyan Bank Portfolio'),
+            ('USA', 'USD', 'US Stock Portfolio')
+        ]
+        
+        portfolio_ids = {}
+        for name, currency, desc in portfolios_config:
+            try:
+                db_execute(cur, """
+                    INSERT INTO portfolios (user_id, name, base_currency, description, created_at)
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(user_id, name) DO UPDATE SET description=excluded.description
+                """, (user_id, name, currency, desc, ts))
+                
+                db_execute(cur, "SELECT id FROM portfolios WHERE user_id = ? AND name = ?", (user_id, name))
+                row = cur.fetchone()
+                if row:
+                    portfolio_ids[name] = row[0]
+                    stats['portfolios_created'] += 1
+            except Exception as e:
+                stats['errors'].append(f"Portfolio {name}: {e}")
+        
+        # 2. Create external accounts (linked to portfolios)
+        accounts_config = [
+            ('KFH Brokerage', 'KWD', 'BROKERAGE', 'KFH'),
+            ('BBYN Brokerage', 'KWD', 'BROKERAGE', 'BBYN'),
+            ('US Brokerage', 'USD', 'BROKERAGE', 'USA')
+        ]
+        
+        account_ids = {}
+        for name, currency, acct_type, portfolio_name in accounts_config:
+            try:
+                port_id = portfolio_ids.get(portfolio_name)
+                db_execute(cur, """
+                    INSERT INTO external_accounts (user_id, portfolio_id, name, currency, account_type, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(user_id, name) DO UPDATE SET portfolio_id=excluded.portfolio_id
+                """, (user_id, port_id, name, currency, acct_type, ts))
+                
+                db_execute(cur, "SELECT id FROM external_accounts WHERE user_id = ? AND name = ?", (user_id, name))
+                row = cur.fetchone()
+                if row:
+                    account_ids[portfolio_name] = row[0]
+                    stats['accounts_created'] += 1
+            except Exception as e:
+                stats['errors'].append(f"Account {name}: {e}")
+        
+        # 3. Get all unique symbols from transactions and create stocks_master entries
+        db_execute(cur, """
+            SELECT DISTINCT stock_symbol, portfolio 
+            FROM transactions 
+            WHERE user_id = ? AND stock_symbol IS NOT NULL
+        """, (user_id,))
+        symbols = cur.fetchall()
+        
+        # Symbol normalization mapping (user input -> canonical)
+        symbol_normalizations = {
+            'mabanee': 'MABANEE',
+            'Mabanee': 'MABANEE',
+            'ooredoo': 'OOREDOO',
+            'OOREDOO': 'OOREDOO',
+            'agility kuwait': 'AGILITY',
+            'agilityPLC': 'AGILITY',
+            'AGLTY': 'AGILITY',
+            'Sanam': 'SANAM',
+            'sanam': 'SANAM',
+        }
+        
+        stock_ids = {}
+        for symbol, portfolio in symbols:
+            try:
+                # Normalize the symbol
+                canonical = symbol_normalizations.get(symbol, symbol.upper().strip())
+                exchange = 'NASDAQ' if portfolio == 'USA' else 'KSE'
+                currency = 'USD' if portfolio == 'USA' else 'KWD'
+                
+                # Insert or get stocks_master record
+                db_execute(cur, """
+                    INSERT INTO stocks_master (ticker, name, exchange, currency, country, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(ticker, exchange) DO UPDATE SET updated_at=excluded.updated_at
+                """, (canonical, canonical, exchange, currency, 'US' if portfolio == 'USA' else 'KW', ts, ts))
+                
+                db_execute(cur, "SELECT id FROM stocks_master WHERE ticker = ? AND exchange = ?", (canonical, exchange))
+                row = cur.fetchone()
+                if row:
+                    stock_ids[symbol] = row[0]
+                    stats['stocks_created'] += 1
+                
+                # Create symbol mapping
+                if symbol != canonical:
+                    db_execute(cur, """
+                        INSERT INTO symbol_mappings (user_input, canonical_ticker, stock_id, created_at)
+                        VALUES (?, ?, ?, ?)
+                        ON CONFLICT(user_input) DO UPDATE SET canonical_ticker=excluded.canonical_ticker
+                    """, (symbol, canonical, stock_ids.get(symbol), ts))
+                    stats['mappings_created'] += 1
+                    
+            except Exception as e:
+                stats['errors'].append(f"Stock {symbol}: {e}")
+        
+        # 4. Link transactions to normalized tables
+        for symbol, stock_id in stock_ids.items():
+            try:
+                db_execute(cur, """
+                    UPDATE transactions 
+                    SET stock_master_id = ?
+                    WHERE user_id = ? AND stock_symbol = ? AND stock_master_id IS NULL
+                """, (stock_id, user_id, symbol))
+                stats['transactions_linked'] += cur.rowcount
+            except Exception as e:
+                stats['errors'].append(f"Linking {symbol}: {e}")
+        
+        # Link portfolio_id based on portfolio column
+        for portfolio_name, port_id in portfolio_ids.items():
+            try:
+                db_execute(cur, """
+                    UPDATE transactions 
+                    SET portfolio_id = ?
+                    WHERE user_id = ? AND portfolio = ? AND portfolio_id IS NULL
+                """, (port_id, user_id, portfolio_name))
+            except Exception as e:
+                stats['errors'].append(f"Linking portfolio {portfolio_name}: {e}")
+        
+        conn.commit()
+        conn.close()
+        logger.info(f"✅ Migration completed: {stats}")
+        
+    except Exception as e:
+        stats['errors'].append(f"Migration error: {e}")
+        logger.error(f"Migration error: {e}")
+    
+    return stats
+
+
+def migrate_to_unified_transactions(user_id: int) -> dict:
+    """
+    Migrate legacy transactions and cash_deposits to the unified portfolio_transactions table.
+    
+    This creates a single source of truth for all portfolio transactions:
+    - BUY/SELL from transactions table
+    - DIVIDEND from transactions (cash_dividend > 0)
+    - DEPOSIT/WITHDRAWAL from cash_deposits table
+    
+    Source tracking:
+    - source='LEGACY' for migrated records
+    - legacy_txn_id preserves original ID for audit trail
+    
+    Args:
+        user_id: User ID to migrate
+        
+    Returns:
+        Migration stats dict
+    """
+    stats = {
+        'buys_migrated': 0,
+        'sells_migrated': 0,
+        'dividends_migrated': 0,
+        'deposits_migrated': 0,
+        'withdrawals_migrated': 0,
+        'skipped_duplicates': 0,
+        'errors': []
+    }
+    
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        ts = int(time.time())
+        soft_del = _soft_delete_filter()
+        
+        # Get portfolio and account mappings
+        db_execute(cur, "SELECT id, name FROM portfolios WHERE user_id = ?", (user_id,))
+        portfolio_map = {row[1]: row[0] for row in cur.fetchall()}
+        
+        db_execute(cur, "SELECT id, name FROM external_accounts WHERE user_id = ?", (user_id,))
+        account_map = {row[1]: row[0] for row in cur.fetchall()}
+        
+        db_execute(cur, "SELECT id, ticker FROM stocks_master")
+        stock_map = {row[1]: row[0] for row in cur.fetchall()}
+        
+        # 1. Migrate stock transactions (Buy/Sell)
+        db_execute(cur, f"""
+            SELECT id, stock_symbol, portfolio, txn_type, txn_date, shares, 
+                   purchase_cost, sell_value, cash_dividend, fees, notes
+            FROM transactions
+            WHERE user_id = ? AND txn_type IN ('Buy', 'Sell') {soft_del}
+            ORDER BY txn_date, id
+        """, (user_id,))
+        
+        for row in cur.fetchall():
+            txn_id, symbol, portfolio, txn_type, txn_date, shares, cost, proceeds, dividend, fees, notes = row
+            
+            portfolio_id = portfolio_map.get(portfolio)
+            stock_id = stock_map.get(symbol)
+            account_id = account_map.get(portfolio)
+            
+            if not portfolio_id:
+                stats['errors'].append(f"Missing portfolio for txn {txn_id}: {portfolio}")
+                continue
+            
+            # Check for duplicate (already migrated)
+            db_execute(cur, """
+                SELECT id FROM portfolio_transactions 
+                WHERE legacy_txn_id = ? AND user_id = ?
+            """, (txn_id, user_id))
+            if cur.fetchone():
+                stats['skipped_duplicates'] += 1
+                continue
+            
+            # Calculate amount (cash impact)
+            shares = float(shares or 0)
+            cost = float(cost or 0)
+            proceeds = float(proceeds or 0)
+            fees = float(fees or 0)
+            
+            if txn_type == 'Buy':
+                amount = -cost  # Cash outflow
+                price = cost / shares if shares > 0 else 0
+            else:  # Sell
+                amount = proceeds  # Cash inflow
+                price = proceeds / shares if shares > 0 else 0
+            
+            db_execute(cur, """
+                INSERT INTO portfolio_transactions 
+                (user_id, portfolio_id, txn_type, source, source_reference, 
+                 stock_id, account_id, shares, price, amount, fees, 
+                 txn_date, notes, legacy_txn_id, created_at, created_by)
+                VALUES (?, ?, ?, 'LEGACY', 'transactions', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (user_id, portfolio_id, txn_type.upper(), stock_id, account_id,
+                  shares, price, amount, fees, txn_date, notes, txn_id, ts, user_id))
+            
+            if txn_type == 'Buy':
+                stats['buys_migrated'] += 1
+            else:
+                stats['sells_migrated'] += 1
+        
+        # 2. Migrate dividends (separate entries from transactions with cash_dividend > 0)
+        db_execute(cur, f"""
+            SELECT id, stock_symbol, portfolio, txn_date, cash_dividend, notes
+            FROM transactions
+            WHERE user_id = ? AND COALESCE(cash_dividend, 0) > 0 {soft_del}
+            ORDER BY txn_date, id
+        """, (user_id,))
+        
+        for row in cur.fetchall():
+            txn_id, symbol, portfolio, txn_date, dividend, notes = row
+            
+            portfolio_id = portfolio_map.get(portfolio)
+            stock_id = stock_map.get(symbol)
+            account_id = account_map.get(portfolio)
+            
+            if not portfolio_id:
+                continue
+            
+            dividend = float(dividend or 0)
+            
+            # Check for duplicate dividend (check by source_reference containing 'div')
+            db_execute(cur, """
+                SELECT id FROM portfolio_transactions 
+                WHERE legacy_txn_id = ? AND user_id = ? AND txn_type = 'DIVIDEND'
+            """, (txn_id, user_id))
+            if cur.fetchone():
+                stats['skipped_duplicates'] += 1
+                continue
+            
+            db_execute(cur, """
+                INSERT INTO portfolio_transactions 
+                (user_id, portfolio_id, txn_type, source, source_reference,
+                 stock_id, account_id, shares, price, amount, fees,
+                 txn_date, notes, legacy_txn_id, created_at, created_by)
+                VALUES (?, ?, 'DIVIDEND', 'LEGACY', 'transactions_dividend', ?, ?, 0, 0, ?, 0, ?, ?, ?, ?, ?)
+            """, (user_id, portfolio_id, stock_id, account_id, dividend, 
+                  txn_date, notes, txn_id, ts, user_id))
+            
+            stats['dividends_migrated'] += 1
+        
+        # 3. Migrate cash deposits
+        db_execute(cur, """
+            SELECT id, portfolio, deposit_date, amount, notes
+            FROM cash_deposits
+            WHERE user_id = ?
+            ORDER BY deposit_date, id
+        """, (user_id,))
+        
+        for row in cur.fetchall():
+            dep_id, portfolio, dep_date, amount, notes = row
+            
+            portfolio_id = portfolio_map.get(portfolio)
+            account_id = account_map.get(portfolio)
+            
+            if not portfolio_id:
+                stats['errors'].append(f"Missing portfolio for deposit {dep_id}: {portfolio}")
+                continue
+            
+            amount = float(amount or 0)
+            
+            # Check for duplicate
+            db_execute(cur, """
+                SELECT id FROM portfolio_transactions 
+                WHERE source_reference = ? AND user_id = ? AND txn_type IN ('DEPOSIT', 'WITHDRAWAL')
+            """, (f'cash_deposits_{dep_id}', user_id))
+            if cur.fetchone():
+                stats['skipped_duplicates'] += 1
+                continue
+            
+            txn_type = 'DEPOSIT' if amount >= 0 else 'WITHDRAWAL'
+            
+            db_execute(cur, """
+                INSERT INTO portfolio_transactions 
+                (user_id, portfolio_id, txn_type, source, source_reference,
+                 stock_id, account_id, shares, price, amount, fees,
+                 txn_date, notes, legacy_txn_id, created_at, created_by)
+                VALUES (?, ?, ?, 'LEGACY', ?, NULL, ?, NULL, NULL, ?, 0, ?, ?, NULL, ?, ?)
+            """, (user_id, portfolio_id, txn_type, f'cash_deposits_{dep_id}', account_id,
+                  abs(amount), dep_date, notes, ts, user_id))
+            
+            if txn_type == 'DEPOSIT':
+                stats['deposits_migrated'] += 1
+            else:
+                stats['withdrawals_migrated'] += 1
+        
+        conn.commit()
+        conn.close()
+        
+        total = (stats['buys_migrated'] + stats['sells_migrated'] + 
+                 stats['dividends_migrated'] + stats['deposits_migrated'] + 
+                 stats['withdrawals_migrated'])
+        logger.info(f"✅ Unified transactions migration: {total} records migrated")
+        
+    except Exception as e:
+        stats['errors'].append(str(e))
+        logger.error(f"Unified transactions migration error: {e}")
+    
+    return stats
+
+
+def add_portfolio_transaction(
+    user_id: int,
+    portfolio_id: int,
+    txn_type: str,
+    amount: float,
+    txn_date: str,
+    source: str = 'MANUAL',
+    source_reference: str = None,
+    stock_id: int = None,
+    account_id: int = None,
+    shares: float = None,
+    price: float = None,
+    fees: float = 0,
+    notes: str = None
+) -> dict:
+    """
+    Add a new transaction to the unified portfolio_transactions table.
+    
+    This is the primary entry point for all new transactions.
+    
+    Args:
+        user_id: User ID
+        portfolio_id: Portfolio ID (from portfolios table)
+        txn_type: BUY, SELL, DIVIDEND, DEPOSIT, WITHDRAWAL
+        amount: Cash impact (negative for BUY, positive for SELL/DEPOSIT)
+        txn_date: Transaction date (YYYY-MM-DD)
+        source: MANUAL, UPLOAD, API, BANK_FEED
+        source_reference: File name, API ID, etc.
+        stock_id: Stock ID (for BUY/SELL/DIVIDEND)
+        account_id: Account ID (for DEPOSIT/WITHDRAWAL)
+        shares: Number of shares (for BUY/SELL)
+        price: Price per share (for BUY/SELL)
+        fees: Transaction fees
+        notes: Optional notes
+        
+    Returns:
+        {'success': bool, 'txn_id': int, 'error': str}
+    """
+    result = {'success': False, 'txn_id': None}
+    
+    # Validate txn_type
+    valid_types = {'BUY', 'SELL', 'DIVIDEND', 'DEPOSIT', 'WITHDRAWAL'}
+    txn_type = txn_type.upper()
+    if txn_type not in valid_types:
+        result['error'] = f"Invalid txn_type: {txn_type}. Must be one of {valid_types}"
+        return result
+    
+    # Validate source
+    valid_sources = {'MANUAL', 'UPLOAD', 'API', 'BANK_FEED', 'LEGACY'}
+    source = source.upper()
+    if source not in valid_sources:
+        result['error'] = f"Invalid source: {source}. Must be one of {valid_sources}"
+        return result
+    
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        ts = int(time.time())
+        
+        db_execute(cur, """
+            INSERT INTO portfolio_transactions 
+            (user_id, portfolio_id, txn_type, source, source_reference,
+             stock_id, account_id, shares, price, amount, fees,
+             txn_date, notes, created_at, created_by, is_deleted)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+        """, (user_id, portfolio_id, txn_type, source, source_reference,
+              stock_id, account_id, shares, price, amount, fees,
+              txn_date, notes, ts, user_id))
+        
+        if is_postgres():
+            cur.execute("SELECT lastval()")
+        else:
+            cur.execute("SELECT last_insert_rowid()")
+        result['txn_id'] = cur.fetchone()[0]
+        
+        conn.commit()
+        conn.close()
+        
+        result['success'] = True
+        logger.info(f"Added {txn_type} transaction: {result['txn_id']}")
+        
+    except Exception as e:
+        result['error'] = str(e)
+        logger.error(f"Error adding transaction: {e}")
+    
+    return result
+
+
+def get_portfolio_transactions(
+    user_id: int,
+    portfolio_id: int = None,
+    txn_type: str = None,
+    source: str = None,
+    start_date: str = None,
+    end_date: str = None,
+    include_deleted: bool = False
+) -> pd.DataFrame:
+    """
+    Query transactions from the unified portfolio_transactions table.
+    
+    Args:
+        user_id: User ID
+        portfolio_id: Optional filter by portfolio
+        txn_type: Optional filter by type (BUY, SELL, DIVIDEND, DEPOSIT, WITHDRAWAL)
+        source: Optional filter by source (MANUAL, UPLOAD, API, BANK_FEED, LEGACY)
+        start_date: Optional start date filter
+        end_date: Optional end date filter
+        include_deleted: If True, include soft-deleted records
+        
+    Returns:
+        DataFrame with transactions
+    """
+    try:
+        conn = get_conn()
+        
+        query = """
+            SELECT pt.id, pt.user_id, pt.portfolio_id, p.name as portfolio_name,
+                   pt.txn_type, pt.source, pt.source_reference,
+                   pt.stock_id, sm.ticker as stock_symbol, sm.name as stock_name,
+                   pt.account_id, ea.name as account_name,
+                   pt.shares, pt.price, pt.amount, pt.fees, pt.txn_date,
+                   pt.notes, pt.legacy_txn_id, pt.created_at, pt.is_deleted
+            FROM portfolio_transactions pt
+            LEFT JOIN portfolios p ON pt.portfolio_id = p.id
+            LEFT JOIN stocks_master sm ON pt.stock_id = sm.id
+            LEFT JOIN external_accounts ea ON pt.account_id = ea.id
+            WHERE pt.user_id = ?
+        """
+        params = [user_id]
+        
+        if not include_deleted:
+            query += " AND (pt.is_deleted = 0 OR pt.is_deleted IS NULL)"
+        
+        if portfolio_id:
+            query += " AND pt.portfolio_id = ?"
+            params.append(portfolio_id)
+        
+        if txn_type:
+            query += " AND pt.txn_type = ?"
+            params.append(txn_type.upper())
+        
+        if source:
+            query += " AND pt.source = ?"
+            params.append(source.upper())
+        
+        if start_date:
+            query += " AND pt.txn_date >= ?"
+            params.append(start_date)
+        
+        if end_date:
+            query += " AND pt.txn_date <= ?"
+            params.append(end_date)
+        
+        query += " ORDER BY pt.txn_date DESC, pt.id DESC"
+        
+        df = pd.read_sql_query(query, conn, params=params)
+        conn.close()
+        
+        return df
+        
+    except Exception as e:
+        logger.error(f"Error querying portfolio transactions: {e}")
+        return pd.DataFrame()
+
+
+def get_portfolio_cash_balance(user_id: int, portfolio_id: int = None) -> dict:
+    """
+    Calculate cash balance from unified portfolio_transactions.
+    
+    Cash balance = SUM(amount) where amount is:
+    - Negative for BUY
+    - Positive for SELL, DIVIDEND, DEPOSIT
+    - Negative for WITHDRAWAL
+    
+    Args:
+        user_id: User ID
+        portfolio_id: Optional filter by portfolio
+        
+    Returns:
+        {'total': float, 'by_portfolio': {name: balance}}
+    """
+    result = {'total': 0, 'by_portfolio': {}}
+    
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        
+        query = """
+            SELECT p.name, SUM(pt.amount) as balance
+            FROM portfolio_transactions pt
+            JOIN portfolios p ON pt.portfolio_id = p.id
+            WHERE pt.user_id = ? 
+            AND (pt.is_deleted = 0 OR pt.is_deleted IS NULL)
+        """
+        params = [user_id]
+        
+        if portfolio_id:
+            query += " AND pt.portfolio_id = ?"
+            params.append(portfolio_id)
+        
+        query += " GROUP BY p.name"
+        
+        db_execute(cur, query, tuple(params))
+        
+        for row in cur.fetchall():
+            portfolio_name, balance = row
+            balance = float(balance or 0)
+            result['by_portfolio'][portfolio_name] = balance
+            result['total'] += balance
+        
+        conn.close()
+        
+    except Exception as e:
+        logger.error(f"Error calculating cash balance: {e}")
+        result['error'] = str(e)
+    
+    return result
+
+
+def get_deposit_summary(user_id: int, portfolio_id: int = None) -> pd.DataFrame:
+    """
+    Get deposit summary from the portfolio_deposit_summary view.
+    
+    This view always shows accurate deposit totals regardless of upload status.
+    
+    Args:
+        user_id: User ID
+        portfolio_id: Optional filter by portfolio
+        
+    Returns:
+        DataFrame with deposit summary per portfolio
+    """
+    try:
+        conn = get_conn()
+        
+        query = """
+            SELECT portfolio_id, portfolio_name, 
+                   total_deposits, total_withdrawals, net_deposits,
+                   deposit_count, withdrawal_count,
+                   first_deposit_date, last_deposit_date
+            FROM portfolio_deposit_summary
+            WHERE user_id = ?
+        """
+        params = [user_id]
+        
+        if portfolio_id:
+            query += " AND portfolio_id = ?"
+            params.append(portfolio_id)
+        
+        df = pd.read_sql_query(query, conn, params=params)
+        conn.close()
+        return df
+        
+    except Exception as e:
+        logger.error(f"Error getting deposit summary: {e}")
+        return pd.DataFrame()
+
+
+def get_total_deposits_kwd(user_id: int) -> float:
+    """
+    Get total net deposits across all portfolios, converted to KWD.
+    
+    This is a convenience function that:
+    1. Queries the portfolio_deposit_summary view
+    2. Converts each portfolio's deposits to KWD based on portfolio currency
+    3. Returns the sum
+    
+    Always returns accurate totals regardless of upload status.
+    
+    Args:
+        user_id: User ID
+        
+    Returns:
+        Total net deposits in KWD
+    """
+    try:
+        deposit_summary = get_deposit_summary(user_id)
+        
+        if deposit_summary.empty:
+            return 0.0
+        
+        total_kwd = 0.0
+        for _, row in deposit_summary.iterrows():
+            port_name = row['portfolio_name']
+            net_deposits = float(row['net_deposits'] or 0)
+            ccy = PORTFOLIO_CCY.get(port_name, 'KWD')
+            total_kwd += convert_to_kwd(net_deposits, ccy)
+        
+        return total_kwd
+        
+    except Exception as e:
+        logger.error(f"Error calculating total deposits KWD: {e}")
+        return 0.0
+
+
+# ============================================================================
+# SOLUTION #3: UPLOAD PROCESS ENHANCEMENT
+# ============================================================================
+
+class TransactionUploader:
+    """
+    Enhanced transaction upload handler with:
+    - Soft delete of previous uploads from same file
+    - Source tracking for audit trail
+    - Automatic cash balance reconciliation
+    """
+    
+    def __init__(self, user_id: int):
+        self.user_id = user_id
+        self.stats = {
+            'uploaded': 0,
+            'soft_deleted': 0,
+            'errors': [],
+            'reconciled': False
+        }
+    
+    def upload(self, transactions: list, portfolio_id: int, source_reference: str, 
+               source: str = 'UPLOAD') -> dict:
+        """
+        Upload transactions with proper source tracking and soft delete handling.
+        
+        Args:
+            transactions: List of transaction dicts with keys:
+                - txn_type: BUY, SELL, DIVIDEND, DEPOSIT, WITHDRAWAL
+                - stock_symbol: Stock ticker (for trades)
+                - shares: Number of shares
+                - price: Price per share
+                - amount: Cash impact (negative for BUY)
+                - fees: Transaction fees
+                - txn_date: Transaction date (YYYY-MM-DD)
+                - notes: Optional notes
+            portfolio_id: Target portfolio ID
+            source_reference: File name or upload identifier
+            source: Source type (UPLOAD, API, BANK_FEED)
+            
+        Returns:
+            Result dict with stats and status
+        """
+        result = {
+            'success': False,
+            'uploaded_count': 0,
+            'soft_deleted_count': 0,
+            'errors': [],
+            'debug_log': [],  # Debug log for troubleshooting
+            'message': ''
+        }
+        
+        # DEBUG: Log upload start
+        debug_log = result['debug_log']
+        debug_log.append(f"[UPLOAD START] user_id={self.user_id}, portfolio_id={portfolio_id}")
+        debug_log.append(f"[UPLOAD] source={source}, source_reference={source_reference}")
+        debug_log.append(f"[UPLOAD] transactions_count={len(transactions)}")
+        logger.info(f"TransactionUploader.upload() started: user={self.user_id}, portfolio={portfolio_id}, source={source}, ref={source_reference}, txn_count={len(transactions)}")
+        
+        try:
+            conn = get_conn()
+            cur = conn.cursor()
+            ts = int(time.time())
+            
+            # Get stock and account mappings
+            db_execute(cur, "SELECT id, ticker FROM stocks_master")
+            stock_map = {row[1]: row[0] for row in cur.fetchall()}
+            
+            db_execute(cur, "SELECT id, name FROM external_accounts WHERE user_id = ?", (self.user_id,))
+            account_map = {row[1]: row[0] for row in cur.fetchall()}
+            
+            # Get account_id for this portfolio
+            db_execute(cur, """
+                SELECT ea.id FROM external_accounts ea
+                JOIN portfolios p ON ea.portfolio_id = p.id
+                WHERE p.id = ? AND ea.user_id = ?
+            """, (portfolio_id, self.user_id))
+            acc_row = cur.fetchone()
+            default_account_id = acc_row[0] if acc_row else None
+            
+            # STEP 1: Soft delete previous uploads from same source_reference
+            debug_log.append(f"[STEP 1] Soft-deleting previous uploads with source_reference='{source_reference}'")
+            db_execute(cur, """
+                UPDATE portfolio_transactions 
+                SET is_deleted = 1
+                WHERE portfolio_id = ? 
+                AND user_id = ?
+                AND source = ?
+                AND source_reference = ?
+                AND (is_deleted = 0 OR is_deleted IS NULL)
+            """, (portfolio_id, self.user_id, source, source_reference))
+            
+            result['soft_deleted_count'] = cur.rowcount
+            debug_log.append(f"[STEP 1] Soft-deleted {result['soft_deleted_count']} previous entries")
+            logger.info(f"Soft-deleted {result['soft_deleted_count']} previous entries for source_reference={source_reference}")
+            
+            # STEP 2: Insert new transactions with source tracking
+            debug_log.append(f"[STEP 2] Processing {len(transactions)} transactions...")
+            for txn_idx, txn in enumerate(transactions):
+                try:
+                    txn_type = txn.get('txn_type', 'BUY').upper()
+                    stock_symbol = txn.get('stock_symbol')
+                    stock_id = stock_map.get(stock_symbol) if stock_symbol else None
+                    account_id = txn.get('account_id', default_account_id)
+                    
+                    shares = float(txn.get('shares', 0) or 0)
+                    price = float(txn.get('price', 0) or 0)
+                    amount = float(txn.get('amount', 0) or 0)
+                    fees = float(txn.get('fees', 0) or 0)
+                    txn_date = txn.get('txn_date')
+                    notes = txn.get('notes')
+                    
+                    # DEBUG: Log raw transaction data
+                    if txn_idx < 5:  # Log first 5 transactions in detail
+                        debug_log.append(f"  [TXN {txn_idx+1}] raw: type={txn_type}, symbol={stock_symbol}, shares={shares}, price={price}, date={txn_date}")
+                    
+                    # Auto-calculate amount if not provided
+                    if amount == 0 and shares > 0 and price > 0:
+                        if txn_type == 'BUY':
+                            amount = -(shares * price + fees)
+                        elif txn_type == 'SELL':
+                            amount = shares * price - fees
+                        if txn_idx < 5:
+                            debug_log.append(f"  [TXN {txn_idx+1}] auto-calculated amount={amount:.2f}")
+                    
+                    db_execute(cur, """
+                        INSERT INTO portfolio_transactions 
+                        (user_id, portfolio_id, txn_type, source, source_reference,
+                         stock_id, account_id, shares, price, amount, fees,
+                         txn_date, notes, created_at, created_by, is_deleted)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+                    """, (self.user_id, portfolio_id, txn_type, source, source_reference,
+                          stock_id, account_id, shares, price, amount, fees,
+                          txn_date, notes, ts, self.user_id))
+                    
+                    result['uploaded_count'] += 1
+                    
+                except Exception as e:
+                    error_msg = f"Row {txn_idx+1} error: {e}"
+                    result['errors'].append(error_msg)
+                    debug_log.append(f"  [ERROR] {error_msg}")
+                    logger.error(f"Transaction insert error: {e}")
+            
+            # STEP 3: Reconcile cash balances
+            self._reconcile_cash_balances(cur, portfolio_id)
+            
+            conn.commit()
+            conn.close()
+            
+            result['success'] = True
+            result['message'] = f"Successfully uploaded {result['uploaded_count']} transactions"
+            if result['soft_deleted_count'] > 0:
+                result['message'] += f" (replaced {result['soft_deleted_count']} previous entries)"
+            
+            # DEBUG: Log completion
+            debug_log.append(f"[UPLOAD COMPLETE] success=True, uploaded={result['uploaded_count']}, replaced={result['soft_deleted_count']}")
+            logger.info(f"Upload complete: {result['uploaded_count']} uploaded, {result['soft_deleted_count']} replaced")
+            
+        except Exception as e:
+            result['errors'].append(str(e))
+            result['message'] = f"Upload failed: {e}"
+            debug_log.append(f"[UPLOAD FAILED] {e}")
+            logger.error(f"Transaction upload error: {e}")
+        
+        return result
+    
+    def _reconcile_cash_balances(self, cur, portfolio_id: int):
+        """
+        Reconcile cash balances after upload.
+        
+        Calculates net cash flow from all non-deleted transactions
+        and updates the external_accounts balance.
+        """
+        try:
+            # Calculate net cash flow per account
+            db_execute(cur, """
+                SELECT 
+                    account_id,
+                    SUM(CASE 
+                        WHEN txn_type = 'DEPOSIT' THEN amount
+                        WHEN txn_type = 'WITHDRAWAL' THEN -ABS(amount)
+                        WHEN txn_type = 'BUY' THEN amount - COALESCE(fees, 0)
+                        WHEN txn_type = 'SELL' THEN amount - COALESCE(fees, 0)
+                        WHEN txn_type = 'DIVIDEND' THEN amount
+                        ELSE 0 
+                    END) as net_cash_flow
+                FROM portfolio_transactions
+                WHERE portfolio_id = ? 
+                AND user_id = ?
+                AND (is_deleted = 0 OR is_deleted IS NULL)
+                AND account_id IS NOT NULL
+                GROUP BY account_id
+            """, (portfolio_id, self.user_id))
+            
+            today = time.strftime('%Y-%m-%d')
+            
+            for row in cur.fetchall():
+                account_id, net_cash_flow = row
+                net_cash_flow = float(net_cash_flow or 0)
+                
+                db_execute(cur, """
+                    UPDATE external_accounts 
+                    SET current_balance = ?,
+                        last_reconciled_date = ?
+                    WHERE id = ? AND user_id = ?
+                """, (net_cash_flow, today, account_id, self.user_id))
+            
+            self.stats['reconciled'] = True
+            
+        except Exception as e:
+            logger.error(f"Cash reconciliation error: {e}")
+            self.stats['errors'].append(f"Reconciliation: {e}")
+    
+    def soft_delete_by_source(self, source: str, source_reference: str = None) -> int:
+        """
+        Soft delete transactions by source and optional reference.
+        
+        Args:
+            source: Source type (UPLOAD, API, etc.)
+            source_reference: Optional specific file/reference
+            
+        Returns:
+            Number of records soft-deleted
+        """
+        try:
+            conn = get_conn()
+            cur = conn.cursor()
+            
+            if source_reference:
+                db_execute(cur, """
+                    UPDATE portfolio_transactions 
+                    SET is_deleted = 1
+                    WHERE user_id = ?
+                    AND source = ?
+                    AND source_reference = ?
+                    AND (is_deleted = 0 OR is_deleted IS NULL)
+                """, (self.user_id, source, source_reference))
+            else:
+                db_execute(cur, """
+                    UPDATE portfolio_transactions 
+                    SET is_deleted = 1
+                    WHERE user_id = ?
+                    AND source = ?
+                    AND (is_deleted = 0 OR is_deleted IS NULL)
+                """, (self.user_id, source))
+            
+            count = cur.rowcount
+            conn.commit()
+            conn.close()
+            
+            return count
+            
+        except Exception as e:
+            logger.error(f"Soft delete error: {e}")
+            return 0
+    
+    def restore_deleted(self, source_reference: str) -> int:
+        """
+        Restore soft-deleted transactions by source reference.
+        
+        Args:
+            source_reference: File name or upload identifier
+            
+        Returns:
+            Number of records restored
+        """
+        try:
+            conn = get_conn()
+            cur = conn.cursor()
+            
+            db_execute(cur, """
+                UPDATE portfolio_transactions 
+                SET is_deleted = 0
+                WHERE user_id = ?
+                AND source_reference = ?
+                AND is_deleted = 1
+            """, (self.user_id, source_reference))
+            
+            count = cur.rowcount
+            conn.commit()
+            conn.close()
+            
+            return count
+            
+        except Exception as e:
+            logger.error(f"Restore error: {e}")
+            return 0
+
+
+# ============================================================================
+# LEGACY TRANSACTIONS TABLE - SOFT DELETE HELPERS
+# ============================================================================
+
+def soft_delete_transactions(user_id: int, source: str = None, source_reference: str = None, 
+                              preserve_manual: bool = True) -> int:
+    """
+    Soft delete transactions from the legacy transactions table.
+    
+    Args:
+        user_id: User ID
+        source: Source filter (UPLOAD, MANUAL, API, etc.) or None for all non-manual
+        source_reference: Specific source_reference to filter (e.g., filename)
+        preserve_manual: If True, never delete MANUAL entries
+        
+    Returns:
+        Number of records soft-deleted
+    """
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        
+        if source_reference:
+            # Delete by specific source_reference
+            db_execute(cur, """
+                UPDATE transactions 
+                SET is_deleted = 1,
+                    deleted_at = ?,
+                    deleted_by = ?
+                WHERE user_id = ?
+                AND source_reference = ?
+                AND (is_deleted = 0 OR is_deleted IS NULL)
+            """, (int(time.time()), user_id, user_id, source_reference))
+        elif source:
+            # Delete by source type
+            db_execute(cur, """
+                UPDATE transactions 
+                SET is_deleted = 1,
+                    deleted_at = ?,
+                    deleted_by = ?
+                WHERE user_id = ?
+                AND source = ?
+                AND (is_deleted = 0 OR is_deleted IS NULL)
+            """, (int(time.time()), user_id, user_id, source))
+        elif preserve_manual:
+            # Delete all non-MANUAL entries
+            db_execute(cur, """
+                UPDATE transactions 
+                SET is_deleted = 1,
+                    deleted_at = ?,
+                    deleted_by = ?
+                WHERE user_id = ?
+                AND (source != 'MANUAL' OR source IS NULL)
+                AND (is_deleted = 0 OR is_deleted IS NULL)
+            """, (int(time.time()), user_id, user_id))
+        else:
+            # Delete ALL (for full replace)
+            db_execute(cur, """
+                UPDATE transactions 
+                SET is_deleted = 1,
+                    deleted_at = ?,
+                    deleted_by = ?
+                WHERE user_id = ?
+                AND (is_deleted = 0 OR is_deleted IS NULL)
+            """, (int(time.time()), user_id, user_id))
+        
+        count = cur.rowcount
+        conn.commit()
+        conn.close()
+        
+        return count
+        
+    except Exception as e:
+        logger.error(f"Soft delete transactions error: {e}")
+        return 0
+
+
+def restore_deleted_transactions(user_id: int, source_reference: str = None) -> int:
+    """
+    Restore soft-deleted transactions from the legacy transactions table.
+    
+    Args:
+        user_id: User ID
+        source_reference: Optional specific source_reference to restore
+        
+    Returns:
+        Number of records restored
+    """
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        
+        if source_reference:
+            db_execute(cur, """
+                UPDATE transactions 
+                SET is_deleted = 0,
+                    deleted_at = NULL,
+                    deleted_by = NULL
+                WHERE user_id = ?
+                AND source_reference = ?
+                AND is_deleted = 1
+            """, (user_id, source_reference))
+        else:
+            db_execute(cur, """
+                UPDATE transactions 
+                SET is_deleted = 0,
+                    deleted_at = NULL,
+                    deleted_by = NULL
+                WHERE user_id = ?
+                AND is_deleted = 1
+            """, (user_id,))
+        
+        count = cur.rowcount
+        conn.commit()
+        conn.close()
+        
+        return count
+        
+    except Exception as e:
+        logger.error(f"Restore transactions error: {e}")
+        return 0
+
+
+def get_deleted_transactions_count(user_id: int) -> dict:
+    """
+    Get count of deleted transactions by source.
+    
+    Args:
+        user_id: User ID
+        
+    Returns:
+        Dict with counts by source
+    """
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        
+        db_execute(cur, """
+            SELECT source, COUNT(*) as count
+            FROM transactions
+            WHERE user_id = ?
+            AND is_deleted = 1
+            GROUP BY source
+        """, (user_id,))
+        
+        results = {row['source'] or 'UNKNOWN': row['count'] for row in cur.fetchall()}
+        conn.close()
+        
+        return results
+        
+    except Exception as e:
+        logger.error(f"Get deleted count error: {e}")
+        return {}
+
+
+def upload_transactions_from_excel(
+    user_id: int, 
+    portfolio_id: int, 
+    file_path: str,
+    sheet_name: str = None
+) -> dict:
+    """
+    Parse and upload transactions from an Excel file.
+    
+    Wrapper function that:
+    1. Reads Excel file
+    2. Normalizes column names
+    3. Maps to transaction format
+    4. Calls TransactionUploader.upload()
+    
+    Args:
+        user_id: User ID
+        portfolio_id: Target portfolio ID
+        file_path: Path to Excel file
+        sheet_name: Optional sheet name
+        
+    Returns:
+        Upload result dict
+    """
+    import os
+    
+    result = {'success': False, 'errors': [], 'debug_log': []}
+    debug_log = result['debug_log']
+    
+    # DEBUG: Log function start
+    debug_log.append(f"[EXCEL UPLOAD START] user_id={user_id}, portfolio_id={portfolio_id}")
+    debug_log.append(f"[EXCEL] file_path={file_path}, sheet_name={sheet_name}")
+    logger.info(f"upload_transactions_from_excel() started: user={user_id}, portfolio={portfolio_id}, file={file_path}")
+    
+    try:
+        # Read Excel file
+        if sheet_name:
+            df = pd.read_excel(file_path, sheet_name=sheet_name)
+        else:
+            df = pd.read_excel(file_path)
+        
+        if df.empty:
+            debug_log.append("[EXCEL] File is empty!")
+            result['errors'].append("Excel file is empty")
+            return result
+        
+        # Normalize column names
+        original_cols = list(df.columns)
+        df.columns = [str(c).strip().lower().replace(' ', '_') for c in df.columns]
+        normalized_cols = list(df.columns)
+        
+        # DEBUG: Log column info
+        debug_log.append(f"[EXCEL] Rows: {len(df)}, Original columns: {original_cols}")
+        debug_log.append(f"[EXCEL] Normalized columns: {normalized_cols}")
+        logger.info(f"Excel loaded: {len(df)} rows, columns: {normalized_cols}")
+        
+        # Map to transaction format
+        transactions = []
+        for idx, row in df.iterrows():
+            try:
+                # DEBUG: Log raw values for first few rows
+                raw_date = row.get('txn_date') or row.get('date') or row.get('trade_date')
+                raw_type = row.get('txn_type') or row.get('type') or row.get('transaction_type')
+                parsed_date = _parse_date(raw_date)
+                
+                if idx < 3:  # Log first 3 rows in detail
+                    debug_log.append(f"  [ROW {idx+2}] raw_date={raw_date!r} -> parsed={parsed_date}")
+                    debug_log.append(f"  [ROW {idx+2}] raw_type={raw_type!r} -> mapped={_map_txn_type(raw_type)}")
+                
+                txn = {
+                    'txn_type': _map_txn_type(raw_type),
+                    # SYMBOL NORMALIZATION: Use normalize_stock_symbol for variations
+                    'stock_symbol': normalize_stock_symbol(
+                        str(row.get('stock_symbol') or row.get('symbol') or row.get('ticker') or '').strip()
+                    ),
+                    'shares': float(row.get('shares') or row.get('quantity') or row.get('qty') or 0),
+                    'price': float(row.get('price') or row.get('unit_price') or 0),
+                    'amount': float(row.get('amount') or row.get('total') or row.get('value') or 0),
+                    'fees': float(row.get('fees') or row.get('commission') or row.get('brokerage') or 0),
+                    'txn_date': parsed_date,
+                    'notes': str(row.get('notes') or row.get('comments') or '') if row.get('notes') else None
+                }
+                
+                # DEBUG: Log symbol normalization for first few rows
+                if idx < 3:
+                    raw_sym = str(row.get('stock_symbol') or row.get('symbol') or row.get('ticker') or '')
+                    debug_log.append(f"  [ROW {idx+2}] symbol: {raw_sym!r} -> {txn['stock_symbol']}")
+                
+                # Skip rows with no meaningful data
+                if not txn['stock_symbol'] and txn['txn_type'] in ['BUY', 'SELL']:
+                    continue
+                if txn['txn_type'] not in ['BUY', 'SELL', 'DIVIDEND', 'DEPOSIT', 'WITHDRAWAL']:
+                    continue
+                
+                transactions.append(txn)
+                
+            except Exception as e:
+                result['errors'].append(f"Row {idx + 2}: {e}")
+        
+        if not transactions:
+            result['errors'].append("No valid transactions found in file")
+            return result
+        
+        # Upload using TransactionUploader
+        uploader = TransactionUploader(user_id)
+        source_reference = os.path.basename(file_path)
+        
+        upload_result = uploader.upload(transactions, portfolio_id, source_reference, source='UPLOAD')
+        
+        result.update(upload_result)
+        
+    except Exception as e:
+        result['errors'].append(str(e))
+        logger.error(f"Excel upload error: {e}")
+    
+    return result
+
+
+def _map_txn_type(raw_type) -> str:
+    """Map various transaction type strings to standard format."""
+    if not raw_type:
+        return 'BUY'
+    
+    raw = str(raw_type).upper().strip()
+    
+    mappings = {
+        'BUY': 'BUY',
+        'PURCHASE': 'BUY',
+        'B': 'BUY',
+        'SELL': 'SELL',
+        'SALE': 'SELL',
+        'S': 'SELL',
+        'DIVIDEND': 'DIVIDEND',
+        'DIV': 'DIVIDEND',
+        'CASH_DIVIDEND': 'DIVIDEND',
+        'DEPOSIT': 'DEPOSIT',
+        'DEP': 'DEPOSIT',
+        'TRANSFER_IN': 'DEPOSIT',
+        'WITHDRAWAL': 'WITHDRAWAL',
+        'WITHDRAW': 'WITHDRAWAL',
+        'TRANSFER_OUT': 'WITHDRAWAL'
+    }
+    
+    return mappings.get(raw, 'BUY')
+
+
+# Global flag to enable date parsing debug logging
+_DATE_PARSE_DEBUG = False
+
+def set_date_parse_debug(enabled: bool):
+    """Enable/disable date parsing debug logging."""
+    global _DATE_PARSE_DEBUG
+    _DATE_PARSE_DEBUG = enabled
+
+
+def _parse_date(raw_date, debug_log: list = None) -> str:
+    """
+    Parse various date formats to YYYY-MM-DD (ISO format).
+    
+    Handles:
+    - ISO format: 2025-07-27
+    - DD/MM/YYYY: 27/07/2025
+    - MM/DD/YYYY: 07/27/2025
+    - DD-MM-YYYY: 27-07-2025
+    - DD-MMM-YY: 27-Jul-25
+    - DD-MMM-YYYY: 27-Jul-2025
+    - MM/DD/YY: 07/27/25
+    - DD/MM/YY: 27/07/25
+    - Excel serial dates: 45869 (days since 1899-12-30)
+    - Pandas/numpy datetime objects
+    """
+    from datetime import datetime, timedelta
+    
+    if not raw_date:
+        return time.strftime('%Y-%m-%d')
+    
+    # Handle None explicitly
+    if raw_date is None or (isinstance(raw_date, float) and pd.isna(raw_date)):
+        return time.strftime('%Y-%m-%d')
+    
+    # Handle pandas Timestamp or datetime objects directly
+    if isinstance(raw_date, (datetime, pd.Timestamp)):
+        return raw_date.strftime('%Y-%m-%d')
+    
+    # Handle Excel serial date numbers (float or int)
+    if isinstance(raw_date, (int, float)) and not pd.isna(raw_date):
+        # Excel serial date: days since 1899-12-30
+        # Numbers > 30000 are likely Excel dates (year 1982+)
+        if 30000 <= raw_date <= 100000:
+            try:
+                excel_epoch = datetime(1899, 12, 30)
+                dt = excel_epoch + timedelta(days=int(raw_date))
+                return dt.strftime('%Y-%m-%d')
+            except:
+                pass
+    
+    if isinstance(raw_date, str):
+        raw_date = raw_date.strip()
+        
+        # Already in correct ISO format: YYYY-MM-DD
+        if len(raw_date) == 10 and raw_date[4] == '-' and raw_date[7] == '-':
+            try:
+                # Validate it's a real date
+                datetime.strptime(raw_date, '%Y-%m-%d')
+                return raw_date
+            except:
+                pass
+        
+        # Try comprehensive list of formats
+        date_formats = [
+            '%Y-%m-%d',      # ISO: 2025-07-27
+            '%d/%m/%Y',      # DD/MM/YYYY: 27/07/2025
+            '%m/%d/%Y',      # MM/DD/YYYY: 07/27/2025
+            '%d-%m-%Y',      # DD-MM-YYYY: 27-07-2025
+            '%d-%b-%y',      # DD-MMM-YY: 27-Jul-25
+            '%d-%b-%Y',      # DD-MMM-YYYY: 27-Jul-2025
+            '%d-%B-%y',      # DD-Month-YY: 27-July-25
+            '%d-%B-%Y',      # DD-Month-YYYY: 27-July-2025
+            '%d %b %y',      # DD MMM YY: 27 Jul 25
+            '%d %b %Y',      # DD MMM YYYY: 27 Jul 2025
+            '%d %B %y',      # DD Month YY: 27 July 25
+            '%d %B %Y',      # DD Month YYYY: 27 July 2025
+            '%b %d, %Y',     # MMM DD, YYYY: Jul 27, 2025
+            '%B %d, %Y',     # Month DD, YYYY: July 27, 2025
+            '%m/%d/%y',      # MM/DD/YY: 07/27/25
+            '%d/%m/%y',      # DD/MM/YY: 27/07/25
+            '%Y/%m/%d',      # YYYY/MM/DD: 2025/07/27
+            '%Y.%m.%d',      # YYYY.MM.DD: 2025.07.27
+            '%d.%m.%Y',      # DD.MM.YYYY: 27.07.2025
+        ]
+        
+        for fmt in date_formats:
+            try:
+                dt = datetime.strptime(raw_date, fmt)
+                # Handle 2-digit years: if year < 100, assume 2000s for years < 50, 1900s otherwise
+                if dt.year < 100:
+                    dt = dt.replace(year=dt.year + 2000 if dt.year < 50 else dt.year + 1900)
+                result = dt.strftime('%Y-%m-%d')
+                # Debug log success
+                if _DATE_PARSE_DEBUG or debug_log is not None:
+                    msg = f"[DATE PARSE] '{raw_date}' matched format '{fmt}' -> {result}"
+                    if debug_log is not None:
+                        debug_log.append(msg)
+                    if _DATE_PARSE_DEBUG:
+                        logger.debug(msg)
+                return result
+            except ValueError:
+                continue
+    
+    # Fallback: Try pandas Timestamp for any remaining edge cases
+    try:
+        ts = pd.Timestamp(raw_date)
+        if not pd.isna(ts):
+            result = ts.strftime('%Y-%m-%d')
+            if _DATE_PARSE_DEBUG or debug_log is not None:
+                msg = f"[DATE PARSE] '{raw_date}' parsed via pandas.Timestamp -> {result}"
+                if debug_log is not None:
+                    debug_log.append(msg)
+                if _DATE_PARSE_DEBUG:
+                    logger.debug(msg)
+            return result
+    except:
+        pass
+    
+    # Last resort: return today's date with a warning logged
+    result = time.strftime('%Y-%m-%d')
+    warning_msg = f"[DATE PARSE WARNING] Could not parse: {raw_date!r} (type={type(raw_date).__name__}), using today: {result}"
+    logger.warning(warning_msg)
+    if debug_log is not None:
+        debug_log.append(warning_msg)
+    return result
+
+
+# ============================================================================
+# SOLUTION #2: POSITION CALCULATION HELPER
+# ============================================================================
+# Standardized SQL for calculating current holdings from transactions.
+# This ensures consistency across all UI components.
+
+def get_position_calculation_sql(user_id_param: str = "?", include_soft_delete: bool = True) -> str:
+    """
+    Generate standardized SQL for position calculation.
+    
+    CORRECT FORMULA: 
+        net_shares = BUY shares + BONUS shares - SELL shares
+    
+    Args:
+        user_id_param: SQL parameter placeholder (default "?")
+        include_soft_delete: Whether to add soft-delete filter
+        
+    Returns:
+        SQL subquery string that calculates positions per stock
+    """
+    soft_delete = ""
+    if include_soft_delete:
+        soft_delete = " AND (is_deleted IS NULL OR is_deleted = 0)"
+    
+    return f"""
+        SELECT 
+            portfolio,
+            stock_symbol,
+            SUM(CASE WHEN txn_type = 'Buy' THEN COALESCE(shares, 0) ELSE 0 END) AS total_bought,
+            SUM(CASE WHEN txn_type = 'Sell' THEN COALESCE(shares, 0) ELSE 0 END) AS total_sold,
+            SUM(COALESCE(bonus_shares, 0)) AS total_bonus,
+            SUM(CASE WHEN txn_type = 'Buy' THEN COALESCE(shares, 0) ELSE 0 END) + 
+            SUM(COALESCE(bonus_shares, 0)) - 
+            SUM(CASE WHEN txn_type = 'Sell' THEN COALESCE(shares, 0) ELSE 0 END) AS current_holding
+        FROM transactions
+        WHERE user_id = {user_id_param}
+        AND txn_type IN ('Buy', 'Sell', 'Bonus')
+        {soft_delete}
+        GROUP BY portfolio, stock_symbol
+        HAVING current_holding > 0.001
+    """
+
+
+def get_current_holdings(user_id: int, portfolio: str = None, include_closed: bool = False) -> pd.DataFrame:
+    """
+    Get current stock holdings calculated from transactions.
+    
+    This is the SINGLE SOURCE OF TRUTH for position calculations.
+    
+    Args:
+        user_id: User ID
+        portfolio: Optional portfolio filter (None = all)
+        include_closed: If True, include positions with 0 shares
+        
+    Returns:
+        DataFrame with columns: portfolio, stock_symbol, total_bought, total_sold, 
+                                total_bonus, current_holding
+    """
+    soft_del = _soft_delete_filter()
+    
+    having_clause = "HAVING current_holding > 0.001" if not include_closed else ""
+    portfolio_filter = f"AND portfolio = '{portfolio}'" if portfolio else ""
+    
+    sql = f"""
+        SELECT 
+            portfolio,
+            stock_symbol,
+            SUM(CASE WHEN txn_type = 'Buy' THEN COALESCE(shares, 0) ELSE 0 END) AS total_bought,
+            SUM(CASE WHEN txn_type = 'Sell' THEN COALESCE(shares, 0) ELSE 0 END) AS total_sold,
+            SUM(COALESCE(bonus_shares, 0)) AS total_bonus,
+            SUM(CASE WHEN txn_type = 'Buy' THEN COALESCE(shares, 0) ELSE 0 END) + 
+            SUM(COALESCE(bonus_shares, 0)) - 
+            SUM(CASE WHEN txn_type = 'Sell' THEN COALESCE(shares, 0) ELSE 0 END) AS current_holding,
+            -- Cost basis for open positions
+            SUM(CASE WHEN txn_type = 'Buy' THEN COALESCE(purchase_cost, 0) ELSE 0 END) AS total_cost,
+            -- Dividends received
+            SUM(COALESCE(cash_dividend, 0)) AS total_dividends,
+            -- Realized P&L from sells
+            SUM(CASE WHEN txn_type = 'Sell' THEN COALESCE(sell_value, 0) ELSE 0 END) AS total_sell_value
+        FROM transactions
+        WHERE user_id = ?
+        {portfolio_filter}
+        {soft_del}
+        GROUP BY portfolio, stock_symbol
+        {having_clause}
+        ORDER BY portfolio, stock_symbol
+    """
+    
+    return query_df(sql, (user_id,))
+
+
+def validate_position_integrity(user_id: int) -> dict:
+    """
+    Validate that position calculations are consistent.
+    
+    Returns:
+        Dict with validation results and any discrepancies found
+    """
+    holdings = get_current_holdings(user_id, include_closed=True)
+    
+    issues = []
+    
+    for _, row in holdings.iterrows():
+        # Check for negative holdings (should not happen)
+        if row['current_holding'] < 0:
+            issues.append({
+                'type': 'NEGATIVE_POSITION',
+                'portfolio': row['portfolio'],
+                'symbol': row['stock_symbol'],
+                'holding': row['current_holding'],
+                'message': f"Negative position: {row['current_holding']:.4f} shares"
+            })
+        
+        # Check for sells exceeding buys
+        if row['total_sold'] > row['total_bought'] + row['total_bonus']:
+            issues.append({
+                'type': 'OVERSOLD',
+                'portfolio': row['portfolio'],
+                'symbol': row['stock_symbol'],
+                'bought': row['total_bought'],
+                'bonus': row['total_bonus'],
+                'sold': row['total_sold'],
+                'message': f"Sold more than owned: bought={row['total_bought']:.0f}, bonus={row['total_bonus']:.0f}, sold={row['total_sold']:.0f}"
+            })
+    
+    return {
+        'valid': len(issues) == 0,
+        'issue_count': len(issues),
+        'issues': issues,
+        'total_positions': len(holdings),
+        'open_positions': len(holdings[holdings['current_holding'] > 0.001]),
+        'closed_positions': len(holdings[holdings['current_holding'] <= 0.001])
+    }
+
+
+# ============================================================================
+# UI DISPLAY FIX #1: PORTFOLIO OVERVIEW QUERIES
+# ============================================================================
+
+def get_portfolio_overview(user_id: int, portfolio_id: int = None) -> dict:
+    """
+    Get comprehensive portfolio overview data from unified tables.
+    
+    This is the CORRECT query for the Overview tab - always shows accurate data
+    regardless of upload status or data source.
+    
+    Args:
+        user_id: User ID
+        portfolio_id: Optional specific portfolio (None = all portfolios)
+        
+    Returns:
+        Dict with:
+        - total_deposits: Sum of all DEPOSIT transactions
+        - total_withdrawals: Sum of all WITHDRAWAL transactions  
+        - net_deposits: Deposits - Withdrawals
+        - total_invested: Sum of BUY amounts (negative, so we negate)
+        - total_divested: Sum of SELL amounts
+        - total_dividends: Sum of DIVIDEND amounts
+        - cash_balance: Net cash flow
+        - by_portfolio: Breakdown per portfolio
+    """
+    result = {
+        'total_deposits': 0.0,
+        'total_withdrawals': 0.0,
+        'net_deposits': 0.0,
+        'total_invested': 0.0,
+        'total_divested': 0.0,
+        'total_dividends': 0.0,
+        'cash_balance': 0.0,
+        'total_fees': 0.0,
+        'transaction_count': 0,
+        'by_portfolio': {}
+    }
+    
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        
+        # Build query with optional portfolio filter
+        portfolio_filter = "AND pt.portfolio_id = ?" if portfolio_id else ""
+        params = [user_id, portfolio_id] if portfolio_id else [user_id]
+        
+        # Query aggregated data per portfolio
+        query = f"""
+            SELECT 
+                p.id as portfolio_id,
+                p.name as portfolio_name,
+                COALESCE(SUM(CASE WHEN pt.txn_type = 'DEPOSIT' THEN pt.amount ELSE 0 END), 0) as total_deposits,
+                COALESCE(SUM(CASE WHEN pt.txn_type = 'WITHDRAWAL' THEN pt.amount ELSE 0 END), 0) as total_withdrawals,
+                COALESCE(SUM(CASE WHEN pt.txn_type = 'BUY' THEN pt.amount ELSE 0 END), 0) as total_buys,
+                COALESCE(SUM(CASE WHEN pt.txn_type = 'SELL' THEN pt.amount ELSE 0 END), 0) as total_sells,
+                COALESCE(SUM(CASE WHEN pt.txn_type = 'DIVIDEND' THEN pt.amount ELSE 0 END), 0) as total_dividends,
+                COALESCE(SUM(pt.amount), 0) as cash_balance,
+                COALESCE(SUM(COALESCE(pt.fees, 0)), 0) as total_fees,
+                COUNT(*) as txn_count
+            FROM portfolios p
+            LEFT JOIN portfolio_transactions pt ON p.id = pt.portfolio_id 
+                AND pt.user_id = p.user_id
+                AND (pt.is_deleted = 0 OR pt.is_deleted IS NULL)
+            WHERE p.user_id = ? {portfolio_filter}
+            GROUP BY p.id, p.name
+        """
+        
+        db_execute(cur, query, tuple(params))
+        
+        for row in cur.fetchall():
+            (port_id, port_name, deposits, withdrawals, buys, sells, 
+             dividends, balance, fees, txn_count) = row
+            
+            deposits = float(deposits or 0)
+            withdrawals = float(withdrawals or 0)
+            buys = float(buys or 0)  # Negative value
+            sells = float(sells or 0)
+            dividends = float(dividends or 0)
+            balance = float(balance or 0)
+            fees = float(fees or 0)
+            
+            # Get portfolio currency
+            ccy = PORTFOLIO_CCY.get(port_name, 'KWD')
+            
+            # Store per-portfolio data
+            result['by_portfolio'][port_name] = {
+                'portfolio_id': port_id,
+                'currency': ccy,
+                'total_deposits': deposits,
+                'total_withdrawals': withdrawals,
+                'net_deposits': deposits - withdrawals,
+                'total_invested': -buys,  # Negate since buys are negative
+                'total_divested': sells,
+                'total_dividends': dividends,
+                'cash_balance': balance,
+                'total_fees': fees,
+                'transaction_count': txn_count
+            }
+            
+            # Aggregate totals (convert to KWD)
+            result['total_deposits'] += convert_to_kwd(deposits, ccy)
+            result['total_withdrawals'] += convert_to_kwd(withdrawals, ccy)
+            result['total_invested'] += convert_to_kwd(-buys, ccy)
+            result['total_divested'] += convert_to_kwd(sells, ccy)
+            result['total_dividends'] += convert_to_kwd(dividends, ccy)
+            result['cash_balance'] += convert_to_kwd(balance, ccy)
+            result['total_fees'] += convert_to_kwd(fees, ccy)
+            result['transaction_count'] += txn_count
+        
+        result['net_deposits'] = result['total_deposits'] - result['total_withdrawals']
+        
+        conn.close()
+        
+    except Exception as e:
+        logger.error(f"Error getting portfolio overview: {e}")
+        result['error'] = str(e)
+    
+    return result
+
+
+def get_portfolio_value(user_id: int, portfolio_id: int = None) -> dict:
+    """
+    Get current portfolio value from holdings.
+    
+    Calculates market value based on current prices and share quantities.
+    
+    Args:
+        user_id: User ID
+        portfolio_id: Optional specific portfolio
+        
+    Returns:
+        Dict with market values per portfolio and total
+    """
+    result = {
+        'total_value_kwd': 0.0,
+        'by_portfolio': {}
+    }
+    
+    try:
+        # Use existing build_portfolio_table function for consistency
+        for port_name in PORTFOLIO_CCY.keys():
+            df_port = build_portfolio_table(port_name)
+            
+            if not df_port.empty:
+                ccy = PORTFOLIO_CCY.get(port_name, 'KWD')
+                port_value = 0.0
+                
+                for _, row in df_port.iterrows():
+                    if row.get('Shares Qty', 0) > 0:
+                        market_val = float(row.get('Market Value', 0) or 0)
+                        port_value += market_val
+                
+                result['by_portfolio'][port_name] = {
+                    'currency': ccy,
+                    'market_value': port_value,
+                    'market_value_kwd': convert_to_kwd(port_value, ccy)
+                }
+                
+                result['total_value_kwd'] += convert_to_kwd(port_value, ccy)
+        
+    except Exception as e:
+        logger.error(f"Error getting portfolio value: {e}")
+        result['error'] = str(e)
+    
+    return result
+
+
+def get_account_balances(user_id: int, portfolio_id: int = None) -> dict:
+    """
+    Get current account balances from external_accounts table.
+    
+    Args:
+        user_id: User ID
+        portfolio_id: Optional specific portfolio
+        
+    Returns:
+        Dict with account balances
+    """
+    result = {
+        'total_cash_kwd': 0.0,
+        'accounts': []
+    }
+    
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        
+        query = """
+            SELECT ea.id, ea.name, ea.current_balance, ea.currency, 
+                   ea.last_reconciled_date, p.name as portfolio_name
+            FROM external_accounts ea
+            LEFT JOIN portfolios p ON ea.portfolio_id = p.id
+            WHERE ea.user_id = ?
+        """
+        params = [user_id]
+        
+        if portfolio_id:
+            query += " AND ea.portfolio_id = ?"
+            params.append(portfolio_id)
+        
+        db_execute(cur, query, tuple(params))
+        
+        for row in cur.fetchall():
+            acc_id, acc_name, balance, ccy, reconciled_date, port_name = row
+            balance = float(balance or 0)
+            ccy = ccy or 'KWD'
+            
+            account_data = {
+                'id': acc_id,
+                'name': acc_name,
+                'balance': balance,
+                'currency': ccy,
+                'balance_kwd': convert_to_kwd(balance, ccy),
+                'last_reconciled': reconciled_date,
+                'portfolio_name': port_name
+            }
+            
+            result['accounts'].append(account_data)
+            result['total_cash_kwd'] += convert_to_kwd(balance, ccy)
+        
+        conn.close()
+        
+    except Exception as e:
+        logger.error(f"Error getting account balances: {e}")
+        result['error'] = str(e)
+    
+    return result
+
+
+def get_complete_overview(user_id: int) -> dict:
+    """
+    Get complete portfolio overview for UI display.
+    
+    This is the main entry point for the Overview tab.
+    Combines all data sources into a single comprehensive dict.
+    
+    Args:
+        user_id: User ID
+        
+    Returns:
+        Complete overview data
+    """
+    # Get transaction-based overview
+    overview = get_portfolio_overview(user_id)
+    
+    # Get current market values
+    values = get_portfolio_value(user_id)
+    
+    # Get account cash balances
+    accounts = get_account_balances(user_id)
+    
+    # Combine into complete result
+    result = {
+        # Transaction aggregates
+        'total_deposits': overview['total_deposits'],
+        'total_withdrawals': overview['total_withdrawals'],
+        'net_deposits': overview['net_deposits'],
+        'total_invested': overview['total_invested'],
+        'total_divested': overview['total_divested'],
+        'total_dividends': overview['total_dividends'],
+        'total_fees': overview['total_fees'],
+        'transaction_count': overview['transaction_count'],
+        
+        # Current values
+        'portfolio_value': values['total_value_kwd'],
+        'cash_balance': accounts['total_cash_kwd'],
+        'total_value': values['total_value_kwd'] + accounts['total_cash_kwd'],
+        
+        # Calculated metrics
+        'total_gain': values['total_value_kwd'] + accounts['total_cash_kwd'] - overview['net_deposits'],
+        'roi_percent': (
+            ((values['total_value_kwd'] + accounts['total_cash_kwd']) / overview['net_deposits'] - 1) * 100
+            if overview['net_deposits'] > 0 else 0
+        ),
+        
+        # Breakdown by portfolio
+        'by_portfolio': {},
+        'accounts': accounts['accounts']
+    }
+    
+    # Combine portfolio data
+    for port_name in PORTFOLIO_CCY.keys():
+        port_data = overview['by_portfolio'].get(port_name, {})
+        value_data = values['by_portfolio'].get(port_name, {})
+        
+        result['by_portfolio'][port_name] = {
+            **port_data,
+            'market_value': value_data.get('market_value', 0),
+            'market_value_kwd': value_data.get('market_value_kwd', 0)
+        }
+    
+    return result
+
+
+# ============================================================================
+# UI DISPLAY FIX #2: PORTFOLIO ANALYSIS QUERIES
+# ============================================================================
+
+def get_portfolio_monthly_breakdown(user_id: int, portfolio_id: int = None, 
+                                    start_date: str = None, end_date: str = None) -> pd.DataFrame:
+    """
+    Get monthly transaction breakdown by type from portfolio_transactions.
+    
+    This is the CORRECT query for the Analysis tab - aggregates transactions
+    by month and type (DEPOSIT, BUY, SELL, DIVIDEND, WITHDRAWAL).
+    
+    Args:
+        user_id: User ID
+        portfolio_id: Optional specific portfolio
+        start_date: Optional start date (YYYY-MM-DD)
+        end_date: Optional end date (YYYY-MM-DD)
+        
+    Returns:
+        DataFrame with: month, txn_type, transaction_count, total_amount, total_fees
+    """
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        
+        # Build query with optional filters
+        where_clauses = ["pt.user_id = ?", "(pt.is_deleted = 0 OR pt.is_deleted IS NULL)"]
+        params = [user_id]
+        
+        if portfolio_id:
+            where_clauses.append("pt.portfolio_id = ?")
+            params.append(portfolio_id)
+        
+        if start_date:
+            where_clauses.append("pt.txn_date >= ?")
+            params.append(start_date)
+        
+        if end_date:
+            where_clauses.append("pt.txn_date <= ?")
+            params.append(end_date)
+        
+        where_sql = " AND ".join(where_clauses)
+        
+        # SQLite date formatting: strftime('%Y-%m', txn_date)
+        query = f"""
+            SELECT 
+                strftime('%Y-%m', pt.txn_date) as month,
+                pt.txn_type,
+                COUNT(*) as transaction_count,
+                COALESCE(SUM(pt.amount), 0) as total_amount,
+                COALESCE(SUM(pt.fees), 0) as total_fees,
+                p.name as portfolio_name
+            FROM portfolio_transactions pt
+            LEFT JOIN portfolios p ON pt.portfolio_id = p.id
+            WHERE {where_sql}
+            GROUP BY strftime('%Y-%m', pt.txn_date), pt.txn_type, p.name
+            ORDER BY month DESC, pt.txn_type
+        """
+        
+        db_execute(cur, query, tuple(params))
+        columns = ['month', 'txn_type', 'transaction_count', 'total_amount', 'total_fees', 'portfolio_name']
+        rows = cur.fetchall()
+        conn.close()
+        
+        if rows:
+            return pd.DataFrame(rows, columns=columns)
+        return pd.DataFrame(columns=columns)
+        
+    except Exception as e:
+        logger.error(f"Error getting monthly breakdown: {e}")
+        return pd.DataFrame()
+
+
+def get_cumulative_deposits(user_id: int, portfolio_id: int = None,
+                            start_date: str = None, end_date: str = None) -> pd.DataFrame:
+    """
+    Get cumulative deposits over time from portfolio_transactions.
+    
+    Uses window function to calculate running total of deposits.
+    
+    Args:
+        user_id: User ID
+        portfolio_id: Optional specific portfolio
+        start_date: Optional start date
+        end_date: Optional end date
+        
+    Returns:
+        DataFrame with: txn_date, amount, cumulative_deposits, portfolio_name
+    """
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        
+        # Build query with optional filters
+        where_clauses = [
+            "pt.user_id = ?",
+            "pt.txn_type = 'DEPOSIT'",
+            "(pt.is_deleted = 0 OR pt.is_deleted IS NULL)"
+        ]
+        params = [user_id]
+        
+        if portfolio_id:
+            where_clauses.append("pt.portfolio_id = ?")
+            params.append(portfolio_id)
+        
+        if start_date:
+            where_clauses.append("pt.txn_date >= ?")
+            params.append(start_date)
+        
+        if end_date:
+            where_clauses.append("pt.txn_date <= ?")
+            params.append(end_date)
+        
+        where_sql = " AND ".join(where_clauses)
+        
+        # SQLite window function for running total
+        query = f"""
+            SELECT 
+                pt.txn_date,
+                pt.amount,
+                SUM(pt.amount) OVER (ORDER BY pt.txn_date ROWS UNBOUNDED PRECEDING) as cumulative_deposits,
+                p.name as portfolio_name
+            FROM portfolio_transactions pt
+            LEFT JOIN portfolios p ON pt.portfolio_id = p.id
+            WHERE {where_sql}
+            ORDER BY pt.txn_date
+        """
+        
+        db_execute(cur, query, tuple(params))
+        columns = ['txn_date', 'amount', 'cumulative_deposits', 'portfolio_name']
+        rows = cur.fetchall()
+        conn.close()
+        
+        if rows:
+            df = pd.DataFrame(rows, columns=columns)
+            df['txn_date'] = pd.to_datetime(df['txn_date'])
+            return df
+        return pd.DataFrame(columns=columns)
+        
+    except Exception as e:
+        logger.error(f"Error getting cumulative deposits: {e}")
+        return pd.DataFrame()
+
+
+def get_cumulative_cash_flow(user_id: int, portfolio_id: int = None,
+                              start_date: str = None, end_date: str = None) -> pd.DataFrame:
+    """
+    Get cumulative cash flow (all transaction types) over time.
+    
+    Shows running balance of: deposits + dividends + sells - buys - withdrawals - fees
+    
+    Args:
+        user_id: User ID
+        portfolio_id: Optional specific portfolio
+        start_date: Optional start date
+        end_date: Optional end date
+        
+    Returns:
+        DataFrame with: txn_date, txn_type, amount, cumulative_cash_flow
+    """
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        
+        # Build query with optional filters
+        where_clauses = [
+            "pt.user_id = ?",
+            "(pt.is_deleted = 0 OR pt.is_deleted IS NULL)"
+        ]
+        params = [user_id]
+        
+        if portfolio_id:
+            where_clauses.append("pt.portfolio_id = ?")
+            params.append(portfolio_id)
+        
+        if start_date:
+            where_clauses.append("pt.txn_date >= ?")
+            params.append(start_date)
+        
+        if end_date:
+            where_clauses.append("pt.txn_date <= ?")
+            params.append(end_date)
+        
+        where_sql = " AND ".join(where_clauses)
+        
+        # Get all transactions with running cash balance
+        # amount is already signed correctly in portfolio_transactions
+        query = f"""
+            SELECT 
+                pt.txn_date,
+                pt.txn_type,
+                pt.amount,
+                SUM(pt.amount) OVER (ORDER BY pt.txn_date, pt.id ROWS UNBOUNDED PRECEDING) as cumulative_cash_flow,
+                p.name as portfolio_name
+            FROM portfolio_transactions pt
+            LEFT JOIN portfolios p ON pt.portfolio_id = p.id
+            WHERE {where_sql}
+            ORDER BY pt.txn_date, pt.id
+        """
+        
+        db_execute(cur, query, tuple(params))
+        columns = ['txn_date', 'txn_type', 'amount', 'cumulative_cash_flow', 'portfolio_name']
+        rows = cur.fetchall()
+        conn.close()
+        
+        if rows:
+            df = pd.DataFrame(rows, columns=columns)
+            df['txn_date'] = pd.to_datetime(df['txn_date'])
+            return df
+        return pd.DataFrame(columns=columns)
+        
+    except Exception as e:
+        logger.error(f"Error getting cumulative cash flow: {e}")
+        return pd.DataFrame()
+
+
+def get_portfolio_analysis_data(user_id: int, portfolio_id: int = None,
+                                 start_date: str = None, end_date: str = None) -> dict:
+    """
+    Get comprehensive portfolio analysis data.
+    
+    Main entry point for Portfolio Analysis tab - combines all analysis queries.
+    
+    Args:
+        user_id: User ID
+        portfolio_id: Optional specific portfolio
+        start_date: Optional start date
+        end_date: Optional end date
+        
+    Returns:
+        Dict with monthly_breakdown, cumulative_deposits, cumulative_cash_flow
+    """
+    return {
+        'monthly_breakdown': get_portfolio_monthly_breakdown(user_id, portfolio_id, start_date, end_date),
+        'cumulative_deposits': get_cumulative_deposits(user_id, portfolio_id, start_date, end_date),
+        'cumulative_cash_flow': get_cumulative_cash_flow(user_id, portfolio_id, start_date, end_date)
+    }
+
+
+def get_cash_summary(user_id: int, portfolio_id: int = None) -> pd.DataFrame:
+    """
+    Get complete cash summary from the portfolio_cash_summary view.
+    
+    Returns all cash movements: buys, sells, dividends, deposits, withdrawals.
+    
+    Args:
+        user_id: User ID
+        portfolio_id: Optional filter by portfolio
+        
+    Returns:
+        DataFrame with cash summary per portfolio
+    """
+    try:
+        conn = get_conn()
+        
+        query = """
+            SELECT portfolio_id, portfolio_name,
+                   total_buys, total_sells, total_dividends,
+                   total_deposits, total_withdrawals,
+                   cash_balance, total_fees, transaction_count
+            FROM portfolio_cash_summary
+            WHERE user_id = ?
+        """
+        params = [user_id]
+        
+        if portfolio_id:
+            query += " AND portfolio_id = ?"
+            params.append(portfolio_id)
+        
+        df = pd.read_sql_query(query, conn, params=params)
+        conn.close()
+        return df
+        
+    except Exception as e:
+        logger.error(f"Error getting cash summary: {e}")
+        return pd.DataFrame()
+
+
+def get_stock_positions(user_id: int, portfolio_id: int = None, include_closed: bool = False) -> pd.DataFrame:
+    """
+    Get stock position summary from the stock_position_summary view.
+    
+    Args:
+        user_id: User ID
+        portfolio_id: Optional filter by portfolio
+        include_closed: If True, include positions with 0 shares
+        
+    Returns:
+        DataFrame with position details per stock/portfolio
+    """
+    try:
+        conn = get_conn()
+        
+        query = """
+            SELECT portfolio_id, portfolio_name, stock_id, stock_symbol, stock_name,
+                   shares_bought, shares_sold, current_shares,
+                   total_cost, total_proceeds, total_dividends,
+                   buy_count, sell_count, first_trade_date, last_trade_date
+            FROM stock_position_summary
+            WHERE user_id = ?
+        """
+        params = [user_id]
+        
+        if portfolio_id:
+            query += " AND portfolio_id = ?"
+            params.append(portfolio_id)
+        
+        if not include_closed:
+            query += " AND current_shares != 0"
+        
+        query += " ORDER BY portfolio_name, stock_symbol"
+        
+        df = pd.read_sql_query(query, conn, params=params)
+        conn.close()
+        
+        # Add calculated columns
+        if not df.empty:
+            df['avg_cost'] = df.apply(
+                lambda r: r['total_cost'] / r['shares_bought'] if r['shares_bought'] > 0 else 0, 
+                axis=1
+            )
+            df['realized_pnl'] = df['total_proceeds'] - (df['avg_cost'] * df['shares_sold'])
+            df['status'] = df['current_shares'].apply(lambda x: 'CLOSED' if abs(x) < 0.001 else 'OPEN')
+        
+        return df
+        
+    except Exception as e:
+        logger.error(f"Error getting stock positions: {e}")
+        return pd.DataFrame()
+
+
+def resolve_stock_symbol(user_input: str, user_id: int = None) -> dict:
+    """
+    Resolve a user-input stock symbol to canonical form.
+    
+    This provides referential integrity by:
+    1. Checking symbol_mappings for known variations
+    2. Checking stocks_master for exact match
+    3. Returning normalized form with stock_id
+    
+    Returns:
+        {
+            'canonical_ticker': str,
+            'stock_id': int or None,
+            'exchange': str,
+            'currency': str,
+            'found': bool
+        }
+    """
+    result = {
+        'canonical_ticker': user_input.upper().strip(),
+        'stock_id': None,
+        'exchange': 'KSE',
+        'currency': 'KWD',
+        'found': False
+    }
+    
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        
+        # 1. Check symbol_mappings first
+        db_execute(cur, """
+            SELECT canonical_ticker, stock_id 
+            FROM symbol_mappings 
+            WHERE user_input = ? COLLATE NOCASE
+        """, (user_input,))
+        row = cur.fetchone()
+        
+        if row:
+            result['canonical_ticker'] = row[0]
+            result['stock_id'] = row[1]
+            result['found'] = True
+        else:
+            # 2. Check stocks_master directly
+            db_execute(cur, """
+                SELECT id, ticker, exchange, currency 
+                FROM stocks_master 
+                WHERE ticker = ? COLLATE NOCASE
+            """, (user_input.upper().strip(),))
+            row = cur.fetchone()
+            
+            if row:
+                result['stock_id'] = row[0]
+                result['canonical_ticker'] = row[1]
+                result['exchange'] = row[2]
+                result['currency'] = row[3]
+                result['found'] = True
+        
+        conn.close()
+    except Exception as e:
+        logger.warning(f"Error resolving symbol {user_input}: {e}")
+    
+    return result
 
 
 def init_db() -> None:
@@ -2161,6 +6803,7 @@ def init_db() -> None:
                     add_column_if_missing(tbl, "user_id", "INTEGER DEFAULT 1")
                 # Ensure securities tables exist (added later in development)
                 _ensure_securities_tables()
+                _ensure_normalized_schema()
                 return
         else:
             # For SQLite, check sqlite_master
@@ -2172,6 +6815,7 @@ def init_db() -> None:
                 _log_startup("SQLite DB already initialized - skipping full setup")
                 # Ensure securities tables exist (added later in development)
                 _ensure_securities_tables()
+                _ensure_normalized_schema()
                 return
             conn.close()
     except Exception as e:
@@ -2199,6 +6843,7 @@ def init_db() -> None:
         add_column_if_missing("transactions", "category", "TEXT DEFAULT 'portfolio'")
         # Ensure securities tables exist (added later in development)
         _ensure_securities_tables()
+        _ensure_normalized_schema()
         logger.info("✅ PostgreSQL schema ready")
         return
     
@@ -2990,9 +7635,15 @@ def init_db() -> None:
         conn.close()
     
     # ============================================
-    # STEP 4: VERIFICATION
+    # STEP 4: NORMALIZED SCHEMA (Phase 1)
     # ============================================
-    logger.info("✅ Step 4: Database initialized. Users table verified.")
+    _ensure_normalized_schema()
+    logger.info("✅ Step 4: Normalized schema tables created.")
+    
+    # ============================================
+    # STEP 5: VERIFICATION
+    # ============================================
+    logger.info("✅ Step 5: Database initialized. Users table verified.")
     logger.info("🔧 All tables created successfully.")
     
     # ============================================
@@ -3876,39 +8527,20 @@ def compute_holdings_avg_cost(tx: pd.DataFrame):
 
 @st.cache_data(ttl=300, show_spinner=False)  # Cache for 5 minutes - manual refresh via button
 def build_portfolio_table(portfolio_name: str, user_id: Optional[int] = None) -> pd.DataFrame:
-    """Build portfolio table with optimized bulk transaction fetch (N+1 fix).
+    """Build portfolio table directly from transactions (master storage).
     
     Args:
         portfolio_name: Name of the portfolio ('KFH', 'BBYN', 'USA')
         user_id: Optional user ID. If None, uses st.session_state.user_id.
                  Pass explicitly when running outside Streamlit (e.g., cron jobs).
+    
+    Note: Stocks list is derived from transactions table. The stocks table is used
+    only to get current_price and currency metadata. Missing stocks are auto-created.
     """
     if user_id is None:
         user_id = st.session_state.get('user_id')
     
-    # 1. Bulk Fetch Stocks for this portfolio
-    stocks: pd.DataFrame = query_df(
-        """
-        SELECT
-            TRIM(symbol) AS symbol,
-            COALESCE(name,'') AS name,
-            COALESCE(current_price,0) AS current_price,
-            COALESCE(portfolio,'KFH') AS portfolio,
-            COALESCE(currency,'KWD') AS currency,
-            tradingview_symbol,
-            tradingview_exchange
-        FROM stocks
-        WHERE COALESCE(portfolio,'KFH') = ? AND user_id = ?
-        ORDER BY symbol ASC
-        """,
-        (portfolio_name, user_id),
-    )
-
-    if stocks.empty:
-        return pd.DataFrame()
-
-    # 2. Bulk Fetch All Transactions for this user (Performance Optimization)
-    # Exclude soft-deleted transactions (if column exists)
+    # 1. Bulk Fetch All Transactions for this user (Master Storage - Source of Truth)
     soft_delete_clause = _soft_delete_filter()
     all_txs = query_df(
         f"""
@@ -3926,13 +8558,92 @@ def build_portfolio_table(portfolio_name: str, user_id: Optional[int] = None) ->
         """,
         (user_id,)
     )
+    
+    if all_txs.empty:
+        return pd.DataFrame()
+    
+    # 2. Get unique stock symbols from transactions WITH their portfolio assignment
+    # Use portfolio from transactions as the PRIMARY source (not stocks table)
+    symbol_portfolio_df = all_txs.groupby('stock_symbol').agg({
+        'txn_date': 'max'  # Get latest transaction date for each symbol
+    }).reset_index()
+    
+    # Get portfolio from the LATEST transaction for each symbol
+    symbol_portfolios = {}
+    for sym in all_txs['stock_symbol'].str.strip().unique():
+        sym_txs = all_txs[all_txs['stock_symbol'].str.strip() == sym]
+        if not sym_txs.empty:
+            # Get portfolio from the latest transaction for this symbol
+            latest_tx = sym_txs.sort_values('txn_date', ascending=False).iloc[0]
+            # Use portfolio from transaction, or infer from stocks table later
+            tx_portfolio = query_val(
+                "SELECT portfolio FROM transactions WHERE stock_symbol = ? AND user_id = ? AND (is_deleted = 0 OR is_deleted IS NULL) ORDER BY txn_date DESC LIMIT 1",
+                (sym, user_id)
+            )
+            symbol_portfolios[sym.strip()] = tx_portfolio
+    
+    unique_symbols = list(symbol_portfolios.keys())
+    
+    # 3. Fetch stock metadata (current_price, currency, portfolio assignment)
+    # Use placeholders for IN clause
+    if unique_symbols:
+        placeholders = ','.join(['?' for _ in unique_symbols])
+        stocks_meta = query_df(
+            f"""
+            SELECT
+                TRIM(symbol) AS symbol,
+                COALESCE(name,'') AS name,
+                COALESCE(current_price,0) AS current_price,
+                COALESCE(portfolio,'KFH') AS portfolio,
+                COALESCE(currency,'KWD') AS currency,
+                tradingview_symbol,
+                tradingview_exchange
+            FROM stocks
+            WHERE TRIM(symbol) IN ({placeholders}) AND user_id = ?
+            """,
+            tuple(unique_symbols) + (user_id,),
+        )
+    else:
+        stocks_meta = pd.DataFrame()
+    
+    # 4. Create a lookup dict for stock metadata
+    stock_lookup = {}
+    if not stocks_meta.empty:
+        for _, srow in stocks_meta.iterrows():
+            stock_lookup[srow['symbol'].strip()] = {
+                'name': srow['name'],
+                'current_price': srow['current_price'],
+                'portfolio': srow['portfolio'],
+                'currency': srow['currency'],
+            }
 
     rows = []
-    for _, srow in stocks.iterrows():
-        sym = str(srow["symbol"]).strip()
-        cp = safe_float(srow["current_price"], 0.0)
+    for sym in unique_symbols:
+        sym = sym.strip()
+        
+        # PRIMARY: Get portfolio from transactions (master source)
+        tx_portfolio = symbol_portfolios.get(sym, None)
+        
+        # Get stock metadata for price/currency (or use defaults)
+        meta = stock_lookup.get(sym, {
+            'name': sym,
+            'current_price': 0.0,
+            'portfolio': tx_portfolio or ('USA' if not sym.endswith('.KW') and sym.isupper() and len(sym) <= 5 else 'KFH'),
+            'currency': 'USD' if tx_portfolio == 'USA' or (not sym.endswith('.KW') and sym.isupper() and len(sym) <= 5) else 'KWD',
+        })
+        
+        # PRIORITY: Use portfolio from transactions first, then stocks table, then default
+        stock_portfolio = tx_portfolio or meta.get('portfolio', 'KFH')
+        if stock_portfolio != portfolio_name:
+            continue
+        
+        cp = safe_float(meta.get('current_price', 0), 0.0)
+        currency = meta.get('currency', 'KWD')
+        # Override currency based on portfolio
+        if stock_portfolio == 'USA':
+            currency = 'USD'
 
-        # Filter transactions in memory - use trimmed comparison
+        # Filter transactions for this stock
         tx = all_txs[all_txs['stock_symbol'].str.strip() == sym].copy()
 
         # Calculate metrics (CFA/IFRS-compliant WAC method)
@@ -3940,8 +8651,8 @@ def build_portfolio_table(portfolio_name: str, user_id: Optional[int] = None) ->
 
         qty = h["shares"]
         
-        # Skip empty positions early for performance
-        if qty <= 0.001 and h["cost_basis"] <= 0.001 and h["cash_div"] <= 0.001:
+        # CRITICAL: Only include stocks with quantity > 0 (active holdings)
+        if qty <= 0.001:
             continue
 
         # --- Rounding to 3 decimals to prevent 1 fils errors ---
@@ -3970,7 +8681,7 @@ def build_portfolio_table(portfolio_name: str, user_id: Optional[int] = None) ->
         total_pnl = round(unreal + realized_pnl + cash_div, 3)
         pnl_pct = (total_pnl / (total_cost + abs(realized_pnl))) if (total_cost + abs(realized_pnl)) > 0 else 0.0
         
-        display_name = srow.get('name') if srow.get('name') else sym
+        display_name = meta.get('name') if meta.get('name') else sym
         
         rows.append({
             "Company": f"{display_name} - {sym}".strip(),
@@ -3988,7 +8699,7 @@ def build_portfolio_table(portfolio_name: str, user_id: Optional[int] = None) ->
             "Dividend Yield on Cost %": yield_pct,
             "Total PNL": total_pnl,
             "PNL %": pnl_pct,
-            "Currency": srow["currency"],
+            "Currency": currency,
         })
 
     df = pd.DataFrame(rows)
@@ -4104,17 +8815,19 @@ def render_portfolio_table(title: str, df: pd.DataFrame, fx_usdkwd: Optional[flo
     def fmt_val(x, fmt_str):
         if is_privacy:
             return "*****"
+        if x is None:
+            return "-"
         try:
             return fmt_str.format(x)
         except:
-            return str(x)
+            return str(x) if x is not None else "-"
 
     format_dict = {
         "Quantity": lambda x: fmt_val(x, "{:,.0f}"),
         # Prices: 3 decimals
         "Avg. Cost Per Share": lambda x: fmt_val(x, "{:,.3f}") if x and x != 0 else "-",
         "Market price": lambda x: fmt_val(x, "{:,.3f}") if x and x != 0 else "-",
-        "P/E Ratio": "{:.2f}",
+        "P/E Ratio": lambda x: fmt_val(x, "{:.2f}") if x and x != 0 else "-",
         # Money/Values: No decimals (rounded)
         "Total cost": lambda x: fmt_val(x, "{:,.0f}"),
         "Market value": lambda x: fmt_val(x, "{:,.0f}"),
@@ -4127,10 +8840,10 @@ def render_portfolio_table(title: str, df: pd.DataFrame, fx_usdkwd: Optional[flo
         "Yield Amount": lambda x: fmt_val(x, "{:,.0f}"),
         "Total P/L": lambda x: fmt_val(x, "{:,.0f}"),
         # Percentages: 2 decimals
-        "weight by Cost": "{:.2%}",
-        "Yield": "{:.2%}",
-        "Weighted yield": "{:.2%}",
-        "P/L %": "{:.2%}"
+        "weight by Cost": lambda x: fmt_val(x, "{:.2%}") if x is not None else "-",
+        "Yield": lambda x: fmt_val(x, "{:.2%}") if x is not None else "-",
+        "Weighted yield": lambda x: fmt_val(x, "{:.2%}") if x is not None else "-",
+        "P/L %": lambda x: fmt_val(x, "{:.2%}") if x is not None else "-"
     }
 
     # Apply Styling
@@ -5573,7 +10286,7 @@ def calculate_monthly_reconciliation(user_id: int, year: int, month: int) -> dic
         _soft_del_dep = _soft_delete_filter_deposits()
         deposits_before = query_df(f"""
             SELECT SUM(amount) as total FROM cash_deposits 
-            WHERE user_id = ? AND deposit_date < ?{_soft_del_dep}
+            WHERE user_id = ? AND deposit_date < ? AND include_in_analysis = 1{_soft_del_dep}
         """, (user_id, first_day_str))
         result['cash_starting'] = float(deposits_before['total'].iloc[0]) if not deposits_before.empty and pd.notna(deposits_before['total'].iloc[0]) else 0.0
     else:
@@ -6114,10 +10827,17 @@ def ui_transactions():
                     pass
                 
                 if import_mode == "🗑️ Delete All & Replace":
-                    st.warning("⚠️ **WARNING:** This will DELETE ALL your existing transactions before importing!")
-                    confirm_delete = st.checkbox("I understand this will permanently delete all my existing transactions", key="confirm_full_replace")
+                    st.warning("⚠️ **WARNING:** This will soft-delete your existing transactions before importing!")
+                    preserve_manual = st.checkbox(
+                        "✅ Preserve manually entered transactions", 
+                        value=True, 
+                        key="preserve_manual_entries",
+                        help="If checked, transactions marked as 'MANUAL' source will NOT be deleted"
+                    )
+                    confirm_delete = st.checkbox("I understand this will delete my imported transactions", key="confirm_full_replace")
                 else:
                     confirm_delete = True  # No confirmation needed for merge
+                    preserve_manual = True  # Default to preserve in merge mode
                 
                 if st.button("⚡ Restore / Import Data", type="primary", width="stretch", disabled=(import_mode == "🗑️ Delete All & Replace" and not confirm_delete)):
                     try:
@@ -6148,14 +10868,55 @@ def ui_transactions():
                             skipped_count = 0
                             new_stocks = 0
                             deleted_count = 0
+                            deposits_imported = 0  # Track deposits separately
                             
-                            # DELETE ALL MODE: Clear existing transactions first
+                            # Generate source_reference from filename
+                            source_reference = f"restore:{restore_file.name}:{int(time.time())}"
+                            
+                            # DELETE ALL MODE: Soft delete existing transactions first
                             if import_mode == "🗑️ Delete All & Replace":
-                                db_execute(cur, "SELECT COUNT(*) FROM transactions WHERE user_id = ?", (user_id,))
-                                deleted_count = cur.fetchone()[0]
-                                db_execute(cur, "DELETE FROM transactions WHERE user_id = ?", (user_id,))
+                                # Build query based on preserve_manual setting
+                                if preserve_manual:
+                                    # Count only non-manual transactions
+                                    db_execute(cur, """
+                                        SELECT COUNT(*) FROM transactions 
+                                        WHERE user_id = ? 
+                                        AND (is_deleted = 0 OR is_deleted IS NULL)
+                                        AND (source != 'MANUAL' OR source IS NULL)
+                                    """, (user_id,))
+                                    deleted_count = cur.fetchone()[0]
+                                    # Soft delete non-manual only
+                                    db_execute(cur, """
+                                        UPDATE transactions 
+                                        SET is_deleted = 1, 
+                                            deleted_at = ?, 
+                                            deleted_by = ?
+                                        WHERE user_id = ? 
+                                        AND (is_deleted = 0 OR is_deleted IS NULL)
+                                        AND (source != 'MANUAL' OR source IS NULL)
+                                    """, (int(time.time()), user_id, user_id))
+                                    st.info(f"🗑️ Soft-deleted {deleted_count:,} imported transactions (manual entries preserved).")
+                                else:
+                                    # Delete all transactions
+                                    db_execute(cur, """
+                                        SELECT COUNT(*) FROM transactions 
+                                        WHERE user_id = ? 
+                                        AND (is_deleted = 0 OR is_deleted IS NULL)
+                                    """, (user_id,))
+                                    deleted_count = cur.fetchone()[0]
+                                    db_execute(cur, """
+                                        UPDATE transactions 
+                                        SET is_deleted = 1, 
+                                            deleted_at = ?, 
+                                            deleted_by = ?
+                                        WHERE user_id = ? 
+                                        AND (is_deleted = 0 OR is_deleted IS NULL)
+                                    """, (int(time.time()), user_id, user_id))
+                                    st.info(f"🗑️ Soft-deleted {deleted_count:,} existing transactions.")
+                                
+                                # Also clear cash_deposits if doing full replace
+                                db_execute(cur, "DELETE FROM cash_deposits WHERE user_id = ?", (user_id,))
                                 conn.commit()
-                                st.info(f"🗑️ Deleted {deleted_count:,} existing transactions.")
                             
                             progress_bar = st.progress(0, text="Restoring data...")
                             
@@ -6166,13 +10927,71 @@ def ui_transactions():
                                 if idx % 10 == 0:
                                     progress_bar.progress((idx + 1) / total_rows, text=f"Processing row {idx+1}/{total_rows}")
 
-                                symbol = str(row['stock_symbol']).strip().upper()
+                                # 2. Extract common data first
+                                t_date = pd.to_datetime(row['txn_date']).strftime('%Y-%m-%d')
+                                t_type = str(row['txn_type']).strip()
+                                t_portfolio = str(row.get('portfolio', 'KFH') or 'KFH')
                                 
-                                # Validate symbol format before import
+                                # ========== HANDLE DEPOSITS SEPARATELY ==========
+                                # Check if this is a deposit transaction (case-insensitive)
+                                if t_type.lower() in ['deposit', 'cash_deposit', 'cash deposit', 'flow_in']:
+                                    # Get deposit amount from purchase_cost or amount column
+                                    deposit_amount = float(row.get('purchase_cost', 0) or row.get('amount', 0) or 0)
+                                    if deposit_amount <= 0:
+                                        skipped_invalid += 1
+                                        continue
+                                    
+                                    deposit_currency = str(row.get('currency', 'KWD') or 'KWD').upper()
+                                    deposit_notes = str(row.get('notes', '') or '')
+                                    deposit_ref = str(row.get('reference', '') or '')
+                                    
+                                    # Check for duplicate deposit (in Merge mode)
+                                    if import_mode == "🔄 Merge (Skip Duplicates)":
+                                        cur.execute("""
+                                            SELECT id FROM cash_deposits 
+                                            WHERE deposit_date=? AND amount=? AND user_id=?
+                                        """, (t_date, deposit_amount, user_id))
+                                        if cur.fetchone():
+                                            skipped_count += 1
+                                            continue
+                                    
+                                    # Insert into cash_deposits table
+                                    current_fx = get_current_fx_rate()
+                                    cur.execute("""
+                                        INSERT INTO cash_deposits 
+                                        (user_id, portfolio, bank_name, deposit_date, amount, currency, 
+                                         description, comments, include_in_analysis, fx_rate_at_deposit, created_at)
+                                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                    """, (
+                                        user_id,
+                                        t_portfolio,
+                                        deposit_ref if deposit_ref else 'Imported',
+                                        t_date,
+                                        deposit_amount,
+                                        deposit_currency,
+                                        deposit_notes,
+                                        f"Imported from transactions Excel",
+                                        1,  # include_in_analysis = True
+                                        current_fx,
+                                        int(time.time())
+                                    ))
+                                    deposits_imported += 1
+                                    continue  # Skip to next row, don't process as stock transaction
+                                # ========== END DEPOSIT HANDLING ==========
+
+                                # SYMBOL NORMALIZATION: Resolve user input to canonical ticker
+                                raw_symbol = str(row['stock_symbol']).strip()
+                                symbol = normalize_stock_symbol(raw_symbol, t_portfolio)
+                                
+                                # Validate symbol format after normalization
                                 is_valid, _ = validate_stock_symbol(symbol, allow_new=True)
                                 if not is_valid:
                                     skipped_invalid += 1
                                     continue
+                                
+                                # Auto-register new mapping if normalized differently
+                                if raw_symbol.upper() != symbol and raw_symbol.lower() not in ['deposit', 'cash_deposit']:
+                                    add_symbol_mapping(raw_symbol, symbol)
                                 
                                 # 1. Ensure Stock Exists for this user
                                 db_execute(cur, "SELECT id FROM stocks WHERE symbol = ? AND user_id = ?", (symbol, user_id))
@@ -6186,10 +11005,7 @@ def ui_transactions():
                                     _VALID_SYMBOLS_CACHE.add(symbol.upper())  # Update cache
                                     new_stocks += 1
                                 
-                                # 2. Extract Data
-                                t_date = pd.to_datetime(row['txn_date']).strftime('%Y-%m-%d')
-                                t_type = row['txn_type']
-                                t_portfolio = str(row.get('portfolio', 'KFH') or 'KFH')
+                                # Extract remaining transaction data
                                 t_cat = row.get('category', 'portfolio')
                                 t_shares = float(row.get('shares', 0) or 0)
                                 t_cost = float(row.get('purchase_cost', 0) or 0)
@@ -6203,42 +11019,67 @@ def ui_transactions():
                                 t_notes = str(row.get('notes', '') or '')
                                 t_created = int(row.get('created_at', time.time()) or time.time())
                                 
-                                # 3. Check Duplicate (only in Merge mode)
+                                # 3. Check Duplicate (only in Merge mode, excluding soft-deleted)
                                 if import_mode == "🔄 Merge (Skip Duplicates)":
                                     cur.execute("""
                                         SELECT id FROM transactions 
                                         WHERE stock_symbol=? AND txn_date=? AND txn_type=? 
                                         AND shares=? AND purchase_cost=? AND sell_value=? AND user_id=?
+                                        AND (is_deleted = 0 OR is_deleted IS NULL)
                                     """, (symbol, t_date, t_type, t_shares, t_cost, t_sell, user_id))
                                     
                                     if cur.fetchone():
                                         skipped_count += 1
                                         continue
                                 
-                                # 4. Insert record (with historical FX rate)
+                                # 4. Insert record (with historical FX rate and source tracking)
                                 t_fx_rate = float(row.get('fx_rate_at_txn', 0) or 0) if pd.notna(row.get('fx_rate_at_txn')) else get_current_fx_rate()
                                 cur.execute("""
                                     INSERT INTO transactions 
                                     (stock_symbol, portfolio, txn_date, txn_type, category, shares, purchase_cost, 
                                      sell_value, cash_dividend, reinvested_dividend, bonus_shares, 
-                                     fees, broker, reference, notes, fx_rate_at_txn, created_at, user_id)
-                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                     fees, broker, reference, notes, fx_rate_at_txn, created_at, user_id,
+                                     source, source_reference, is_deleted)
+                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                                 """, (symbol, t_portfolio, t_date, t_type, t_cat, t_shares, t_cost, t_sell, 
-                                      t_div, t_reinv, t_bonus, t_fees, t_broker, t_ref, t_notes, t_fx_rate, t_created, user_id))
+                                      t_div, t_reinv, t_bonus, t_fees, t_broker, t_ref, t_notes, t_fx_rate, t_created, user_id,
+                                      'RESTORE', source_reference, 0))
                                 restored_count += 1
                             
                             conn.commit()
+                            
+                            # AUTO-SYNC: Ensure all transaction symbols have corresponding stock entries
+                            stocks_synced = 0
+                            cur.execute('SELECT DISTINCT stock_symbol, portfolio FROM transactions WHERE user_id = ? AND (is_deleted = 0 OR is_deleted IS NULL)', (user_id,))
+                            for sym, port in cur.fetchall():
+                                if not sym or str(sym).strip().lower() in ['deposit', 'cash_deposit', 'cash deposit', 'flow_in']:
+                                    continue
+                                sym = str(sym).strip().upper()
+                                cur.execute('SELECT id FROM stocks WHERE UPPER(symbol) = ? AND user_id = ?', (sym, user_id))
+                                if not cur.fetchone():
+                                    currency = 'USD' if port == 'USA' else 'KWD'
+                                    cur.execute('INSERT INTO stocks (symbol, name, portfolio, currency, user_id) VALUES (?, ?, ?, ?, ?)', 
+                                               (sym, sym, port or 'KFH', currency, user_id))
+                                    stocks_synced += 1
+                            conn.commit()
                             conn.close()
+                            
                             progress_bar.empty()
                             build_portfolio_table.clear()  # Clear cache to show updated data
                             
                             if import_mode == "🗑️ Delete All & Replace":
-                                st.success(f"✅ Full Replace Complete: Deleted {deleted_count:,}, imported {restored_count:,} records.")
+                                st.success(f"✅ Full Replace Complete: Deleted {deleted_count:,}, imported {restored_count:,} transactions.")
                             else:
                                 st.success(f"✅ Merge Complete: {restored_count:,} imported, {skipped_count:,} skipped (duplicates).")
                             
-                            if new_stocks > 0:
-                                st.info(f"🆕 Created {new_stocks:,} missing stock entries.")
+                            if deposits_imported > 0:
+                                st.success(f"💵 Imported **{deposits_imported:,}** cash deposits to portfolio analysis.")
+                            
+                            if new_stocks > 0 or stocks_synced > 0:
+                                st.info(f"🆕 Created {new_stocks + stocks_synced:,} stock entries.")
+                            
+                            if skipped_invalid > 0:
+                                st.warning(f"⚠️ Skipped {skipped_invalid:,} rows with invalid data.")
                             
                             time.sleep(2)
                             st.rerun()
@@ -6619,58 +11460,83 @@ def ui_transactions():
                     st.dataframe(df.head(20), width="stretch")
                     
                     if st.button("Import These Transactions", type="primary", key=f"import_btn_{selected_symbol}"):
-                        # Process each row and assign to selected_symbol
+                        # Use the FIXED upload handler with all improvements
                         user_id = st.session_state.get('user_id', 1)
-                        conn = get_conn()
-                        cur = conn.cursor()
-                        imported = 0
-                        errors = []
-                        current_fx = get_current_fx_rate()  # Store historical FX rate for all imported transactions
                         
-                        for idx, r in df.iterrows():
-                            try:
-                                iso_date = _to_iso_date(r.get(_pick_col(df, ["txn_date", "date", "trade_date"])))
-                                ttype = _safe_str(r.get(_pick_col(df, ["txn_type", "type", "side"]))).title()
-                                shares_val = _safe_num(r.get(_pick_col(df, ["shares", "quantity", "qty"])), 0)
-                                
-                                if ttype not in ("Buy", "Sell"):
-                                    errors.append(f"Row {idx+2}: Invalid txn_type")
-                                    continue
-                                
-                                purchase_cost = _safe_num(r.get(_pick_col(df, ["purchase_cost", "buy_cost", "cost"])), 0.0)
-                                sell_value = _safe_num(r.get(_pick_col(df, ["sell_value", "proceeds"])), 0.0)
-                                bonus_shares = _safe_num(r.get(_pick_col(df, ["bonus_shares", "bonus"])), 0.0)
-                                cash_dividend = _safe_num(r.get(_pick_col(df, ["cash_dividend", "dividend"])), 0.0)
-                                
-                                # Insert transaction for selected stock (with historical FX rate)
-                                cur.execute("""
-                                    INSERT INTO transactions
-                                    (user_id, stock_symbol, txn_date, txn_type, purchase_cost, sell_value, shares,
-                                     bonus_shares, cash_dividend, reinvested_dividend, fees,
-                                     broker, reference, notes, category, fx_rate_at_txn, created_at)
-                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, '', '', '', 'portfolio', ?, ?)
-                                """, (user_id, selected_symbol, iso_date, ttype, purchase_cost, sell_value, shares_val,
-                                      bonus_shares, cash_dividend, current_fx, int(time.time())))
-                                imported += 1
-                                
-                            except Exception as e:
-                                errors.append(f"Row {idx+2}: {str(e)}")
+                        # Get portfolio ID from selected stock
+                        portfolio_name = stock_row.get('portfolio', 'KFH')
+                        portfolio_map = {'KFH': 1, 'BBYN': 2, 'USA': 3}
+                        portfolio_id = portfolio_map.get(portfolio_name, 1)
                         
-                        conn.commit()
-                        conn.close()
+                        # Save file to temp location for upload
+                        import tempfile
+                        import os
+                        temp_dir = tempfile.gettempdir()
+                        temp_path = os.path.join(temp_dir, uploaded_file.name)
+                        with open(temp_path, 'wb') as f:
+                            f.write(uploaded_file.getvalue())
                         
-                        if errors:
-                            st.error(f"❌ {len(errors)} errors:")
-                            st.write(errors[:10])
+                        # Call the FIXED upload handler
+                        debug_log = [f"[TRADING UPLOAD] Started for {selected_symbol}"]
+                        result = upload_transactions_fixed(
+                            user_id=user_id,
+                            excel_file=temp_path,
+                            portfolio_id=portfolio_id,
+                            stock_symbol=selected_symbol,  # Force all transactions to this symbol
+                            debug_log=debug_log
+                        )
                         
-                        if imported > 0:
+                        # Clean up temp file
+                        try:
+                            os.remove(temp_path)
+                        except:
+                            pass
+                        
+                        # Store results in session state for display after rerun
+                        st.session_state['last_upload_debug_log'] = result.get('debug_log', debug_log)
+                        st.session_state['last_upload_errors'] = result.get('errors', [])
+                        st.session_state['last_upload_imported'] = result.get('uploaded', 0)
+                        st.session_state['last_upload_symbol'] = selected_symbol
+                        st.session_state['last_upload_soft_deleted'] = result.get('soft_deleted', 0)
+                        
+                        if result.get('uploaded', 0) > 0:
                             build_portfolio_table.clear()  # Clear cache to show updated data
-                            st.success(f"✅ Imported {imported:,} transactions for {selected_symbol}")
-                            time.sleep(1)
                             st.rerun()
                         
             except Exception as e:
                 st.error(f"Error reading Excel: {e}")
+    
+    # Show last upload results (persisted in session state)
+    if st.session_state.get('last_upload_debug_log') and st.session_state.get('last_upload_symbol') == selected_symbol:
+        debug_log = st.session_state['last_upload_debug_log']
+        errors = st.session_state.get('last_upload_errors', [])
+        imported = st.session_state.get('last_upload_imported', 0)
+        soft_deleted = st.session_state.get('last_upload_soft_deleted', 0)
+        
+        # Show success message
+        if imported > 0:
+            msg = f"✅ Imported {imported:,} transactions for {selected_symbol}"
+            if soft_deleted > 0:
+                msg += f" (replaced {soft_deleted} previous entries)"
+            st.success(msg)
+        
+        # Show errors if any
+        if errors:
+            st.error(f"❌ {len(errors)} errors:")
+            st.write(errors[:10])
+        
+        # Show debug log in expander (always visible after upload)
+        with st.expander("🔍 Debug Log (Last Upload)", expanded=True):
+            st.code("\n".join(debug_log), language="text")
+        
+        # Clear button
+        if st.button("🧹 Clear Upload Log", key="clear_upload_log"):
+            st.session_state.pop('last_upload_debug_log', None)
+            st.session_state.pop('last_upload_errors', None)
+            st.session_state.pop('last_upload_imported', None)
+            st.session_state.pop('last_upload_symbol', None)
+            st.session_state.pop('last_upload_soft_deleted', None)
+            st.rerun()
 
     s1, s2, s3, s4, s5, s6 = st.columns(6)
     s1.metric("Total Purchase", fmt_money_plain(metrics["total_buy_cost"]))
@@ -7132,9 +11998,9 @@ def ui_transactions():
                             old_sell = float(row.get('sell_value', 0) or 0)
                             old_buy = float(row.get('purchase_cost', 0) or 0)
                             
-                            # Get portfolio and currency from stock_row
-                            stock_portfolio = stock_row['portfolio'].values[0] if len(stock_row) > 0 else 'KFH'
-                            stock_currency = stock_row['currency'].values[0] if len(stock_row) > 0 else 'KWD'
+                            # Get portfolio and currency from stock_row (it's a Series, not DataFrame)
+                            stock_portfolio = stock_row.get('portfolio', 'KFH') if stock_row is not None else 'KFH'
+                            stock_currency = stock_row.get('currency', 'KWD') if stock_row is not None else 'KWD'
                             
                             # Calculate old cash effect (what was added/subtracted before)
                             old_cash_effect = 0.0
@@ -8684,40 +13550,19 @@ def ui_backup_restore():
         soft_del_dep = _soft_delete_filter_deposits()
         
         data = {
-            'stocks': safe_query("""
-                SELECT symbol, name, portfolio, currency, current_price, sector, 
-                       tradingview_symbol, notes, created_at 
-                FROM stocks WHERE user_id = ? ORDER BY symbol
-            """, (user_id,)),
             'transactions': safe_query(f"""
                 SELECT portfolio, stock_symbol, txn_date, txn_type, category, shares, 
                        purchase_cost, sell_value, cash_dividend, reinvested_dividend, 
-                       bonus_shares, fees, broker, reference, notes, price_override, 
-                       planned_cum_shares, created_at 
+                       bonus_shares, fees, broker, reference, notes 
                 FROM transactions WHERE user_id = ?{soft_del_txn} ORDER BY txn_date DESC
             """, (user_id,)),
             'cash_deposits': safe_query(f"""
-                SELECT portfolio, amount, currency, deposit_date, source, notes, 
-                       include_in_analysis, created_at 
+                SELECT portfolio, amount, currency, deposit_date, include_in_analysis 
                 FROM cash_deposits WHERE user_id = ?{soft_del_dep} ORDER BY deposit_date DESC
             """, (user_id,)),
-            'portfolio_cash': safe_query("""
-                SELECT portfolio, balance, currency, last_updated 
-                FROM portfolio_cash WHERE user_id = ?
-            """, (user_id,)),
             'portfolio_snapshots': safe_query("""
-                SELECT snapshot_date, portfolio_value, daily_movement, beginning_difference, 
-                       deposit_cash, accumulated_cash, net_gain, change_percent, roi_percent, created_at 
+                SELECT snapshot_date, portfolio_value, daily_movement, deposit_cash 
                 FROM portfolio_snapshots WHERE user_id = ? ORDER BY snapshot_date DESC
-            """, (user_id,)),
-            'securities_master': safe_query("""
-                SELECT security_id, exchange, canonical_ticker, display_name, isin, 
-                       currency, country, status, sector, created_at, updated_at 
-                FROM securities_master WHERE user_id = ? ORDER BY canonical_ticker
-            """, (user_id,)),
-            'security_aliases': safe_query("""
-                SELECT security_id, alias_name, alias_type, valid_from, valid_until, created_at 
-                FROM security_aliases WHERE user_id = ? ORDER BY security_id, alias_name
             """, (user_id,)),
         }
         return data
@@ -8783,18 +13628,16 @@ def ui_backup_restore():
         col1, col2, col3 = st.columns(3)
         
         with col1:
-            st.markdown("**📈 Portfolio Data**")
-            st.metric("Stocks Tracked", stats['stocks'], help="Unique stocks in your portfolio")
-            st.metric("Transactions", stats['transactions'], help="Buy, Sell, Dividend, Bonus transactions (all in master storage)")
+            st.markdown("**📈 Transactions**")
+            st.metric("Total Transactions", stats['transactions'], help="Buy, Sell, Dividend, Bonus transactions")
         
         with col2:
-            st.markdown("**💰 Cash Management**")
+            st.markdown("**💰 Cash Deposits**")
             st.metric("Cash Deposits", stats['cash_deposits'], help="Capital injection records")
-            st.metric("Manual Cash Balances", stats['portfolio_cash'], help="Per-portfolio available cash overrides")
         
         with col3:
-            st.markdown("**📊 Tracking & History**")
-            st.metric("📈 Portfolio Tracker", stats['portfolio_snapshots'], help="Daily portfolio value snapshots for performance tracking")
+            st.markdown("**📊 Portfolio Tracking**")
+            st.metric("📈 Portfolio Snapshots", stats['portfolio_snapshots'], help="Daily portfolio value snapshots for performance tracking")
         
         st.divider()
         
@@ -8802,8 +13645,6 @@ def ui_backup_restore():
         st.markdown("**📋 What's Included in Backup:**")
         
         included_items = []
-        if stats['stocks'] > 0:
-            included_items.append(f"✅ **Stocks** ({stats['stocks']}) - Symbols, names, currency, sectors, TradingView mappings")
         if stats['transactions'] > 0:
             # Count dividends within transactions
             txn_df = all_data['transactions']
@@ -8814,17 +13655,15 @@ def ui_backup_restore():
             included_items.append(f"✅ **Transactions** ({stats['transactions']}) - All Buy/Sell/Dividend records (includes {div_count} dividend entries)")
         if stats['cash_deposits'] > 0:
             included_items.append(f"✅ **Cash Deposits** ({stats['cash_deposits']}) - Capital injections history")
-        if stats['portfolio_cash'] > 0:
-            included_items.append(f"✅ **Manual Cash Balances** ({stats['portfolio_cash']}) - Available cash overrides per portfolio")
         if stats['portfolio_snapshots'] > 0:
             # Show date range for snapshots
             snap_df = all_data['portfolio_snapshots']
             if not snap_df.empty and 'snapshot_date' in snap_df.columns:
                 min_date = snap_df['snapshot_date'].min()
                 max_date = snap_df['snapshot_date'].max()
-                included_items.append(f"✅ **Portfolio Tracker History** ({stats['portfolio_snapshots']}) - Daily values from {min_date} to {max_date}")
+                included_items.append(f"✅ **Portfolio Tracking History** ({stats['portfolio_snapshots']}) - Daily values from {min_date} to {max_date}")
             else:
-                included_items.append(f"✅ **Portfolio Tracker History** ({stats['portfolio_snapshots']})")
+                included_items.append(f"✅ **Portfolio Tracking History** ({stats['portfolio_snapshots']})")
         
         for item in included_items:
             st.markdown(item)
@@ -8861,14 +13700,12 @@ def ui_backup_restore():
                 metadata = pd.DataFrame({
                     'key': [
                         'backup_version', 'backup_date', 'backup_time', 'username',
-                        'stocks_count', 'transactions_count', 'cash_deposits_count',
-                        'portfolio_cash_count', 'portfolio_snapshots_count',
+                        'transactions_count', 'cash_deposits_count', 'portfolio_snapshots_count',
                         'total_records'
                     ],
                     'value': [
-                        '3.3', str(date.today()), datetime.now().strftime('%H:%M:%S'), username,
-                        stats['stocks'], stats['transactions'], stats['cash_deposits'],
-                        stats['portfolio_cash'], stats['portfolio_snapshots'],
+                        '3.4', str(date.today()), datetime.now().strftime('%H:%M:%S'), username,
+                        stats['transactions'], stats['cash_deposits'], stats['portfolio_snapshots'],
                         total_records
                     ]
                 })
@@ -9109,28 +13946,33 @@ def ui_backup_restore():
                                 df = pd.read_excel(uploaded_file, sheet_name='transactions')
                                 txn_count = 0
                                 txn_errors = 0
-                                current_fx = get_current_fx_rate()  # Store historical FX rate
                                 for idx, row in df.iterrows():
                                     try:
-                                        stock_sym = safe_str(row.get('stock_symbol'))
+                                        raw_stock_sym = safe_str(row.get('stock_symbol'))
                                         txn_date = safe_date(row.get('txn_date'))
                                         txn_type = safe_str(row.get('txn_type'), 'Buy')
                                         security_id = safe_str(row.get('security_id')) if pd.notna(row.get('security_id')) else None
-                                        # Preserve original FX rate if available from backup, else use current
-                                        fx_rate = safe_float(row.get('fx_rate_at_txn')) if pd.notna(row.get('fx_rate_at_txn')) else current_fx
+                                        portfolio = safe_str(row.get('portfolio'), 'KFH')
                                         
-                                        if not stock_sym:
+                                        if not raw_stock_sym:
                                             txn_errors += 1
                                             error_details.append(f"Transaction row {idx}: Missing stock_symbol")
                                             continue
+                                        
+                                        # SYMBOL NORMALIZATION: Resolve user input to canonical ticker
+                                        stock_sym = normalize_stock_symbol(raw_stock_sym, portfolio)
+                                        
+                                        # Auto-register new mapping if normalized differently
+                                        if raw_stock_sym.upper() != stock_sym:
+                                            add_symbol_mapping(raw_stock_sym, stock_sym)
                                         
                                         db_execute(cur, """
                                             INSERT INTO transactions 
                                             (user_id, portfolio, stock_symbol, security_id, txn_date, txn_type, 
                                              shares, purchase_cost, sell_value, cash_dividend, 
                                              bonus_shares, reinvested_dividend, fees, broker,
-                                             reference, notes, category, price_override, planned_cum_shares, fx_rate_at_txn, created_at)
-                                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                             reference, notes, category, created_at)
+                                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                                         """, (
                                             user_id,
                                             safe_str(row.get('portfolio'), 'KFH'),
@@ -9149,9 +13991,6 @@ def ui_backup_restore():
                                             safe_str(row.get('reference')),
                                             safe_str(row.get('notes')),
                                             safe_str(row.get('category'), 'portfolio'),
-                                            safe_float(row.get('price_override')) if pd.notna(row.get('price_override')) else None,
-                                            safe_float(row.get('planned_cum_shares')) if pd.notna(row.get('planned_cum_shares')) else None,
-                                            fx_rate,
                                             int(time.time())
                                         ))
                                         imported += 1
@@ -9170,72 +14009,22 @@ def ui_backup_restore():
                                 df = pd.read_excel(uploaded_file, sheet_name='cash_deposits')
                                 cash_count = 0
                                 
-                                # Detect which schema we're using by checking table columns
-                                try:
-                                    db_cols = table_columns("cash_deposits")
-                                    has_new_schema = 'source' in db_cols
-                                    has_old_schema = 'bank_name' in db_cols
-                                except:
-                                    has_new_schema = True
-                                    has_old_schema = False
-                                
                                 for _, row in df.iterrows():
                                     try:
-                                        # Handle different column naming conventions in backup file
-                                        # Old schema exports: bank_name, description, comments
-                                        # New schema exports: source, notes
-                                        source_val = (
-                                            safe_str(row.get('source')) or 
-                                            safe_str(row.get('bank_name')) or 
-                                            ''
-                                        )
-                                        notes_val = (
-                                            safe_str(row.get('notes')) or 
-                                            safe_str(row.get('description')) or 
-                                            safe_str(row.get('comments')) or 
-                                            ''
-                                        )
-                                        # Preserve original FX rate if available, else use current
-                                        fx_rate = safe_float(row.get('fx_rate_at_deposit')) if pd.notna(row.get('fx_rate_at_deposit')) else get_current_fx_rate()
-                                        
-                                        # Use appropriate INSERT based on target DB schema
-                                        if has_new_schema:
-                                            # PostgreSQL / new SQLite with source, notes columns
-                                            db_execute(cur, """
-                                                INSERT INTO cash_deposits 
-                                                (user_id, portfolio, amount, currency, deposit_date, 
-                                                 source, notes, include_in_analysis, fx_rate_at_deposit, created_at)
-                                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                            """, (
-                                                user_id,
-                                                safe_str(row.get('portfolio'), 'KFH'),
-                                                safe_float(row.get('amount')),
-                                                safe_str(row.get('currency'), 'KWD'),
-                                                safe_date(row.get('deposit_date')),
-                                                source_val,
-                                                notes_val,
-                                                int(safe_float(row.get('include_in_analysis'), 1)),
-                                                fx_rate,
-                                                int(time.time())
-                                            ))
-                                        elif has_old_schema:
-                                            # Old SQLite with bank_name, description, comments columns
-                                            db_execute(cur, """
-                                                INSERT INTO cash_deposits 
-                                                (user_id, portfolio, bank_name, deposit_date, amount, 
-                                                 description, comments, fx_rate_at_deposit, created_at)
-                                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                            """, (
-                                                user_id,
-                                                safe_str(row.get('portfolio'), 'KFH'),
-                                                source_val or 'Unknown',  # bank_name is NOT NULL
-                                                safe_date(row.get('deposit_date')),
-                                                safe_float(row.get('amount')),
-                                                notes_val,
-                                                '',
-                                                fx_rate,
-                                                int(time.time())
-                                            ))
+                                        db_execute(cur, """
+                                            INSERT INTO cash_deposits 
+                                            (user_id, portfolio, amount, currency, deposit_date, 
+                                             include_in_analysis, created_at)
+                                            VALUES (?, ?, ?, ?, ?, ?, ?)
+                                        """, (
+                                            user_id,
+                                            safe_str(row.get('portfolio'), 'KFH'),
+                                            safe_float(row.get('amount')),
+                                            safe_str(row.get('currency'), 'KWD'),
+                                            safe_date(row.get('deposit_date')),
+                                            int(safe_float(row.get('include_in_analysis'), 1)),
+                                            int(time.time())
+                                        ))
                                         imported += 1
                                         cash_count += 1
                                     except Exception as e:
@@ -9283,10 +14072,28 @@ def ui_backup_restore():
                                 progress.progress(75, text="📉 Restoring portfolio snapshots...")
                                 uploaded_file.seek(0)  # Reset file pointer
                                 df = pd.read_excel(uploaded_file, sheet_name='portfolio_snapshots')
+                                # Sort by date ascending to calculate cumulative values correctly
+                                df = df.sort_values('snapshot_date', ascending=True)
                                 snap_count = 0
+                                accumulated_cash = 0.0
+                                first_value = None
+                                
                                 for _, row in df.iterrows():
                                     try:
                                         snap_date = safe_date(row.get('snapshot_date'))
+                                        portfolio_value = safe_float(row.get('portfolio_value'))
+                                        daily_movement = safe_float(row.get('daily_movement'))
+                                        deposit_cash = safe_float(row.get('deposit_cash'))
+                                        
+                                        # Calculate derived values
+                                        accumulated_cash += deposit_cash
+                                        if first_value is None:
+                                            first_value = portfolio_value
+                                        beginning_difference = portfolio_value - first_value
+                                        net_gain = portfolio_value - accumulated_cash
+                                        change_percent = ((portfolio_value - first_value) / first_value * 100) if first_value > 0 else 0
+                                        roi_percent = (net_gain / accumulated_cash * 100) if accumulated_cash > 0 else 0
+                                        
                                         # Check for existing (unique per user+date)
                                         existing = query_df("SELECT id FROM portfolio_snapshots WHERE snapshot_date = ? AND user_id = ?", (snap_date, user_id))
                                         if existing.empty:
@@ -9298,14 +14105,14 @@ def ui_backup_restore():
                                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                                             """, (
                                                 user_id, snap_date,
-                                                safe_float(row.get('portfolio_value')),
-                                                safe_float(row.get('daily_movement')),
-                                                safe_float(row.get('beginning_difference')),
-                                                safe_float(row.get('deposit_cash')),
-                                                safe_float(row.get('accumulated_cash')),
-                                                safe_float(row.get('net_gain')),
-                                                safe_float(row.get('change_percent')),
-                                                safe_float(row.get('roi_percent')),
+                                                portfolio_value,
+                                                daily_movement,
+                                                beginning_difference,
+                                                deposit_cash,
+                                                accumulated_cash,
+                                                net_gain,
+                                                change_percent,
+                                                roi_percent,
                                                 int(time.time())
                                             ))
                                             imported += 1
@@ -9435,23 +14242,21 @@ def ui_backup_restore():
     **This action CANNOT be undone!** Make sure to export a backup first.
     """)
     
-    # Two-step confirmation
-    col_warning, col_action = st.columns([2, 1])
+    # Simple checkbox + button confirmation
+    confirm_checkbox = st.checkbox(
+        "✅ I understand this will permanently delete ALL my data and cannot be undone",
+        key="master_delete_confirm_checkbox",
+        value=False
+    )
     
-    with col_warning:
-        confirm_text = st.text_input(
-            f"Type **DELETE {username.upper()}** to confirm:",
-            key="master_delete_confirm",
-            placeholder=f"DELETE {username.upper()}"
-        )
+    delete_btn = st.button(
+        "🗑️ DELETE ALL MY DATA", 
+        type="primary", 
+        disabled=not confirm_checkbox,
+        key="master_delete_btn"
+    )
     
-    with col_action:
-        st.write("")  # Spacing
-        st.write("")
-        delete_btn = st.button("🗑️ DELETE ALL MY DATA", type="primary", 
-                               disabled=(confirm_text != f"DELETE {username.upper()}"))
-    
-    if delete_btn and confirm_text == f"DELETE {username.upper()}":
+    if delete_btn and confirm_checkbox:
         # Additional confirmation dialog
         st.session_state.confirm_master_delete = True
     
@@ -10333,9 +15138,17 @@ def ui_portfolio_analysis():
     _cash_portfolios = ["KFH", "BBYN", "USA"]
     
     for p in _cash_portfolios:
-        # A. Total Deposited (Read-only Reference) - exclude soft-deleted if column exists
+        # A. Total Deposited (Read-only Reference) - only include deposits marked for analysis
         _soft_del_dep = _soft_delete_filter_deposits()
-        _total_dep = query_val(f"SELECT SUM(amount) FROM cash_deposits WHERE portfolio=? AND user_id=?{_soft_del_dep}", (p, _user_id)) 
+        # CORRECT QUERY: Filter by include_in_analysis = 1 and sum only positive amounts
+        _total_dep = query_val(f"""
+            SELECT COALESCE(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END), 0)
+            FROM cash_deposits 
+            WHERE portfolio = ? 
+            AND user_id = ?
+            AND include_in_analysis = 1
+            {_soft_del_dep}
+        """, (p, _user_id)) 
         if _total_dep is None: _total_dep = 0.0
         
         # B. Manual Cash Balance (Source of Truth for Buying Power)
@@ -10369,12 +15182,15 @@ def ui_portfolio_analysis():
                 ),
                 "Available Cash": st.column_config.NumberColumn(
                     "Available Cash (Manual)",
-                    min_value=0, step=100.0, format="%,.0f",
-                    help="Enter your actual current cash balance in the portfolio."
+                    min_value=0.0, step=100.0, format="%.2f",
+                    help="Double-click to edit. Enter your actual current cash balance.",
+                    disabled=False
                 )
             },
             hide_index=True,
-            width="stretch",
+            use_container_width=True,
+            num_rows="fixed",
+            disabled=False,
             key="cash_editor_widget"
         )
         
@@ -10727,6 +15543,146 @@ def ui_portfolio_analysis():
     
     st.divider()
     
+    # =========================================================================
+    # UI FIX #2: TRANSACTION ANALYSIS FROM UNIFIED portfolio_transactions
+    # =========================================================================
+    st.markdown("## 📈 Transaction Analysis")
+    st.caption("Analysis from unified portfolio_transactions table - always accurate")
+    
+    user_id = st.session_state.get('user_id', 1)
+    
+    # Get analysis data from new helper functions
+    analysis_data = get_portfolio_analysis_data(user_id)
+    
+    # Monthly Breakdown Section
+    monthly_df = analysis_data.get('monthly_breakdown', pd.DataFrame())
+    cumulative_deposits_df = analysis_data.get('cumulative_deposits', pd.DataFrame())
+    cumulative_cash_df = analysis_data.get('cumulative_cash_flow', pd.DataFrame())
+    
+    if not monthly_df.empty:
+        with st.expander("📊 Monthly Transaction Breakdown", expanded=True):
+            st.caption("Transactions grouped by month and type from portfolio_transactions")
+            
+            # Pivot for better display
+            pivot_df = monthly_df.pivot_table(
+                index='month',
+                columns='txn_type',
+                values='total_amount',
+                aggfunc='sum',
+                fill_value=0
+            ).reset_index()
+            
+            # Add transaction counts
+            count_pivot = monthly_df.pivot_table(
+                index='month',
+                columns='txn_type',
+                values='transaction_count',
+                aggfunc='sum',
+                fill_value=0
+            ).reset_index()
+            
+            # Sort by month descending
+            pivot_df = pivot_df.sort_values('month', ascending=False)
+            
+            # Format amounts
+            for col in pivot_df.columns:
+                if col != 'month':
+                    pivot_df[col] = pivot_df[col].apply(lambda x: f"{x:,.2f}")
+            
+            st.dataframe(pivot_df, use_container_width=True, hide_index=True)
+            
+            # Summary metrics
+            total_deposits = monthly_df[monthly_df['txn_type'] == 'DEPOSIT']['total_amount'].sum()
+            total_buys = abs(monthly_df[monthly_df['txn_type'] == 'BUY']['total_amount'].sum())
+            total_sells = monthly_df[monthly_df['txn_type'] == 'SELL']['total_amount'].sum()
+            total_dividends = monthly_df[monthly_df['txn_type'] == 'DIVIDEND']['total_amount'].sum()
+            
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("💰 Total Deposits", fmt_money_plain(total_deposits), delta_color="off")
+            with col2:
+                st.metric("🛒 Total Invested", fmt_money_plain(total_buys), delta_color="off")
+            with col3:
+                st.metric("💵 Total Sold", fmt_money_plain(total_sells), delta_color="off")
+            with col4:
+                st.metric("📊 Total Dividends", fmt_money_plain(total_dividends), delta_color="off")
+    else:
+        st.info("No transaction data in portfolio_transactions table yet.")
+    
+    # Cumulative Deposits Chart
+    if not cumulative_deposits_df.empty and go is not None:
+        with st.expander("📈 Cumulative Deposits Over Time", expanded=False):
+            st.caption("Running total of deposits from portfolio_transactions")
+            
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(
+                x=cumulative_deposits_df['txn_date'],
+                y=cumulative_deposits_df['cumulative_deposits'],
+                mode='lines+markers',
+                name='Cumulative Deposits',
+                line=dict(color='#10b981', width=2),
+                marker=dict(size=6)
+            ))
+            
+            fig.update_layout(
+                title='Cumulative Deposits Over Time',
+                xaxis_title='Date',
+                yaxis_title='Cumulative Deposits',
+                template='plotly_dark' if st.session_state.theme == 'dark' else 'plotly_white',
+                height=400
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+    
+    # Cumulative Cash Flow Chart
+    if not cumulative_cash_df.empty and go is not None:
+        with st.expander("💹 Cumulative Cash Flow Over Time", expanded=False):
+            st.caption("Running balance: deposits + dividends + sells - buys - withdrawals")
+            
+            fig = go.Figure()
+            
+            # Color by transaction type
+            colors = {
+                'DEPOSIT': '#10b981',
+                'WITHDRAWAL': '#ef4444',
+                'BUY': '#f59e0b',
+                'SELL': '#3b82f6',
+                'DIVIDEND': '#8b5cf6'
+            }
+            
+            for txn_type in cumulative_cash_df['txn_type'].unique():
+                type_df = cumulative_cash_df[cumulative_cash_df['txn_type'] == txn_type]
+                fig.add_trace(go.Scatter(
+                    x=type_df['txn_date'],
+                    y=type_df['cumulative_cash_flow'],
+                    mode='markers',
+                    name=txn_type,
+                    marker=dict(color=colors.get(txn_type, '#64748b'), size=8)
+                ))
+            
+            # Add running line
+            fig.add_trace(go.Scatter(
+                x=cumulative_cash_df['txn_date'],
+                y=cumulative_cash_df['cumulative_cash_flow'],
+                mode='lines',
+                name='Cash Flow',
+                line=dict(color='#60a5fa', width=2),
+                showlegend=True
+            ))
+            
+            fig.update_layout(
+                title='Cumulative Cash Flow Over Time',
+                xaxis_title='Date',
+                yaxis_title='Cash Flow Balance',
+                template='plotly_dark' if st.session_state.theme == 'dark' else 'plotly_white',
+                height=400,
+                legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1)
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+    
+    st.divider()
+    
     # Footer
     st.markdown("""
     <div class="portfolio-footer">
@@ -10919,30 +15875,80 @@ def ui_portfolio_tracker():
             # Total Portfolio Value = Stocks + Cash
             live_portfolio_value = live_stock_value + manual_cash_kwd
             
-            # 2. Calculate Accumulated Cash (Total Deposits) - exclude soft-deleted if column exists
-            _soft_del_dep = _soft_delete_filter_deposits()
-            all_deposits = query_df(f"SELECT amount, currency, include_in_analysis, deposit_date FROM cash_deposits WHERE user_id = ?{_soft_del_dep}", (user_id,))
-            today_str = date.today().strftime("%Y-%m-%d")
+            # 2. Calculate Accumulated Cash (Total Deposits) - USE UNIFIED VIEW
+            # This view ALWAYS shows correct totals regardless of upload status
+            deposit_summary = query_df("""
+                SELECT portfolio_name, total_deposits, total_withdrawals, net_deposits, deposit_count
+                FROM portfolio_deposit_summary 
+                WHERE user_id = ?
+            """, (user_id,))
             
+            today_str = date.today().strftime("%Y-%m-%d")
             total_deposits_kwd = 0.0
             today_deposits_kwd = 0.0
+            all_deposits = pd.DataFrame()  # Initialize empty to prevent UnboundLocalError
+            analysis_deposits = pd.DataFrame()  # Initialize empty
             
-            if not all_deposits.empty:
-                # Convert all to KWD first
-                all_deposits["amount_in_kwd"] = all_deposits.apply(
-                    lambda row: convert_to_kwd(row["amount"], row.get("currency", "KWD")),
-                    axis=1
-                )
-                # Filter for analysis
-                analysis_deposits = all_deposits[all_deposits["include_in_analysis"] == 1]
+            if not deposit_summary.empty:
+                # Convert to KWD based on portfolio currency
+                for _, row in deposit_summary.iterrows():
+                    port_name = row['portfolio_name']
+                    ccy = PORTFOLIO_CCY.get(port_name, 'KWD')
+                    total_deposits_kwd += convert_to_kwd(float(row['net_deposits'] or 0), ccy)
+            else:
+                # FALLBACK 1: Try legacy cash_deposits table
+                _soft_del_dep = _soft_delete_filter_deposits()
+                all_deposits = query_df(f"SELECT amount, currency, include_in_analysis, deposit_date FROM cash_deposits WHERE user_id = ?{_soft_del_dep}", (user_id,))
                 
-                # Total accumulated up to today (inclusive)
-                # Note: We assume all deposits in DB are valid. If we want strictly <= today:
-                # analysis_deposits = analysis_deposits[analysis_deposits["deposit_date"] <= today_str]
-                total_deposits_kwd = analysis_deposits["amount_in_kwd"].sum()
-                
-                # Deposits specifically for today
-                today_deposits_kwd = analysis_deposits[analysis_deposits["deposit_date"] == today_str]["amount_in_kwd"].sum()
+                if not all_deposits.empty:
+                    # Convert all to KWD first
+                    all_deposits["amount_in_kwd"] = all_deposits.apply(
+                        lambda row: convert_to_kwd(row["amount"], row.get("currency", "KWD")),
+                        axis=1
+                    )
+                    # Filter for analysis
+                    analysis_deposits = all_deposits[all_deposits["include_in_analysis"] == 1]
+                    
+                    # Total accumulated up to today (inclusive)
+                    total_deposits_kwd = analysis_deposits["amount_in_kwd"].sum()
+                    
+                    # Deposits specifically for today
+                    today_deposits_kwd = analysis_deposits[analysis_deposits["deposit_date"] == today_str]["amount_in_kwd"].sum()
+                else:
+                    # FALLBACK 2: Calculate Net Invested Capital from transactions
+                    _soft_del_txn = _soft_delete_filter()
+                    
+                    # Get total purchase cost (Buy transactions)
+                    buys_df = query_df(f"""
+                        SELECT portfolio, purchase_cost 
+                        FROM transactions 
+                        WHERE user_id = ? AND txn_type = 'Buy' AND purchase_cost IS NOT NULL{_soft_del_txn}
+                    """, (user_id,))
+                    
+                    # Get total sell value (Sell transactions)
+                    sells_df = query_df(f"""
+                        SELECT portfolio, sell_value 
+                        FROM transactions 
+                        WHERE user_id = ? AND txn_type = 'Sell' AND sell_value IS NOT NULL{_soft_del_txn}
+                    """, (user_id,))
+                    
+                    # Calculate totals in KWD
+                    total_buys_kwd = 0.0
+                    if not buys_df.empty:
+                        for _, row in buys_df.iterrows():
+                            port = row.get('portfolio', 'KFH')
+                            ccy = PORTFOLIO_CCY.get(port, 'KWD')
+                            total_buys_kwd += convert_to_kwd(float(row['purchase_cost'] or 0), ccy)
+                    
+                    total_sells_kwd = 0.0
+                    if not sells_df.empty:
+                        for _, row in sells_df.iterrows():
+                            port = row.get('portfolio', 'KFH')
+                            ccy = PORTFOLIO_CCY.get(port, 'KWD')
+                            total_sells_kwd += convert_to_kwd(float(row['sell_value'] or 0), ccy)
+                    
+                    # Net Invested Capital = Money put in - Money taken out
+                    total_deposits_kwd = total_buys_kwd - total_sells_kwd
             
             # 3. Get Previous Snapshot for Deltas
             prev_snap = query_df(
@@ -12063,6 +17069,25 @@ def ui_trading_section():
     """
     st.subheader("📈 Trading Section - All Transactions")
     
+    user_id = st.session_state.get('user_id', 1)
+    
+    # Add refresh button - recalculates avg costs, P&L, and refreshes all data
+    col_refresh, col_spacer = st.columns([1, 5])
+    with col_refresh:
+        if st.button("🔄 Refresh & Recalculate", type="primary", help="Recalculate avg costs, P&L and refresh all transaction data"):
+            with st.spinner("Recalculating avg costs and P&L for all transactions..."):
+                stats = recalculate_and_store_avg_costs(user_id)
+                # Clear all relevant caches
+                build_portfolio_table.clear()
+                st.cache_data.clear()  # Clear all cached data to ensure fresh reads
+                
+                if stats['errors']:
+                    st.error(f"Errors during recalculation: {stats['errors'][:3]}")
+                else:
+                    st.success(f"✅ Recalculated {stats['updated']} transactions across {stats['positions_processed']} positions")
+                time.sleep(0.5)
+            st.rerun()
+    
     st.info("""
     **📋 This shows ALL your saved transactions.**
     
@@ -12072,12 +17097,12 @@ def ui_trading_section():
     • Portfolio positions and cash are calculated from the same data.
     """)
     
-    user_id = st.session_state.get('user_id', 1)
-    
     # Query ALL transactions from the main transactions table (no date filter in query)
     conn = get_conn()
     
     # Query all transactions with current prices for P&L calculation
+    # Include source column for filtering and display
+    # Include stored avg_cost columns for accurate historical P&L
     query = """
         SELECT 
             t.id,
@@ -12094,10 +17119,17 @@ def ui_trading_section():
             t.bonus_shares,
             t.reinvested_dividend,
             t.notes,
-            COALESCE(s.current_price, 0) AS current_price
+            COALESCE(t.source, 'MANUAL') AS source,
+            t.source_reference,
+            COALESCE(s.current_price, 0) AS current_price,
+            t.avg_cost_at_txn,
+            t.realized_pnl_at_txn,
+            t.cost_basis_at_txn,
+            t.shares_held_at_txn
         FROM transactions t
         LEFT JOIN stocks s ON UPPER(t.stock_symbol) = UPPER(s.symbol) AND t.user_id = s.user_id
         WHERE t.user_id = ? 
+        AND (t.is_deleted = 0 OR t.is_deleted IS NULL)
         ORDER BY t.txn_date DESC, t.id DESC
     """
     df = pd.read_sql_query(convert_sql_placeholders(query), conn, params=(user_id,))
@@ -12139,16 +17171,20 @@ def ui_trading_section():
     # ============================================================
     # CFA/IFRS-Compliant Cost Basis Calculation (Weighted Average Cost Method)
     # ============================================================
-    # Process transactions chronologically to compute proper state per symbol:
+    # Process transactions chronologically to compute proper state per (symbol, portfolio):
     # - total_shares: Shares currently held
     # - total_cost: Remaining cost basis of held shares
     # - avg_cost: Weighted average cost per share
     # - realized_pnl: Cumulative realized P&L from sells
+    # IMPORTANT: Avg cost is calculated PER PORTFOLIO - same stock in different
+    #            portfolios will have independent avg cost calculations.
     # ============================================================
     
     # Get ALL transactions sorted chronologically (oldest first) for state calculation
+    # Exclude soft-deleted records from cost basis calculation
+    # Include portfolio column for per-portfolio avg cost calculation
     all_txn_query = """
-        SELECT id, stock_symbol, txn_type, txn_date, 
+        SELECT id, stock_symbol, COALESCE(portfolio, 'KFH') as portfolio, txn_type, txn_date, 
                COALESCE(shares, 0) as shares,
                COALESCE(purchase_cost, 0) as purchase_cost,
                COALESCE(sell_value, 0) as sell_value,
@@ -12158,22 +17194,26 @@ def ui_trading_section():
                COALESCE(reinvested_dividend, 0) as reinvested_dividend
         FROM transactions
         WHERE user_id = ?
+        AND (is_deleted = 0 OR is_deleted IS NULL)
         ORDER BY txn_date ASC, id ASC
     """
     all_txn_df = pd.read_sql_query(convert_sql_placeholders(all_txn_query), conn, params=(user_id,))
     
-    # Build state per symbol by processing chronologically
-    symbol_state = {}  # symbol -> {total_shares, total_cost, avg_cost, realized_pnl, dividends_received}
-    txn_state = {}     # txn_id -> {avg_cost_at_time, realized_pnl_increment}
+    # Build state per (symbol, portfolio) by processing chronologically
+    # Key is tuple (symbol, portfolio) for independent avg cost per portfolio
+    position_state = {}  # (symbol, portfolio) -> {total_shares, total_cost, avg_cost, ...}
+    txn_state = {}       # txn_id -> {avg_cost_at_time, realized_pnl_increment}
     
     for _, txn in all_txn_df.iterrows():
         sym = txn['stock_symbol']
+        port = txn['portfolio']
+        position_key = (sym, port)  # Key by both symbol AND portfolio
         txn_id = txn['id']
         txn_type = txn['txn_type']
         
-        # Initialize state if new symbol
-        if sym not in symbol_state:
-            symbol_state[sym] = {
+        # Initialize state if new (symbol, portfolio) combination
+        if position_key not in position_state:
+            position_state[position_key] = {
                 'total_shares': 0.0,
                 'total_cost': 0.0,
                 'avg_cost': 0.0,
@@ -12182,7 +17222,7 @@ def ui_trading_section():
                 'position_open': False  # Will be set True on first Buy
             }
         
-        state = symbol_state[sym]
+        state = position_state[position_key]
         
         if txn_type == 'Buy':
             # BUY: Add cost + shares (fees increase cost basis)
@@ -12241,8 +17281,17 @@ def ui_trading_section():
         
         elif txn_type in ('DIVIDEND_ONLY', 'Dividend'):
             # CASH DIVIDEND: Income, does NOT affect cost basis
-            dividend_amount = float(txn['cash_dividend'])
+            dividend_amount = float(txn['cash_dividend']) if txn['cash_dividend'] else 0
             state['dividends_received'] += dividend_amount
+            
+            # CHECK FOR BONUS SHARES attached to dividend transaction
+            # Some dividends include stock dividends (bonus shares) - these dilute avg cost
+            bonus_in_dividend = float(txn['bonus_shares']) if txn['bonus_shares'] and float(txn['bonus_shares']) > 0 else 0
+            if bonus_in_dividend > 0:
+                state['total_shares'] += bonus_in_dividend
+                # Recalculate avg_cost after adding bonus shares (cost unchanged, shares increased)
+                state['avg_cost'] = state['total_cost'] / state['total_shares'] if state['total_shares'] > 0 else 0
+                state['position_open'] = state['total_shares'] > 0
             
             txn_state[txn_id] = {'avg_cost_at_time': state['avg_cost'], 'realized_pnl': 0, 'dividend': dividend_amount}
         
@@ -12250,16 +17299,54 @@ def ui_trading_section():
             # Other types (Deposit, Withdrawal, etc.) - no effect on stock state
             txn_state[txn_id] = {'avg_cost_at_time': state['avg_cost'], 'realized_pnl': 0}
     
-    # Now map the calculated avg_cost back to the main dataframe
-    # CFA/IFRS Rule: Return 0 for closed positions (position_open = False)
-    def get_symbol_avg_cost(sym):
-        if sym in symbol_state:
-            if not symbol_state[sym].get('position_open', False):
-                return 0  # Closed position - no avg cost to display
-            return symbol_state[sym]['avg_cost']
+    # ============================================================
+    # AVG COST ASSIGNMENT - Use stored values when available
+    # ============================================================
+    # Priority: 1) Stored avg_cost_at_txn (accurate historical record)
+    #           2) Runtime calculated (fallback for old data)
+    # CRITICAL: For closed positions, we STILL show the avg_cost from stored value
+    #           This allows accurate P&L display even after position is closed
+    # IMPORTANT: Uses (symbol, portfolio) key for per-portfolio avg cost
+    # ============================================================
+    
+    def get_avg_cost_for_row(row):
+        """Get avg_cost: prefer stored value, fallback to runtime calculation."""
+        # First check if we have a stored avg_cost_at_txn
+        stored_avg = row.get('avg_cost_at_txn')
+        if stored_avg is not None and pd.notna(stored_avg) and stored_avg > 0:
+            return float(stored_avg)
+        
+        # Fallback to runtime calculation using (symbol, portfolio) key
+        sym = row.get('symbol', '')
+        port = row.get('portfolio', 'KFH')
+        position_key = (sym, port)
+        
+        if position_key in position_state:
+            # For open positions, use current state
+            if position_state[position_key].get('position_open', False):
+                return position_state[position_key]['avg_cost']
+            # For closed positions without stored value, return 0
+            return 0
         return 0
     
-    df['avg_cost'] = df['symbol'].apply(get_symbol_avg_cost)
+    df['avg_cost'] = df.apply(get_avg_cost_for_row, axis=1)
+    
+    # Also get stored realized_pnl for sell transactions
+    def get_realized_pnl_for_row(row):
+        """Get realized P&L: prefer stored value, fallback to txn_state."""
+        if row.get('type') != 'Sell':
+            return 0
+        # Check stored value first
+        stored_pnl = row.get('realized_pnl_at_txn')
+        if stored_pnl is not None and pd.notna(stored_pnl):
+            return float(stored_pnl)
+        # Fallback to runtime calculation
+        txn_id = row.get('id')
+        if txn_id in txn_state:
+            return txn_state[txn_id].get('realized_pnl', 0)
+        return 0
+    
+    df['stored_realized_pnl'] = df.apply(get_realized_pnl_for_row, axis=1)
     
     conn.close()
     
@@ -12293,11 +17380,13 @@ def ui_trading_section():
     def get_status(row):
         t = row['type']
         sym = row.get('symbol', '')
+        port = row.get('portfolio', 'KFH')
+        position_key = (sym, port)
         if t == 'Sell':
             return 'Realized'
         elif t == 'Buy':
-            # Check if position is closed
-            if sym in symbol_state and not symbol_state[sym].get('position_open', False):
+            # Check if position is closed (per portfolio)
+            if position_key in position_state and not position_state[position_key].get('position_open', False):
                 return 'Closed'  # Position fully exited
             return 'Unrealized'
         elif t in ('DIVIDEND_ONLY', 'Dividend'):
@@ -12312,9 +17401,11 @@ def ui_trading_section():
     # CFA/IFRS-Compliant P&L Calculation
     # ============================================================
     # - Buy (Unrealized): (Current Price - Avg Cost) × Shares
-    # - Sell (Realized): Proceeds - (Avg Cost at time of sale × Shares Sold)
+    # - Sell (Realized): Use stored realized_pnl_at_txn OR calculate
     # - Dividend (Income): Cash received (no cost basis impact)
     # - Bonus: No P&L (just dilutes avg cost)
+    # CRITICAL: For sells, we use stored avg_cost_at_txn to ensure accuracy
+    #           even after the position is fully closed
     # ============================================================
     
     def calc_pnl(row):
@@ -12322,15 +17413,16 @@ def ui_trading_section():
         txn_id = row.get('id')
         qty = float(row.get('quantity', 0) or 0)
         sym = row.get('symbol', '')
+        port = row.get('portfolio', 'KFH')
+        position_key = (sym, port)
         
         if txn_type == 'Buy':
             # CFA/IFRS Rule: Unrealized P&L only calculated for OPEN positions
             # If position is closed (total_shares = 0), unrealized P&L = 0
-            if sym in symbol_state and not symbol_state[sym].get('position_open', False):
+            if position_key in position_state and not position_state[position_key].get('position_open', False):
                 return 0  # Position closed - no unrealized P&L
             
             # Unrealized P&L: (Current Price - Avg Cost) × Shares held from this lot
-            # Note: Using current avg_cost (after all transactions) for simplicity
             current_price = float(row.get('current_price', 0) or 0)
             avg_cost = float(row.get('avg_cost', 0) or 0)
             if current_price > 0 and qty > 0 and avg_cost > 0:
@@ -12344,10 +17436,16 @@ def ui_trading_section():
             return 0
         
         elif txn_type == 'Sell':
-            # Realized P&L from txn_state (calculated during chronological processing)
+            # PRIORITY 1: Use stored realized_pnl_at_txn (most accurate)
+            stored_pnl = row.get('stored_realized_pnl', 0)
+            if stored_pnl != 0:
+                return stored_pnl
+            
+            # PRIORITY 2: Use runtime calculated txn_state
             if txn_id in txn_state:
                 return txn_state[txn_id].get('realized_pnl', 0)
-            # Fallback calculation
+            
+            # PRIORITY 3: Fallback calculation using stored avg_cost
             sell_value = float(row.get('sell_value', 0) or 0)
             avg_cost = float(row.get('avg_cost', 0) or 0)
             fees = float(row.get('fees', 0) or 0)
@@ -12374,10 +17472,12 @@ def ui_trading_section():
         qty = float(row.get('quantity', 0) or 0)
         avg_cost = float(row.get('avg_cost', 0) or 0)
         sym = row.get('symbol', '')
+        port = row.get('portfolio', 'KFH')
+        position_key = (sym, port)
         
         if txn_type == 'Buy':
             # CFA/IFRS Rule: No unrealized return % for closed positions
-            if sym in symbol_state and not symbol_state[sym].get('position_open', False):
+            if position_key in position_state and not position_state[position_key].get('position_open', False):
                 return 0  # Position closed - no unrealized P&L %
             
             # Unrealized return %: P&L / Cost Basis
@@ -12444,29 +17544,68 @@ def ui_trading_section():
     dividend_df = df[df['type'].isin(['DIVIDEND_ONLY', 'Dividend'])]
     bonus_df = df[df['type'].isin(['Bonus Shares', 'Bonus'])]
     
-    total_buys = buy_df['purchase_cost'].sum() if not buy_df.empty else 0
-    total_sells = sell_df['sell_value'].sum() if not sell_df.empty else 0
-    total_withdrawals = withdrawal_df['sell_value'].sum() if not withdrawal_df.empty else 0
-    total_fees = df['fees'].sum() if 'fees' in df.columns else 0
+    total_buys = buy_df['purchase_cost'].fillna(0).sum() if not buy_df.empty else 0
+    total_sells = sell_df['sell_value'].fillna(0).sum() if not sell_df.empty else 0
+    total_withdrawals = withdrawal_df['sell_value'].fillna(0).sum() if not withdrawal_df.empty else 0
+    total_fees = df['fees'].fillna(0).sum() if 'fees' in df.columns else 0
     
-    # CFA-Compliant P&L from symbol_state (accurate realized P&L)
-    total_realized_pnl = sum(s['realized_pnl'] for s in symbol_state.values())
-    total_dividends_received = sum(s['dividends_received'] for s in symbol_state.values())
-    total_current_shares = sum(s['total_shares'] for s in symbol_state.values())
-    total_current_cost = sum(s['total_cost'] for s in symbol_state.values())
+    # ============================================================
+    # CFA-COMPLIANT SUMMARY METRICS - USE STORED DB VALUES
+    # Priority: Stored values > Runtime calculation (fallback)
+    # ============================================================
     
-    # Calculate unrealized P&L from OPEN positions only (CFA/IFRS Rule)
-    # If position_open = False (fully closed), unrealized P&L = 0
+    # 1. REALIZED P&L - sum of all stored realized_pnl_at_txn (sell transactions)
+    if 'stored_realized_pnl' in df.columns and df['stored_realized_pnl'].notna().any():
+        total_realized_pnl = df['stored_realized_pnl'].fillna(0).sum()
+    else:
+        total_realized_pnl = sum(s['realized_pnl'] for s in position_state.values())
+    
+    # 2. DIVIDENDS - sum directly from cash_dividend column in transactions
+    if 'dividend' in df.columns:
+        total_dividends_received = df['dividend'].fillna(0).sum()
+    else:
+        total_dividends_received = sum(s['dividends_received'] for s in position_state.values())
+    
+    # 3. CURRENT SHARES - use stored shares_held_at_txn from LATEST transaction per position
+    # df is sorted by date DESC, so .first() gives latest transaction per (symbol, portfolio)
+    if 'shares_held_at_txn' in df.columns and df['shares_held_at_txn'].notna().any():
+        latest_per_position = df.groupby(['symbol', 'portfolio']).first()
+        total_current_shares = latest_per_position['shares_held_at_txn'].fillna(0).sum()
+    else:
+        total_current_shares = sum(s['total_shares'] for s in position_state.values())
+    
+    # 4. CURRENT COST BASIS - use stored cost_basis_at_txn from LATEST transaction per position
+    if 'cost_basis_at_txn' in df.columns and df['cost_basis_at_txn'].notna().any():
+        latest_per_position = df.groupby(['symbol', 'portfolio']).first()
+        total_current_cost = latest_per_position['cost_basis_at_txn'].fillna(0).sum()
+    else:
+        total_current_cost = sum(s['total_cost'] for s in position_state.values())
+    
+    # 5. UNREALIZED P&L - calculated from OPEN positions (current market value - cost basis)
+    # Uses stored cost_basis_at_txn where available, falls back to position_state
     total_unrealized_pnl = 0
-    for sym, state in symbol_state.items():
-        if state.get('position_open', False) and state['total_shares'] > 0:
-            # Get current price for this symbol
-            sym_prices = df[df['symbol'] == sym]['current_price'].dropna()
-            current_price = sym_prices.iloc[0] if len(sym_prices) > 0 else 0
-            if current_price > 0:
-                market_value = current_price * state['total_shares']
-                cost_basis = state['total_cost']
+    if 'shares_held_at_txn' in df.columns and df['shares_held_at_txn'].notna().any():
+        # Use stored values - get latest state per position
+        latest_per_position = df.groupby(['symbol', 'portfolio']).first().reset_index()
+        for _, row in latest_per_position.iterrows():
+            shares = row.get('shares_held_at_txn', 0) or 0
+            cost_basis = row.get('cost_basis_at_txn', 0) or 0
+            current_price = row.get('current_price', 0) or 0
+            if shares > 0 and current_price > 0:
+                market_value = current_price * shares
                 total_unrealized_pnl += (market_value - cost_basis)
+    else:
+        # Fallback to runtime position_state
+        for (sym, port), state in position_state.items():
+            if state.get('position_open', False) and state['total_shares'] > 0:
+                sym_prices = df[(df['symbol'] == sym) & (df['portfolio'] == port)]['current_price'].dropna()
+                if len(sym_prices) == 0:
+                    sym_prices = df[df['symbol'] == sym]['current_price'].dropna()
+                current_price = sym_prices.iloc[0] if len(sym_prices) > 0 else 0
+                if current_price > 0:
+                    market_value = current_price * state['total_shares']
+                    cost_basis = state['total_cost']
+                    total_unrealized_pnl += (market_value - cost_basis)
     
     # ============================================================
     # DIVIDEND DOUBLE-COUNTING PREVENTION (CFA/IFRS Compliant)
@@ -12552,6 +17691,9 @@ def ui_trading_section():
         # Clear type filter checkboxes by forcing a rerun with cleared state
         for txn_type in ["Buy", "Sell", "Deposit", "Withdrawal", "DIVIDEND_ONLY", "Dividend", "Bonus Shares"]:
             st.session_state[f"trading_filter_{txn_type}"] = False
+        # Clear source filter checkboxes
+        for src_type in ["MANUAL", "UPLOAD", "RESTORE", "API", "LEGACY"]:
+            st.session_state[f"trading_filter_source_{src_type}"] = False
         st.rerun()
     
     if apply_date_filter:
@@ -12570,6 +17712,16 @@ def ui_trading_section():
         default_val = st.session_state.get(f"trading_filter_{txn_type}", False)
         if cols[i].checkbox(txn_type, value=default_val, key=f"trading_filter_{txn_type}"):
             selected_types.append(txn_type)
+    
+    # Source Filter - Filter by how the transaction was entered
+    st.markdown("**Filter by Source:**")
+    source_types = ["MANUAL", "UPLOAD", "RESTORE", "API", "LEGACY"]
+    source_cols = st.columns(len(source_types))
+    selected_sources = []
+    for i, src_type in enumerate(source_types):
+        default_val = st.session_state.get(f"trading_filter_source_{src_type}", False)
+        if source_cols[i].checkbox(src_type, value=default_val, key=f"trading_filter_source_{src_type}"):
+            selected_sources.append(src_type)
     
     # Smart Search Filter
     st.markdown("**🔍 Search:**")
@@ -12605,6 +17757,9 @@ def ui_trading_section():
             # Add notes
             if pd.notna(row.get('notes')):
                 searchable_parts.append(str(row['notes']).lower())
+            # Add source for filtering by upload/manual
+            if pd.notna(row.get('source')):
+                searchable_parts.append(str(row['source']).lower())
             # Add amounts as strings for searching
             if pd.notna(row.get('quantity')) and row['quantity'] != 0:
                 searchable_parts.append(str(int(row['quantity'])))
@@ -12642,17 +17797,35 @@ def ui_trading_section():
     if selected_types:
         display_data = display_data[display_data['type'].isin(selected_types)]
     
+    # Apply source filter if any checkboxes selected
+    if selected_sources:
+        display_data = display_data[display_data['source'].isin(selected_sources)]
+    
     # View/Edit mode toggle
     view_mode = st.radio("", ["📊 View", "✏️ Edit"], horizontal=True, label_visibility="collapsed", key="trading_view_mode")
     
     if view_mode == "📊 View":
-        # Display table (read-only) with all relevant columns including P&L
-        display_df = display_data[['id', 'date', 'symbol', 'portfolio', 'type', 'status', 'quantity', 'avg_cost', 'price', 'current_price', 'sell_price', 'value', 'pnl', 'pnl_pct', 'fees', 'dividend', 'bonus_shares', 'notes']].copy()
+        # Display table (read-only) with all relevant columns including P&L and Source
+        display_df = display_data[['id', 'date', 'symbol', 'portfolio', 'type', 'status', 'source', 'quantity', 'avg_cost', 'price', 'current_price', 'sell_price', 'value', 'pnl', 'pnl_pct', 'fees', 'dividend', 'bonus_shares', 'notes']].copy()
         
         # Current price only for Unrealized (Buy) transactions
         display_df['current_price'] = display_df.apply(
             lambda r: r['current_price'] if r['status'] == 'Unrealized' else 0, axis=1
         )
+        
+        # Add source badge with emoji for visual distinction
+        def format_source_badge(src):
+            badges = {
+                'MANUAL': '✍️ Manual',
+                'UPLOAD': '📤 Upload',
+                'RESTORE': '🔄 Restore',
+                'API': '🔌 API',
+                'LEGACY': '📜 Legacy',
+                None: '✍️ Manual'
+            }
+            return badges.get(src, f'📋 {src}')
+        
+        display_df['source'] = display_df['source'].apply(format_source_badge)
         
         # Rename columns for clarity
         display_df = display_df.rename(columns={
@@ -12662,7 +17835,8 @@ def ui_trading_section():
             'pnl_pct': 'P&L %',
             'avg_cost': 'Avg Cost',
             'sell_price': 'Sell Price',
-            'current_price': 'Current Price'
+            'current_price': 'Current Price',
+            'source': 'Source'
         })
         
         # Format date to show only date (no time)
@@ -12766,6 +17940,8 @@ def ui_trading_section():
                             st.session_state['trading_delete_ids'] = []
                             
                             st.success(f"✅ Deleted {deleted_count} transaction(s). Use 'Trash' to undo.")
+                            # Recalculate avg costs and realized P&L after deletion
+                            recalculate_and_store_avg_costs(user_id)
                             # Recalculate cash after deletion
                             recalc_portfolio_cash(user_id)
                             build_portfolio_table.clear()
@@ -12853,6 +18029,8 @@ def ui_trading_section():
                 
                 if changes > 0:
                     st.success(f"✅ Updated {changes} transaction(s)")
+                    # Recalculate avg costs and realized P&L after edits
+                    recalculate_and_store_avg_costs(user_id)
                     # Recalculate cash after edits
                     recalc_portfolio_cash(user_id)
                     build_portfolio_table.clear()
@@ -13336,8 +18514,25 @@ def calculate_trading_realized_profit(user_id):
     Uses FIFO matching of Buy/Sell pairs for closed positions.
     Returns profit in KWD (converted from original currency).
     """
+    result = calculate_realized_profit_details(user_id)
+    return result['total_realized_kwd']
+
+
+def calculate_realized_profit_details(user_id):
+    """
+    Calculate realized profit from ALL transactions using stored CFA-compliant values.
+    Returns a dict with:
+      - 'total_realized_kwd': Total realized profit in KWD
+      - 'total_profit_kwd': Total profits only (positive trades)
+      - 'total_loss_kwd': Total losses only (negative trades)
+      - 'details': DataFrame with trade-by-trade breakdown
+    
+    USES STORED realized_pnl_at_txn values from database (same as Trading Section).
+    Falls back to runtime calculation if stored values not available.
+    """
     conn = get_conn()
     try:
+        # Query all sell transactions with their stored realized_pnl_at_txn
         query = """
             SELECT 
                 t.id,
@@ -13346,73 +18541,144 @@ def calculate_trading_realized_profit(user_id):
                 t.txn_type,
                 t.shares,
                 t.purchase_cost,
-                t.sell_value
+                t.sell_value,
+                t.realized_pnl_at_txn,
+                t.avg_cost_at_txn,
+                COALESCE(t.portfolio, s.portfolio, 'KFH') as portfolio,
+                COALESCE(s.currency, 'KWD') as currency,
+                COALESCE(t.category, 'portfolio') as category
             FROM transactions t
-            WHERE t.user_id = ? AND t.txn_type IN ('Buy', 'Sell')
-            ORDER BY t.txn_date, t.stock_symbol, t.txn_type
+            LEFT JOIN stocks s ON UPPER(t.stock_symbol) = UPPER(s.symbol) AND s.user_id = t.user_id
+            WHERE t.user_id = ? 
+            AND (t.is_deleted = 0 OR t.is_deleted IS NULL)
+            ORDER BY t.stock_symbol, t.portfolio, t.txn_date ASC, t.id ASC
         """
         df = pd.read_sql_query(convert_sql_placeholders(query), conn, params=(user_id,))
-        # Rename columns for consistency
-        df = df.rename(columns={
-            'stock_symbol': 'Stock',
-            'shares': 'Quantity',
-            'purchase_cost': 'price_cost',
-            'sell_value': 'sale_price'
-        })
     except Exception:
         df = pd.DataFrame()
     finally:
         conn.close()
     
     if df.empty:
-        return 0.0
+        return {
+            'total_realized_kwd': 0.0,
+            'total_profit_kwd': 0.0,
+            'total_loss_kwd': 0.0,
+            'details': pd.DataFrame()
+        }
     
-    total_realized = 0.0
+    # Check if stored values are available
+    has_stored_values = 'realized_pnl_at_txn' in df.columns and df['realized_pnl_at_txn'].notna().any()
     
-    # Process by Stock to pair transactions
-    for stock in df["Stock"].dropna().unique():
-        stock_df = df[df['Stock'] == stock].sort_values('txn_date').reset_index(drop=True)
+    # List to store trade details
+    trade_details = []
+    total_realized_kwd = 0.0
+    total_profit_kwd = 0.0
+    total_loss_kwd = 0.0
+    
+    if has_stored_values:
+        # USE STORED VALUES (CFA-compliant, matches Trading Section)
+        sell_df = df[df['txn_type'] == 'Sell'].copy()
         
-        buys = stock_df[stock_df['txn_type'] == 'Buy'].copy()
-        sells = stock_df[stock_df['txn_type'] == 'Sell'].copy()
+        for _, row in sell_df.iterrows():
+            stored_pnl = row.get('realized_pnl_at_txn')
+            if pd.notna(stored_pnl):
+                profit = float(stored_pnl)
+                ccy = row.get('currency', 'KWD') or 'KWD'
+                profit_kwd = convert_to_kwd(profit, ccy)
+                
+                total_realized_kwd += profit_kwd
+                if profit_kwd >= 0:
+                    total_profit_kwd += profit_kwd
+                else:
+                    total_loss_kwd += profit_kwd
+                
+                # Record trade detail
+                avg_cost = row.get('avg_cost_at_txn', 0) or 0
+                qty = safe_float(row['shares'], 0)
+                proceeds = safe_float(row['sell_value'], 0)
+                cost_of_sold = avg_cost * qty
+                
+                trade_details.append({
+                    'Stock': row['stock_symbol'],
+                    'Portfolio': row.get('portfolio', 'KFH'),
+                    'Sell Date': row['txn_date'],
+                    'Shares': qty,
+                    'Avg Cost': round(avg_cost, 4),
+                    'Buy Cost': round(cost_of_sold, 3),
+                    'Sell Value': round(proceeds, 3),
+                    'Profit/Loss': round(profit, 4),
+                    'Profit/Loss (KWD)': round(profit_kwd, 4),
+                    'Currency': ccy,
+                    'Category': row.get('category', 'portfolio')
+                })
+    else:
+        # FALLBACK: Runtime calculation using Average Cost Method per (symbol, portfolio)
+        # Track cost basis per (stock, portfolio) using Average Cost Method
+        position_basis = {}  # Key: (symbol, portfolio)
         
-        matched_buy_ids = set()
-        matched_sell_ids = set()
-        
-        # Match Sells to Buys (FIFO)
-        for _, sell in sells.iterrows():
-            if sell['id'] in matched_sell_ids:
-                continue
+        for _, row in df.iterrows():
+            typ = row['txn_type']
+            qty = safe_float(row['shares'], 0)
+            ccy = row.get('currency', 'KWD') or 'KWD'
+            stock = row['stock_symbol']
+            portfolio = row.get('portfolio', 'KFH')
+            pos_key = (stock, portfolio)
             
-            # Find matching buy with same quantity
-            matching_buys = buys[
-                (buys['Quantity'] == sell['Quantity']) & 
-                (~buys['id'].isin(matched_buy_ids)) &
-                (buys['txn_date'] <= sell['txn_date'])
-            ]
+            if pos_key not in position_basis:
+                position_basis[pos_key] = {'qty': 0.0, 'total_cost': 0.0, 'currency': ccy}
             
-            if not matching_buys.empty:
-                buy = matching_buys.iloc[-1]  # Most recent buy before sell
-                matched_buy_ids.add(buy['id'])
-                matched_sell_ids.add(sell['id'])
+            position_basis[pos_key]['currency'] = ccy
+            
+            if typ == 'Buy':
+                cost = safe_float(row['purchase_cost'], 0)
+                position_basis[pos_key]['qty'] += qty
+                position_basis[pos_key]['total_cost'] += cost
                 
-                # Calculate profit: sale_price - price_cost (already total values)
-                sell_val = safe_float(sell['sale_price'], 0)
-                buy_cost = safe_float(buy['price_cost'], 0)
-                profit = sell_val - buy_cost
+            elif typ == 'Sell' and qty > 0:
+                current_qty = position_basis[pos_key]['qty']
+                current_cost = position_basis[pos_key]['total_cost']
                 
-                # Determine currency from stock suffix
-                currency = 'KWD'
-                if isinstance(stock, str):
-                    if stock.endswith('.KW'):
-                        currency = 'KWD'
-                    elif not stock.endswith('.'):
-                        currency = 'USD'  # US stocks don't have suffix
-                
-                # Convert to KWD
-                total_realized += convert_to_kwd(profit, currency)
+                if current_qty > 0:
+                    avg_cost_per_share = current_cost / current_qty
+                    cost_of_sold_shares = avg_cost_per_share * qty
+                    
+                    proceeds = safe_float(row['sell_value'], 0)
+                    profit = proceeds - cost_of_sold_shares
+                    profit_kwd = convert_to_kwd(profit, ccy)
+                    
+                    total_realized_kwd += profit_kwd
+                    if profit_kwd >= 0:
+                        total_profit_kwd += profit_kwd
+                    else:
+                        total_loss_kwd += profit_kwd
+                    
+                    trade_details.append({
+                        'Stock': stock,
+                        'Portfolio': portfolio,
+                        'Sell Date': row['txn_date'],
+                        'Shares': qty,
+                        'Avg Cost': round(avg_cost_per_share, 4),
+                        'Buy Cost': round(cost_of_sold_shares, 3),
+                        'Sell Value': round(proceeds, 3),
+                        'Profit/Loss': round(profit, 4),
+                        'Profit/Loss (KWD)': round(profit_kwd, 4),
+                        'Currency': ccy,
+                        'Category': row.get('category', 'portfolio')
+                    })
+                    
+                    position_basis[pos_key]['qty'] -= qty
+                    position_basis[pos_key]['total_cost'] -= cost_of_sold_shares
     
-    return total_realized
+    # Create DataFrame from trade details
+    details_df = pd.DataFrame(trade_details) if trade_details else pd.DataFrame()
+    
+    return {
+        'total_realized_kwd': total_realized_kwd,
+        'total_profit_kwd': total_profit_kwd,
+        'total_loss_kwd': total_loss_kwd,
+        'details': details_df
+    }
 
 
 def calculate_total_cash_dividends(user_id, debug=False):
@@ -13450,6 +18716,14 @@ def calculate_total_cash_dividends(user_id, debug=False):
 
 def ui_overview():
     st.header("📊 Portfolio Overview")
+    
+    # Add refresh button
+    col_refresh, col_spacer = st.columns([1, 5])
+    with col_refresh:
+        if st.button("🔄 Refresh", key="overview_refresh", help="Recalculate all positions"):
+            build_portfolio_table.clear()
+            st.toast("✅ Data refreshed!")
+            st.rerun()
     
     # Get total portfolio value from latest snapshot (for reference)
     user_id = st.session_state.get('user_id', 1)
@@ -13490,87 +18764,83 @@ def ui_overview():
     live_portfolio_value = live_stock_value + manual_cash_kwd
     # ---------------------------------------------------------------------------
 
-    # Get total cash deposits (exclude soft-deleted if column exists)
+    # Get total cash deposits - USE NEW UNIFIED HELPER FUNCTIONS
+    # These query cash_deposits table and ALWAYS show correct totals
     user_id = st.session_state.get('user_id', 1)
+    
+    # PRIMARY SOURCE: cash_deposits table (single source of truth for deposits)
+    # This is the same table that Cash Management uses
     _soft_del_dep = _soft_delete_filter_deposits()
-    all_deposits = query_df(f"SELECT amount, currency, include_in_analysis FROM cash_deposits WHERE user_id = ?{_soft_del_dep}", (user_id,))
+    all_deposits = query_df(f"""
+        SELECT amount, currency, include_in_analysis, portfolio 
+        FROM cash_deposits 
+        WHERE user_id = ?{_soft_del_dep}
+    """, (user_id,))
+    
+    deposits_from_unified = False
+    total_deposits_kwd = 0.0
+    deposits_in_analysis = 0.0
     
     if not all_deposits.empty:
+        # Convert all to KWD
         all_deposits["amount_in_kwd"] = all_deposits.apply(
             lambda row: convert_to_kwd(row["amount"], row.get("currency", "KWD")),
             axis=1
         )
+        # NET deposits (deposits minus withdrawals) - this is what the user actually put in
         total_deposits_kwd = all_deposits["amount_in_kwd"].sum()
-        deposits_in_analysis = all_deposits[all_deposits["include_in_analysis"] == 1]["amount_in_kwd"].sum()
+        
+        # For analysis: only include those marked for analysis
+        analysis_deposits = all_deposits[all_deposits["include_in_analysis"] == 1]
+        deposits_in_analysis = analysis_deposits["amount_in_kwd"].sum()
+        deposits_from_unified = True
     else:
-        total_deposits_kwd = 0
-        deposits_in_analysis = 0
+        # FALLBACK: Calculate Net Invested Capital from transactions if no deposits recorded
+        _soft_del_txn = _soft_delete_filter()
+        
+        buys_df = query_df(f"""
+            SELECT portfolio, purchase_cost 
+            FROM transactions 
+            WHERE user_id = ? AND txn_type = 'Buy' AND purchase_cost IS NOT NULL{_soft_del_txn}
+        """, (user_id,))
+        
+        sells_df = query_df(f"""
+            SELECT portfolio, sell_value 
+            FROM transactions 
+            WHERE user_id = ? AND txn_type = 'Sell' AND sell_value IS NOT NULL{_soft_del_txn}
+        """, (user_id,))
+        
+        total_buys_kwd = 0.0
+        if not buys_df.empty:
+            for _, row in buys_df.iterrows():
+                port = row.get('portfolio', 'KFH')
+                ccy = PORTFOLIO_CCY.get(port, 'KWD')
+                total_buys_kwd += convert_to_kwd(float(row['purchase_cost'] or 0), ccy)
+        
+        total_sells_kwd = 0.0
+        if not sells_df.empty:
+            for _, row in sells_df.iterrows():
+                port = row.get('portfolio', 'KFH')
+                ccy = PORTFOLIO_CCY.get(port, 'KWD')
+                total_sells_kwd += convert_to_kwd(float(row['sell_value'] or 0), ccy)
+        
+        total_deposits_kwd = total_buys_kwd - total_sells_kwd
+        deposits_in_analysis = total_deposits_kwd
     
     # Get total cash dividends (properly calculated - excludes bonus shares, reinvested, etc.)
     total_dividends_kwd, dividend_count, _ = calculate_total_cash_dividends(user_id, debug=False)
     
-    # Calculate Realized Profit (Portfolio - Average Cost Method)
-    # CFA Compliant: Match Revenue (Sell Value) with Cost Basis at time of sale
-    portfolio_realized_kwd = 0.0
+    # Calculate Realized Profit using the consolidated function
+    # This uses Average Cost method and returns detailed breakdown
+    realized_details = calculate_realized_profit_details(user_id)
+    realized_profit_kwd = realized_details['total_realized_kwd']
+    total_profits_kwd = realized_details['total_profit_kwd']
+    total_losses_kwd = realized_details['total_loss_kwd']
+    realized_trades_df = realized_details['details']
     
-    # Get all portfolio transactions ordered chronologically
-    all_port_tx = query_df("""
-        SELECT 
-            t.stock_symbol, 
-            t.txn_type, 
-            t.shares, 
-            t.purchase_cost, 
-            t.sell_value,
-            COALESCE(s.currency, 'KWD') as currency
-        FROM transactions t
-        LEFT JOIN stocks s ON t.stock_symbol = s.symbol AND s.user_id = t.user_id
-        WHERE t.user_id = ? AND COALESCE(t.category, 'portfolio') = 'portfolio'
-        ORDER BY t.txn_date ASC, t.id ASC
-    """, (user_id,))
-    
-    if not all_port_tx.empty:
-        # Track cost basis per stock: {symbol: {'qty': float, 'total_cost': float, 'currency': str}}
-        stock_basis = {}
-        
-        for _, row in all_port_tx.iterrows():
-            sym = row['stock_symbol']
-            typ = row['txn_type']
-            qty = safe_float(row['shares'], 0)
-            ccy = row.get('currency', 'KWD') or 'KWD'
-            
-            if sym not in stock_basis:
-                stock_basis[sym] = {'qty': 0.0, 'total_cost': 0.0, 'currency': ccy}
-            
-            if typ == 'Buy':
-                cost = safe_float(row['purchase_cost'], 0)
-                stock_basis[sym]['qty'] += qty
-                stock_basis[sym]['total_cost'] += cost
-                
-            elif typ == 'Sell':
-                # Calculate Average Cost at this moment
-                current_qty = stock_basis[sym]['qty']
-                current_cost = stock_basis[sym]['total_cost']
-                
-                if current_qty > 0 and qty > 0:
-                    avg_cost_per_share = current_cost / current_qty
-                    cost_of_sold_shares = avg_cost_per_share * qty
-                    
-                    # Realized Profit = Proceeds - Cost of Sold Shares
-                    proceeds = safe_float(row['sell_value'], 0)
-                    profit = proceeds - cost_of_sold_shares
-                    
-                    # Convert to KWD
-                    portfolio_realized_kwd += convert_to_kwd(profit, ccy)
-                    
-                    # Update basis (reduce by sold shares)
-                    stock_basis[sym]['qty'] -= qty
-                    stock_basis[sym]['total_cost'] -= cost_of_sold_shares
-    
-    # Calculate Realized Profit from Trading Section (transactions table - uses FIFO)
-    trading_realized_kwd = calculate_trading_realized_profit(user_id)
-    
-    # Total Realized Profit from closed positions
-    realized_profit_kwd = portfolio_realized_kwd + trading_realized_kwd
+    # For backward compatibility with breakdown display
+    portfolio_realized_kwd = realized_profit_kwd
+    trading_realized_kwd = 0.0  # Now merged into single calculation
     
     # Calculate Unrealized Profit (current holdings)
     unrealized_profit_kwd = 0.0
@@ -13713,11 +18983,12 @@ def ui_overview():
         """, unsafe_allow_html=True)
     
     with col2:
+        deposit_source_text = "✅ All deposits since inception" if deposits_from_unified else "📊 Calculated from Buy-Sell"
         st.markdown(f"""
         <div class="ov-card">
-            <div class="ov-title">💰 Total Cash Deposits</div>
+            <div class="ov-title">💰 Total Deposits</div>
             <div class="ov-value">{fmt_money_plain(total_deposits_kwd)} <span class="ov-currency">KWD</span></div>
-            <div class="ov-sub">In Analysis: {fmt_money_plain(deposits_in_analysis)}</div>
+            <div class="ov-sub">{deposit_source_text}</div>
         </div>
         """, unsafe_allow_html=True)
     
@@ -13779,8 +19050,11 @@ def ui_overview():
     with col_r1:
         realized_class = "ov-delta-pos" if realized_profit_kwd >= 0 else "ov-delta-neg"
         realized_sign = "+" if realized_profit_kwd >= 0 else ""
-        # Show breakdown: Portfolio + Trading (no decimals)
-        breakdown_text = f"Portfolio: {fmt_money_plain(portfolio_realized_kwd)} | Trading: {fmt_money_plain(trading_realized_kwd)}"
+        # Show breakdown: Gains vs Losses
+        gains_text = f"+{fmt_money_plain(total_profits_kwd)}" if total_profits_kwd > 0 else "0"
+        losses_text = f"{fmt_money_plain(total_losses_kwd)}" if total_losses_kwd < 0 else "0"
+        num_trades = len(realized_trades_df) if not realized_trades_df.empty else 0
+        breakdown_text = f"Gains: {gains_text} | Losses: {losses_text} ({num_trades} trades)"
         st.markdown(f"""
         <div class="ov-card">
             <div class="ov-title">💵 Realized Profit</div>
@@ -13813,6 +19087,94 @@ def ui_overview():
             <div class="ov-sub">{div_info}</div>
         </div>
         """, unsafe_allow_html=True)
+
+    # ==========================================
+    # 📋 REALIZED TRADES BREAKDOWN (Detailed View)
+    # ==========================================
+    if not realized_trades_df.empty:
+        with st.expander("📋 Realized Trades Breakdown (Buy → Sell)", expanded=False):
+            st.caption("All completed trades where you bought and then sold shares. Profit/Loss is calculated using the Average Cost method.")
+            
+            # Summary row
+            summary_col1, summary_col2, summary_col3, summary_col4 = st.columns(4)
+            with summary_col1:
+                st.metric("Total Trades", len(realized_trades_df))
+            with summary_col2:
+                profitable_trades = len(realized_trades_df[realized_trades_df['Profit/Loss (KWD)'] > 0])
+                st.metric("Profitable Trades", profitable_trades, delta=f"{profitable_trades/len(realized_trades_df)*100:.0f}%" if len(realized_trades_df) > 0 else "0%")
+            with summary_col3:
+                st.metric("Total Gains", f"+{fmt_money_plain(total_profits_kwd)} KWD", delta_color="normal")
+            with summary_col4:
+                st.metric("Total Losses", f"{fmt_money_plain(total_losses_kwd)} KWD", delta_color="inverse")
+            
+            st.divider()
+            
+            # Display detailed table
+            display_df = realized_trades_df.copy()
+            
+            # Format for display
+            display_df['Sell Date'] = pd.to_datetime(display_df['Sell Date']).dt.strftime('%Y-%m-%d')
+            
+            # Color-code profit/loss column
+            def color_pnl(val):
+                if val > 0:
+                    return 'color: #10b981; font-weight: bold'  # Green
+                elif val < 0:
+                    return 'color: #ef4444; font-weight: bold'  # Red
+                return ''
+            
+            # Sort by date descending (most recent first)
+            display_df = display_df.sort_values('Sell Date', ascending=False)
+            
+            # Style the dataframe
+            styled_df = display_df.style.applymap(color_pnl, subset=['Profit/Loss', 'Profit/Loss (KWD)'])
+            styled_df = styled_df.format({
+                'Shares': '{:,.2f}',
+                'Buy Cost': '{:,.3f}',
+                'Sell Value': '{:,.3f}',
+                'Profit/Loss': '{:+,.3f}',
+                'Profit/Loss (KWD)': '{:+,.3f}'
+            })
+            
+            st.dataframe(
+                styled_df,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    'Stock': st.column_config.TextColumn('Stock', width='medium'),
+                    'Sell Date': st.column_config.TextColumn('Sell Date', width='small'),
+                    'Shares': st.column_config.NumberColumn('Shares', format='%.2f'),
+                    'Buy Cost': st.column_config.NumberColumn('Buy Cost', format='%.3f'),
+                    'Sell Value': st.column_config.NumberColumn('Sell Value', format='%.3f'),
+                    'Profit/Loss': st.column_config.NumberColumn('P/L (Original)', format='%.3f'),
+                    'Profit/Loss (KWD)': st.column_config.NumberColumn('P/L (KWD)', format='%.3f'),
+                    'Currency': st.column_config.TextColumn('Currency', width='small'),
+                    'Category': st.column_config.TextColumn('Category', width='small')
+                }
+            )
+            
+            # Group by stock summary
+            st.write("")
+            st.caption("**Summary by Stock:**")
+            stock_summary = realized_trades_df.groupby('Stock').agg({
+                'Shares': 'sum',
+                'Buy Cost': 'sum',
+                'Sell Value': 'sum',
+                'Profit/Loss (KWD)': 'sum'
+            }).reset_index()
+            stock_summary.columns = ['Stock', 'Total Shares Sold', 'Total Cost', 'Total Proceeds', 'Net P/L (KWD)']
+            stock_summary = stock_summary.sort_values('Net P/L (KWD)', ascending=False)
+            
+            st.dataframe(
+                stock_summary.style.applymap(color_pnl, subset=['Net P/L (KWD)']).format({
+                    'Total Shares Sold': '{:,.2f}',
+                    'Total Cost': '{:,.3f}',
+                    'Total Proceeds': '{:,.3f}',
+                    'Net P/L (KWD)': '{:+,.3f}'
+                }),
+                use_container_width=True,
+                hide_index=True
+            )
 
     st.divider()
 
