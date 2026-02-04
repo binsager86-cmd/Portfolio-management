@@ -8540,7 +8540,8 @@ def build_portfolio_table(portfolio_name: str, user_id: Optional[int] = None) ->
     if user_id is None:
         user_id = st.session_state.get('user_id')
     
-    # 1. Bulk Fetch All Transactions for this user (Master Storage - Source of Truth)
+    # 1. Bulk Fetch All Transactions for this user AND this portfolio (Master Storage - Source of Truth)
+    # CRITICAL: Filter by portfolio in the SQL query to properly handle stocks in multiple portfolios
     soft_delete_clause = _soft_delete_filter()
     all_txs = query_df(
         f"""
@@ -8550,39 +8551,23 @@ def build_portfolio_table(portfolio_name: str, user_id: Optional[int] = None) ->
             bonus_shares, cash_dividend,
             price_override, planned_cum_shares,
             reinvested_dividend, fees,
-            broker, reference, notes, created_at
+            broker, reference, notes, created_at,
+            portfolio
         FROM transactions
         WHERE user_id = ? AND COALESCE(category, 'portfolio') = 'portfolio'
+              AND portfolio = ?
               {soft_delete_clause}
         ORDER BY txn_date ASC, created_at ASC, id ASC
         """,
-        (user_id,)
+        (user_id, portfolio_name)
     )
     
     if all_txs.empty:
         return pd.DataFrame()
     
-    # 2. Get unique stock symbols from transactions WITH their portfolio assignment
-    # Use portfolio from transactions as the PRIMARY source (not stocks table)
-    symbol_portfolio_df = all_txs.groupby('stock_symbol').agg({
-        'txn_date': 'max'  # Get latest transaction date for each symbol
-    }).reset_index()
-    
-    # Get portfolio from the LATEST transaction for each symbol
-    symbol_portfolios = {}
-    for sym in all_txs['stock_symbol'].str.strip().unique():
-        sym_txs = all_txs[all_txs['stock_symbol'].str.strip() == sym]
-        if not sym_txs.empty:
-            # Get portfolio from the latest transaction for this symbol
-            latest_tx = sym_txs.sort_values('txn_date', ascending=False).iloc[0]
-            # Use portfolio from transaction, or infer from stocks table later
-            tx_portfolio = query_val(
-                "SELECT portfolio FROM transactions WHERE stock_symbol = ? AND user_id = ? AND (is_deleted = 0 OR is_deleted IS NULL) ORDER BY txn_date DESC LIMIT 1",
-                (sym, user_id)
-            )
-            symbol_portfolios[sym.strip()] = tx_portfolio
-    
-    unique_symbols = list(symbol_portfolios.keys())
+    # 2. Get unique stock symbols from transactions for THIS portfolio only
+    # Since we already filtered by portfolio in SQL, all symbols here belong to this portfolio
+    unique_symbols = [sym.strip() for sym in all_txs['stock_symbol'].str.strip().unique()]
     
     # 3. Fetch stock metadata (current_price, currency, portfolio assignment)
     # Use placeholders for IN clause
@@ -8621,29 +8606,22 @@ def build_portfolio_table(portfolio_name: str, user_id: Optional[int] = None) ->
     for sym in unique_symbols:
         sym = sym.strip()
         
-        # PRIMARY: Get portfolio from transactions (master source)
-        tx_portfolio = symbol_portfolios.get(sym, None)
-        
         # Get stock metadata for price/currency (or use defaults)
+        # Since we already filtered by portfolio in SQL, all transactions here belong to this portfolio
         meta = stock_lookup.get(sym, {
             'name': sym,
             'current_price': 0.0,
-            'portfolio': tx_portfolio or ('USA' if not sym.endswith('.KW') and sym.isupper() and len(sym) <= 5 else 'KFH'),
-            'currency': 'USD' if tx_portfolio == 'USA' or (not sym.endswith('.KW') and sym.isupper() and len(sym) <= 5) else 'KWD',
+            'portfolio': portfolio_name,
+            'currency': 'USD' if portfolio_name == 'USA' else 'KWD',
         })
-        
-        # PRIORITY: Use portfolio from transactions first, then stocks table, then default
-        stock_portfolio = tx_portfolio or meta.get('portfolio', 'KFH')
-        if stock_portfolio != portfolio_name:
-            continue
         
         cp = safe_float(meta.get('current_price', 0), 0.0)
         currency = meta.get('currency', 'KWD')
         # Override currency based on portfolio
-        if stock_portfolio == 'USA':
+        if portfolio_name == 'USA':
             currency = 'USD'
 
-        # Filter transactions for this stock
+        # Filter transactions for this stock (already filtered by portfolio in SQL)
         tx = all_txs[all_txs['stock_symbol'].str.strip() == sym].copy()
 
         # Calculate metrics (CFA/IFRS-compliant WAC method)
@@ -8824,8 +8802,8 @@ def render_portfolio_table(title: str, df: pd.DataFrame, fx_usdkwd: Optional[flo
 
     format_dict = {
         "Quantity": lambda x: fmt_val(x, "{:,.0f}"),
-        # Prices: 3 decimals
-        "Avg. Cost Per Share": lambda x: fmt_val(x, "{:,.3f}") if x and x != 0 else "-",
+        # Prices: 6 decimals for Avg Cost, 3 decimals for Market Price
+        "Avg. Cost Per Share": lambda x: fmt_val(x, "{:,.6f}") if x and x != 0 else "-",
         "Market price": lambda x: fmt_val(x, "{:,.3f}") if x and x != 0 else "-",
         "P/E Ratio": lambda x: fmt_val(x, "{:.2f}") if x and x != 0 else "-",
         # Money/Values: No decimals (rounded)
@@ -9608,42 +9586,37 @@ def ui_cash_deposits():
 
 def calculate_accumulated_cash(user_id: int, as_of_date: str = None) -> float:
     """
-    Calculate accumulated cash directly from cash_deposits table.
+    Calculate accumulated cash from portfolio_cash table (the source of truth).
     
-    This eliminates carry-forward drift by always computing from source data
-    instead of relying on previous snapshot values.
+    This returns the current cash balance held across all portfolios,
+    which properly accounts for deposits, withdrawals, buys, sells, dividends, and fees.
+    
+    The portfolio_cash table can be either:
+    1. Manually set (manual_override=1) to match brokerage statements
+    2. Auto-calculated from transactions (manual_override=0)
     
     Args:
         user_id: User ID
-        as_of_date: Date to calculate up to (YYYY-MM-DD format). If None, uses all deposits.
+        as_of_date: Not used currently, kept for API compatibility
         
     Returns:
         Total accumulated cash in KWD (converted from original currencies)
     """
-    if as_of_date:
-        deposits_df = query_df("""
-            SELECT amount, COALESCE(currency, 'KWD') as currency
-            FROM cash_deposits 
-            WHERE user_id = ? 
-              AND deposit_date <= ? 
-              AND include_in_analysis = 1
-        """, (user_id, as_of_date))
-    else:
-        deposits_df = query_df("""
-            SELECT amount, COALESCE(currency, 'KWD') as currency
-            FROM cash_deposits 
-            WHERE user_id = ? 
-              AND include_in_analysis = 1
-        """, (user_id,))
+    # Use portfolio_cash table which has the correct cash balances
+    cash_df = query_df("""
+        SELECT balance, COALESCE(currency, 'KWD') as currency
+        FROM portfolio_cash 
+        WHERE user_id = ?
+    """, (user_id,))
     
-    if deposits_df.empty:
+    if cash_df.empty:
         return 0.0
     
     total_kwd = 0.0
-    for _, row in deposits_df.iterrows():
-        amount = float(row['amount']) if pd.notna(row['amount']) else 0.0
+    for _, row in cash_df.iterrows():
+        balance = float(row['balance']) if pd.notna(row['balance']) else 0.0
         currency = row['currency'] if pd.notna(row['currency']) else 'KWD'
-        total_kwd += convert_to_kwd(amount, currency)
+        total_kwd += convert_to_kwd(balance, currency)
     
     return total_kwd
 
@@ -9703,8 +9676,8 @@ def recalc_portfolio_cash(user_id: int, conn=None, force_override: bool = False)
                        (int(time.time()), user_id))
         
         # Step B: Aggregation Query using UNION ALL
-        # NOTE: We JOIN transactions with stocks to get the portfolio, because
-        # older transactions may not have the portfolio column populated
+        # NOTE: Use t.portfolio directly from transactions table
+        # This properly handles stocks that appear in multiple portfolios
         # IMPORTANT: PostgreSQL requires alias for derived tables
         aggregation_sql = """
             SELECT portfolio, SUM(net_change) as total_change
@@ -9712,39 +9685,39 @@ def recalc_portfolio_cash(user_id: int, conn=None, force_override: bool = False)
                 -- 1. Deposits & Withdrawals (amount can be + or -)
                 SELECT portfolio, COALESCE(amount, 0) as net_change
                 FROM cash_deposits
-                WHERE user_id = ? AND include_in_analysis = 1
+                WHERE user_id = ? AND include_in_analysis = 1 AND COALESCE(is_deleted, 0) = 0
 
                 UNION ALL
 
-                -- 2. Buys (Outflow - negative) - JOIN with stocks to get portfolio
-                SELECT COALESCE(t.portfolio, s.portfolio, 'KFH') as portfolio, -1 * COALESCE(t.purchase_cost, 0) as net_change
+                -- 2. Buys (Outflow - negative) - Use portfolio from transaction directly
+                SELECT t.portfolio, -1 * COALESCE(t.purchase_cost, 0) as net_change
                 FROM transactions t
-                LEFT JOIN stocks s ON t.stock_symbol = s.symbol AND t.user_id = s.user_id
                 WHERE t.user_id = ? AND t.txn_type = 'Buy' AND COALESCE(t.category, 'portfolio') = 'portfolio'
+                AND COALESCE(t.is_deleted, 0) = 0
 
                 UNION ALL
 
-                -- 3. Sells (Inflow - positive) - JOIN with stocks to get portfolio
-                SELECT COALESCE(t.portfolio, s.portfolio, 'KFH') as portfolio, COALESCE(t.sell_value, 0) as net_change
+                -- 3. Sells (Inflow - positive) - Use portfolio from transaction directly
+                SELECT t.portfolio, COALESCE(t.sell_value, 0) as net_change
                 FROM transactions t
-                LEFT JOIN stocks s ON t.stock_symbol = s.symbol AND t.user_id = s.user_id
                 WHERE t.user_id = ? AND t.txn_type = 'Sell' AND COALESCE(t.category, 'portfolio') = 'portfolio'
+                AND COALESCE(t.is_deleted, 0) = 0
 
                 UNION ALL
 
-                -- 4. Dividends (Inflow - positive) - JOIN with stocks to get portfolio
-                SELECT COALESCE(t.portfolio, s.portfolio, 'KFH') as portfolio, COALESCE(t.cash_dividend, 0) as net_change
+                -- 4. Dividends (Inflow - positive) - Use portfolio from transaction directly
+                SELECT t.portfolio, COALESCE(t.cash_dividend, 0) as net_change
                 FROM transactions t
-                LEFT JOIN stocks s ON t.stock_symbol = s.symbol AND t.user_id = s.user_id
                 WHERE t.user_id = ? AND COALESCE(t.cash_dividend, 0) > 0 AND COALESCE(t.category, 'portfolio') = 'portfolio'
+                AND COALESCE(t.is_deleted, 0) = 0
 
                 UNION ALL
 
-                -- 5. Fees (Outflow - negative, applies to all transaction types) - JOIN with stocks to get portfolio
-                SELECT COALESCE(t.portfolio, s.portfolio, 'KFH') as portfolio, -1 * COALESCE(t.fees, 0) as net_change
+                -- 5. Fees (Outflow - negative) - Use portfolio from transaction directly
+                SELECT t.portfolio, -1 * COALESCE(t.fees, 0) as net_change
                 FROM transactions t
-                LEFT JOIN stocks s ON t.stock_symbol = s.symbol AND t.user_id = s.user_id
                 WHERE t.user_id = ? AND COALESCE(t.fees, 0) > 0 AND COALESCE(t.category, 'portfolio') = 'portfolio'
+                AND COALESCE(t.is_deleted, 0) = 0
             ) AS cash_movements
             GROUP BY portfolio
         """
@@ -15955,23 +15928,19 @@ def ui_portfolio_tracker():
             else:
                 prev_date = "1970-01-01" # Start of time
             
-            # Calculate accumulated cash incrementally to respect manual edits in history
-            # Accumulated = Previous Accumulated + Deposits since previous snapshot (up to today)
+            # Calculate accumulated cash incrementally:
+            # accumulated_cash = previous accumulated_cash + today's deposit_cash
+            # This ensures the value builds up over time from each snapshot
             
-            new_deposits_kwd = 0.0
+            # Calculate today's deposit amount (will be used as deposit_cash)
+            today_deposits_kwd = 0.0
             if not all_deposits.empty:
-                # Filter deposits strictly > prev_date and <= today
-                # Note: We use analysis_deposits which is already filtered by include_in_analysis=1
-                new_deposits_df = analysis_deposits[
-                    (analysis_deposits["deposit_date"] > prev_date) & 
-                    (analysis_deposits["deposit_date"] <= today_str)
-                ]
-                new_deposits_kwd = new_deposits_df["amount_in_kwd"].sum()
+                # Filter deposits for today only
+                today_deposits_df = analysis_deposits[analysis_deposits["deposit_date"] == today_str]
+                today_deposits_kwd = today_deposits_df["amount_in_kwd"].sum()
             
-            # --- FIX: DIRECT CALCULATION (no carry-forward drift) ---
-            # Calculate accumulated cash DIRECTLY from all deposits up to today
-            accumulated_cash = calculate_accumulated_cash(user_id, today_str)
-            # -------------------------------
+            # accumulated_cash = previous accumulated + today's deposit
+            accumulated_cash = prev_accumulated + today_deposits_kwd
             
             # 4. Calculate Metrics
             daily_movement = live_portfolio_value - prev_value if prev_value > 0 else 0.0
@@ -16290,12 +16259,14 @@ def ui_portfolio_tracker():
                 )
                 
                 prev_value = 0.0
+                prev_accumulated = 0.0
                 
                 if not prev_snap.empty:
                     prev_value = float(prev_snap["portfolio_value"].iloc[0])
+                    prev_accumulated = float(prev_snap["accumulated_cash"].iloc[0]) if pd.notna(prev_snap["accumulated_cash"].iloc[0]) else 0.0
                 
-                # Calculate Accumulated Cash DIRECTLY from deposits (no carry-forward drift)
-                accumulated_cash = calculate_accumulated_cash(user_id, snap_date_str)
+                # accumulated_cash = previous accumulated + this deposit
+                accumulated_cash = prev_accumulated + deposit_cash
                 
                 # Auto-calculate metrics if 0
                 if daily_movement == 0:
