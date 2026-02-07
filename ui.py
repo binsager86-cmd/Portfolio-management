@@ -3340,7 +3340,7 @@ def resolve_symbol_to_security(raw_symbol: str, portfolio: str = None) -> dict:
                 FROM security_aliases sa
                 JOIN securities_master sm ON sa.security_id = sm.security_id
                 WHERE LOWER(sa.alias_name) = LOWER(?)
-                  AND (sa.valid_until IS NULL OR sa.valid_until >= date('now'))
+                  AND (sa.valid_until IS NULL OR sa.valid_until >= CURRENT_DATE)
                   AND sm.status = 'active'
                 LIMIT 1
             """, (clean_symbol,))
@@ -3355,8 +3355,11 @@ def resolve_symbol_to_security(raw_symbol: str, portfolio: str = None) -> dict:
                     "display_name": row[4]
                 }
         except Exception:
-            # Tables don't exist yet - that's fine, continue to other lookups
-            pass
+            # Tables don't exist yet - rollback to clear PostgreSQL error state
+            try:
+                conn.rollback()
+            except Exception:
+                pass
         
         # Step 2: Direct canonical_ticker match
         # Infer exchange from portfolio if provided
@@ -3398,8 +3401,11 @@ def resolve_symbol_to_security(raw_symbol: str, portfolio: str = None) -> dict:
                     "display_name": row[4]
                 }
         except Exception:
-            # Table doesn't exist yet
-            pass
+            # Table doesn't exist yet - rollback to clear PostgreSQL error state
+            try:
+                conn.rollback()
+            except Exception:
+                pass
         
         return None
         
@@ -3478,7 +3484,10 @@ def migrate_transactions_to_security_id(user_id: int = None):
     This resolves raw stock_symbol to security_id using the alias table.
     Should be run after populating securities_master and security_aliases.
     """
-    conn = get_conn()
+    # Use a fresh connection from db_layer (not the persistent wrapper)
+    # to avoid transaction state corruption from resolve_symbol_to_security
+    from db_layer import get_conn as _db_fresh_conn
+    conn = _db_fresh_conn()
     cur = conn.cursor()
     
     try:
@@ -3501,6 +3510,8 @@ def migrate_transactions_to_security_id(user_id: int = None):
         unresolved = []
         
         for stock_symbol, portfolio in symbols_to_resolve:
+            # resolve_symbol_to_security uses its own connection (the persistent wrapper)
+            # so it won't interfere with our fresh connection here
             security = resolve_symbol_to_security(stock_symbol, portfolio)
             
             if security:
@@ -3529,8 +3540,17 @@ def migrate_transactions_to_security_id(user_id: int = None):
         
         return resolved_count, unresolved
         
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise
     finally:
-        conn.close()
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 
 def auto_create_security_from_stock(symbol: str, portfolio: str = None, display_name: str = None, user_id: int = 1):
@@ -3604,16 +3624,11 @@ def backfill_security_ids(user_id: int = None, auto_create: bool = False) -> dic
             for symbol in unresolved:
                 try:
                     # Try to infer portfolio from transactions
-                    conn = get_conn()
-                    cur = conn.cursor()
-                    db_execute(cur, """
-                        SELECT DISTINCT portfolio FROM transactions 
+                    portfolio = query_val("""
+                        SELECT portfolio FROM transactions 
                         WHERE stock_symbol = ? AND portfolio IS NOT NULL
                         LIMIT 1
                     """, (symbol,))
-                    row = cur.fetchone()
-                    portfolio = row[0] if row else None
-                    conn.close()
                     
                     # Auto-create the security
                     new_security_id = auto_create_security_from_stock(symbol, portfolio, user_id=user_id or 1)
