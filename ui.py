@@ -18181,9 +18181,13 @@ def ui_trading_section():
             sell_value = float(txn['sell_value'])
             fees = float(txn['fees'])
             
+            # CRITICAL: Capture avg_cost BEFORE reducing state
+            # This is the WAC at the time of sale (needed for P&L calculation)
+            avg_cost_at_sale = state['avg_cost']
+            
             # Compute proceeds and cost of goods sold
             proceeds = sell_value - fees
-            cost_of_shares_sold = sell_shares * state['avg_cost']
+            cost_of_shares_sold = sell_shares * avg_cost_at_sale
             
             # Realized P&L increment
             realized_pnl_increment = proceeds - cost_of_shares_sold
@@ -18205,7 +18209,8 @@ def ui_trading_section():
                 state['total_shares'] = 0
                 state['position_open'] = False  # Mark as closed
             
-            txn_state[txn_id] = {'avg_cost_at_time': state['avg_cost'], 'realized_pnl': realized_pnl_increment}
+            # Store avg_cost AT TIME OF SALE (not after reset) for accurate P&L display
+            txn_state[txn_id] = {'avg_cost_at_time': avg_cost_at_sale, 'realized_pnl': realized_pnl_increment}
         
         elif txn_type in ('Bonus Shares', 'Bonus'):
             # BONUS: 0-cost stock dividends - shares increase, cost unchanged
@@ -18247,11 +18252,24 @@ def ui_trading_section():
     # ============================================================
     
     def get_avg_cost_for_row(row):
-        """Get avg_cost: prefer stored value, fallback to runtime calculation."""
+        """Get avg_cost: prefer stored value, fallback to runtime calculation.
+        
+        For Sell transactions: uses avg_cost at TIME OF SALE (critical for closed positions)
+        For Buy transactions: uses current position avg_cost (or stored historical)
+        """
         # First check if we have a stored avg_cost_at_txn
         stored_avg = row.get('avg_cost_at_txn')
         if stored_avg is not None and pd.notna(stored_avg) and stored_avg > 0:
             return float(stored_avg)
+        
+        # For Sell transactions: use txn_state which captured avg_cost AT TIME OF SALE
+        # This is critical because after position closure, position_state.avg_cost = 0
+        txn_id = row.get('id')
+        txn_type = row.get('type', '')
+        if txn_type == 'Sell' and txn_id in txn_state:
+            avg_at_sale = txn_state[txn_id].get('avg_cost_at_time', 0)
+            if avg_at_sale > 0:
+                return avg_at_sale
         
         # Fallback to runtime calculation using (symbol, portfolio) key
         sym = row.get('symbol', '')
@@ -18262,7 +18280,9 @@ def ui_trading_section():
             # For open positions, use current state
             if position_state[position_key].get('position_open', False):
                 return position_state[position_key]['avg_cost']
-            # For closed positions without stored value, return 0
+            # For closed positions, try txn_state for ANY transaction type
+            if txn_id in txn_state:
+                return txn_state[txn_id].get('avg_cost_at_time', 0)
             return 0
         return 0
     
@@ -18428,8 +18448,20 @@ def ui_trading_section():
             return 0
         
         elif txn_type == 'Sell':
+            # For Sell P&L%, use avg_cost at time of sale (multiple fallback sources)
             avg_cost = float(row.get('avg_cost', 0) or 0)
             qty = float(row.get('quantity', 0) or 0)
+            
+            # If avg_cost is 0, try getting it from txn_state (runtime) or stored value
+            if avg_cost <= 0:
+                txn_id = row.get('id')
+                if txn_id in txn_state:
+                    avg_cost = txn_state[txn_id].get('avg_cost_at_time', 0)
+            if avg_cost <= 0:
+                stored_avg = row.get('avg_cost_at_txn')
+                if stored_avg is not None and pd.notna(stored_avg):
+                    avg_cost = float(stored_avg)
+            
             if avg_cost > 0 and qty > 0:
                 cost_basis = avg_cost * qty
                 return (pnl / cost_basis) * 100
