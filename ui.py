@@ -14191,6 +14191,10 @@ def ui_backup_restore():
                 SELECT security_id, alias_name, alias_type, valid_from, valid_until
                 FROM security_aliases WHERE user_id = ? ORDER BY security_id, alias_name
             """, (user_id,)),
+            'stocks': safe_query("""
+                SELECT symbol, name, current_price, portfolio, currency, tradingview_symbol
+                FROM stocks WHERE user_id = ? ORDER BY symbol
+            """, (user_id,)),
         }
         return data
     
@@ -15702,21 +15706,29 @@ def ui_portfolio_analysis():
             else:
                 try:
                     # 1. Fetch only stocks with positive holdings (shares > 0)
-                    # Calculate net shares from transactions: Buy + Bonus - Sell
+                    # Derive active stocks from transactions (source of truth)
+                    # Join stocks table only for currency metadata (optional)
                     symbols_df = query_df("""
-                        SELECT s.symbol, s.currency, COALESCE(h.net_shares, 0) as net_shares
-                        FROM stocks s
-                        LEFT JOIN (
-                            SELECT stock_symbol,
-                                   SUM(CASE WHEN txn_type = 'Buy' THEN COALESCE(shares, 0) ELSE 0 END) +
-                                   SUM(COALESCE(bonus_shares, 0)) -
-                                   SUM(CASE WHEN txn_type = 'Sell' THEN COALESCE(shares, 0) ELSE 0 END) as net_shares
-                            FROM transactions
-                            WHERE user_id = ?
-                            GROUP BY stock_symbol
-                        ) h ON UPPER(s.symbol) = UPPER(h.stock_symbol)
-                        WHERE s.user_id = ? AND COALESCE(h.net_shares, 0) > 0
-                    """, (user_id, user_id))
+                        SELECT 
+                            t.stock_symbol as symbol,
+                            COALESCE(s.currency, 
+                                CASE WHEN t.portfolio = 'USA' THEN 'USD' ELSE 'KWD' END
+                            ) as currency,
+                            MAX(t.portfolio) as portfolio,
+                            SUM(CASE WHEN t.txn_type = 'Buy' THEN COALESCE(t.shares, 0) ELSE 0 END) +
+                            SUM(COALESCE(t.bonus_shares, 0)) -
+                            SUM(CASE WHEN t.txn_type = 'Sell' THEN COALESCE(t.shares, 0) ELSE 0 END) as net_shares
+                        FROM transactions t
+                        LEFT JOIN stocks s ON UPPER(TRIM(t.stock_symbol)) = UPPER(TRIM(s.symbol)) AND s.user_id = t.user_id
+                        WHERE t.user_id = ? AND COALESCE(t.category, 'portfolio') = 'portfolio'
+                        GROUP BY t.stock_symbol, COALESCE(s.currency, 
+                            CASE WHEN t.portfolio = 'USA' THEN 'USD' ELSE 'KWD' END)
+                        HAVING (
+                            SUM(CASE WHEN t.txn_type = 'Buy' THEN COALESCE(t.shares, 0) ELSE 0 END) +
+                            SUM(COALESCE(t.bonus_shares, 0)) -
+                            SUM(CASE WHEN t.txn_type = 'Sell' THEN COALESCE(t.shares, 0) ELSE 0 END)
+                        ) > 0
+                    """, (user_id,))
                 except Exception as e:
                     st.error(f"DB query failed: {e}")
                     symbols_df = pd.DataFrame()
@@ -15744,7 +15756,8 @@ def ui_portfolio_analysis():
                             yf_sym = db_sym_upper
                         
                         # Store ORIGINAL symbol for DB update (case-sensitive match)
-                        ticker_map[yf_sym] = {'symbol': db_sym_original, 'currency': ccy}
+                        ticker_map[yf_sym] = {'symbol': db_sym_original, 'currency': ccy, 
+                                              'portfolio': str(row.get('portfolio', 'KFH') or 'KFH')}
 
                     unique_yf_tickers = list(ticker_map.keys())
                     
@@ -15805,11 +15818,14 @@ def ui_portfolio_analysis():
                                             else:
                                                 price = raw_price
                                             
-                                            # Update database
-                                            exec_sql(
-                                                "UPDATE stocks SET current_price = ? WHERE symbol = ? AND user_id = ?",
-                                                (price, db_symbol, user_id)
-                                            )
+                                            # Update database (upsert: create stock if missing)
+                                            exec_sql("""
+                                                INSERT INTO stocks (symbol, user_id, current_price, currency, portfolio)
+                                                VALUES (?, ?, ?, ?, ?)
+                                                ON CONFLICT(symbol, user_id) DO UPDATE SET
+                                                    current_price = excluded.current_price
+                                            """, (db_symbol, user_id, price, db_ccy, 
+                                                  stock_info.get('portfolio', 'KFH')))
                                             success_count += 1
                                             success_details.append(f"{db_symbol} = {price:,.3f} {db_ccy}")
                                         else:
