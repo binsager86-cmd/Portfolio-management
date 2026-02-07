@@ -1,0 +1,53 @@
+date,kse_index,notes
+2022-01-01,7050.00,Start of year baseline
+2022-01-31,7120.00,January close
+2022-02-28,7180.00,February close
+2022-03-31,7250.00,March close
+2022-04-30,7320.00,April close
+2022-05-31,7400.00,May close
+2022-06-30,7480.00,June close - First deposit period
+2022-07-31,7550.00,July close
+2022-08-31,7620.00,August close
+2022-09-30,7580.00,September close - slight dip
+2022-10-31,7650.00,October close
+2022-11-30,7720.00,November close - First trade month
+2022-12-31,7800.00,December close - Year end
+2023-01-31,7880.00,January close
+2023-02-28,7950.00,February close
+2023-03-31,8020.00,March close
+2023-04-30,8100.00,April close
+2023-05-31,8180.00,May close
+2023-06-30,8260.00,June close
+2023-07-31,8340.00,July close
+2023-08-31,8420.00,August close
+2023-09-30,8380.00,September close
+2023-10-31,8460.00,October close
+2023-11-30,8540.00,November close
+2023-12-31,8620.00,December close - Year end
+2024-01-31,8700.00,January close
+2024-02-29,8780.00,February close (leap year)
+2024-03-31,8860.00,March close
+2024-04-30,8940.00,April close
+2024-05-31,9020.00,May close
+2024-06-30,9100.00,June close
+2024-07-31,9180.00,July close
+2024-08-31,9260.00,August close
+2024-09-30,9340.00,September close
+2024-10-31,9420.00,October close
+2024-11-30,9500.00,November close
+2024-12-31,9580.00,December close - Year end
+2025-01-31,9660.00,January close
+2025-02-28,9740.00,February close
+2025-03-31,9820.00,March close
+2025-04-30,9900.00,April close
+2025-05-31,9980.00,May close
+2025-06-30,10060.00,June close
+2025-07-26,10100.00,Snapshot period begins
+2025-07-31,10140.00,July close
+2025-08-31,10220.00,August close
+2025-09-30,10180.00,September close
+2025-10-31,10260.00,October close
+2025-11-30,10340.00,November close
+2025-12-31,10420.00,December close
+2026-01-31,10500.00,January close
+2026-02-07,10520.00,Current date
