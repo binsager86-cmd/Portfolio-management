@@ -14442,9 +14442,12 @@ def ui_backup_restore():
                                         # Handle both 'name' (SQLite) and 'company_name' (PostgreSQL) columns
                                         stock_name = safe_str(row.get('name')) or safe_str(row.get('company_name')) or symbol
                                         
-                                        # Check if exists
-                                        existing = query_df("SELECT id FROM stocks WHERE symbol = ? AND user_id = ?", (symbol, user_id))
-                                        if existing.empty:
+                                        # Check if exists (use same cursor to stay on same connection)
+                                        check_cur = conn.cursor()
+                                        db_execute(check_cur, "SELECT id FROM stocks WHERE symbol = ? AND user_id = ?", (symbol, user_id))
+                                        existing = check_cur.fetchone()
+                                        check_cur.close()
+                                        if not existing:
                                             # INSERT new stock - use simpler column set that works for both schemas
                                             db_execute(cur, """
                                                 INSERT INTO stocks (user_id, symbol, name, portfolio, currency, current_price)
@@ -14587,8 +14590,11 @@ def ui_backup_restore():
                                 for _, row in df.iterrows():
                                     try:
                                         portfolio = safe_str(row.get('portfolio'))
-                                        existing = query_df("SELECT id FROM portfolio_cash WHERE portfolio = ? AND user_id = ?", (portfolio, user_id))
-                                        if existing.empty:
+                                        check_cur = conn.cursor()
+                                        db_execute(check_cur, "SELECT id FROM portfolio_cash WHERE portfolio = ? AND user_id = ?", (portfolio, user_id))
+                                        existing = check_cur.fetchone()
+                                        check_cur.close()
+                                        if not existing:
                                             db_execute(cur, """
                                                 INSERT INTO portfolio_cash (user_id, portfolio, balance, currency, last_updated)
                                                 VALUES (?, ?, ?, ?, ?)
@@ -14640,9 +14646,12 @@ def ui_backup_restore():
                                         change_percent = ((portfolio_value - first_value) / first_value * 100) if first_value > 0 else 0
                                         roi_percent = (net_gain / accumulated_cash * 100) if accumulated_cash > 0 else 0
                                         
-                                        # Check for existing (unique per user+date)
-                                        existing = query_df("SELECT id FROM portfolio_snapshots WHERE snapshot_date = ? AND user_id = ?", (snap_date, user_id))
-                                        if existing.empty:
+                                        # Check for existing (unique per user+date) - use same connection
+                                        check_cur = conn.cursor()
+                                        db_execute(check_cur, "SELECT id FROM portfolio_snapshots WHERE snapshot_date = ? AND user_id = ?", (snap_date, user_id))
+                                        existing = check_cur.fetchone()
+                                        check_cur.close()
+                                        if not existing:
                                             db_execute(cur, """
                                                 INSERT INTO portfolio_snapshots 
                                                 (user_id, snapshot_date, portfolio_value, daily_movement,
@@ -14758,9 +14767,13 @@ def ui_backup_restore():
                             st.rerun()
                             
                         except Exception as e:
-                            conn.rollback()
-                            conn.close()
+                            try:
+                                conn.rollback()
+                            except Exception:
+                                pass
                             st.error(f"❌ Restore failed: {e}")
+                            import traceback
+                            logger.error(f"Restore error: {traceback.format_exc()}")
                 with col2:
                     st.caption("Click the button to start restoring your backup data.")
                     
