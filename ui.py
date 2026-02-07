@@ -413,10 +413,10 @@ def normalize_stock_symbol(raw_symbol: str, portfolio: str = 'KFH') -> str:
         conn = get_conn()
         cursor = conn.cursor()
         
-        # Check symbol_mappings table first (case-insensitive match via COLLATE NOCASE)
+        # Check symbol_mappings table first (case-insensitive match)
         db_execute(cursor, """
             SELECT canonical_ticker FROM symbol_mappings 
-            WHERE user_input = ? COLLATE NOCASE
+            WHERE UPPER(user_input) = UPPER(?)
         """, (raw_symbol,))
         result = cursor.fetchone()
         
@@ -868,11 +868,22 @@ def add_symbol_mapping(user_input: str, canonical_ticker: str, stock_id: int = N
         cursor = conn.cursor()
         ts = int(time.time())
         
-        db_execute(cursor, """
-            INSERT OR REPLACE INTO symbol_mappings 
-            (user_input, canonical_ticker, stock_id, created_at)
-            VALUES (?, ?, ?, ?)
-        """, (user_input.strip(), canonical_ticker.strip().upper(), stock_id, ts))
+        if is_postgres():
+            db_execute(cursor, """
+                INSERT INTO symbol_mappings 
+                (user_input, canonical_ticker, stock_id, created_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT (user_input) DO UPDATE SET
+                    canonical_ticker = EXCLUDED.canonical_ticker,
+                    stock_id = EXCLUDED.stock_id,
+                    created_at = EXCLUDED.created_at
+            """, (user_input.strip(), canonical_ticker.strip().upper(), stock_id, ts))
+        else:
+            db_execute(cursor, """
+                INSERT OR REPLACE INTO symbol_mappings 
+                (user_input, canonical_ticker, stock_id, created_at)
+                VALUES (?, ?, ?, ?)
+            """, (user_input.strip(), canonical_ticker.strip().upper(), stock_id, ts))
         
         conn.commit()
         conn.close()
@@ -1312,7 +1323,7 @@ def validate_stock_upload(raw_data: list, user_id: int = None) -> dict:
                 db_execute(cur, """
                     SELECT sm.stock_id, sm.canonical_ticker 
                     FROM symbol_mappings sm 
-                    WHERE sm.user_input = ? COLLATE NOCASE
+                    WHERE UPPER(sm.user_input) = UPPER(?)
                 """, (ticker,))
                 result = cur.fetchone()
                 if result and result[0]:
@@ -6760,7 +6771,7 @@ def resolve_stock_symbol(user_input: str, user_id: int = None) -> dict:
         db_execute(cur, """
             SELECT canonical_ticker, stock_id 
             FROM symbol_mappings 
-            WHERE user_input = ? COLLATE NOCASE
+            WHERE UPPER(user_input) = UPPER(?)
         """, (user_input,))
         row = cur.fetchone()
         
@@ -6773,7 +6784,7 @@ def resolve_stock_symbol(user_input: str, user_id: int = None) -> dict:
             db_execute(cur, """
                 SELECT id, ticker, exchange, currency 
                 FROM stocks_master 
-                WHERE ticker = ? COLLATE NOCASE
+                WHERE UPPER(ticker) = UPPER(?)
             """, (user_input.upper().strip(),))
             row = cur.fetchone()
             
@@ -7511,7 +7522,10 @@ def init_db() -> None:
     cur.execute("CREATE INDEX IF NOT EXISTS idx_securities_exchange ON securities_master(exchange)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_securities_ticker ON securities_master(canonical_ticker)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_securities_country ON securities_master(country)")
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_aliases_name ON security_aliases(alias_name COLLATE NOCASE)")
+    if is_postgres():
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_aliases_name ON security_aliases(LOWER(alias_name))")
+    else:
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_aliases_name ON security_aliases(alias_name COLLATE NOCASE)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_aliases_security ON security_aliases(security_id)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_txn_security_id ON transactions(security_id)")
     
