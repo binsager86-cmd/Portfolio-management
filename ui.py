@@ -15109,11 +15109,14 @@ def verify_data_integrity(user_id: int) -> dict:
         # 1. Cash Balance Drift Check
         # ============================================
         try:
-            cash_balance_df = pd.read_sql_query(convert_sql_placeholders("""
+            # Check if manual_override column exists before querying it
+            _pc_cols = table_columns("portfolio_cash")
+            _mo_col = ", pc.manual_override" if "manual_override" in _pc_cols else ", 0 as manual_override"
+            cash_balance_df = pd.read_sql_query(convert_sql_placeholders(f"""
                 SELECT 
                     pc.portfolio,
-                    pc.balance as current_balance,
-                    pc.manual_override
+                    pc.balance as current_balance
+                    {_mo_col}
                 FROM portfolio_cash pc
                 WHERE pc.user_id = ?
             """), conn, params=(user_id,))
@@ -15934,6 +15937,11 @@ def ui_portfolio_analysis():
                 )
                 
                 # Upsert into portfolio_cash with manual_override=1 (user explicitly set this balance)
+                # Ensure manual_override column exists (self-healing for PostgreSQL)
+                try:
+                    add_column_if_missing("portfolio_cash", "manual_override", "INTEGER DEFAULT 0")
+                except Exception:
+                    pass
                 exec_sql("""
                     INSERT INTO portfolio_cash (portfolio, user_id, balance, currency, last_updated, manual_override)
                     VALUES (?, ?, ?, ?, ?, 1)
