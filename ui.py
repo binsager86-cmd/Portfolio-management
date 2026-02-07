@@ -15032,34 +15032,43 @@ def master_delete_user_data(user_id: int) -> dict:
             ("user_watchlist", "user_id"),
         ]
         
+        # Pre-fetch existing tables to avoid querying non-existent ones
+        existing_tables = set()
+        if is_postgres():
+            db_execute(cur, """
+                SELECT table_name FROM information_schema.tables
+                WHERE table_schema = 'public'
+            """, ())
+            existing_tables = {row[0] for row in cur.fetchall()}
+        else:
+            cur.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            existing_tables = {row[0] for row in cur.fetchall()}
+        
         for table_name, user_column in tables_to_delete:
             try:
-                # Check if table exists
-                if is_postgres():
-                    db_execute(cur, """
-                        SELECT EXISTS (
-                            SELECT FROM information_schema.tables 
-                            WHERE table_name = %s
-                        )
-                    """, (table_name,))
-                else:
-                    db_execute(cur, """
-                        SELECT name FROM sqlite_master 
-                        WHERE type='table' AND name=?
-                    """, (table_name,))
-                
-                table_exists = cur.fetchone()
-                
-                if table_exists:
-                    # Delete all records for this user
-                    db_execute(cur, f"DELETE FROM {table_name} WHERE {user_column} = ?", (user_id,))
-                    deleted_counts[table_name] = cur.rowcount
-                else:
+                if table_name not in existing_tables:
                     deleted_counts[table_name] = 0
+                    continue
+                
+                # Use SAVEPOINT for PostgreSQL to isolate errors per table
+                if is_postgres():
+                    cur.execute(f"SAVEPOINT sp_delete_{table_name}")
+                
+                db_execute(cur, f"DELETE FROM {table_name} WHERE {user_column} = ?", (user_id,))
+                deleted_counts[table_name] = cur.rowcount
+                
+                if is_postgres():
+                    cur.execute(f"RELEASE SAVEPOINT sp_delete_{table_name}")
                     
             except Exception as e:
                 logger.warning(f"Could not delete from {table_name}: {e}")
                 deleted_counts[table_name] = 0
+                # Roll back to savepoint so subsequent deletes can continue
+                if is_postgres():
+                    try:
+                        cur.execute(f"ROLLBACK TO SAVEPOINT sp_delete_{table_name}")
+                    except Exception:
+                        pass
         
         conn.commit()
         
