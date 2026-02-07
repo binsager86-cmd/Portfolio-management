@@ -293,6 +293,15 @@ US_STOCKS = [
     {"symbol": "ARKK", "name": "ARK Innovation ETF", "yf_ticker": "ARKK"},
     {"symbol": "XLF", "name": "Financial Select Sector SPDR Fund", "yf_ticker": "XLF"},
     {"symbol": "XLK", "name": "Technology Select Sector SPDR Fund", "yf_ticker": "XLK"},
+    {"symbol": "KRE", "name": "SPDR S&P Regional Banking ETF", "yf_ticker": "KRE"},
+    {"symbol": "XLE", "name": "Energy Select Sector SPDR Fund", "yf_ticker": "XLE"},
+    {"symbol": "XLV", "name": "Health Care Select Sector SPDR Fund", "yf_ticker": "XLV"},
+    
+    # BIOTECH / PHARMA (not in major indices)
+    {"symbol": "INCY", "name": "Incyte Corporation", "yf_ticker": "INCY"},
+    {"symbol": "BIIB", "name": "Biogen Inc.", "yf_ticker": "BIIB"},
+    {"symbol": "REGN", "name": "Regeneron Pharmaceuticals Inc.", "yf_ticker": "REGN"},
+    {"symbol": "VRTX", "name": "Vertex Pharmaceuticals Inc.", "yf_ticker": "VRTX"},
 ]
 
 

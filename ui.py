@@ -3889,6 +3889,105 @@ def get_yf_ticker(symbol: str):
     return symbol
 
 
+def resolve_yf_ticker(db_symbol: str, currency: str = 'KWD', portfolio: str = None) -> str:
+    """
+    Resolve a database stock symbol to its correct Yahoo Finance ticker.
+    
+    Uses multiple resolution strategies in priority order:
+    1. Exact match in KUWAIT_STOCKS / US_STOCKS (authoritative yf_ticker values)
+    2. Reverse normalize_stock_symbol lookup (handles DB="AGILITY" → stock_data="AGLTY")
+    3. Securities Master canonical_ticker + exchange suffix
+    4. Currency-based suffix fallback (.KW for KWD, .BH for BHD)
+    
+    Args:
+        db_symbol: Stock symbol as stored in the database
+        currency: Currency code (KWD, USD, BHD, etc.)
+        portfolio: Portfolio name (KFH, BBYN, USA)
+    
+    Returns:
+        Yahoo Finance compatible ticker string
+    """
+    if not db_symbol:
+        return db_symbol
+    
+    sym = str(db_symbol).strip().upper()
+    ccy = str(currency or 'KWD').strip().upper()
+    
+    # Already has a valid exchange suffix? Return as-is
+    if any(sym.endswith(sfx) for sfx in ['.KW', '.BH', '.L', '.TO']):
+        return sym
+    
+    # --- Strategy 1: Exact match in KUWAIT_STOCKS / US_STOCKS ---
+    # These lists have authoritative yf_ticker values from stock_data.py
+    is_kwd = ccy in ('KWD', 'BHD') and portfolio not in ('USA',)
+    is_usd = ccy == 'USD' or portfolio == 'USA'
+    
+    if is_kwd:
+        for stock in KUWAIT_STOCKS:
+            if stock["symbol"].upper() == sym:
+                return stock.get("yf_ticker", f"{sym}.KW")
+    
+    if is_usd:
+        for stock in US_STOCKS:
+            if stock["symbol"].upper() == sym:
+                return stock.get("yf_ticker", sym)
+    
+    # --- Strategy 2: Reverse normalize_stock_symbol lookup ---
+    # DB stores canonical names (e.g., "AGILITY"), but KUWAIT_STOCKS might use
+    # a different ticker (e.g., "AGLTY"). Check if any KUWAIT_STOCKS symbol
+    # is a known variation that normalizes to our DB symbol.
+    if is_kwd:
+        # Build reverse map: canonical → [variations]
+        # KUWAIT_VARIATIONS from normalize_stock_symbol maps variation → canonical
+        KUWAIT_VARIATIONS = {
+            'AGLTY': 'AGILITY', 'AGILITY PLC': 'AGILITY', 'AGILITYPLC': 'AGILITY',
+            'MABNEE': 'MABANEE', 'MABNE': 'MABANEE',
+            'OORED': 'OOREDOO', 'OREDOO': 'OOREDOO',
+            'HUMAN SOFT': 'HUMANSOFT', 'H-SOFT': 'HUMANSOFT', 'HSOFT': 'HUMANSOFT', 'HUM': 'HUMANSOFT',
+            'SANAM BUSINESS': 'SANAM', 'SANAM SYS': 'SANAM',
+            'KFH.KW': 'KFH', 'KUWAIT FINANCE HOUSE': 'KFH',
+            'ZAIN KUWAIT': 'ZAIN', 'ZAIN.KW': 'ZAIN',
+            'GFH FINANCIAL': 'GFH', 'GFH.BH': 'GFH',
+            'NATIONAL INVESTMENTS': 'NIH', 'NIH.KW': 'NIH',
+            'KUWAIT REAL ESTATE': 'KRE', 'KRE.KW': 'KRE',
+            'BOUBYAN PETROCHEMICAL': 'BPCC', 'BPCC.KW': 'BPCC',
+            'KUWAIT INTERNATIONAL BANK': 'KIB', 'KIB.KW': 'KIB',
+            'MUNSHAAT.KW': 'MUNSHAAT',
+            'ALG.KW': 'ALG',
+            'INCYTE': 'INCY', 'INCYTE CORP': 'INCY',
+        }
+        # Build reverse: canonical → set of variation symbols
+        reverse_map = {}
+        for variation, canonical in KUWAIT_VARIATIONS.items():
+            reverse_map.setdefault(canonical, set()).add(variation)
+        
+        # Check if our DB symbol has known variations that appear in KUWAIT_STOCKS
+        if sym in reverse_map:
+            for variation in reverse_map[sym]:
+                var_upper = variation.upper().replace('.KW', '').replace('.BH', '').strip()
+                for stock in KUWAIT_STOCKS:
+                    if stock["symbol"].upper() == var_upper:
+                        return stock.get("yf_ticker", f"{var_upper}.KW")
+    
+    # --- Strategy 3: Securities Master lookup ---
+    try:
+        security = resolve_symbol_to_security(sym, portfolio=portfolio)
+        if security:
+            api_symbol, exchange, sec_currency = get_price_fetch_symbol(security["security_id"])
+            if api_symbol:
+                return api_symbol
+    except Exception:
+        pass
+    
+    # --- Strategy 4: Currency-based suffix fallback ---
+    if ccy == 'KWD':
+        return f"{sym}.KW"
+    elif ccy == 'BHD':
+        return f"{sym}.BH"
+    else:
+        return sym
+
+
 def fetch_price_yfinance(symbol: str, max_retries: int = 3, portfolio: str = None):
     """Fetch price using yfinance with correct Kuwait stock ticker mapping.
     
@@ -15745,19 +15844,14 @@ def ui_portfolio_analysis():
                         db_sym_upper = db_sym_original.upper()
                         # Default to KWD if currency is missing/null
                         ccy = str(row.get('currency', 'KWD') or 'KWD').strip().upper()
+                        ptf = str(row.get('portfolio', 'KFH') or 'KFH')
                         
-                        # Convert to yfinance ticker format (use uppercase for Yahoo)
-                        if db_sym_upper.endswith('.KW'):
-                            yf_sym = db_sym_upper
-                        elif ccy == 'KWD' and '.' not in db_sym_upper:
-                            # FORCE .KW suffix for KWD stocks
-                            yf_sym = f"{db_sym_upper}.KW"
-                        else:
-                            yf_sym = db_sym_upper
+                        # Use comprehensive resolver (KUWAIT_STOCKS/US_STOCKS → Securities Master → suffix)
+                        yf_sym = resolve_yf_ticker(db_sym_upper, currency=ccy, portfolio=ptf)
                         
                         # Store ORIGINAL symbol for DB update (case-sensitive match)
                         ticker_map[yf_sym] = {'symbol': db_sym_original, 'currency': ccy, 
-                                              'portfolio': str(row.get('portfolio', 'KFH') or 'KFH')}
+                                              'portfolio': ptf}
 
                     unique_yf_tickers = list(ticker_map.keys())
                     
@@ -15840,6 +15934,57 @@ def ui_portfolio_analysis():
                                                   text=f"Processing {i+1}/{len(unique_yf_tickers)}...")
 
                             progress.empty()
+                            
+                            # --- INDIVIDUAL RETRY for failed batch tickers ---
+                            # fetch_price_yfinance() has sophisticated retry logic:
+                            # Securities Master → KUWAIT_STOCKS → multiple variants → backoff
+                            if failed_symbols:
+                                retry_progress = st.progress(0, text="Retrying failed tickers individually...")
+                                retry_success = []
+                                still_failed = []
+                                
+                                for ri, fsym in enumerate(failed_symbols):
+                                    retry_progress.progress(
+                                        (ri + 1) / len(failed_symbols),
+                                        text=f"Retrying {fsym} ({ri+1}/{len(failed_symbols)})..."
+                                    )
+                                    try:
+                                        # Look up original info from ticker_map (reverse by db_symbol)
+                                        fsym_info = None
+                                        for yftk, info in ticker_map.items():
+                                            if info['symbol'] == fsym:
+                                                fsym_info = info
+                                                break
+                                        fsym_ccy = fsym_info['currency'] if fsym_info else 'KWD'
+                                        fsym_ptf = fsym_info['portfolio'] if fsym_info else 'KFH'
+                                        
+                                        price, used_ticker = fetch_price_yfinance(
+                                            fsym, max_retries=2, portfolio=fsym_ptf
+                                        )
+                                        if price is not None and price > 0:
+                                            # Normalize Kuwait prices (Fils to KWD)
+                                            if fsym_ccy == 'KWD':
+                                                price = normalize_kwd_price(price, fsym_ccy)
+                                            
+                                            exec_sql("""
+                                                INSERT INTO stocks (symbol, user_id, current_price, currency, portfolio)
+                                                VALUES (?, ?, ?, ?, ?)
+                                                ON CONFLICT(symbol, user_id) DO UPDATE SET
+                                                    current_price = excluded.current_price
+                                            """, (fsym, user_id, price, fsym_ccy, fsym_ptf))
+                                            
+                                            success_count += 1
+                                            retry_success.append(f"{fsym} = {price:,.3f} {fsym_ccy} (via {used_ticker})")
+                                        else:
+                                            still_failed.append(fsym)
+                                    except Exception:
+                                        still_failed.append(fsym)
+                                
+                                retry_progress.empty()
+                                failed_symbols = still_failed  # Update for display
+                                
+                                if retry_success:
+                                    success_details.extend(retry_success)
                             
                             # Show results
                             if success_count > 0:
