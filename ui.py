@@ -5119,7 +5119,7 @@ def get_portfolio_transactions(
         
         query += " ORDER BY pt.txn_date DESC, pt.id DESC"
         
-        df = pd.read_sql_query(query, conn, params=params)
+        df = pd.read_sql_query(convert_sql_placeholders(query), conn, params=params)
         conn.close()
         
         return df
@@ -5213,7 +5213,7 @@ def get_deposit_summary(user_id: int, portfolio_id: int = None) -> pd.DataFrame:
             query += " AND portfolio_id = ?"
             params.append(portfolio_id)
         
-        df = pd.read_sql_query(query, conn, params=params)
+        df = pd.read_sql_query(convert_sql_placeholders(query), conn, params=params)
         conn.close()
         return df
         
@@ -6015,7 +6015,9 @@ def get_position_calculation_sql(user_id_param: str = "?", include_soft_delete: 
         AND txn_type IN ('Buy', 'Sell', 'Bonus')
         {soft_delete}
         GROUP BY portfolio, stock_symbol
-        HAVING current_holding > 0.001
+        HAVING (SUM(CASE WHEN txn_type = 'Buy' THEN COALESCE(shares, 0) ELSE 0 END) + 
+            SUM(COALESCE(bonus_shares, 0)) - 
+            SUM(CASE WHEN txn_type = 'Sell' THEN COALESCE(shares, 0) ELSE 0 END)) > 0.001
     """
 
 
@@ -6036,7 +6038,10 @@ def get_current_holdings(user_id: int, portfolio: str = None, include_closed: bo
     """
     soft_del = _soft_delete_filter()
     
-    having_clause = "HAVING current_holding > 0.001" if not include_closed else ""
+    # PostgreSQL doesn't allow HAVING with column aliases - repeat full expression
+    having_clause = """HAVING (SUM(CASE WHEN txn_type = 'Buy' THEN COALESCE(shares, 0) ELSE 0 END) + 
+            SUM(COALESCE(bonus_shares, 0)) - 
+            SUM(CASE WHEN txn_type = 'Sell' THEN COALESCE(shares, 0) ELSE 0 END)) > 0.001""" if not include_closed else ""
     portfolio_filter = f"AND portfolio = '{portfolio}'" if portfolio else ""
     
     sql = f"""
@@ -6449,10 +6454,11 @@ def get_portfolio_monthly_breakdown(user_id: int, portfolio_id: int = None,
         
         where_sql = " AND ".join(where_clauses)
         
-        # SQLite date formatting: strftime('%Y-%m', txn_date)
+        # Cross-DB date formatting: use SUBSTRING for portability
+        date_expr = "SUBSTRING(pt.txn_date FROM 1 FOR 7)" if is_postgres() else "strftime('%Y-%m', pt.txn_date)"
         query = f"""
             SELECT 
-                strftime('%Y-%m', pt.txn_date) as month,
+                {date_expr} as month,
                 pt.txn_type,
                 COUNT(*) as transaction_count,
                 COALESCE(SUM(pt.amount), 0) as total_amount,
@@ -6461,7 +6467,7 @@ def get_portfolio_monthly_breakdown(user_id: int, portfolio_id: int = None,
             FROM portfolio_transactions pt
             LEFT JOIN portfolios p ON pt.portfolio_id = p.id
             WHERE {where_sql}
-            GROUP BY strftime('%Y-%m', pt.txn_date), pt.txn_type, p.name
+            GROUP BY {date_expr}, pt.txn_type, p.name
             ORDER BY month DESC, pt.txn_type
         """
         
@@ -6675,7 +6681,7 @@ def get_cash_summary(user_id: int, portfolio_id: int = None) -> pd.DataFrame:
             query += " AND portfolio_id = ?"
             params.append(portfolio_id)
         
-        df = pd.read_sql_query(query, conn, params=params)
+        df = pd.read_sql_query(convert_sql_placeholders(query), conn, params=params)
         conn.close()
         return df
         
@@ -6718,7 +6724,7 @@ def get_stock_positions(user_id: int, portfolio_id: int = None, include_closed: 
         
         query += " ORDER BY portfolio_name, stock_symbol"
         
-        df = pd.read_sql_query(query, conn, params=params)
+        df = pd.read_sql_query(convert_sql_placeholders(query), conn, params=params)
         conn.close()
         
         # Add calculated columns
@@ -7706,7 +7712,7 @@ def seed_default_admin():
                 hashed_pw = "admin123"
                 logger.warning("⚠️ WARNING: bcrypt not available, using plain text password")
             
-            cur.execute(
+            db_execute(cur,
                 "INSERT INTO users (username, email, password_hash, created_at) VALUES (?, ?, ?, ?)",
                 ('admin', 'admin@cloud.com', hashed_pw, int(time.time()))
             )
@@ -8774,7 +8780,7 @@ class PortfolioCalculator:
         """
         try:
             sells = pd.read_sql(
-                """
+                convert_sql_placeholders("""
                 SELECT stock_symbol, txn_date, shares, sell_value,
                        realized_pnl_at_txn, avg_cost_at_txn, fees
                 FROM transactions
@@ -8783,7 +8789,7 @@ class PortfolioCalculator:
                   AND realized_pnl_at_txn IS NOT NULL
                   AND user_id = ?
                 ORDER BY txn_date
-                """,
+                """),
                 conn,
                 params=(user_id,),
             )
@@ -11503,7 +11509,7 @@ def ui_transactions():
                                     
                                     # Check for duplicate deposit (in Merge mode)
                                     if import_mode == "🔄 Merge (Skip Duplicates)":
-                                        cur.execute("""
+                                        db_execute(cur, """
                                             SELECT id FROM cash_deposits 
                                             WHERE deposit_date=? AND amount=? AND user_id=?
                                         """, (t_date, deposit_amount, user_id))
@@ -11513,7 +11519,7 @@ def ui_transactions():
                                     
                                     # Insert into cash_deposits table
                                     current_fx = get_current_fx_rate()
-                                    cur.execute("""
+                                    db_execute(cur, """
                                         INSERT INTO cash_deposits 
                                         (user_id, portfolio, bank_name, deposit_date, amount, currency, 
                                          description, comments, include_in_analysis, fx_rate_at_deposit, created_at)
@@ -11577,7 +11583,7 @@ def ui_transactions():
                                 
                                 # 3. Check Duplicate (only in Merge mode, excluding soft-deleted)
                                 if import_mode == "🔄 Merge (Skip Duplicates)":
-                                    cur.execute("""
+                                    db_execute(cur, """
                                         SELECT id FROM transactions 
                                         WHERE stock_symbol=? AND txn_date=? AND txn_type=? 
                                         AND shares=? AND purchase_cost=? AND sell_value=? AND user_id=?
@@ -11590,7 +11596,7 @@ def ui_transactions():
                                 
                                 # 4. Insert record (with historical FX rate and source tracking)
                                 t_fx_rate = float(row.get('fx_rate_at_txn', 0) or 0) if pd.notna(row.get('fx_rate_at_txn')) else get_current_fx_rate()
-                                cur.execute("""
+                                db_execute(cur, """
                                     INSERT INTO transactions 
                                     (stock_symbol, portfolio, txn_date, txn_type, category, shares, purchase_cost, 
                                      sell_value, cash_dividend, reinvested_dividend, bonus_shares, 
@@ -11606,15 +11612,15 @@ def ui_transactions():
                             
                             # AUTO-SYNC: Ensure all transaction symbols have corresponding stock entries
                             stocks_synced = 0
-                            cur.execute('SELECT DISTINCT stock_symbol, portfolio FROM transactions WHERE user_id = ? AND (is_deleted = 0 OR is_deleted IS NULL)', (user_id,))
+                            db_execute(cur, 'SELECT DISTINCT stock_symbol, portfolio FROM transactions WHERE user_id = ? AND (is_deleted = 0 OR is_deleted IS NULL)', (user_id,))
                             for sym, port in cur.fetchall():
                                 if not sym or str(sym).strip().lower() in ['deposit', 'cash_deposit', 'cash deposit', 'flow_in']:
                                     continue
                                 sym = str(sym).strip().upper()
-                                cur.execute('SELECT id FROM stocks WHERE UPPER(symbol) = ? AND user_id = ?', (sym, user_id))
+                                db_execute(cur, 'SELECT id FROM stocks WHERE UPPER(symbol) = ? AND user_id = ?', (sym, user_id))
                                 if not cur.fetchone():
                                     currency = 'USD' if port == 'USA' else 'KWD'
-                                    cur.execute('INSERT INTO stocks (symbol, name, portfolio, currency, user_id) VALUES (?, ?, ?, ?, ?)', 
+                                    db_execute(cur, 'INSERT INTO stocks (symbol, name, portfolio, currency, user_id) VALUES (?, ?, ?, ?, ?)', 
                                                (sym, sym, port or 'KFH', currency, user_id))
                                     stocks_synced += 1
                             conn.commit()
@@ -15076,8 +15082,8 @@ def verify_data_integrity(user_id: int) -> dict:
                 FROM transactions
                 WHERE user_id = ?
                 GROUP BY stock_symbol
-                HAVING total_cash_div > 0 OR total_reinvested > 0 OR total_bonus_shares > 0
-                ORDER BY total_cash_div DESC
+                HAVING SUM(COALESCE(cash_dividend, 0)) > 0 OR SUM(COALESCE(reinvested_dividend, 0)) > 0 OR SUM(COALESCE(bonus_shares, 0)) > 0
+                ORDER BY SUM(COALESCE(cash_dividend, 0)) DESC
             """), conn, params=(user_id,))
             
             if not dividend_df.empty:
@@ -22365,7 +22371,8 @@ def ui_pfm():
                               AND t.is_deleted = 0
                               AND t.txn_type IN ('Buy', 'Sell')
                             GROUP BY t.stock_symbol, t.portfolio
-                            HAVING net_shares > 0
+                            HAVING (SUM(CASE WHEN t.txn_type = 'Buy' THEN t.shares ELSE 0 END) - 
+                                SUM(CASE WHEN t.txn_type = 'Sell' THEN t.shares ELSE 0 END)) > 0
                         """, (user_id,))
                         portfolio_rows = cur.fetchall()
                         conn.close()
