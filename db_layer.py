@@ -418,6 +418,19 @@ def convert_sql(sql: str) -> str:
                 sql = sql.rstrip().rstrip(';')
                 sql += " ON CONFLICT DO NOTHING"
         
+        # Handle COLLATE NOCASE (SQLite-only, remove for PostgreSQL)
+        # PostgreSQL text comparisons are case-sensitive by default,
+        # but our queries already use UPPER() or we handle at app level
+        sql = sql.replace(" COLLATE NOCASE", "")
+        
+        # Handle INSERT OR REPLACE -> INSERT ... ON CONFLICT DO UPDATE
+        # Note: This is a generic fallback. For proper upserts, handle at call site.
+        if "INSERT OR REPLACE INTO" in sql:
+            sql = sql.replace("INSERT OR REPLACE INTO", "INSERT INTO")
+            if "ON CONFLICT" not in sql.upper():
+                sql = sql.rstrip().rstrip(';')
+                sql += " ON CONFLICT DO NOTHING"
+        
         # Handle IFNULL -> COALESCE
         sql = sql.replace("IFNULL(", "COALESCE(")
         sql = sql.replace("ifnull(", "COALESCE(")
