@@ -643,6 +643,7 @@ def init_postgres_schema():
                 balance DOUBLE PRECISION,
                 currency TEXT DEFAULT 'KWD',
                 last_updated INTEGER,
+                manual_override INTEGER DEFAULT 0,
                 PRIMARY KEY (portfolio, user_id)
             )
         """)
