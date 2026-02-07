@@ -14093,13 +14093,14 @@ def ui_backup_restore():
         
         data = {
             'transactions': safe_query(f"""
-                SELECT portfolio, stock_symbol, txn_date, txn_type, category, shares, 
+                SELECT portfolio, stock_symbol, security_id, txn_date, txn_type, category, shares, 
                        purchase_cost, sell_value, cash_dividend, reinvested_dividend, 
                        bonus_shares, fees, broker, reference, notes 
                 FROM transactions WHERE user_id = ?{soft_del_txn} ORDER BY txn_date DESC
             """, (user_id,)),
             'cash_deposits': safe_query(f"""
-                SELECT portfolio, amount, currency, deposit_date, include_in_analysis 
+                SELECT portfolio, amount, currency, deposit_date, include_in_analysis,
+                       bank_name, description, comments 
                 FROM cash_deposits WHERE user_id = ?{soft_del_dep} ORDER BY deposit_date DESC
             """, (user_id,)),
             'portfolio_snapshots': safe_query("""
@@ -14556,8 +14557,8 @@ def ui_backup_restore():
                                         db_execute(cur, """
                                             INSERT INTO cash_deposits 
                                             (user_id, portfolio, amount, currency, deposit_date, 
-                                             include_in_analysis, created_at)
-                                            VALUES (?, ?, ?, ?, ?, ?, ?)
+                                             include_in_analysis, bank_name, description, comments, created_at)
+                                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                                         """, (
                                             user_id,
                                             safe_str(row.get('portfolio'), 'KFH'),
@@ -14565,6 +14566,9 @@ def ui_backup_restore():
                                             safe_str(row.get('currency'), 'KWD'),
                                             safe_date(row.get('deposit_date')),
                                             int(safe_float(row.get('include_in_analysis'), 1)),
+                                            safe_str(row.get('bank_name'), 'Cash Deposit'),
+                                            safe_str(row.get('description')),
+                                            safe_str(row.get('comments')),
                                             int(time.time())
                                         ))
                                         imported += 1

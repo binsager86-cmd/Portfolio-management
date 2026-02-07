@@ -409,6 +409,15 @@ def convert_sql(sql: str) -> str:
         sql = sql.replace("datetime('now')", "NOW()")
         sql = sql.replace("date('now')", "CURRENT_DATE")
         
+        # Handle INSERT OR IGNORE -> INSERT ... ON CONFLICT DO NOTHING
+        if "INSERT OR IGNORE INTO" in sql:
+            sql = sql.replace("INSERT OR IGNORE INTO", "INSERT INTO")
+            # Append ON CONFLICT DO NOTHING before the end of the statement
+            if "ON CONFLICT" not in sql.upper():
+                # Add before trailing semicolon or at end
+                sql = sql.rstrip().rstrip(';')
+                sql += " ON CONFLICT DO NOTHING"
+        
         # Handle IFNULL -> COALESCE
         sql = sql.replace("IFNULL(", "COALESCE(")
         sql = sql.replace("ifnull(", "COALESCE(")
