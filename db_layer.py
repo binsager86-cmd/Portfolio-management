@@ -617,12 +617,20 @@ def init_postgres_schema():
                 id SERIAL PRIMARY KEY,
                 user_id INTEGER,
                 portfolio TEXT DEFAULT 'KFH',
-                source TEXT,
+                source TEXT DEFAULT 'MANUAL',
+                source_reference TEXT,
                 deposit_date TEXT NOT NULL,
                 amount DOUBLE PRECISION NOT NULL,
+                bank_name TEXT NOT NULL DEFAULT 'Cash Deposit',
+                description TEXT,
+                comments TEXT,
                 notes TEXT,
                 currency TEXT DEFAULT 'KWD',
                 include_in_analysis INTEGER DEFAULT 1,
+                fx_rate_at_deposit DOUBLE PRECISION,
+                is_deleted INTEGER DEFAULT 0,
+                deleted_at INTEGER,
+                deleted_by INTEGER,
                 created_at INTEGER NOT NULL
             )
         """)
@@ -651,6 +659,8 @@ def init_postgres_schema():
                 currency TEXT DEFAULT 'KWD',
                 tradingview_symbol TEXT,
                 tradingview_exchange TEXT,
+                last_updated INTEGER,
+                price_source TEXT,
                 created_at INTEGER,
                 UNIQUE(symbol, user_id)
             )
@@ -678,6 +688,19 @@ def init_postgres_schema():
                 reference TEXT,
                 notes TEXT,
                 category TEXT DEFAULT 'portfolio',
+                security_id TEXT,
+                source TEXT DEFAULT 'MANUAL',
+                source_reference TEXT,
+                is_deleted INTEGER DEFAULT 0,
+                deleted_at INTEGER,
+                deleted_by INTEGER,
+                avg_cost_at_txn DOUBLE PRECISION,
+                realized_pnl_at_txn DOUBLE PRECISION,
+                cost_basis_at_txn DOUBLE PRECISION,
+                shares_held_at_txn DOUBLE PRECISION,
+                stock_master_id INTEGER,
+                portfolio_id INTEGER,
+                account_id INTEGER,
                 created_at INTEGER NOT NULL
             )
         """)
@@ -714,6 +737,8 @@ def init_postgres_schema():
                 net_gain DOUBLE PRECISION DEFAULT 0,
                 change_percent DOUBLE PRECISION DEFAULT 0,
                 roi_percent DOUBLE PRECISION DEFAULT 0,
+                twr_percent DOUBLE PRECISION,
+                mwrr_percent DOUBLE PRECISION,
                 created_at INTEGER
             )
         """)
