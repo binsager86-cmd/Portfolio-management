@@ -153,6 +153,13 @@ import warnings
 import re
 import pandas as pd
 
+# Import Modified TWR Calculator (dynamic deposit handling, full history reconstruction)
+try:
+    from modified_twr_calculator import calculate_modified_twr, get_initial_capital
+    _MODIFIED_TWR_AVAILABLE = True
+except ImportError:
+    _MODIFIED_TWR_AVAILABLE = False
+
 # Re-import logging for rest of app (already configured above)
 
 # ====== LOGGING SETUP ======
@@ -7927,332 +7934,894 @@ class PortfolioCalculator:
     """Calculate advanced portfolio metrics: TWR, MWRR, CAGR."""
     
     @staticmethod
+    def calculate_twr_detailed(
+        start_date: str,
+        end_date: str,
+        transactions_df: pd.DataFrame,
+        cash_deposits_df: pd.DataFrame,
+        daily_mv_df: pd.DataFrame
+    ) -> dict:
+        """
+        Calculate Time-Weighted Return (TWR) - Full CFA/GIPS Compliant Implementation.
+        
+        GIPS COMPLIANCE NOTES:
+        - External flows (deposits/withdrawals) split performance periods
+        - Buys/sells/dividends are EXCLUDED (internal reallocations)
+        - Midpoint weighting (0.5) applied for daily-level data without intra-day timing
+        - Geometric linking of subperiod returns: TWR = ∏(1 + Rᵢ) - 1
+        
+        Args:
+            start_date: Period start date (ISO format 'YYYY-MM-DD')
+            end_date: Period end date (ISO format 'YYYY-MM-DD')
+            transactions_df: DataFrame with columns [timestamp/txn_date, txn_type, amount]
+                            txn_type in ['deposit', 'withdrawal', 'buy', 'sell', 'dividend']
+            cash_deposits_df: DataFrame with columns [deposit_date/timestamp, amount]
+                             Supplemental source for deposits outside transactions table
+            daily_mv_df: DataFrame with columns [date, portfolio_value/balance]
+                        Daily end-of-day market valuations
+        
+        Returns:
+            dict with keys:
+                twr_decimal: float - TWR as decimal (e.g., 0.0823)
+                twr_percent: str - TWR as percentage string (e.g., "8.23%")
+                period_start: str - Start date
+                period_end: str - End date
+                subperiods: list - Detailed subperiod breakdown
+                external_flows_detected: int - Count of external flows
+                cash_deposits_included: bool - Whether cash_deposits table was used
+                methodology: str - Description of methodology
+                warnings: list - Any warnings about data quality
+        """
+        import logging
+        warnings_list = []
+        
+        try:
+            # Parse dates
+            period_start = pd.to_datetime(start_date)
+            period_end = pd.to_datetime(end_date)
+            
+            # Validate inputs
+            if daily_mv_df is None or daily_mv_df.empty:
+                return {
+                    'twr_decimal': None,
+                    'twr_percent': 'N/A',
+                    'period_start': str(start_date),
+                    'period_end': str(end_date),
+                    'subperiods': [],
+                    'external_flows_detected': 0,
+                    'cash_deposits_included': False,
+                    'methodology': 'GIPS daily rebalanced with midpoint weighting',
+                    'warnings': ['No market value data available']
+                }
+            
+            # Normalize daily_mv_df columns
+            daily_mv = daily_mv_df.copy()
+            if 'date' not in daily_mv.columns and 'snapshot_date' in daily_mv.columns:
+                daily_mv = daily_mv.rename(columns={'snapshot_date': 'date'})
+            if 'balance' not in daily_mv.columns and 'portfolio_value' in daily_mv.columns:
+                daily_mv = daily_mv.rename(columns={'portfolio_value': 'balance'})
+            
+            daily_mv['date'] = pd.to_datetime(daily_mv['date'])
+            daily_mv = daily_mv.sort_values('date').reset_index(drop=True)
+            
+            # Filter to period
+            daily_mv = daily_mv[(daily_mv['date'] >= period_start) & (daily_mv['date'] <= period_end)]
+            if daily_mv.empty:
+                return {
+                    'twr_decimal': None,
+                    'twr_percent': 'N/A',
+                    'period_start': str(start_date),
+                    'period_end': str(end_date),
+                    'subperiods': [],
+                    'external_flows_detected': 0,
+                    'cash_deposits_included': False,
+                    'methodology': 'GIPS daily rebalanced with midpoint weighting',
+                    'warnings': ['No market value data in specified period']
+                }
+            
+            # STEP 1: Consolidate ALL external flows from both sources
+            external_flows = []
+            has_time_precision = True
+            
+            # 1A. From transactions table - ONLY deposits and withdrawals
+            if transactions_df is not None and not transactions_df.empty:
+                txn_df = transactions_df.copy()
+                
+                # Normalize column names
+                ts_col = None
+                for col in ['timestamp', 'txn_date', 'date']:
+                    if col in txn_df.columns:
+                        ts_col = col
+                        break
+                
+                type_col = None
+                for col in ['type', 'txn_type']:
+                    if col in txn_df.columns:
+                        type_col = col
+                        break
+                
+                amt_col = None
+                for col in ['amount', 'purchase_cost', 'sell_value']:
+                    if col in txn_df.columns:
+                        amt_col = col
+                        break
+                
+                if ts_col and type_col:
+                    txn_df['_ts'] = pd.to_datetime(txn_df[ts_col])
+                    
+                    # Check for time precision
+                    sample_ts = txn_df['_ts'].iloc[0] if len(txn_df) > 0 else None
+                    if sample_ts and sample_ts.hour == 0 and sample_ts.minute == 0 and sample_ts.second == 0:
+                        has_time_precision = False
+                        warnings_list.append(
+                            "WARNING: Using daily midpoint weighting due to missing intra-day timestamps—accuracy reduced per GIPS guidance."
+                        )
+                    
+                    for _, row in txn_df.iterrows():
+                        txn_type = str(row[type_col]).lower().strip()
+                        
+                        # CRITICAL: Only deposits and withdrawals are external flows
+                        # Buys, sells, dividends are internal reallocations - EXCLUDE
+                        if txn_type in ['deposit', 'withdrawal']:
+                            flow_ts = row['_ts']
+                            
+                            # Skip flows outside period
+                            if flow_ts < period_start or flow_ts > period_end:
+                                continue
+                            
+                            flow_amount = float(row.get(amt_col, 0) or 0)
+                            if abs(flow_amount) < 0.01:
+                                continue
+                            
+                            # Sign convention
+                            if txn_type == 'withdrawal':
+                                flow_amount = -abs(flow_amount)
+                            else:
+                                flow_amount = abs(flow_amount)
+                            
+                            external_flows.append({
+                                'timestamp': flow_ts,
+                                'amount': flow_amount,
+                                'source': 'transactions',
+                                'type': txn_type
+                            })
+            
+            # 1B. From cash_deposits table (MUST BE INCLUDED per requirements)
+            cash_deposits_included = False
+            if cash_deposits_df is not None and not cash_deposits_df.empty:
+                cash_deposits_included = True
+                cd_df = cash_deposits_df.copy()
+                
+                # Normalize column names
+                ts_col = None
+                for col in ['deposit_timestamp', 'deposit_date', 'timestamp', 'date']:
+                    if col in cd_df.columns:
+                        ts_col = col
+                        break
+                
+                if ts_col:
+                    cd_df['_ts'] = pd.to_datetime(cd_df[ts_col])
+                    
+                    for _, row in cd_df.iterrows():
+                        flow_ts = row['_ts']
+                        
+                        # Skip flows outside period
+                        if flow_ts < period_start or flow_ts > period_end:
+                            continue
+                        
+                        flow_amount = float(row.get('amount', 0) or 0)
+                        if abs(flow_amount) < 0.01:
+                            continue
+                        
+                        # Cash deposits are always positive inflows
+                        flow_amount = abs(flow_amount)
+                        
+                        external_flows.append({
+                            'timestamp': flow_ts,
+                            'amount': flow_amount,
+                            'source': 'cash_deposits',
+                            'type': 'deposit'
+                        })
+            
+            # Sort flows chronologically
+            external_flows.sort(key=lambda x: x['timestamp'])
+            
+            # Aggregate flows on same timestamp (edge case handling)
+            aggregated_flows = []
+            if external_flows:
+                current_ts = external_flows[0]['timestamp']
+                current_amount = 0.0
+                for flow in external_flows:
+                    if flow['timestamp'] == current_ts:
+                        current_amount += flow['amount']
+                    else:
+                        if abs(current_amount) >= 0.01:
+                            aggregated_flows.append({
+                                'timestamp': current_ts,
+                                'amount': current_amount
+                            })
+                        current_ts = flow['timestamp']
+                        current_amount = flow['amount']
+                # Don't forget last flow
+                if abs(current_amount) >= 0.01:
+                    aggregated_flows.append({
+                        'timestamp': current_ts,
+                        'amount': current_amount
+                    })
+            
+            external_flows = aggregated_flows
+            
+            # STEP 2: Build subperiod boundaries
+            mv_start = daily_mv.iloc[0]['date']
+            mv_end = daily_mv.iloc[-1]['date']
+            
+            boundaries = [mv_start]
+            for flow in external_flows:
+                flow_date = flow['timestamp']
+                # Normalize to date for boundary (daily granularity per GIPS)
+                flow_date_only = pd.Timestamp(flow_date.date())
+                if mv_start < flow_date_only < mv_end:
+                    boundaries.append(flow_date_only)
+            boundaries.append(mv_end)
+            boundaries = sorted(set(boundaries))
+            
+            # STEP 3: Calculate subperiod returns
+            subperiods = []
+            subperiod_returns = []
+            
+            # No external flows case - single subperiod
+            if len(external_flows) == 0:
+                mv_begin_val = float(daily_mv.iloc[0]['balance'])
+                mv_end_val = float(daily_mv.iloc[-1]['balance'])
+                
+                if mv_begin_val <= 0:
+                    return {
+                        'twr_decimal': None,
+                        'twr_percent': 'N/A',
+                        'period_start': str(start_date),
+                        'period_end': str(end_date),
+                        'subperiods': [],
+                        'external_flows_detected': 0,
+                        'cash_deposits_included': cash_deposits_included,
+                        'methodology': 'GIPS daily rebalanced with midpoint weighting',
+                        'warnings': ['Zero or negative starting market value']
+                    }
+                
+                simple_return = (mv_end_val - mv_begin_val) / mv_begin_val
+                
+                subperiods.append({
+                    'start': str(mv_start),
+                    'end': str(mv_end),
+                    'mv_begin': mv_begin_val,
+                    'mv_end': mv_end_val,
+                    'net_flow': 0.0,
+                    'return': round(simple_return, 6)
+                })
+                
+                return {
+                    'twr_decimal': round(simple_return, 6),
+                    'twr_percent': f"{simple_return * 100:.2f}%",
+                    'period_start': str(start_date),
+                    'period_end': str(end_date),
+                    'subperiods': subperiods,
+                    'external_flows_detected': 0,
+                    'cash_deposits_included': cash_deposits_included,
+                    'methodology': 'GIPS daily rebalanced with midpoint weighting',
+                    'warnings': warnings_list
+                }
+            
+            # Calculate each subperiod return
+            for i in range(len(boundaries) - 1):
+                t_begin = boundaries[i]
+                t_end = boundaries[i + 1]
+                
+                # Get MV at beginning (EOD of t_begin or closest before)
+                mv_begin_rows = daily_mv[daily_mv['date'] <= t_begin]
+                if mv_begin_rows.empty:
+                    mv_begin_val = float(daily_mv.iloc[0]['balance'])
+                else:
+                    mv_begin_val = float(mv_begin_rows.iloc[-1]['balance'])
+                
+                # Get MV at end (EOD of t_end or closest at/before)
+                mv_end_rows = daily_mv[daily_mv['date'] <= t_end]
+                if mv_end_rows.empty:
+                    continue
+                mv_end_val = float(mv_end_rows.iloc[-1]['balance'])
+                
+                # Sum flows DURING this subperiod (t_begin < flow <= t_end)
+                cf_net = 0.0
+                for flow in external_flows:
+                    flow_date = pd.Timestamp(flow['timestamp'].date()) if hasattr(flow['timestamp'], 'date') else pd.Timestamp(flow['timestamp'])
+                    if t_begin < flow_date <= t_end:
+                        cf_net += flow['amount']
+                
+                # MIDPOINT WEIGHTING (GIPS standard)
+                # R = (MV_end - MV_begin - CF) / (MV_begin + CF * 0.5)
+                weighted_cf = cf_net * 0.5
+                denominator = mv_begin_val + weighted_cf
+                
+                if abs(denominator) < 0.01:
+                    subperiod_return = 0.0
+                else:
+                    subperiod_return = (mv_end_val - mv_begin_val - cf_net) / denominator
+                
+                subperiod_returns.append(subperiod_return)
+                
+                subperiods.append({
+                    'start': str(t_begin),
+                    'end': str(t_end),
+                    'mv_begin': round(mv_begin_val, 2),
+                    'mv_end': round(mv_end_val, 2),
+                    'net_flow': round(cf_net, 2),
+                    'return': round(subperiod_return, 6)
+                })
+            
+            # STEP 4: Geometric linking - TWR = ∏(1 + Rᵢ) - 1
+            if not subperiod_returns:
+                return {
+                    'twr_decimal': None,
+                    'twr_percent': 'N/A',
+                    'period_start': str(start_date),
+                    'period_end': str(end_date),
+                    'subperiods': subperiods,
+                    'external_flows_detected': len(external_flows),
+                    'cash_deposits_included': cash_deposits_included,
+                    'methodology': 'GIPS daily rebalanced with midpoint weighting',
+                    'warnings': ['No valid subperiod returns calculated']
+                }
+            
+            twr_factor = 1.0
+            for r in subperiod_returns:
+                twr_factor *= (1.0 + r)
+            
+            twr_decimal = twr_factor - 1.0
+            
+            return {
+                'twr_decimal': round(twr_decimal, 6),
+                'twr_percent': f"{twr_decimal * 100:.2f}%",
+                'period_start': str(start_date),
+                'period_end': str(end_date),
+                'subperiods': subperiods,
+                'external_flows_detected': len(external_flows),
+                'cash_deposits_included': cash_deposits_included,
+                'methodology': 'GIPS daily rebalanced with midpoint weighting',
+                'warnings': warnings_list
+            }
+            
+        except Exception as e:
+            return {
+                'twr_decimal': None,
+                'twr_percent': 'N/A',
+                'period_start': str(start_date),
+                'period_end': str(end_date),
+                'subperiods': [],
+                'external_flows_detected': 0,
+                'cash_deposits_included': False,
+                'methodology': 'GIPS daily rebalanced with midpoint weighting',
+                'warnings': [f'Calculation error: {str(e)}']
+            }
+    
+    @staticmethod
+    def validate_twr_implementation() -> dict:
+        """
+        Run validation test suite for TWR implementation.
+        
+        Tests:
+        1. Basic 2-subperiod case (CFA validation case)
+        2. Cash deposit table integration
+        3. Security trade exclusion
+        
+        Returns:
+            dict with test results
+        """
+        results = {'passed': 0, 'failed': 0, 'tests': []}
+        
+        # TEST 1: Basic 2-subperiod case
+        # Day 1: Start with 100,000
+        # Day 2: Deposit 10,000, end at 115,500
+        # Day 3: Withdraw 5,000, end at 108,000
+        # 
+        # Subperiod 1 (Day 1 -> Day 2):
+        #   MV_begin = 100,000, MV_end = 115,500, CF = +10,000
+        #   R1 = (115,500 - 100,000 - 10,000) / (100,000 + 10,000*0.5)
+        #   R1 = 5,500 / 105,000 = 0.05238
+        #
+        # Subperiod 2 (Day 2 -> Day 3):
+        #   MV_begin = 115,500, MV_end = 108,000, CF = -5,000
+        #   R2 = (108,000 - 115,500 - (-5,000)) / (115,500 + (-5,000)*0.5)
+        #   R2 = (108,000 - 115,500 + 5,000) / (115,500 - 2,500)
+        #   R2 = -2,500 / 113,000 = -0.02212
+        #
+        # TWR = (1 + 0.05238) * (1 - 0.02212) - 1 = 0.02910 = 2.91%
+        
+        test1_mv = pd.DataFrame({
+            'date': ['2026-01-01', '2026-01-02', '2026-01-03'],
+            'balance': [100000, 115500, 108000]
+        })
+        
+        test1_txn = pd.DataFrame({
+            'timestamp': ['2026-01-02 10:00:00', '2026-01-03 14:00:00'],
+            'type': ['deposit', 'withdrawal'],
+            'amount': [10000, 5000]
+        })
+        
+        test1_result = PortfolioCalculator.calculate_twr_detailed(
+            '2026-01-01', '2026-01-03',
+            test1_txn, pd.DataFrame(), test1_mv
+        )
+        
+        expected_twr_1 = 0.0291  # ~2.91%
+        actual_twr_1 = test1_result.get('twr_decimal')
+        
+        test1_pass = actual_twr_1 is not None and abs(actual_twr_1 - expected_twr_1) < 0.005
+        results['tests'].append({
+            'name': 'TEST 1: Basic 2-subperiod case',
+            'passed': test1_pass,
+            'expected': f"{expected_twr_1*100:.2f}%",
+            'actual': f"{actual_twr_1*100:.2f}%" if actual_twr_1 else 'N/A',
+            'subperiods': test1_result.get('subperiods', [])
+        })
+        if test1_pass:
+            results['passed'] += 1
+        else:
+            results['failed'] += 1
+        
+        # TEST 2: Cash deposit table integration
+        test2_mv = pd.DataFrame({
+            'date': ['2026-01-04', '2026-01-05', '2026-01-06'],
+            'balance': [100000, 127000, 128000]
+        })
+        
+        # No transactions, but deposit via cash_deposits table
+        test2_cash_deposits = pd.DataFrame({
+            'deposit_date': ['2026-01-05 09:00:00'],
+            'amount': [25000]
+        })
+        
+        test2_result = PortfolioCalculator.calculate_twr_detailed(
+            '2026-01-04', '2026-01-06',
+            pd.DataFrame(), test2_cash_deposits, test2_mv
+        )
+        
+        # Should detect the deposit as external flow
+        test2_pass = (
+            test2_result.get('external_flows_detected', 0) >= 1 and
+            test2_result.get('cash_deposits_included', False) == True
+        )
+        results['tests'].append({
+            'name': 'TEST 2: Cash deposit table integration',
+            'passed': test2_pass,
+            'expected': 'external_flows >= 1, cash_deposits_included = True',
+            'actual': f"external_flows={test2_result.get('external_flows_detected')}, cash_deposits_included={test2_result.get('cash_deposits_included')}",
+            'subperiods': test2_result.get('subperiods', [])
+        })
+        if test2_pass:
+            results['passed'] += 1
+        else:
+            results['failed'] += 1
+        
+        # TEST 3: Security trade exclusion
+        # Buy transaction should NOT create a subperiod split
+        test3_mv = pd.DataFrame({
+            'date': ['2026-01-09', '2026-01-10', '2026-01-11'],
+            'balance': [100000, 102000, 104000]
+        })
+        
+        test3_txn = pd.DataFrame({
+            'timestamp': ['2026-01-10 10:00:00'],
+            'type': ['buy'],  # Buy - should be IGNORED
+            'amount': [10000]
+        })
+        
+        test3_result = PortfolioCalculator.calculate_twr_detailed(
+            '2026-01-09', '2026-01-11',
+            test3_txn, pd.DataFrame(), test3_mv
+        )
+        
+        # Buy should NOT be detected as external flow
+        test3_pass = test3_result.get('external_flows_detected', 0) == 0
+        results['tests'].append({
+            'name': 'TEST 3: Security trade exclusion (buy/sell ignored)',
+            'passed': test3_pass,
+            'expected': 'external_flows = 0',
+            'actual': f"external_flows = {test3_result.get('external_flows_detected')}",
+            'subperiods': test3_result.get('subperiods', [])
+        })
+        if test3_pass:
+            results['passed'] += 1
+        else:
+            results['failed'] += 1
+        
+        # TEST 4: Dividend exclusion
+        test4_mv = pd.DataFrame({
+            'date': ['2026-01-15', '2026-01-16'],
+            'balance': [100000, 101000]
+        })
+        
+        test4_txn = pd.DataFrame({
+            'timestamp': ['2026-01-16 09:00:00'],
+            'type': ['dividend'],  # Dividend - should be IGNORED
+            'amount': [500]
+        })
+        
+        test4_result = PortfolioCalculator.calculate_twr_detailed(
+            '2026-01-15', '2026-01-16',
+            test4_txn, pd.DataFrame(), test4_mv
+        )
+        
+        test4_pass = test4_result.get('external_flows_detected', 0) == 0
+        results['tests'].append({
+            'name': 'TEST 4: Dividend exclusion (dividends are returns, not flows)',
+            'passed': test4_pass,
+            'expected': 'external_flows = 0',
+            'actual': f"external_flows = {test4_result.get('external_flows_detected')}",
+            'subperiods': test4_result.get('subperiods', [])
+        })
+        if test4_pass:
+            results['passed'] += 1
+        else:
+            results['failed'] += 1
+        
+        # TEST 5: Zero denominator edge case
+        test5_mv = pd.DataFrame({
+            'date': ['2026-01-20', '2026-01-21'],
+            'balance': [0, 10000]
+        })
+        
+        test5_txn = pd.DataFrame({
+            'timestamp': ['2026-01-21 09:00:00'],
+            'type': ['deposit'],
+            'amount': [10000]
+        })
+        
+        test5_result = PortfolioCalculator.calculate_twr_detailed(
+            '2026-01-20', '2026-01-21',
+            test5_txn, pd.DataFrame(), test5_mv
+        )
+        
+        # Should handle gracefully without error
+        test5_pass = 'error' not in str(test5_result.get('warnings', [])).lower() or test5_result.get('twr_decimal') is not None
+        results['tests'].append({
+            'name': 'TEST 5: Zero denominator edge case',
+            'passed': test5_pass,
+            'expected': 'No crash, graceful handling',
+            'actual': f"twr={test5_result.get('twr_percent')}, warnings={test5_result.get('warnings')}",
+            'subperiods': test5_result.get('subperiods', [])
+        })
+        if test5_pass:
+            results['passed'] += 1
+        else:
+            results['failed'] += 1
+        
+        results['summary'] = f"Passed: {results['passed']}/{results['passed']+results['failed']}"
+        return results
+    
+    @staticmethod
     def calculate_twr(portfolio_history: pd.DataFrame, cash_flows: pd.DataFrame) -> Optional[float]:
         """
-        Calculate Time-Weighted Return (TWR).
+        Calculate Time-Weighted Return (TWR) - CFA/GIPS Compliant (Simplified API).
+        
+        This is the simplified wrapper for backward compatibility.
+        For detailed output with subperiod breakdown, use calculate_twr_detailed().
+        
+        GIPS COMPLIANCE:
+        - Only deposit/withdrawal split subperiods (buy/sell/dividend excluded)
+        - Midpoint weighting (0.5) for daily-level data
+        - Geometric linking: TWR = ∏(1 + Rᵢ) - 1
         
         Args:
             portfolio_history: DataFrame with columns [date, balance]
-            cash_flows: DataFrame with columns [date, amount, type] 
-                       where type can be 'DEPOSIT', 'WITHDRAWAL', or 'DIVIDEND'
+            cash_flows: DataFrame with columns [date, amount, type]
+                       type should be 'DEPOSIT' or 'WITHDRAWAL' only
         
         Returns:
-            TWR as decimal (e.g., 0.125 = 12.5%) or None if calculation fails
+            TWR as decimal (e.g., 0.0823 = 8.23%) or None if calculation fails
         """
         try:
             if portfolio_history.empty:
                 return None
             
-            # Ensure dates are datetime
-            portfolio_history = portfolio_history.copy()
-            portfolio_history['date'] = pd.to_datetime(portfolio_history['date'])
+            # Use the detailed implementation
+            ph = portfolio_history.copy()
+            if 'date' not in ph.columns and 'snapshot_date' in ph.columns:
+                ph = ph.rename(columns={'snapshot_date': 'date'})
             
-            if cash_flows.empty:
-                # No cash flows - simple return calculation
-                v_start = portfolio_history.iloc[0]['balance']
-                v_end = portfolio_history.iloc[-1]['balance']
-                if v_start <= 0:
-                    return None
-                return (v_end - v_start) / v_start
+            ph['date'] = pd.to_datetime(ph['date'])
+            start_date = ph['date'].min().strftime('%Y-%m-%d')
+            end_date = ph['date'].max().strftime('%Y-%m-%d')
             
-            cash_flows = cash_flows.copy()
-            cash_flows['date'] = pd.to_datetime(cash_flows['date'])
-            cash_flows = cash_flows.sort_values('date')
+            # Prepare cash flows as transactions format
+            cf_formatted = pd.DataFrame()
+            if not cash_flows.empty:
+                cf = cash_flows.copy()
+                cf_formatted = pd.DataFrame({
+                    'timestamp': pd.to_datetime(cf['date']),
+                    'type': cf['type'].str.lower(),
+                    'amount': cf['amount']
+                })
             
-            # Calculate sub-period returns
-            period_returns = []
-            prev_date = portfolio_history.iloc[0]['date']
-            prev_value = portfolio_history.iloc[0]['balance']
+            result = PortfolioCalculator.calculate_twr_detailed(
+                start_date, end_date,
+                cf_formatted, pd.DataFrame(), ph
+            )
             
-            for i in range(len(cash_flows)):
-                cf_date = cash_flows.iloc[i]['date']
-                cf_amount = cash_flows.iloc[i]['amount']
-                cf_type = cash_flows.iloc[i]['type']
-                
-                # Net cash flow interpretation:
-                # - DEPOSIT: Money coming IN (+) - increases portfolio
-                # - DIVIDEND: Money going OUT (-) - decreases portfolio but is return
-                # - WITHDRAWAL: Money going OUT (-) - decreases portfolio
-                if cf_type == 'DEPOSIT':
-                    net_cf = cf_amount  # Money IN
-                elif cf_type in ['DIVIDEND', 'WITHDRAWAL']:
-                    net_cf = -cf_amount  # Money OUT
-                else:
-                    net_cf = 0
-                
-                # Get portfolio value just before this cash flow
-                before_cf = portfolio_history[portfolio_history['date'] < cf_date]
-                if before_cf.empty:
-                    v0 = prev_value
-                else:
-                    v0 = before_cf.iloc[-1]['balance']
-                
-                # Get portfolio value at or after cash flow date
-                at_or_after_cf = portfolio_history[portfolio_history['date'] >= cf_date]
-                if at_or_after_cf.empty:
-                    # No data after this cash flow, skip
-                    continue
-                
-                # Value after the cash flow is reflected
-                v1_with_cf = at_or_after_cf.iloc[0]['balance']
-                
-                # Remove the effect of cash flow to get the pre-cash-flow value
-                # This gives us the market value change before the cash flow happened
-                v1_before_cf = v1_with_cf - net_cf
-                
-                # Calculate period return: (V1 - V0) / V0
-                # This measures pure market performance excluding the cash flow
-                if v0 > 0:
-                    period_return = (v1_before_cf - v0) / v0
-                    period_returns.append(period_return)
-                    prev_value = v1_with_cf
-                    prev_date = cf_date
-            
-            # Add final period from last cash flow to end
-            final_value = portfolio_history.iloc[-1]['balance']
-            if prev_value > 0 and final_value != prev_value:
-                final_return = (final_value - prev_value) / prev_value
-                period_returns.append(final_return)
-            
-            # Calculate TWR by compounding all period returns
-            if not period_returns:
-                # Fallback to simple return
-                v_start = portfolio_history.iloc[0]['balance']
-                v_end = portfolio_history.iloc[-1]['balance']
-                if v_start <= 0:
-                    return None
-                return (v_end - v_start) / v_start
-            
-            twr = 1.0
-            for r in period_returns:
-                twr *= (1 + r)
-            
-            return twr - 1
+            return result.get('twr_decimal')
             
         except Exception as e:
-            st.error(f"TWR calculation error: {e}")
+            logging.error(f"TWR calculation error: {e}")
             return None
     
     @staticmethod
     def calculate_mwrr(cash_flows: pd.DataFrame, current_value: float, start_date: date) -> Optional[float]:
         """
-        Calculate Money-Weighted Return (MWRR/IRR) using XIRR with irregular dates.
-        CFA-compliant calculation with proper cash flow signs.
+        CFA-compliant XIRR (Money-Weighted Return) with robust convergence.
+        
+        Uses Newton-Raphson with bisection fallback.
+        Cash flows must have columns [date, amount, type] where:
+          - type='DEPOSIT'    → sign forced negative  (money OUT of investor)
+          - type='DIVIDEND'   → sign forced positive  (money IN to investor)
+          - type='WITHDRAWAL' → sign forced positive  (money IN to investor)
+        Final portfolio value is appended automatically as a positive terminal flow.
         
         Args:
             cash_flows: DataFrame with columns [date, amount, type]
-                       type can be 'DEPOSIT', 'DIVIDEND', 'WITHDRAWAL'
             current_value: Current portfolio value (must be > 0)
-            start_date: Portfolio inception date
-        
+            start_date: Portfolio inception date (used for validation only;
+                        actual dates come from the DataFrame)
         Returns:
-            MWRR as decimal (e.g., 0.125 = 12.5%) or None if calculation fails
+            Annualized IRR as decimal (e.g. 0.1174 = 11.74%) or None
         """
         try:
-            # Validate current value
+            # ── validate ──────────────────────────────────────────────
             if current_value is None or current_value <= 0:
                 return None
-            
-            # Prepare cash flows from INVESTOR PERSPECTIVE
-            # CRITICAL: Deposits = negative (money OUT), Dividends/Withdrawals = positive (money IN)
-            cf_dates = []
-            cf_amounts = []
-            
+
+            # ── 1. build signed cash‑flow list ────────────────────────
+            cf_dates: list = []
+            cf_amounts: list = []
+
             if not cash_flows.empty:
-                cash_flows = cash_flows.copy()
-                cash_flows['date'] = pd.to_datetime(cash_flows['date'])
-                
-                for _, row in cash_flows.iterrows():
-                    cf_date = pd.to_datetime(row['date'])
-                    amount = float(row['amount'])
-                    cf_type = str(row['type']).upper()
-                    
-                    if amount == 0:
+                _cf = cash_flows.copy()
+                _cf['date'] = pd.to_datetime(_cf['date'])
+
+                for _, row in _cf.iterrows():
+                    amt = float(row['amount'])
+                    if amt == 0:
                         continue
-                    
-                    # Cash flow signs (investor perspective):
-                    # - DEPOSIT: negative (money leaving investor to portfolio)
-                    # - DIVIDEND: positive (cash returning to investor)
-                    # - WITHDRAWAL: positive (money returning to investor)
+                    cf_type = str(row['type']).upper()
+
                     if cf_type == 'DEPOSIT':
-                        cf_value = -abs(amount)  # Always negative
-                    elif cf_type in ['DIVIDEND', 'WITHDRAWAL']:
-                        cf_value = abs(amount)   # Always positive
+                        cf_amounts.append(-abs(amt))      # money leaving investor
+                    elif cf_type in ('DIVIDEND', 'WITHDRAWAL'):
+                        cf_amounts.append(abs(amt))        # money returning
                     else:
                         continue
-                    
-                    cf_dates.append(cf_date)
-                    cf_amounts.append(cf_value)
-            
-            # CRITICAL: Add final portfolio value as positive cash flow (withdrawal at end)
+                    cf_dates.append(pd.to_datetime(row['date']))
+
+            # ── 2. terminal value (simulated full liquidation today) ──
             today = pd.Timestamp.now()
             cf_dates.append(today)
-            cf_amounts.append(abs(current_value))  # Always positive
-            
+            cf_amounts.append(abs(current_value))
+
             if len(cf_dates) < 2:
-                return None  # Need at least one flow + final value
-            
-            # Validation: Must have at least one negative and one positive cash flow
-            has_negative = any(cf < 0 for cf in cf_amounts)
-            has_positive = any(cf > 0 for cf in cf_amounts)
-            
-            if not (has_negative and has_positive):
-                return None  # IRR undefined without both signs
-            
-            # Sort by date
-            sorted_pairs = sorted(zip(cf_dates, cf_amounts), key=lambda x: x[0])
-            cf_dates = [x[0] for x in sorted_pairs]
-            cf_amounts = [x[1] for x in sorted_pairs]
-            
-            # Combine same-day cash flows
-            combined_dates = []
-            combined_amounts = []
-            current_date = None
-            current_sum = 0.0
-            
-            for dt, amt in zip(cf_dates, cf_amounts):
-                if current_date is None:
-                    current_date = dt
-                    current_sum = amt
-                elif dt == current_date:
-                    current_sum += amt
+                return None
+
+            # Must have at least one negative AND one positive
+            if not (any(c < 0 for c in cf_amounts) and any(c > 0 for c in cf_amounts)):
+                return None
+
+            # ── 3. sort & combine same‑day flows ─────────────────────
+            pairs = sorted(zip(cf_dates, cf_amounts), key=lambda x: x[0])
+            combined_dates: list = []
+            combined_amounts: list = []
+            prev_dt = None
+            running = 0.0
+            for dt, a in pairs:
+                if prev_dt is None:
+                    prev_dt, running = dt, a
+                elif dt == prev_dt:
+                    running += a
                 else:
-                    combined_dates.append(current_date)
-                    combined_amounts.append(current_sum)
-                    current_date = dt
-                    current_sum = amt
-            
-            # Add last accumulated value
-            if current_date is not None:
-                combined_dates.append(current_date)
-                combined_amounts.append(current_sum)
-            
+                    combined_dates.append(prev_dt)
+                    combined_amounts.append(running)
+                    prev_dt, running = dt, a
+            if prev_dt is not None:
+                combined_dates.append(prev_dt)
+                combined_amounts.append(running)
+
             cf_dates = combined_dates
             cf_amounts = combined_amounts
-            
-            # Reference date (first cash flow date)
+
+            # ── 4. year‑fraction helper (ACT/365.25) ─────────────────
             t0 = cf_dates[0]
-            
-            # Helper: Calculate year fraction using 365.25 (accounts for leap years)
-            def year_frac(dt):
-                days = (dt - t0).days
-                return days / 365.25
-            
-            # NPV function: Sum of discounted cash flows
-            def npv(rate):
-                if rate <= -1.0:  # Prevent division by zero
-                    return float('inf')
-                total = 0.0
-                for cf, dt in zip(cf_amounts, cf_dates):
-                    tau = year_frac(dt)
-                    total += cf / ((1 + rate) ** tau)
-                return total
-            
-            # Derivative of NPV (for Newton-Raphson)
-            def d_npv(rate):
+            year_fracs = [(dt - t0).days / 365.25 for dt in cf_dates]
+
+            # ── 5. NPV & derivative ──────────────────────────────────
+            def _npv(rate):
                 if rate <= -1.0:
                     return float('inf')
-                total = 0.0
-                for cf, dt in zip(cf_amounts, cf_dates):
-                    tau = year_frac(dt)
-                    total += -tau * cf / ((1 + rate) ** (tau + 1))
-                return total
-            
-            # Newton-Raphson iteration
-            r = 0.10  # Initial guess: 10%
-            max_iterations = 100
-            tolerance = 1e-8
-            
-            for iteration in range(max_iterations):
-                f = npv(r)
-                fp = d_npv(r)
-                
-                # Check for zero or very small derivative
-                if abs(fp) < 1e-12:
+                s = 0.0
+                for amt, tau in zip(cf_amounts, year_fracs):
+                    s += amt / ((1.0 + rate) ** tau)
+                return s
+
+            def _d_npv(rate):
+                if rate <= -1.0:
+                    return float('inf')
+                s = 0.0
+                for amt, tau in zip(cf_amounts, year_fracs):
+                    s += -tau * amt / ((1.0 + rate) ** (tau + 1.0))
+                return s
+
+            # ── 6. Newton‑Raphson (primary solver) ───────────────────
+            r = 0.10
+            converged = False
+            for _ in range(200):
+                f_val = _npv(r)
+                fp_val = _d_npv(r)
+
+                if abs(fp_val) < 1e-14:
                     break
-                
-                # Newton-Raphson update
-                r_next = r - f / fp
-                
-                # Prevent invalid values
-                if r_next < -0.999:
-                    r_next = -0.95
-                if r_next > 20:
-                    r_next = 10.0
-                
-                # Check convergence
-                if abs(r_next - r) < tolerance:
-                    # Verify solution
-                    final_npv = abs(npv(r_next))
-                    if final_npv < 0.1:  # NPV close enough to zero
-                        return r_next
+
+                r_next = r - f_val / fp_val
+                # clamp to reasonable range
+                r_next = max(-0.9999, min(r_next, 100.0))
+
+                if abs(r_next - r) < 1e-10:
+                    if abs(_npv(r_next)) < 0.01:
+                        converged = True
+                        r = r_next
                     break
-                
                 r = r_next
-            
-            # If Newton-Raphson didn't converge well, try scipy as fallback
-            try:
-                from scipy.optimize import newton
-                
-                def npv_func(rate):
-                    return npv(rate)
-                
-                r_scipy = newton(npv_func, x0=0.1, maxiter=200, tol=1e-8)
-                
-                # Validate scipy result
-                if abs(npv(r_scipy)) < 0.1 and -0.999 < r_scipy < 20:
-                    return r_scipy
-            except:
-                pass  # Scipy failed, continue
-            
-            # Last resort: check if our Newton result is reasonable
-            final_npv = abs(npv(r))
-            if final_npv < 1.0 and -0.99 < r < 20:  # Relaxed tolerance
+
+            if converged:
                 return r
-            
-            return None  # Did not converge to valid solution
-            
+
+            # ── 7. Bisection fallback ────────────────────────────────
+            lo, hi = -0.9999, 10.0
+            npv_lo = _npv(lo)
+            npv_hi = _npv(hi)
+
+            # Widen range if needed
+            if npv_lo * npv_hi > 0:
+                for test_hi in [20.0, 50.0, 100.0]:
+                    if _npv(lo) * _npv(test_hi) < 0:
+                        hi = test_hi
+                        break
+                else:
+                    # Check if Newton result is at least close
+                    if abs(_npv(r)) < 1.0 and -0.99 < r < 100:
+                        return r
+                    return None
+
+            for _ in range(1000):
+                mid = (lo + hi) / 2.0
+                npv_mid = _npv(mid)
+
+                if abs(npv_mid) < 1e-8:
+                    return mid
+
+                if _npv(lo) * npv_mid < 0:
+                    hi = mid
+                else:
+                    lo = mid
+
+            return mid  # best estimate after max iterations
+
         except Exception as e:
-            # Log error for debugging
-            logger.error(f"MWRR calculation error: {e}", exc_info=True)
+            logger.error(f"MWRR/XIRR calculation error: {e}", exc_info=True)
             return None
     
     @staticmethod
     def calculate_cagr(v_start: float, v_end: float, date_start: date, date_end: date) -> Optional[float]:
         """
         Calculate Compound Annual Growth Rate (CAGR).
-        
+
+        ⚠️  CAGR is NOT a performance metric per CFA/GIPS standards.
+        It ignores ALL intermediate cash flows (deposits & withdrawals).
+        Later deposits inflate V_end without affecting V_start → misleading.
+
+        Use TWR for investment skill, IRR for personal wealth growth.
+        CAGR is a simple descriptive statistic ONLY.
+
         Args:
-            v_start: Initial portfolio value
-            v_end: Final portfolio value
-            date_start: Start date
-            date_end: End date
-        
+            v_start: First deposit amount (NOT accumulated_cash from snapshots)
+            v_end:   Current portfolio market value
+            date_start: Date of first deposit
+            date_end:   Date of latest valuation
+
         Returns:
             CAGR as decimal (e.g., 0.125 = 12.5%) or None if calculation fails
         """
         try:
             if v_start <= 0:
                 return None
-            
-            # Calculate years
+
             days = (date_end - date_start).days
             years = days / 365.25
-            
-            if years < 0:
+
+            if years <= 0:
                 return None
-            
-            # If less than 1 year, return absolute return
-            if years < 1:
-                return (v_end - v_start) / v_start
-            
-            # Calculate CAGR
+
             cagr = (v_end / v_start) ** (1 / years) - 1
             return cagr
-            
+
         except Exception as e:
-            st.error(f"CAGR calculation error: {e}")
+            logging.error(f"CAGR calculation error: {e}")
             return None
+
+    @staticmethod
+    def calculate_win_rate(conn, user_id: int) -> dict:
+        """
+        Calculate win rate from completed sell transactions.
+        Uses realized_pnl_at_txn for P&L (already computed at trade time).
+
+        Returns dict with win_rate, counts, and insights.
+        """
+        try:
+            sells = pd.read_sql(
+                """
+                SELECT stock_symbol, txn_date, shares, sell_value,
+                       realized_pnl_at_txn, avg_cost_at_txn, fees
+                FROM transactions
+                WHERE txn_type = 'Sell'
+                  AND (is_deleted IS NULL OR is_deleted = 0)
+                  AND realized_pnl_at_txn IS NOT NULL
+                  AND user_id = ?
+                ORDER BY txn_date
+                """,
+                conn,
+                params=(user_id,),
+            )
+
+            if sells.empty:
+                return {
+                    'win_rate': None,
+                    'total_trades': 0,
+                    'winning_trades': 0,
+                    'losing_trades': 0,
+                    'breakeven_trades': 0,
+                    'status': 'no_data',
+                }
+
+            sells['pnl'] = pd.to_numeric(sells['realized_pnl_at_txn'], errors='coerce').fillna(0)
+
+            winning = sells[sells['pnl'] > 0]
+            losing = sells[sells['pnl'] < 0]
+            breakeven = sells[sells['pnl'] == 0]
+
+            total_trades = len(sells)
+            win_rate = (len(winning) / total_trades * 100) if total_trades > 0 else 0
+
+            avg_win = float(winning['pnl'].mean()) if len(winning) > 0 else 0.0
+            avg_loss = float(losing['pnl'].mean()) if len(losing) > 0 else 0.0
+            total_profit = float(winning['pnl'].sum()) if len(winning) > 0 else 0.0
+            total_loss = abs(float(losing['pnl'].sum())) if len(losing) > 0 else 0.0
+            profit_factor = total_profit / total_loss if total_loss > 0 else float('inf')
+
+            return {
+                'win_rate': round(win_rate, 1),
+                'total_trades': total_trades,
+                'winning_trades': len(winning),
+                'losing_trades': len(losing),
+                'breakeven_trades': len(breakeven),
+                'avg_win_kwd': round(avg_win, 2),
+                'avg_loss_kwd': round(abs(avg_loss), 2),
+                'total_profit_kwd': round(total_profit, 2),
+                'total_loss_kwd': round(total_loss, 2),
+                'profit_factor': round(profit_factor, 2),
+                'status': 'success',
+            }
+        except Exception as e:
+            logging.error(f"Win rate calculation error: {e}")
+            return {
+                'win_rate': None,
+                'total_trades': 0,
+                'winning_trades': 0,
+                'losing_trades': 0,
+                'breakeven_trades': 0,
+                'status': 'error',
+            }
 
 
 def fmt_price(x, d=6):
@@ -15110,6 +15679,9 @@ def ui_portfolio_analysis():
     cash_data = []
     _cash_portfolios = ["KFH", "BBYN", "USA"]
     
+    # Get USD to KWD conversion rate to show in CCY column for USD row
+    _usd_kwd_rate = st.session_state.get("usd_to_kwd", 0.307)
+    
     for p in _cash_portfolios:
         # A. Total Deposited (Read-only Reference) - only include deposits marked for analysis
         _soft_del_dep = _soft_delete_filter_deposits()
@@ -15129,10 +15701,12 @@ def ui_portfolio_analysis():
         _manual_balance = float(_manual_bal_df.iloc[0]['balance']) if not _manual_bal_df.empty else 0.0
         
         _currency = PORTFOLIO_CCY.get(p, "KWD")
+        # Show conversion rate in brackets for USD row
+        _currency_display = f"USD ({_usd_kwd_rate:.3f})" if _currency == "USD" else _currency
         
         cash_data.append({
             "Portfolio": p,
-            "Currency": _currency,
+            "Currency": _currency_display,
             "Total Capital": float(_total_dep),
             "Available Cash": float(_manual_balance)
         })
@@ -15173,7 +15747,7 @@ def ui_portfolio_analysis():
         _rate = st.session_state.get("usd_to_kwd", 0.307)
         # Use edited_cash (current editor values) instead of cash_df_display (pre-edit values)
         for _, r in edited_cash.iterrows():
-            if r["Currency"] == "USD":
+            if str(r["Currency"]).startswith("USD"):
                 _total_cash_kwd += r["Available Cash"] * _rate
             else:
                 _total_cash_kwd += r["Available Cash"]
@@ -15189,7 +15763,8 @@ def ui_portfolio_analysis():
             # If value changed
             if abs(_new_val - _old_val) > 0.001:
                 _p_name = _row["Portfolio"]
-                _p_ccy = _row["Currency"]
+                # Get actual currency from portfolio (not display value which may have rate in brackets)
+                _p_ccy = PORTFOLIO_CCY.get(_p_name, "KWD")
                 _ts = int(time.time())
                 _user_id = st.session_state.get('user_id', 1)
                 
@@ -19319,24 +19894,46 @@ def ui_overview():
     # Collect ALL cash flows (deposits + dividends) with their timing
     # FOR MWRR: Use CORRECT data sources per user specification
     
-    # 1. CASH DEPOSITS from cash_deposits table (MY OWN MONEY = NEGATIVE)
-    # Exclude 1970 dates and zero amounts
+    # 1. CASH DEPOSITS & WITHDRAWALS from cash_deposits table
+    # Positive amounts → DEPOSIT  (money OUT of investor = negative in XIRR)
+    # Negative amounts → WITHDRAWAL (money BACK to investor = positive in XIRR)
+    # USD deposits are converted to KWD using the session FX rate (default 0.307)
     try:
         cash_deposits_for_mwrr = query_df(
             """
             SELECT deposit_date as date, 
                    amount, 
-                   'DEPOSIT' as type 
+                   COALESCE(currency, 'KWD') as currency,
+                   CASE WHEN amount >= 0 THEN 'DEPOSIT' ELSE 'WITHDRAWAL' END as type,
+                   'cash_deposits' as source
             FROM cash_deposits 
             WHERE deposit_date IS NOT NULL
-            AND amount > 0
+            AND amount != 0
             AND deposit_date > '1971-01-01'
+            AND (include_in_analysis = 1 OR include_in_analysis IS NULL)
+            AND (is_deleted IS NULL OR is_deleted = 0)
             AND user_id = ?
             """,
             (user_id,)
         )
+        # For withdrawals (negative amounts), flip to positive so XIRR sign logic works:
+        #   calculate_mwrr forces WITHDRAWAL → +abs(amount)
+        if not cash_deposits_for_mwrr.empty:
+            _wd_mask = cash_deposits_for_mwrr['type'] == 'WITHDRAWAL'
+            if _wd_mask.any():
+                cash_deposits_for_mwrr.loc[_wd_mask, 'amount'] = \
+                    cash_deposits_for_mwrr.loc[_wd_mask, 'amount'].abs()
+        # Convert USD deposits to KWD so all MWRR cash flows are in a single currency
+        if not cash_deposits_for_mwrr.empty and 'currency' in cash_deposits_for_mwrr.columns:
+            _usd_kwd_rate = st.session_state.get("usd_to_kwd", 0.307)
+            _usd_mask = cash_deposits_for_mwrr['currency'].str.upper() == 'USD'
+            if _usd_mask.any():
+                cash_deposits_for_mwrr.loc[_usd_mask, 'amount'] = (
+                    cash_deposits_for_mwrr.loc[_usd_mask, 'amount'] * _usd_kwd_rate
+                )
+            cash_deposits_for_mwrr = cash_deposits_for_mwrr.drop(columns=['currency'])
     except Exception:
-        cash_deposits_for_mwrr = pd.DataFrame(columns=['date', 'amount', 'type'])
+        cash_deposits_for_mwrr = pd.DataFrame(columns=['date', 'amount', 'type', 'source'])
     
     # 2. NON-REINVESTED DIVIDENDS ONLY (CASH PAID OUT = POSITIVE)
     # Exclude reinvested dividends from IRR calculation
@@ -19345,17 +19942,19 @@ def ui_overview():
             """
             SELECT txn_date as date, 
                    COALESCE(cash_dividend, 0) as amount, 
-                   'DIVIDEND' as type 
+                   'DIVIDEND' as type,
+                   'transactions' as source
             FROM transactions 
             WHERE COALESCE(cash_dividend, 0) > 0
             AND txn_date IS NOT NULL
             AND txn_date > '1971-01-01'
+            AND (is_deleted IS NULL OR is_deleted = 0)
             AND user_id = ?
             """,
             (user_id,)
         )
     except Exception:
-        cash_dividends_only = pd.DataFrame(columns=['date', 'amount', 'type'])
+        cash_dividends_only = pd.DataFrame(columns=['date', 'amount', 'type', 'source'])
     
     # FOR TWR: Still use cash_deposits with include_in_analysis flag (exclude soft-deleted if column exists)
     user_id = st.session_state.get('user_id', 1)
@@ -19367,22 +19966,6 @@ def ui_overview():
         )
     except Exception:
         deposits_for_twr = pd.DataFrame(columns=['date', 'amount', 'type'])
-    
-    # For TWR: Include BOTH cash and reinvested dividends (all returns)
-    try:
-        all_dividends = query_df(
-            """
-            SELECT txn_date as date, 
-                   COALESCE(cash_dividend, 0) + COALESCE(reinvested_dividend, 0) as amount, 
-                   'DIVIDEND' as type 
-            FROM transactions 
-            WHERE (COALESCE(cash_dividend, 0) + COALESCE(reinvested_dividend, 0)) > 0
-            AND user_id = ?
-            """,
-            (user_id,)
-        )
-    except Exception:
-        all_dividends = pd.DataFrame(columns=['date', 'amount', 'type'])
     
     # Withdrawals (Explicit Withdrawals Only - NOT Sells)
     # Using the new General Ledger 'Withdrawal' type
@@ -19416,7 +19999,39 @@ def ui_overview():
     except Exception:
         ledger_deposits = pd.DataFrame(columns=['date', 'amount', 'type'])
 
-    # Cash flows for MWRR (Legacy Cash Deposits + New Ledger Deposits + Dividends + Withdrawals)
+    # Transfer In of Assets (e.g., in-kind contributions, shares transferred in)
+    # These are external flows that increase portfolio value without cash movement
+    try:
+        transfers_in = query_df(
+            """
+            SELECT txn_date, COALESCE(purchase_cost, 0) as amount, 'DEPOSIT' as type
+            FROM transactions
+            WHERE txn_type = 'Transfer In'
+            AND user_id = ?
+            """,
+            (user_id,)
+        )
+        transfers_in = transfers_in.rename(columns={'txn_date': 'date'})
+    except Exception:
+        transfers_in = pd.DataFrame(columns=['date', 'amount', 'type'])
+    
+    # Transfer Out of Assets (e.g., in-kind withdrawals, shares transferred out)
+    # These are external flows that decrease portfolio value without cash movement
+    try:
+        transfers_out = query_df(
+            """
+            SELECT txn_date, COALESCE(sell_value, 0) as amount, 'WITHDRAWAL' as type
+            FROM transactions
+            WHERE txn_type = 'Transfer Out'
+            AND user_id = ?
+            """,
+            (user_id,)
+        )
+        transfers_out = transfers_out.rename(columns={'txn_date': 'date'})
+    except Exception:
+        transfers_out = pd.DataFrame(columns=['date', 'amount', 'type'])
+
+    # Cash flows for MWRR (Legacy Cash Deposits + New Ledger Deposits + Dividends + Withdrawals + Transfers)
     # NOTE: Reinvested dividends are EXCLUDED (they stay in portfolio value)
     mwrr_components = []
     if not cash_deposits_for_mwrr.empty:
@@ -19427,22 +20042,42 @@ def ui_overview():
         mwrr_components.append(cash_dividends_only)
     if not withdrawals.empty:
         mwrr_components.append(withdrawals)
+    if not transfers_in.empty:
+        mwrr_components.append(transfers_in)
+    if not transfers_out.empty:
+        mwrr_components.append(transfers_out)
     
     if mwrr_components:
         cash_flows_mwrr = pd.concat(mwrr_components, ignore_index=True).sort_values('date')
     else:
         cash_flows_mwrr = pd.DataFrame(columns=['date', 'amount', 'type'])
     
-    # Cash flows for TWR
+    # Cash flows for TWR (CFA/GIPS compliant - STRICT DEFINITION)
+    # Per CFA Vol 2 Ch 4: ONLY deposits/withdrawals split subperiods
+    # EXCLUDES: buy/sell/dividend - these are internal reallocations, not external flows
+    # 
+    # TWR External Flows that break performance periods:
+    #   1. Cash deposits/contributions ✔
+    #   2. Withdrawals ✔
+    #   3. Transfer in/out of assets ✔ (in-kind contributions/withdrawals)
+    # 
+    # EXCLUDED from TWR flows (internal reallocations):
+    #   - Dividends (they are investment returns, NOT external flows)
+    #   - Buy/Sell transactions (net to zero in MV change)
     twr_components = []
     if not deposits_for_twr.empty:
         twr_components.append(deposits_for_twr)
     if not ledger_deposits.empty:
         twr_components.append(ledger_deposits)
-    if not all_dividends.empty:
-        twr_components.append(all_dividends)
+    # DIVIDENDS EXCLUDED: They are investment returns, not external flows
+    # if not cash_dividends_only.empty:
+    #     twr_components.append(cash_dividends_only)
     if not withdrawals.empty:
         twr_components.append(withdrawals)
+    if not transfers_in.empty:
+        twr_components.append(transfers_in)
+    if not transfers_out.empty:
+        twr_components.append(transfers_out)
     
     if twr_components:
         cash_flows_twr = pd.concat(twr_components, ignore_index=True).sort_values('date')
@@ -19452,13 +20087,58 @@ def ui_overview():
     # Calculate metrics
     calc = PortfolioCalculator()
     
-    # Get inception date and current value for CAGR
-    if not portfolio_history.empty:
-        # Start date: First snapshot date
-        inception_date = pd.to_datetime(portfolio_history.iloc[0]['date']).date()
+    # Get inception date from ALL cash flow sources (CFA-compliant)
+    # CRITICAL: Must consider BOTH cash_deposits AND transactions tables
+    # The earliest date across all sources is the true inception date.
+    # Bug fix: Previously only checked transactions (2022-11-01), ignoring
+    # earlier cash deposits (2022-06-30), which excluded 152 days of idle cash.
+    try:
+        _inception_dates = []
         
-        # End date: Last snapshot date
+        # Source 1: Earliest cash deposit
+        _earliest_deposit = query_df(
+            """
+            SELECT MIN(deposit_date) as earliest_date
+            FROM cash_deposits
+            WHERE deposit_date IS NOT NULL
+            AND deposit_date > '1971-01-01'
+            AND amount > 0
+            AND (include_in_analysis = 1 OR include_in_analysis IS NULL)
+            AND (is_deleted IS NULL OR is_deleted = 0)
+            AND user_id = ?
+            """,
+            (user_id,)
+        )
+        if not _earliest_deposit.empty and _earliest_deposit.iloc[0]['earliest_date']:
+            _inception_dates.append(pd.to_datetime(_earliest_deposit.iloc[0]['earliest_date']).date())
+        
+        # Source 2: Earliest transaction
+        _earliest_txn = query_df(
+            """
+            SELECT MIN(txn_date) as earliest_date
+            FROM transactions
+            WHERE txn_date IS NOT NULL
+            AND txn_date > '1971-01-01'
+            AND user_id = ?
+            """,
+            (user_id,)
+        )
+        if not _earliest_txn.empty and _earliest_txn.iloc[0]['earliest_date']:
+            _inception_dates.append(pd.to_datetime(_earliest_txn.iloc[0]['earliest_date']).date())
+        
+        # CFA-compliant: inception = earliest date across ALL sources
+        inception_date = min(_inception_dates) if _inception_dates else None
+    except Exception:
+        inception_date = None
+    
+    # Get current value and other metrics from portfolio history
+    if not portfolio_history.empty:
+        # End date: Last snapshot date (current valuation date)
         current_date = pd.to_datetime(portfolio_history.iloc[-1]['date']).date()
+        
+        # Fallback inception date to first snapshot if no transactions found
+        if inception_date is None:
+            inception_date = pd.to_datetime(portfolio_history.iloc[0]['date']).date()
         
         # Starting value: ONLY the initial investment (first accumulated_cash)
         # This excludes subsequent deposits from the growth calculation
@@ -19474,20 +20154,35 @@ def ui_overview():
         if pd.isna(total_invested):
             total_invested = initial_investment
             
-        # Calculate precise time period
+        # Calculate precise time period using transaction-based inception date
         days_elapsed = (current_date - inception_date).days
         years_elapsed = days_elapsed / 365.25
         
     else:
-        inception_date = date.today()
+        if inception_date is None:
+            inception_date = date.today()
         current_date = date.today()
         current_portfolio_value = 0
         total_invested = 0
         initial_investment = 0
         years_elapsed = 0
     
-    # Calculate TWR (uses all dividends - cash + reinvested)
-    twr = calc.calculate_twr(portfolio_history, cash_flows_twr)
+    # Calculate TWR using Modified TWR Calculator (full history with MV reconstruction)
+    # This uses dynamic deposit handling and KSE index proxy for pre-snapshot periods
+    twr = None
+    twr_details = None
+    if _MODIFIED_TWR_AVAILABLE:
+        try:
+            twr_result = calculate_modified_twr()
+            if twr_result and 'twr_decimal' in twr_result:
+                twr = twr_result['twr_decimal']
+                twr_details = twr_result
+        except Exception as e:
+            logger.warning(f"Modified TWR calculation failed: {e}, falling back to original")
+            twr = calc.calculate_twr(portfolio_history, cash_flows_twr)
+    else:
+        # Fallback to original TWR calculation if module not available
+        twr = calc.calculate_twr(portfolio_history, cash_flows_twr)
     
     # Calculate MWRR (uses only cash dividends - reinvested are not cash flows)
     # Debug: log key values
@@ -19499,17 +20194,63 @@ def ui_overview():
     }
     mwrr = calc.calculate_mwrr(cash_flows_mwrr, current_portfolio_value, inception_date)
     
-    # Calculate CAGR using ONLY initial investment (excludes impact of additional deposits)
-    # Formula: (V_end / V_start)^(1/years) - 1
-    # V_start = initial_investment (first deposit only)
-    # V_end = current_portfolio_value
-    if initial_investment > 0 and years_elapsed > 0:
-        cagr = ((current_portfolio_value / initial_investment) ** (1 / years_elapsed)) - 1
+    # ── CAGR ────────────────────────────────────────────────────────────
+    # WARNING: CAGR is NOT a performance metric per CFA/GIPS standards.
+    # WARNING: It ignores ALL intermediate cash flows (deposits/withdrawals).
+    # WARNING: Later deposits artificially inflate V_end without affecting V_start.
+    # WARNING: Example: 10k initial + 90k later deposits → 105k final = 65% CAGR
+    #          even though initial 10k only grew 5% → MISLEADING.
+    # RECOMMENDATION: Use TWR for investment skill, IRR for wealth growth.
+    # CAGR USE CASE: Simple descriptive statistic ONLY (not for performance reporting).
+    #
+    # V_start = FIRST deposit amount from cash_deposits (NOT snapshot accumulated_cash)
+    # V_end   = current portfolio value from latest snapshot
+    # t       = years from first deposit date to latest snapshot date
+    try:
+        _cagr_first_dep = query_df(
+            """
+            SELECT deposit_date, amount
+            FROM cash_deposits
+            WHERE deposit_date IS NOT NULL
+            AND deposit_date > '1971-01-01'
+            AND amount > 0
+            AND (include_in_analysis = 1 OR include_in_analysis IS NULL)
+            AND (is_deleted IS NULL OR is_deleted = 0)
+            AND user_id = ?
+            ORDER BY deposit_date ASC
+            LIMIT 1
+            """,
+            (user_id,)
+        )
+        if not _cagr_first_dep.empty:
+            _cagr_v_start = float(_cagr_first_dep.iloc[0]['amount'])
+            _cagr_inception = pd.to_datetime(_cagr_first_dep.iloc[0]['deposit_date']).date()
+        else:
+            _cagr_v_start = initial_investment
+            _cagr_inception = inception_date
+    except Exception:
+        _cagr_v_start = initial_investment
+        _cagr_inception = inception_date
+
+    _cagr_days = (current_date - _cagr_inception).days if _cagr_inception else 0
+    _cagr_years = _cagr_days / 365.25 if _cagr_days > 0 else 0
+
+    if _cagr_v_start > 0 and _cagr_years > 0 and current_portfolio_value > 0:
+        cagr = (current_portfolio_value / _cagr_v_start) ** (1 / _cagr_years) - 1
     else:
         cagr = None
     
-    # Display metric cards
+    # ── Win Rate calculation ──────────────────────────────────────────
+    win_rate_data = PortfolioCalculator.calculate_win_rate(get_conn(), user_id)
+
+    # Display metric cards — Row 1: Return metrics
     col1, col2, col3 = st.columns(3)
+    
+    # TWR Tooltip explanation text
+    _twr_tooltip = (
+        "This percentage shows how much your existing money grew each year — "
+        "completely ignoring when you added new cash."
+    )
     
     with col1:
         if twr is not None:
@@ -19519,14 +20260,28 @@ def ui_overview():
                 "⏱️ Time-Weighted Return (TWR)",
                 f"{twr_pct:.2f}%",
                 delta=f"{'↑' if twr >= 0 else '↓'} Since Inception",
-                delta_color=delta_color
+                delta_color=delta_color,
+                help=_twr_tooltip
             )
-            st.caption("Eliminates impact of cash flows")
+            # Show additional details if available from Modified TWR
+            if twr_details:
+                period_start = twr_details.get('period_start', '')
+                period_end = twr_details.get('period_end', '')
+                subperiod_count = twr_details.get('subperiod_count', 0)
+                st.caption(f"📅 {period_start} → {period_end} ({subperiod_count} subperiods)")
+            else:
+                st.caption("Eliminates impact of cash flows")
         else:
-            st.metric("⏱️ Time-Weighted Return (TWR)", "N/A")
+            st.metric("⏱️ Time-Weighted Return (TWR)", "N/A", help=_twr_tooltip)
             st.caption("Insufficient data")
     
     with col2:
+        # MWRR Tooltip explanation
+        _mwrr_tooltip = (
+            "IRR measures the annualized return you personally earned based on "
+            "all your deposits, withdrawals, and the final value of your portfolio. "
+            "It reflects your timing and decisions, not just market performance."
+        )
         if mwrr is not None:
             mwrr_pct = mwrr * 100
             delta_color = "normal" if mwrr >= 0 else "inverse"
@@ -19535,11 +20290,11 @@ def ui_overview():
                 f"{mwrr_pct:.2f}%",
                 delta=f"{'↑' if mwrr >= 0 else '↓'} Since Inception",
                 delta_color=delta_color,
-                help="Accounts for timing and size of your cash contributions"
+                help=_mwrr_tooltip
             )
             st.caption("Based on actual cash deposits & dividends")
         else:
-            st.metric("💵 Money-Weighted Return (IRR)", "N/A")
+            st.metric("💵 Money-Weighted Return (IRR)", "N/A", help=_mwrr_tooltip)
             # Diagnostic message with debug info
             if cash_flows_mwrr.empty:
                 st.caption(f"⚠️ No cash deposits found for user_id={user_id}")
@@ -19549,6 +20304,14 @@ def ui_overview():
                 st.caption(f"⚠️ Calculation failed (cf:{len(cash_flows_mwrr)}, val:{current_portfolio_value:,.0f})")
     
     with col3:
+        # CAGR Tooltip explanation
+        _cagr_tooltip = (
+            "⚠️ CAGR shows simple start-to-end growth ONLY. "
+            "It IGNORES all deposits/withdrawals made during the period "
+            "and is NOT a performance metric. "
+            "Use TWR to measure investment skill (ignores deposit timing). "
+            "Use IRR to measure personal wealth growth (includes deposit timing)."
+        )
         if cagr is not None:
             cagr_pct = cagr * 100
             delta_color = "normal" if cagr >= 0 else "inverse"
@@ -19556,14 +20319,122 @@ def ui_overview():
                 "📊 CAGR",
                 f"{cagr_pct:.2f}%",
                 delta=f"{'↑' if cagr >= 0 else '↓'} Annualized",
-                delta_color=delta_color
+                delta_color=delta_color,
+                help=_cagr_tooltip
             )
-            days = (current_date - inception_date).days
-            years_display = days / 365.25
-            st.caption(f"{years_display:.2f} years ({days} days)")
+            st.caption(
+                f"📅 {_cagr_inception} → {current_date} "
+                f"({_cagr_years:.2f} yrs) · "
+                f"V₀ = {_cagr_v_start:,.0f} KWD"
+            )
         else:
-            st.metric("📊 CAGR", "N/A")
+            st.metric("📊 CAGR", "N/A", help=_cagr_tooltip)
             st.caption("Insufficient data")
+
+    # Row 2: Trade metrics (Win Rate + Profit Factor)
+    col4, col5 = st.columns(2)
+
+    with col4:
+        wr = win_rate_data.get('win_rate')
+        if wr is not None:
+            # Determine trend label & color
+            if wr > 55:
+                _wr_delta = "▲ Strong"
+                _wr_color = "normal"
+            elif wr >= 50:
+                _wr_delta = "● Average"
+                _wr_color = "off"
+            else:
+                _wr_delta = "▼ Weak"
+                _wr_color = "inverse"
+
+            st.metric(
+                "🎯 Win Rate",
+                f"{wr:.1f}%",
+                delta=_wr_delta,
+                delta_color=_wr_color,
+            )
+            st.caption(
+                f"{win_rate_data['winning_trades']}W / "
+                f"{win_rate_data['losing_trades']}L / "
+                f"{win_rate_data['breakeven_trades']}BE · "
+                f"PF {win_rate_data['profit_factor']}x"
+            )
+            with st.expander("📋 Details", expanded=False):
+                st.markdown(
+                    f"**{wr}%** — "
+                    f"{win_rate_data['winning_trades']}/{win_rate_data['total_trades']} "
+                    f"trades profitable"
+                )
+                _c1, _c2 = st.columns(2)
+                with _c1:
+                    st.markdown(f"✅ **Winning:** {win_rate_data['winning_trades']}")
+                    st.markdown(f"**+{win_rate_data['total_profit_kwd']:,.0f}** KWD")
+                    st.markdown(f"Avg: +{win_rate_data['avg_win_kwd']:,.0f} KWD")
+                with _c2:
+                    st.markdown(f"❌ **Losing:** {win_rate_data['losing_trades']}")
+                    st.markdown(f"**-{win_rate_data['total_loss_kwd']:,.0f}** KWD")
+                    st.markdown(f"Avg: -{win_rate_data['avg_loss_kwd']:,.0f} KWD")
+                if win_rate_data['breakeven_trades'] > 0:
+                    st.markdown(f"⚖️ Breakeven: {win_rate_data['breakeven_trades']}")
+                st.markdown(f"**Profit Factor:** {win_rate_data['profit_factor']}x")
+                st.caption(">55% Strong · 50-55% Average · <50% Weak")
+        else:
+            st.metric("🎯 Win Rate", "N/A")
+            st.caption("No completed trades yet")
+
+    with col5:
+        pf = win_rate_data.get('profit_factor')
+        if pf is not None and win_rate_data.get('status') == 'success':
+            # Determine trend label & color
+            if pf > 2.0:
+                _pf_delta = "▲ Excellent"
+                _pf_color = "normal"
+            elif pf >= 1.5:
+                _pf_delta = "● Good"
+                _pf_color = "normal"
+            elif pf >= 1.0:
+                _pf_delta = "▼ Fair"
+                _pf_color = "off"
+            else:
+                _pf_delta = "✘ Poor"
+                _pf_color = "inverse"
+
+            # Risk-reward ratio
+            _avg_w = win_rate_data.get('avg_win_kwd', 0)
+            _avg_l = win_rate_data.get('avg_loss_kwd', 0)
+            _rr = round(_avg_w / _avg_l, 2) if _avg_l > 0 else 0
+
+            st.metric(
+                "⚖️ Profit Factor",
+                f"{pf}x",
+                delta=_pf_delta,
+                delta_color=_pf_color,
+            )
+            _net_pnl = win_rate_data.get('total_profit_kwd', 0) - win_rate_data.get('total_loss_kwd', 0)
+            st.caption(
+                f"Net P&L: {'+' if _net_pnl >= 0 else ''}{_net_pnl:,.0f} KWD · "
+                f"R:R {_rr}x"
+            )
+            with st.expander("📋 Details", expanded=False):
+                st.markdown(f"**{pf}x** — you make **{pf} KWD** for every **1 KWD** lost")
+                _c1, _c2 = st.columns(2)
+                with _c1:
+                    st.markdown(f"📈 **Gross Profits**")
+                    st.markdown(f"**+{win_rate_data['total_profit_kwd']:,.0f}** KWD")
+                    st.markdown(f"from {win_rate_data['winning_trades']} wins")
+                    st.markdown(f"Avg: +{_avg_w:,.0f} KWD")
+                with _c2:
+                    st.markdown(f"📉 **Gross Losses**")
+                    st.markdown(f"**-{win_rate_data['total_loss_kwd']:,.0f}** KWD")
+                    st.markdown(f"from {win_rate_data['losing_trades']} losses")
+                    st.markdown(f"Avg: -{_avg_l:,.0f} KWD")
+                st.markdown(f"**Net P&L:** {'+' if _net_pnl >= 0 else ''}{_net_pnl:,.0f} KWD")
+                st.markdown(f"**Risk-Reward Ratio:** {_rr}x")
+                st.caption(">2.0 Excellent · 1.5-2.0 Good · 1.0-1.5 Fair · <1.0 Poor")
+        else:
+            st.metric("⚖️ Profit Factor", "N/A")
+            st.caption("No completed trades yet")
 
     # DEBUG: Show MWRR calculation details (can remove later)
     with st.expander("🔧 MWRR Debug Info", expanded=False):
@@ -19571,7 +20442,7 @@ def ui_overview():
         st.write(f"**Portfolio History Rows:** {len(portfolio_history)}")
         st.write(f"**Cash Flows for MWRR:** {len(cash_flows_mwrr)}")
         st.write(f"**Current Portfolio Value:** {current_portfolio_value:,.2f}")
-        st.write(f"**Inception Date:** {inception_date}")
+        st.write(f"**Inception Date (from deposits + transactions):** {inception_date}")
         st.write(f"**MWRR Result:** {mwrr}")
         if not cash_flows_mwrr.empty:
             st.write("**Cash Flow Sample (first 5):**")
@@ -21198,17 +22069,25 @@ def ui_pfm():
                     try:
                         conn = get_conn()
                         cur = conn.cursor()
+                        # Calculate holdings directly from transactions (grouped by symbol + portfolio)
+                        # This matches how build_portfolio_table works
                         db_execute(cur, """
-                            SELECT s.symbol, s.name, 
-                                   COALESCE(SUM(CASE WHEN t.txn_type='Buy' THEN t.shares ELSE 0 END) - 
-                                            SUM(CASE WHEN t.txn_type='Sell' THEN t.shares ELSE 0 END), 0) as shares,
-                                   s.current_price, s.currency
-                            FROM stocks s
-                            LEFT JOIN transactions t ON s.symbol = t.stock_symbol AND t.user_id = ?
-                            WHERE s.user_id = ?
-                            GROUP BY s.symbol, s.name, s.current_price, s.currency
-                            HAVING shares > 0
-                        """, (user_id, user_id))
+                            SELECT 
+                                t.stock_symbol as symbol,
+                                COALESCE(s.name, t.stock_symbol) as name,
+                                t.portfolio,
+                                SUM(CASE WHEN t.txn_type = 'Buy' THEN t.shares ELSE 0 END) - 
+                                SUM(CASE WHEN t.txn_type = 'Sell' THEN t.shares ELSE 0 END) as net_shares,
+                                COALESCE(s.current_price, 0) as current_price,
+                                COALESCE(s.currency, 'KWD') as currency
+                            FROM transactions t
+                            LEFT JOIN stocks s ON t.stock_symbol = s.symbol AND t.portfolio = s.portfolio AND s.user_id = t.user_id
+                            WHERE t.user_id = ? 
+                              AND t.is_deleted = 0
+                              AND t.txn_type IN ('Buy', 'Sell')
+                            GROUP BY t.stock_symbol, t.portfolio
+                            HAVING net_shares > 0
+                        """, (user_id,))
                         portfolio_rows = cur.fetchall()
                         conn.close()
                         
@@ -21216,13 +22095,13 @@ def ui_pfm():
                             port_data = []
                             total_port = 0.0
                             for row in portfolio_rows:
-                                ticker, name, qty, price, curr = row
+                                ticker, name, portfolio, qty, price, curr = row
                                 qty = float(qty) if qty else 0
                                 price = float(price) if price else 0
                                 val = qty * price
                                 val_kwd = convert_to_kwd(val, curr) if curr != "KWD" else val
                                 total_port += val_kwd
-                                port_data.append({"Ticker": ticker, "Company": name, "Shares": qty, "Price": price, "Currency": curr, "Value (KWD)": val_kwd})
+                                port_data.append({"Ticker": ticker, "Company": name, "Portfolio": portfolio, "Shares": qty, "Price": price, "Currency": curr, "Value (KWD)": val_kwd})
                             
                             st.dataframe(pd.DataFrame(port_data), use_container_width=True, hide_index=True)
                             
@@ -23336,34 +24215,6 @@ def main():
             on_change=toggle_privacy,
             key="privacy_toggle"
         )
-
-    # Show price fetching status (collapsed to reduce visual noise)
-    with st.expander("ℹ️ Price Fetching Status", expanded=False):
-        # Note: yfinance is lazy-loaded for faster startup
-        # Check if it's available when the user expands this section
-        yf_ready = _ensure_yfinance()
-        if not yf_ready:
-            st.error(f"""
-            ❌ **Price Fetching Error**: yfinance library failed to load ({YFINANCE_ERROR}).
-            
-            **To fix (recommended):**
-            1. Create a virtual environment:
-               ```
-               cd C:\\Users\\Sager\\OneDrive\\Desktop\\portfolio_app
-               py -3.11 -m venv .venv
-               .\\.venv\\Scripts\\activate
-               pip install streamlit yfinance pandas openpyxl requests
-               streamlit run ui.py
-               ```
-            
-            **Or run the setup script:** `setup_venv.bat`
-            
-            Currently using TradingView symbol mapping only (manual price entry required).
-            """)
-        elif not requests:
-            st.warning("⚠️ **Price Fetching Disabled**: Please install requests: `pip install requests`")
-        else:
-            st.success("✅ **Price Fetching Enabled**: Live prices from Yahoo Finance.")
 
     # --- PROFESSIONAL SIDEBAR ---
     with st.sidebar:

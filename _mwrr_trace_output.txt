@@ -1,0 +1,57 @@
+USER_ID VALUES IN TABLES:
+  cash_deposits: [2]
+  transactions: [2]
+  portfolio_snapshots: [1, 2]
+
+======================================================================
+COMPONENT 1: cash_deposits (deposits + withdrawals)
+======================================================================
+  Rows: 51  (dep=49, wd=2)
+  Deposit total: 120,728.65
+  Withdrawal total: 4,650.00
+
+======================================================================
+COMPONENT 2: cash_dividends_only
+======================================================================
+  Rows: 12  Total: 6,980.01
+      date  amount     type
+2025-06-24  198.00 DIVIDEND
+2025-06-01  133.00 DIVIDEND
+2025-05-01 3124.45 DIVIDEND
+2025-04-24  187.00 DIVIDEND
+2025-04-23  428.05 DIVIDEND
+2025-04-23   70.00 DIVIDEND
+2025-04-17  455.00 DIVIDEND
+2024-08-23  351.84 DIVIDEND
+2024-05-01 1100.05 DIVIDEND
+2024-04-23  286.29 DIVIDEND
+2023-08-23  286.00 DIVIDEND
+2023-04-01  360.33 DIVIDEND
+
+======================================================================
+COMPONENT 3: withdrawals (Withdrawal/FLOW_OUT from transactions)
+======================================================================
+  Rows: 0
+
+======================================================================
+COMPONENT 4: ledger_deposits (Deposit/FLOW_IN from transactions)
+======================================================================
+  Rows: 0
+
+======================================================================
+COMPONENT 5+6: transfers_in / transfers_out
+======================================================================
+  Rows: 0
+
+======================================================================
+COMBINED CASH FLOWS
+======================================================================
+Total rows: 63
+  DEPOSIT     :  49 rows, total =   120,728.65
+  WITHDRAWAL  :   2 rows, total =     4,650.00
+  DIVIDEND    :  12 rows, total =     6,980.01
+
+Portfolio value: 142,961.89
+
+>>> XIRR ALL components (deposits+divs+wd) = 15.9446% <<<
+>>> XIRR deposits-only (no dividends) = 12.4491% <<<
