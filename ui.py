@@ -14163,6 +14163,15 @@ def ui_backup_restore():
                 SELECT snapshot_date, portfolio_value, daily_movement, deposit_cash 
                 FROM portfolio_snapshots WHERE user_id = ? ORDER BY snapshot_date DESC
             """, (user_id,)),
+            'securities_master': safe_query("""
+                SELECT security_id, exchange, canonical_ticker, display_name, isin,
+                       currency, country, status, sector
+                FROM securities_master WHERE user_id = ? ORDER BY security_id
+            """, (user_id,)),
+            'security_aliases': safe_query("""
+                SELECT security_id, alias_name, alias_type, valid_from, valid_until
+                FROM security_aliases WHERE user_id = ? ORDER BY security_id, alias_name
+            """, (user_id,)),
         }
         return data
     
@@ -14224,7 +14233,7 @@ def ui_backup_restore():
         # Professional summary display
         st.markdown('<div class="data-table-header">📊 Your Data Summary</div>', unsafe_allow_html=True)
         
-        col1, col2, col3 = st.columns(3)
+        col1, col2, col3, col4 = st.columns(4)
         
         with col1:
             st.markdown("**📈 Transactions**")
@@ -14237,6 +14246,10 @@ def ui_backup_restore():
         with col3:
             st.markdown("**📊 Portfolio Tracking**")
             st.metric("📈 Portfolio Snapshots", stats['portfolio_snapshots'], help="Daily portfolio value snapshots for performance tracking")
+        
+        with col4:
+            st.markdown("**🏛️ Securities**")
+            st.metric("Securities Master", stats.get('securities_master', 0), help="Securities master entries + aliases")
         
         st.divider()
         
@@ -14263,6 +14276,10 @@ def ui_backup_restore():
                 included_items.append(f"✅ **Portfolio Tracking History** ({stats['portfolio_snapshots']}) - Daily values from {min_date} to {max_date}")
             else:
                 included_items.append(f"✅ **Portfolio Tracking History** ({stats['portfolio_snapshots']})")
+        if stats.get('securities_master', 0) > 0:
+            included_items.append(f"✅ **Securities Master** ({stats['securities_master']}) - Security definitions and metadata")
+        if stats.get('security_aliases', 0) > 0:
+            included_items.append(f"✅ **Security Aliases** ({stats['security_aliases']}) - Symbol alias mappings")
         
         for item in included_items:
             st.markdown(item)
@@ -14300,11 +14317,13 @@ def ui_backup_restore():
                     'key': [
                         'backup_version', 'backup_date', 'backup_time', 'username',
                         'transactions_count', 'cash_deposits_count', 'portfolio_snapshots_count',
+                        'securities_master_count', 'security_aliases_count',
                         'total_records'
                     ],
                     'value': [
-                        '3.4', str(date.today()), datetime.now().strftime('%H:%M:%S'), username,
+                        '3.5', str(date.today()), datetime.now().strftime('%H:%M:%S'), username,
                         stats['transactions'], stats['cash_deposits'], stats['portfolio_snapshots'],
+                        stats.get('securities_master', 0), stats.get('security_aliases', 0),
                         total_records
                     ]
                 })
@@ -14839,11 +14858,21 @@ def ui_backup_restore():
                                 conn.commit()
                                 error_details.append(f"Security Aliases: {alias_count} imported")
                             
-                            progress.progress(100, text="✅ Complete!")
+                            # STEP 9: Auto-populate securities from restored data
+                            progress.progress(98, text="🔗 Populating securities from restored data...")
                             try:
                                 conn.close()
                             except Exception:
                                 pass
+                            try:
+                                seed_default_securities(user_id)
+                                populate_aliases_from_transactions(user_id)
+                                error_details.append("Securities: auto-populated from restored data")
+                            except Exception as e:
+                                logger.warning(f"Securities auto-populate warning: {e}")
+                                error_details.append(f"Securities auto-populate: skipped ({e})")
+                            
+                            progress.progress(100, text="✅ Complete!")
                             
                             # Show results with details
                             st.success(f"✅ **Restore completed! {imported:,} total records processed.**")
