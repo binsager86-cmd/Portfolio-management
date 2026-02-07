@@ -19308,16 +19308,366 @@ def calculate_total_cash_dividends(user_id, debug=False):
 
 
 def ui_overview():
-    st.header("📊 Portfolio Overview")
-    
-    # Add refresh button
+    """FINANCIAL DASHBOARD - Overview Tab (Theme-Aware: Neon Dark / Clean Light)"""
+
+    is_dark = st.session_state.get("theme", "light") == "dark"
+
+    # ======================
+    # THEME-AWARE CSS
+    # ======================
+    if is_dark:
+        _css_vars = """
+        :root {
+            --bg-primary: #0a0a15;
+            --bg-secondary: #121220;
+            --bg-card: #1a1a2e;
+            --bg-card-hover: #22223e;
+            --text-primary: #e6e6f0;
+            --text-secondary: #a0a0b0;
+            --accent-primary: #8a2be2;
+            --accent-secondary: #4cc9f0;
+            --accent-tertiary: #ff00cc;
+            --success: #00d4ff;
+            --warning: #ff9e00;
+            --danger: #ff4757;
+            --card-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            --card-border: 1px solid rgba(138, 43, 226, 0.2);
+            --neon-glow: 0 0 15px rgba(138, 43, 226, 0.6);
+            --icon-bg-base: rgba(138, 43, 226, 0.1);
+            --icon-shadow-base: 0 4px 12px rgba(138, 43, 226, 0.2);
+            --sub-border: 1px dashed rgba(255, 255, 255, 0.06);
+            --section-border-color: rgba(138, 43, 226, 0.3);
+            --hm-border-default: rgba(255, 255, 255, 0.05);
+        }
+        [data-testid="stAppViewContainer"] {
+            background: linear-gradient(135deg, #0a0a15 0%, #0d0d25 100%) !important;
+            background-attachment: fixed;
+        }
+        [data-testid="stAppViewContainer"] > section { background: transparent !important; }
+        [data-testid="stVerticalBlock"] > div { background: transparent !important; }
+        [data-testid="stMarkdown"] p,
+        [data-testid="stMarkdown"] h1,
+        [data-testid="stMarkdown"] h2,
+        [data-testid="stMarkdown"] h3,
+        [data-testid="stMarkdown"] h4,
+        [data-testid="stMarkdown"] h5,
+        [data-testid="stMarkdown"] h6 { color: var(--text-primary) !important; }
+        """
+        _css_btn = """
+        [data-testid="stButton"] button {
+            background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary)) !important;
+            color: white !important; border: none !important;
+            border-radius: 10px !important; padding: 0.8rem 1.5rem !important;
+            font-weight: 600 !important; font-size: 1rem !important;
+            transition: all 0.3s ease !important;
+            box-shadow: 0 4px 15px rgba(138, 43, 226, 0.4) !important;
+            position: relative !important; overflow: hidden !important;
+        }
+        [data-testid="stButton"] button:hover {
+            transform: translateY(-3px) !important;
+            box-shadow: 0 6px 20px rgba(138, 43, 226, 0.7) !important;
+            background: linear-gradient(135deg, var(--accent-secondary), var(--accent-tertiary)) !important;
+        }
+        """
+        _css_expander = """
+        [data-testid="stExpander"] {
+            background: var(--bg-card) !important; border-radius: 12px !important;
+            border: var(--card-border) !important; box-shadow: var(--card-shadow) !important;
+            margin-bottom: 1rem !important;
+        }
+        [data-testid="stExpander"] > div { background: transparent !important; }
+        [data-testid="stExpander"] summary {
+            background: transparent !important; color: var(--text-primary) !important;
+            font-weight: 600 !important; font-size: 1.1rem !important;
+        }
+        [data-testid="stExpanderContent"] { background: transparent !important; color: var(--text-primary) !important; }
+        """
+        _css_card_extras = """
+        .dashboard-card:hover::before { opacity: 0.3; }
+        .metric-value { text-shadow: 0 0 10px rgba(138, 43, 226, 0.3); }
+        .metric-value.positive { text-shadow: 0 0 10px rgba(0, 212, 255, 0.5); }
+        .metric-value.negative { text-shadow: 0 0 10px rgba(255, 71, 87, 0.5); }
+        .heatmap-value {
+            background: linear-gradient(45deg, var(--success), var(--accent-secondary));
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+        }
+        .heatmap-card.positive .heatmap-value {
+            background: linear-gradient(45deg, var(--success), #059669);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+        }
+        .heatmap-card.negative .heatmap-value {
+            background: linear-gradient(45deg, var(--danger), #dc2626);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+        }
+        """
+    else:
+        # ===== LIGHT / PROFESSIONAL THEME =====
+        _css_vars = """
+        :root {
+            --bg-primary: #f8fafc;
+            --bg-secondary: #ffffff;
+            --bg-card: #ffffff;
+            --bg-card-hover: #f1f5f9;
+            --text-primary: #1e293b;
+            --text-secondary: #64748b;
+            --text-muted: #64748b;
+            --accent-primary: #6366f1;
+            --accent-secondary: #3b82f6;
+            --accent-tertiary: #ec4899;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --card-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
+            --card-shadow-hover: 0 8px 24px rgba(0, 0, 0, 0.1);
+            --card-border: 1px solid rgba(203, 213, 225, 0.6);
+            --neon-glow: 0 4px 20px rgba(99, 102, 241, 0.15);
+            --icon-bg-base: rgba(99, 102, 241, 0.08);
+            --icon-shadow-base: 0 2px 8px rgba(99, 102, 241, 0.1);
+            --sub-border: 1px dashed rgba(0, 0, 0, 0.08);
+            --section-border-color: rgba(99, 102, 241, 0.25);
+            --hm-border-default: rgba(0, 0, 0, 0.06);
+        }
+        """
+        _css_btn = """
+        [data-testid="stButton"] button {
+            background: linear-gradient(135deg, #6366f1, #3b82f6) !important;
+            color: white !important; border: none !important;
+            border-radius: 10px !important; padding: 0.8rem 1.5rem !important;
+            font-weight: 600 !important; font-size: 1rem !important;
+            transition: all 0.3s ease !important;
+            box-shadow: 0 4px 12px rgba(99, 102, 241, 0.25) !important;
+        }
+        [data-testid="stButton"] button:hover {
+            transform: translateY(-2px) !important;
+            box-shadow: 0 6px 18px rgba(99, 102, 241, 0.35) !important;
+        }
+        """
+        _css_expander = """
+        [data-testid="stExpander"] {
+            background: var(--bg-card) !important; border-radius: 12px !important;
+            border: var(--card-border) !important; box-shadow: var(--card-shadow) !important;
+            margin-bottom: 1rem !important;
+        }
+        [data-testid="stExpander"] summary {
+            font-weight: 600 !important; font-size: 1.05rem !important;
+            color: var(--text-primary) !important;
+        }
+        """
+        _css_card_extras = """
+        .dashboard-card:hover::before { opacity: 0; }
+        .metric-card { border-radius: 20px; }
+        .metric-card:hover { box-shadow: var(--card-shadow-hover); }
+        .metric-value { text-shadow: none; }
+        .metric-value.positive { text-shadow: none; }
+        .metric-value.negative { text-shadow: none; }
+        .heatmap-value { color: var(--text-primary); }
+        .heatmap-card.positive .heatmap-value { color: var(--success); }
+        .heatmap-card.negative .heatmap-value { color: var(--danger); }
+        .light-footer {
+            margin-top: 3rem; padding: 1.5rem;
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.04) 0%, rgba(59, 130, 246, 0.04) 100%);
+            border-radius: 16px; border: 1px solid rgba(203, 213, 225, 0.4);
+        }
+        """
+
+    # ===== SHARED CSS (uses CSS vars for theming — uses CSS vars) =====
+    _css_shared = """
+    /* ===== DASHBOARD CARD ===== */
+    .dashboard-card {
+        background: var(--bg-card); border-radius: 16px;
+        border: var(--card-border); box-shadow: var(--card-shadow);
+        padding: 1.5rem; margin-bottom: 1.5rem;
+        transition: all 0.3s ease; position: relative;
+        overflow: hidden; backdrop-filter: blur(10px);
+    }
+    .dashboard-card:hover {
+        transform: translateY(-5px);
+        box-shadow: var(--neon-glow), var(--card-shadow);
+        border-color: var(--accent-primary);
+    }
+    .dashboard-card::before {
+        content: ''; position: absolute;
+        top: -2px; left: -2px; right: -2px; bottom: -2px;
+        background: linear-gradient(45deg, var(--accent-primary), var(--accent-secondary), var(--accent-tertiary));
+        z-index: -1; border-radius: 18px;
+        filter: blur(10px); opacity: 0; transition: 0.3s ease;
+    }
+
+    /* ===== METRIC CARDS ===== */
+    .metric-card {
+        background: var(--bg-secondary); border-radius: 12px;
+        padding: 1.25rem; display: flex; flex-direction: column;
+        height: 100%; position: relative; overflow: hidden;
+        border: 1px solid var(--hm-border-default);
+        transition: all 0.3s ease;
+    }
+    .metric-card:hover {
+        transform: translateY(-3px);
+        border-color: var(--accent-primary);
+        box-shadow: 0 8px 20px rgba(0, 0, 0, 0.12);
+    }
+    .metric-card::before {
+        content: ''; position: absolute;
+        top: 0; left: 0; right: 0; height: 4px;
+        background: linear-gradient(90deg, var(--accent-primary), var(--accent-secondary));
+    }
+    .metric-icon {
+        font-size: 2.5rem; margin-bottom: 0.75rem;
+        width: 60px; height: 60px; border-radius: 16px;
+        display: flex; align-items: center; justify-content: center;
+        margin-right: auto;
+        background: var(--icon-bg-base);
+        box-shadow: var(--icon-shadow-base);
+    }
+    .metric-icon.positive { background: rgba(16, 185, 129, 0.12); color: var(--success); }
+    .metric-icon.negative { background: rgba(239, 68, 68, 0.12); color: var(--danger); }
+    .metric-icon.primary { background: rgba(99, 102, 241, 0.12); color: var(--accent-primary); }
+    .metric-icon.warning { background: rgba(245, 158, 11, 0.12); color: var(--warning); }
+    .metric-icon.purple { background: rgba(139, 92, 246, 0.12); color: var(--accent-primary); }
+    .metric-icon.pink { background: rgba(236, 72, 153, 0.12); color: var(--accent-tertiary); }
+    .metric-icon.green { background: rgba(16, 185, 129, 0.12); color: var(--success); }
+    .metric-value {
+        font-size: 2.25rem; font-weight: 800; line-height: 1.2;
+        margin: 0.75rem 0; color: var(--text-primary);
+    }
+    .metric-value.positive { color: var(--success); }
+    .metric-value.negative { color: var(--danger); }
+    .metric-label {
+        font-size: 0.95rem; color: var(--text-secondary);
+        font-weight: 600; margin-bottom: 0.25rem;
+        text-transform: uppercase; letter-spacing: 0.5px;
+    }
+    .metric-sub {
+        font-size: 0.9rem; color: var(--text-secondary);
+        margin-top: auto; padding-top: 0.75rem;
+        border-top: var(--sub-border);
+    }
+    .metric-sub.positive { color: var(--success); font-weight: 600; }
+    .metric-sub.negative { color: var(--danger); font-weight: 600; }
+
+    /* ===== SECTION HEADERS ===== */
+    .section-header {
+        display: flex; align-items: center; gap: 0.75rem;
+        padding-bottom: 0.75rem; margin: 2rem 0 1.25rem;
+        border-bottom: 2px solid var(--section-border-color);
+    }
+    .section-title {
+        font-size: 1.8rem; font-weight: 700; color: var(--text-primary);
+        display: flex; align-items: center; gap: 0.75rem;
+        letter-spacing: -0.5px;
+    }
+    .section-icon {
+        width: 40px; height: 40px; border-radius: 12px;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 1.6rem;
+        background: var(--icon-bg-base);
+        box-shadow: var(--icon-shadow-base);
+    }
+    .section-icon.blue { background: rgba(59, 130, 246, 0.12); color: var(--accent-secondary); }
+    .section-icon.green { background: rgba(16, 185, 129, 0.12); color: var(--success); }
+    .section-icon.purple { background: rgba(99, 102, 241, 0.12); color: var(--accent-primary); }
+    .section-icon.pink { background: rgba(236, 72, 153, 0.12); color: var(--accent-tertiary); }
+
+    /* ===== CHART CONTAINER ===== */
+    .chart-container {
+        background: var(--bg-card); border-radius: 16px;
+        padding: 1.5rem; box-shadow: var(--card-shadow);
+        margin: 1.5rem 0; border: var(--card-border);
+        backdrop-filter: blur(10px);
+    }
+    .chart-title {
+        font-size: 1.5rem; font-weight: 700; color: var(--text-primary);
+        margin-bottom: 1.25rem; display: flex; align-items: center;
+        gap: 0.75rem; letter-spacing: -0.5px;
+    }
+
+    /* ===== PERFORMANCE HEATMAP ===== */
+    .heatmap-container {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+        gap: 1.25rem; margin-top: 1rem;
+    }
+    .heatmap-card {
+        background: var(--bg-secondary); border-radius: 14px;
+        padding: 1.25rem; box-shadow: 0 3px 10px rgba(0, 0, 0, 0.08);
+        border-left: 4px solid var(--accent-primary);
+        transition: all 0.25s ease;
+        border: 1px solid var(--hm-border-default);
+    }
+    .heatmap-card:hover {
+        transform: translateX(4px);
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+        border-left-color: var(--accent-secondary);
+    }
+    .heatmap-card.positive { border-left-color: var(--success); }
+    .heatmap-card.negative { border-left-color: var(--danger); }
+    .heatmap-value {
+        font-size: 1.8rem; font-weight: 800; margin: 0.25rem 0;
+        color: var(--text-primary);
+    }
+    .heatmap-label { font-size: 0.95rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.25rem; }
+    .heatmap-sub { font-size: 0.85rem; color: var(--text-secondary); }
+
+    /* ===== FOOTER ===== */
+    .neon-footer {
+        margin-top: 3rem; padding: 1.5rem;
+        background: linear-gradient(135deg, rgba(99, 102, 241, 0.08) 0%, rgba(59, 130, 246, 0.08) 100%);
+        border-radius: 16px; border: 1px solid var(--section-border-color);
+        backdrop-filter: blur(10px);
+    }
+
+    /* ===== RESPONSIVE ===== */
+    @media (max-width: 768px) {
+        .section-title { font-size: 1.5rem; }
+        .metric-value { font-size: 1.8rem; }
+        .heatmap-container { grid-template-columns: 1fr; }
+    }
+    """
+
+    st.markdown(f"<style>{_css_vars}\n{_css_shared}\n{_css_card_extras}\n{_css_btn}\n{_css_expander}</style>", unsafe_allow_html=True)
+
+    # ======================
+    # HEADER SECTION (Theme-Specific)
+    # ======================
+    if is_dark:
+        st.markdown("""
+        <div class="dashboard-card">
+            <div style="text-align: center; padding: 1rem 0;">
+                <h1 style="font-size: 2.5rem; font-weight: 800; margin: 0; color: var(--text-primary); letter-spacing: -1px; text-shadow: 0 0 15px rgba(138, 43, 226, 0.5);">
+                    💼 PORTFOLIO INTELLIGENCE
+                </h1>
+                <p style="font-size: 1.1rem; color: var(--text-secondary); margin: 0.5rem 0 0; font-weight: 500;">
+                    Real-time performance analytics • Risk-adjusted returns • AI-powered insights
+                </p>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        st.markdown("""
+        <div class="dashboard-card">
+            <div style="text-align: center; padding: 1rem 0;">
+                <h1 style="font-size: 2.5rem; font-weight: 800; margin: 0; color: var(--text-primary); letter-spacing: -1px;">
+                    💼 Portfolio Intelligence Dashboard
+                </h1>
+                <p style="font-size: 1.1rem; color: var(--text-secondary); margin: 0.5rem 0 0; font-weight: 500;">
+                    Real-time performance analytics • Risk-adjusted returns • AI-powered insights
+                </p>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # Refresh Button
     col_refresh, col_spacer = st.columns([1, 5])
     with col_refresh:
-        if st.button("🔄 Refresh", key="overview_refresh", help="Recalculate all positions"):
+        if st.button("🔄 Refresh Data", key="overview_refresh_modern", use_container_width=True):
             build_portfolio_table.clear()
-            st.toast("✅ Data refreshed!")
+            st.cache_data.clear()
+            st.toast("✅ Data refreshed successfully!", icon="✨")
             st.rerun()
-    
+
+    # ======================
+    # CALCULATION LOGIC (UNCHANGED)
+    # ======================
     # Get total portfolio value from latest snapshot (for reference)
     user_id = st.session_state.get('user_id', 1)
     latest_snapshot = query_df(
@@ -19470,91 +19820,12 @@ def ui_overview():
     else:
         sharpe_sortino_error = "CBK rate unavailable - cannot calculate risk-adjusted metrics"
     
-    # Determine colors based on user-selected theme (Matching ui_portfolio_analysis)
-    if st.session_state.theme == "dark":
-        text_color = "#f1f5f9"
-        muted_color = "#94a3b8"
-        card_bg = "rgba(30, 41, 59, 0.5)"
-        card_border = "rgba(71, 85, 105, 0.5)"
-        accent_color = "#3b82f6"
-    else:  # Light mode
-        text_color = "#1e293b"
-        muted_color = "#64748b"
-        card_bg = "white"
-        card_border = "rgba(203, 213, 225, 0.8)"
-        accent_color = "#3b82f6"
-
-    # Summary Cards - Styled globally
-    
-    # CSS for fixed-size cards (Equal Height & Width) - Matching Performance Metrics Style
-    st.markdown(f"""
-    <style>
-    .ov-card {{
-        height: 120px;
-        padding: 1.25rem;
-        border-radius: 12px;
-        background: {card_bg};
-        border: 1px solid {card_border};
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-        transition: all 0.3s ease;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-    }}
-    .ov-card:hover {{
-        transform: translateY(-5px);
-        box-shadow: 0 8px 20px rgba(56, 189, 248, 0.2);
-        border-color: {accent_color};
-    }}
-    .ov-title {{
-        font-size: 0.75rem;
-        color: {muted_color};
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        margin-bottom: 0.5rem;
-    }}
-    .ov-value {{
-        font-size: 1.5rem;
-        font-weight: 700;
-        line-height: 1.2;
-        color: {text_color};
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-    }}
-    .ov-sub {{
-        font-size: 0.8rem;
-        color: {muted_color};
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        margin-top: 0.5rem;
-    }}
-    .ov-delta-pos {{ 
-        color: #10b981; 
-        font-weight: 600; 
-    }}
-    .ov-delta-neg {{ 
-        color: #ef4444; 
-        font-weight: 600; 
-    }}
-    .ov-currency {{
-        font-size: 0.9rem;
-        opacity: 0.7;
-        font-weight: 500;
-    }}
-    </style>
-    """, unsafe_allow_html=True)
-
-    # Calculate daily movement
+    # ======================
+    # PRECOMPUTE DISPLAY VARIABLES
+    # ======================
     daily_change_value = 0.0
     daily_change_pct = 0.0
     daily_change_available = False
-    
     if not previous_snapshot.empty:
         prev_value = previous_snapshot['portfolio_value'].iloc[0]
         if prev_value and prev_value > 0:
@@ -19562,122 +19833,123 @@ def ui_overview():
             daily_change_pct = (daily_change_value / prev_value) * 100
             daily_change_available = True
 
+    net_gain = live_portfolio_value - total_deposits_kwd
+    roi = (net_gain / total_deposits_kwd * 100) if total_deposits_kwd > 0 else 0
+    total_profit = realized_profit_kwd + unrealized_profit_kwd + total_dividends_kwd
+    profitable_trades = len(realized_trades_df[realized_trades_df['Profit/Loss (KWD)'] > 0]) if not realized_trades_df.empty else 0
+    deposit_source_text = "✅ All deposits since inception" if deposits_from_unified else "📊 Calculated from Buy-Sell"
+
+    # ======================
+    # METRIC CARDS - ROW 1
+    # ======================
+    st.markdown('<div class="section-header"><div class="section-icon purple">📊</div><div class="section-title">Portfolio Snapshot</div></div>', unsafe_allow_html=True)
+
     col1, col2, col3, col4, col5 = st.columns(5)
-    
+
     with col1:
-        # Show breakdown: Stocks + Cash (no decimals for money)
-        cash_text = f"Cash: {fmt_money_plain(manual_cash_kwd)} KWD" if manual_cash_kwd > 0 else "Live prices"
         st.markdown(f"""
-        <div class="ov-card">
-            <div class="ov-title">💼 Portfolio Value</div>
-            <div class="ov-value">{fmt_money_plain(live_portfolio_value)} <span class="ov-currency">KWD</span></div>
-            <div class="ov-sub">{cash_text}</div>
+        <div class="metric-card">
+            <div class="metric-icon primary">💼</div>
+            <div class="metric-label">TOTAL VALUE</div>
+            <div class="metric-value">{fmt_money_plain(live_portfolio_value)} KWD</div>
+            <div class="metric-sub">Stocks: {fmt_money_plain(live_stock_value)} • Cash: {fmt_money_plain(manual_cash_kwd)}</div>
         </div>
         """, unsafe_allow_html=True)
-    
+
     with col2:
-        deposit_source_text = "✅ All deposits since inception" if deposits_from_unified else "📊 Calculated from Buy-Sell"
         st.markdown(f"""
-        <div class="ov-card">
-            <div class="ov-title">💰 Total Deposits</div>
-            <div class="ov-value">{fmt_money_plain(total_deposits_kwd)} <span class="ov-currency">KWD</span></div>
-            <div class="ov-sub">{deposit_source_text}</div>
+        <div class="metric-card">
+            <div class="metric-icon purple">💰</div>
+            <div class="metric-label">TOTAL DEPOSITS</div>
+            <div class="metric-value">{fmt_money_plain(total_deposits_kwd)} KWD</div>
+            <div class="metric-sub" style="font-size:0.85rem">{deposit_source_text[:30]}...</div>
         </div>
         """, unsafe_allow_html=True)
-    
+
     with col3:
-        # Net Gain = Live Portfolio Value - Total Cash Deposits
-        net_gain = live_portfolio_value - total_deposits_kwd
-        roi = (net_gain / total_deposits_kwd * 100) if total_deposits_kwd > 0 else 0
-        
-        delta_class = "ov-delta-pos" if roi >= 0 else "ov-delta-neg"
-        delta_sign = "+" if roi >= 0 else ""
-        
+        _delta_class = "positive" if roi >= 0 else "negative"
+        _delta_sign = "+" if roi >= 0 else ""
         st.markdown(f"""
-        <div class="ov-card">
-            <div class="ov-title">📈 Net Gain</div>
-            <div class="ov-value">{fmt_money_plain(net_gain)} <span class="ov-currency">KWD</span></div>
-            <div class="ov-sub">
-                <span class="{delta_class}">{delta_sign}{roi:.2f}% ROI</span>
-            </div>
+        <div class="metric-card">
+            <div class="metric-icon {'positive' if roi >= 0 else 'negative'}">📈</div>
+            <div class="metric-label">NET GAIN</div>
+            <div class="metric-value {_delta_class}">{_delta_sign}{fmt_money_plain(net_gain)} KWD</div>
+            <div class="metric-sub {_delta_class}">{_delta_sign}{roi:.2f}% ROI</div>
         </div>
         """, unsafe_allow_html=True)
-    
+
     with col4:
         st.markdown(f"""
-        <div class="ov-card">
-            <div class="ov-title">📊 Total Stocks</div>
-            <div class="ov-value">{num_stocks}</div>
-            <div class="ov-sub">{num_txns} transactions</div>
+        <div class="metric-card">
+            <div class="metric-icon warning">📊</div>
+            <div class="metric-label">ACTIVE HOLDINGS</div>
+            <div class="metric-value">{num_stocks}</div>
+            <div class="metric-sub">{num_txns} transactions</div>
         </div>
         """, unsafe_allow_html=True)
-    
+
     with col5:
         if daily_change_available:
-            delta_class = "ov-delta-pos" if daily_change_value >= 0 else "ov-delta-neg"
-            delta_sign = "+" if daily_change_value >= 0 else ""
-            arrow = "▲" if daily_change_value >= 0 else "▼"
-            
+            _dc_class = "positive" if daily_change_value >= 0 else "negative"
+            _dc_sign = "+" if daily_change_value >= 0 else ""
+            _dc_arrow = "▲" if daily_change_value >= 0 else "▼"
             st.markdown(f"""
-            <div class="ov-card">
-                <div class="ov-title">📅 Daily Movement</div>
-                <div class="ov-value"><span class="{delta_class}">{delta_sign}{fmt_money_plain(abs(daily_change_value))}</span> <span class="ov-currency">KWD</span></div>
-                <div class="ov-sub">
-                    <span class="{delta_class}">{arrow} {delta_sign}{daily_change_pct:.2f}%</span> vs yesterday
-                </div>
+            <div class="metric-card">
+                <div class="metric-icon {'positive' if daily_change_value >= 0 else 'negative'}">📅</div>
+                <div class="metric-label">DAILY MOVEMENT</div>
+                <div class="metric-value {_dc_class}">{_dc_sign}{fmt_money_plain(abs(daily_change_value))} KWD</div>
+                <div class="metric-sub {_dc_class}">{_dc_arrow} {_dc_sign}{daily_change_pct:.2f}%</div>
             </div>
             """, unsafe_allow_html=True)
         else:
-            st.markdown(f"""
-            <div class="ov-card">
-                <div class="ov-title">📅 Daily Movement</div>
-                <div class="ov-value">N/A</div>
-                <div class="ov-sub">Need 2+ snapshots</div>
+            st.markdown("""
+            <div class="metric-card">
+                <div class="metric-icon">📅</div>
+                <div class="metric-label">DAILY MOVEMENT</div>
+                <div class="metric-value">N/A</div>
+                <div class="metric-sub">Need 2+ snapshots</div>
             </div>
             """, unsafe_allow_html=True)
 
-    # Second row: Realized & Unrealized Profit
-    st.write("")  # Spacer
+    # ======================
+    # METRIC CARDS - ROW 2
+    # ======================
+    st.markdown('<div style="height:1.5rem"></div>', unsafe_allow_html=True)
     col_r1, col_r2, col_r3 = st.columns(3)
-    
+
     with col_r1:
-        realized_class = "ov-delta-pos" if realized_profit_kwd >= 0 else "ov-delta-neg"
-        realized_sign = "+" if realized_profit_kwd >= 0 else ""
-        # Show breakdown: Gains vs Losses
-        gains_text = f"+{fmt_money_plain(total_profits_kwd)}" if total_profits_kwd > 0 else "0"
-        losses_text = f"{fmt_money_plain(total_losses_kwd)}" if total_losses_kwd < 0 else "0"
-        num_trades = len(realized_trades_df) if not realized_trades_df.empty else 0
-        breakdown_text = f"Gains: {gains_text} | Losses: {losses_text} ({num_trades} trades)"
+        _r_class = "positive" if realized_profit_kwd >= 0 else "negative"
+        _r_sign = "+" if realized_profit_kwd >= 0 else ""
         st.markdown(f"""
-        <div class="ov-card">
-            <div class="ov-title">💵 Realized Profit</div>
-            <div class="ov-value"><span class="{realized_class}">{realized_sign}{fmt_money_plain(realized_profit_kwd)}</span> <span class="ov-currency">KWD</span></div>
-            <div class="ov-sub">{breakdown_text}</div>
+        <div class="metric-card">
+            <div class="metric-icon {'positive' if realized_profit_kwd >= 0 else 'negative'}">💵</div>
+            <div class="metric-label">REALIZED PROFIT</div>
+            <div class="metric-value {_r_class}">{_r_sign}{fmt_money_plain(realized_profit_kwd)} KWD</div>
+            <div class="metric-sub">{profitable_trades}/{len(realized_trades_df)} profitable trades</div>
         </div>
         """, unsafe_allow_html=True)
-    
+
     with col_r2:
-        unrealized_class = "ov-delta-pos" if unrealized_profit_kwd >= 0 else "ov-delta-neg"
-        unrealized_sign = "+" if unrealized_profit_kwd >= 0 else ""
+        _u_class = "positive" if unrealized_profit_kwd >= 0 else "negative"
+        _u_sign = "+" if unrealized_profit_kwd >= 0 else ""
         st.markdown(f"""
-        <div class="ov-card">
-            <div class="ov-title">📊 Unrealized Profit</div>
-            <div class="ov-value"><span class="{unrealized_class}">{unrealized_sign}{fmt_money_plain(unrealized_profit_kwd)}</span> <span class="ov-currency">KWD</span></div>
-            <div class="ov-sub">Current holdings</div>
+        <div class="metric-card">
+            <div class="metric-icon green">📊</div>
+            <div class="metric-label">UNREALIZED P&L</div>
+            <div class="metric-value {_u_class}">{_u_sign}{fmt_money_plain(unrealized_profit_kwd)} KWD</div>
+            <div class="metric-sub">Current market positions</div>
         </div>
         """, unsafe_allow_html=True)
-    
+
     with col_r3:
-        total_profit = realized_profit_kwd + unrealized_profit_kwd + total_dividends_kwd
-        total_class = "ov-delta-pos" if total_profit >= 0 else "ov-delta-neg"
-        total_sign = "+" if total_profit >= 0 else ""
-        # Show dividend count for transparency (cash dividends only, no reinvested)
-        div_info = f"Cash Dividends: {fmt_money_plain(total_dividends_kwd)} KWD ({dividend_count} records)"
+        _t_class = "positive" if total_profit >= 0 else "negative"
+        _t_sign = "+" if total_profit >= 0 else ""
         st.markdown(f"""
-        <div class="ov-card">
-            <div class="ov-title">🏆 Total Profit (incl. Cash Dividends)</div>
-            <div class="ov-value"><span class="{total_class}">{total_sign}{fmt_money_plain(total_profit)}</span> <span class="ov-currency">KWD</span></div>
-            <div class="ov-sub">{div_info}</div>
+        <div class="metric-card">
+            <div class="metric-icon pink">🏆</div>
+            <div class="metric-label">TOTAL PROFIT</div>
+            <div class="metric-value {_t_class}">{_t_sign}{fmt_money_plain(total_profit)} KWD</div>
+            <div class="metric-sub">Includes {dividend_count} dividend records</div>
         </div>
         """, unsafe_allow_html=True)
 
@@ -19769,39 +20041,18 @@ def ui_overview():
                 hide_index=True
             )
 
-    st.divider()
-
-    st.subheader("⚡ Risk Adjusted Performance")
-    
-    # CBK Rate Status Row with Refresh Button
-    rate_col1, rate_col2 = st.columns([3, 1])
-    with rate_col1:
-        # Display CBK rate source info
-        source_icons = {
-            'cbk_api': '🌐',
-            'config': '⚙️',
-            'db_cache': '💾',
-            'default': '⚠️',
-            'unavailable': '❌'
-        }
-        source_labels = {
-            'cbk_api': 'Live from CBK',
-            'config': 'Configured Value',
-            'db_cache': 'Cached Value',
-            'default': 'Default Value',
-            'unavailable': 'Unavailable'
-        }
+    # CBK Rate Refresh (collapsed expander)
+    with st.expander("⚙️ Risk-Free Rate (CBK)", expanded=False):
+        source_icons = {'cbk_api': '🌐', 'config': '⚙️', 'db_cache': '💾', 'default': '⚠️', 'unavailable': '❌'}
+        source_labels = {'cbk_api': 'Live from CBK', 'config': 'Configured Value', 'db_cache': 'Cached Value', 'default': 'Default Value', 'unavailable': 'Unavailable'}
         source_icon = source_icons.get(cbk_rate_source, '❓')
         source_label = source_labels.get(cbk_rate_source, 'Unknown')
-        
         if cbk_rate_is_stale and cbk_rate_warning:
             st.caption(f"{source_icon} Risk-Free Rate (CBK): **{rf_rate_percent:.2f}%** — *{cbk_rate_warning}*")
         elif cbk_rate_date:
             st.caption(f"{source_icon} Risk-Free Rate (CBK): **{rf_rate_percent:.2f}%** — {source_label} (as of {cbk_rate_date})")
         else:
             st.caption(f"{source_icon} Risk-Free Rate (CBK): **{rf_rate_percent:.2f}%** — {source_label}")
-    
-    with rate_col2:
         if st.button("🔄 Refresh CBK Rate", key="refresh_cbk_rate", help="Fetch latest rate from Central Bank of Kuwait"):
             with st.spinner("Fetching CBK rate..."):
                 refreshed_data = get_cbk_risk_free_rate(force_refresh=True)
@@ -19810,78 +20061,12 @@ def ui_overview():
                     st.rerun()
                 else:
                     st.error("Could not fetch CBK rate. Using fallback value.")
-    
-    # Show error if rate unavailable
-    if sharpe_sortino_error:
-        st.warning(sharpe_sortino_error)
-    
-    r_col1, r_col2, r_col3, r_col4 = st.columns(4)
-    
-    with r_col1:
-        if sharpe_ratio is not None:
-            sr_val = sharpe_ratio
-            if sr_val > 1.0:
-                sr_color = "#10b981" # Green
-            elif sr_val >= 0.0:
-                sr_color = "#f59e0b" # Orange
-            else:
-                sr_color = "#ef4444" # Red
-            
-            # Build subtitle with stale indicator
-            sr_subtitle = f"Risk-Free (CBK): {rf_rate_percent:.2f}%"
-            if cbk_rate_is_stale:
-                sr_subtitle += " ⚠️"
-            
-            st.markdown(f"""
-            <div class="ov-card">
-                <div class="ov-title">Sharpe Ratio</div>
-                <div class="ov-value" style="color: {sr_color};">{sr_val:.2f}</div>
-                <div class="ov-sub">{sr_subtitle}</div>
-            </div>
-            """, unsafe_allow_html=True)
-        else:
-            error_msg = "Need more data" if not sharpe_sortino_error else "Rate unavailable"
-            st.markdown(f"""
-            <div class="ov-card">
-                <div class="ov-title">Sharpe Ratio</div>
-                <div class="ov-value">N/A</div>
-                <div class="ov-sub">{error_msg}</div>
-            </div>
-            """, unsafe_allow_html=True)
-    
-    with r_col2:
-        if sortino_ratio is not None:
-            so_val = sortino_ratio
-            if so_val > 2.0:
-                so_color = "#10b981" # Green (Excellent)
-            elif so_val >= 1.0:
-                so_color = "#0ea5e9" # Blue (Good)
-            else:
-                so_color = "#f97316" # Orange (Risky)
-            
-            st.markdown(f"""
-            <div class="ov-card">
-                <div class="ov-title">Sortino Ratio</div>
-                <div class="ov-value" style="color: {so_color};">{so_val:.2f}</div>
-                <div class="ov-sub">Target Return (MAR): 0%</div>
-            </div>
-            """, unsafe_allow_html=True)
-        else:
-            st.markdown(f"""
-            <div class="ov-card">
-                <div class="ov-title">Sortino Ratio</div>
-                <div class="ov-value">N/A</div>
-                <div class="ov-sub">Need more data</div>
-            </div>
-            """, unsafe_allow_html=True)
+        if sharpe_sortino_error:
+            st.warning(sharpe_sortino_error)
 
-
-    st.divider()
-    
-    # Advanced Performance Metrics
-    st.subheader("📈 Performance Metrics")
-    
-    # Prepare data for calculations
+    # ======================
+    # PORTFOLIO VALUE CHART
+    # ======================
     user_id = st.session_state.get('user_id', 1)
     try:
         portfolio_history = query_df(
@@ -19890,6 +20075,67 @@ def ui_overview():
         )
     except Exception:
         portfolio_history = pd.DataFrame(columns=['date', 'balance', 'accumulated_cash'])
+
+    st.markdown('<div class="chart-container">', unsafe_allow_html=True)
+    st.markdown('<div class="chart-title"><div class="section-icon blue">📈</div> Portfolio Value History</div>', unsafe_allow_html=True)
+
+    if not portfolio_history.empty and go is not None:
+        _chart_hist = portfolio_history.copy()
+        _chart_hist['date'] = pd.to_datetime(_chart_hist['date'])
+        # Theme-aware chart colors
+        if is_dark:
+            _line_color, _marker_color = '#4cc9f0', '#8a2be2'
+            _dep_line, _dep_fill = '#00d4ff', 'rgba(0, 212, 255, 0.1)'
+            _plot_bg, _paper_bg = 'rgba(26, 26, 46, 0.5)', 'rgba(0,0,0,0)'
+            _grid_c, _axis_c, _label_c = 'rgba(255,255,255,0.05)', '#e6e6f0', '#a0a0b0'
+            _legend_bg, _legend_border = 'rgba(26, 26, 46, 0.8)', 'rgba(138, 43, 226, 0.3)'
+            _hover_bg = 'rgba(26, 26, 46, 0.95)'
+        else:
+            _line_color, _marker_color = '#6366f1', '#3b82f6'
+            _dep_line, _dep_fill = '#10b981', 'rgba(16, 185, 129, 0.08)'
+            _plot_bg, _paper_bg = '#ffffff', 'rgba(0,0,0,0)'
+            _grid_c, _axis_c, _label_c = 'rgba(0,0,0,0.06)', '#1e293b', '#64748b'
+            _legend_bg, _legend_border = 'rgba(255,255,255,0.9)', 'rgba(203, 213, 225, 0.6)'
+            _hover_bg = 'rgba(255,255,255,0.95)'
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=_chart_hist['date'], y=_chart_hist['balance'],
+            mode='lines+markers', name='Portfolio Value',
+            line=dict(color=_line_color, width=3, shape='spline'),
+            marker=dict(size=7, color=_marker_color, symbol='circle'),
+            hovertemplate='<b>Date</b>: %{x|%Y-%m-%d}<br><b>Value</b>: %{y:,.0f} KWD<extra></extra>'
+        ))
+        if 'accumulated_cash' in _chart_hist.columns:
+            fig.add_trace(go.Scatter(
+                x=_chart_hist['date'], y=_chart_hist['accumulated_cash'],
+                mode='lines', name='Deposits',
+                line=dict(color=_dep_line, width=1.5, dash='dot'),
+                fill='tozeroy', fillcolor=_dep_fill,
+                hovertemplate='<b>Deposits</b>: %{y:,.0f} KWD<extra></extra>'
+            ))
+        fig.update_layout(
+            height=420,
+            margin=dict(l=20, r=20, t=40, b=40),
+            plot_bgcolor=_plot_bg,
+            paper_bgcolor=_paper_bg,
+            hovermode='x unified',
+            xaxis=dict(showgrid=True, gridcolor=_grid_c, zeroline=False,
+                       title=dict(text='Date', font=dict(size=12, color=_label_c)), color=_axis_c),
+            yaxis=dict(showgrid=True, gridcolor=_grid_c, zeroline=False,
+                       title=dict(text='Value (KWD)', font=dict(size=12, color=_label_c)),
+                       tickformat=',.0f', color=_axis_c),
+            legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1,
+                        bgcolor=_legend_bg, bordercolor=_legend_border,
+                        borderwidth=1, font=dict(color=_axis_c)),
+            hoverlabel=dict(bgcolor=_hover_bg, font_size=13,
+                            font_family='Inter, sans-serif', namelength=-1,
+                            font=dict(color=_axis_c))
+        )
+        st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+    else:
+        st.info("💡 Add portfolio snapshots to visualize your growth history.")
+
+    st.markdown('</div>', unsafe_allow_html=True)
     
     # Collect ALL cash flows (deposits + dividends) with their timing
     # FOR MWRR: Use CORRECT data sources per user specification
@@ -20243,200 +20489,161 @@ def ui_overview():
     # ── Win Rate calculation ──────────────────────────────────────────
     win_rate_data = PortfolioCalculator.calculate_win_rate(get_conn(), user_id)
 
-    # Display metric cards — Row 1: Return metrics
-    col1, col2, col3 = st.columns(3)
-    
-    # TWR Tooltip explanation text
-    _twr_tooltip = (
-        "This percentage shows how much your existing money grew each year — "
-        "completely ignoring when you added new cash."
-    )
-    
-    with col1:
-        if twr is not None:
-            twr_pct = twr * 100
-            delta_color = "normal" if twr >= 0 else "inverse"
-            st.metric(
-                "⏱️ Time-Weighted Return (TWR)",
-                f"{twr_pct:.2f}%",
-                delta=f"{'↑' if twr >= 0 else '↓'} Since Inception",
-                delta_color=delta_color,
-                help=_twr_tooltip
-            )
-            # Show additional details if available from Modified TWR
-            if twr_details:
-                period_start = twr_details.get('period_start', '')
-                period_end = twr_details.get('period_end', '')
-                subperiod_count = twr_details.get('subperiod_count', 0)
-                st.caption(f"📅 {period_start} → {period_end} ({subperiod_count} subperiods)")
-            else:
-                st.caption("Eliminates impact of cash flows")
-        else:
-            st.metric("⏱️ Time-Weighted Return (TWR)", "N/A", help=_twr_tooltip)
-            st.caption("Insufficient data")
-    
-    with col2:
-        # MWRR Tooltip explanation
-        _mwrr_tooltip = (
-            "IRR measures the annualized return you personally earned based on "
-            "all your deposits, withdrawals, and the final value of your portfolio. "
-            "It reflects your timing and decisions, not just market performance."
-        )
-        if mwrr is not None:
-            mwrr_pct = mwrr * 100
-            delta_color = "normal" if mwrr >= 0 else "inverse"
-            st.metric(
-                "💵 Money-Weighted Return (IRR)",
-                f"{mwrr_pct:.2f}%",
-                delta=f"{'↑' if mwrr >= 0 else '↓'} Since Inception",
-                delta_color=delta_color,
-                help=_mwrr_tooltip
-            )
-            st.caption("Based on actual cash deposits & dividends")
-        else:
-            st.metric("💵 Money-Weighted Return (IRR)", "N/A", help=_mwrr_tooltip)
-            # Diagnostic message with debug info
-            if cash_flows_mwrr.empty:
-                st.caption(f"⚠️ No cash deposits found for user_id={user_id}")
-            elif current_portfolio_value <= 0:
-                st.caption(f"⚠️ No current portfolio value (history rows: {len(portfolio_history)})")
-            else:
-                st.caption(f"⚠️ Calculation failed (cf:{len(cash_flows_mwrr)}, val:{current_portfolio_value:,.0f})")
-    
-    with col3:
-        # CAGR Tooltip explanation
-        _cagr_tooltip = (
-            "⚠️ CAGR shows simple start-to-end growth ONLY. "
-            "It IGNORES all deposits/withdrawals made during the period "
-            "and is NOT a performance metric. "
-            "Use TWR to measure investment skill (ignores deposit timing). "
-            "Use IRR to measure personal wealth growth (includes deposit timing)."
-        )
-        if cagr is not None:
-            cagr_pct = cagr * 100
-            delta_color = "normal" if cagr >= 0 else "inverse"
-            st.metric(
-                "📊 CAGR",
-                f"{cagr_pct:.2f}%",
-                delta=f"{'↑' if cagr >= 0 else '↓'} Annualized",
-                delta_color=delta_color,
-                help=_cagr_tooltip
-            )
-            st.caption(
-                f"📅 {_cagr_inception} → {current_date} "
-                f"({_cagr_years:.2f} yrs) · "
-                f"V₀ = {_cagr_v_start:,.0f} KWD"
-            )
-        else:
-            st.metric("📊 CAGR", "N/A", help=_cagr_tooltip)
-            st.caption("Insufficient data")
+    # ======================
+    # PERFORMANCE HEATMAP
+    # ======================
+    st.markdown('<div class="section-header"><div class="section-icon green">⚡</div><div class="section-title">Performance Metrics</div></div>', unsafe_allow_html=True)
 
-    # Row 2: Trade metrics (Win Rate + Profit Factor)
-    col4, col5 = st.columns(2)
+    heatmap_cols = st.columns(2)
 
-    with col4:
-        wr = win_rate_data.get('win_rate')
-        if wr is not None:
-            # Determine trend label & color
-            if wr > 55:
-                _wr_delta = "▲ Strong"
-                _wr_color = "normal"
-            elif wr >= 50:
-                _wr_delta = "● Average"
-                _wr_color = "off"
-            else:
-                _wr_delta = "▼ Weak"
-                _wr_color = "inverse"
+    with heatmap_cols[0]:
+        st.markdown('<div class="heatmap-container">', unsafe_allow_html=True)
 
-            st.metric(
-                "🎯 Win Rate",
-                f"{wr:.1f}%",
-                delta=_wr_delta,
-                delta_color=_wr_color,
-            )
-            st.caption(
-                f"{win_rate_data['winning_trades']}W / "
-                f"{win_rate_data['losing_trades']}L / "
-                f"{win_rate_data['breakeven_trades']}BE · "
-                f"PF {win_rate_data['profit_factor']}x"
-            )
-            with st.expander("📋 Details", expanded=False):
-                st.markdown(
-                    f"**{wr}%** — "
-                    f"{win_rate_data['winning_trades']}/{win_rate_data['total_trades']} "
-                    f"trades profitable"
-                )
-                _c1, _c2 = st.columns(2)
-                with _c1:
-                    st.markdown(f"✅ **Winning:** {win_rate_data['winning_trades']}")
-                    st.markdown(f"**+{win_rate_data['total_profit_kwd']:,.0f}** KWD")
-                    st.markdown(f"Avg: +{win_rate_data['avg_win_kwd']:,.0f} KWD")
-                with _c2:
-                    st.markdown(f"❌ **Losing:** {win_rate_data['losing_trades']}")
-                    st.markdown(f"**-{win_rate_data['total_loss_kwd']:,.0f}** KWD")
-                    st.markdown(f"Avg: -{win_rate_data['avg_loss_kwd']:,.0f} KWD")
-                if win_rate_data['breakeven_trades'] > 0:
-                    st.markdown(f"⚖️ Breakeven: {win_rate_data['breakeven_trades']}")
-                st.markdown(f"**Profit Factor:** {win_rate_data['profit_factor']}x")
-                st.caption(">55% Strong · 50-55% Average · <50% Weak")
-        else:
-            st.metric("🎯 Win Rate", "N/A")
-            st.caption("No completed trades yet")
+        # TWR Card
+        _twr_pct = twr * 100 if twr is not None else None
+        _twr_class = "positive" if twr is not None and twr >= 0 else "negative" if twr is not None and twr < 0 else ""
+        _twr_sub = "Eliminates impact of cash flows • Since inception"
+        if twr_details:
+            _sp_count = twr_details.get('subperiod_count', 0)
+            _twr_sub = f"{twr_details.get('period_start', '')} → {twr_details.get('period_end', '')} • {_sp_count} subperiods"
+        st.markdown(f"""
+        <div class="heatmap-card {_twr_class}">
+            <div class="heatmap-label">⏱️ Time-Weighted Return (TWR)</div>
+            <div class="heatmap-value">{f'{_twr_pct:.2f}%' if _twr_pct is not None else 'N/A'}</div>
+            <div class="heatmap-sub">{_twr_sub}</div>
+        </div>
+        """, unsafe_allow_html=True)
 
-    with col5:
-        pf = win_rate_data.get('profit_factor')
-        if pf is not None and win_rate_data.get('status') == 'success':
-            # Determine trend label & color
-            if pf > 2.0:
-                _pf_delta = "▲ Excellent"
-                _pf_color = "normal"
-            elif pf >= 1.5:
-                _pf_delta = "● Good"
-                _pf_color = "normal"
-            elif pf >= 1.0:
-                _pf_delta = "▼ Fair"
-                _pf_color = "off"
-            else:
-                _pf_delta = "✘ Poor"
-                _pf_color = "inverse"
+        # MWRR Card
+        _mwrr_pct = mwrr * 100 if mwrr is not None else None
+        _mwrr_class = "positive" if mwrr is not None and mwrr >= 0 else "negative" if mwrr is not None and mwrr < 0 else ""
+        st.markdown(f"""
+        <div class="heatmap-card {_mwrr_class}">
+            <div class="heatmap-label">💵 Money-Weighted Return (IRR)</div>
+            <div class="heatmap-value">{f'{_mwrr_pct:.2f}%' if _mwrr_pct is not None else 'N/A'}</div>
+            <div class="heatmap-sub">Personal wealth growth • Includes deposit timing</div>
+        </div>
+        """, unsafe_allow_html=True)
 
-            # Risk-reward ratio
-            _avg_w = win_rate_data.get('avg_win_kwd', 0)
-            _avg_l = win_rate_data.get('avg_loss_kwd', 0)
-            _rr = round(_avg_w / _avg_l, 2) if _avg_l > 0 else 0
+        # CAGR Card
+        _cagr_pct = cagr * 100 if cagr is not None else None
+        _cagr_class = "positive" if cagr is not None and cagr >= 0 else "negative" if cagr is not None and cagr < 0 else ""
+        _cagr_sub_text = f"{_cagr_inception} → {current_date} ({_cagr_years:.1f}y) · V₀ = {_cagr_v_start:,.0f} KWD" if cagr is not None else "Insufficient data"
+        st.markdown(f"""
+        <div class="heatmap-card {_cagr_class}">
+            <div class="heatmap-label">📊 Compound Annual Growth (CAGR)</div>
+            <div class="heatmap-value">{f'{_cagr_pct:.2f}%' if _cagr_pct is not None else 'N/A'}</div>
+            <div class="heatmap-sub">{_cagr_sub_text}</div>
+        </div>
+        """, unsafe_allow_html=True)
 
-            st.metric(
-                "⚖️ Profit Factor",
-                f"{pf}x",
-                delta=_pf_delta,
-                delta_color=_pf_color,
-            )
-            _net_pnl = win_rate_data.get('total_profit_kwd', 0) - win_rate_data.get('total_loss_kwd', 0)
-            st.caption(
-                f"Net P&L: {'+' if _net_pnl >= 0 else ''}{_net_pnl:,.0f} KWD · "
-                f"R:R {_rr}x"
-            )
-            with st.expander("📋 Details", expanded=False):
-                st.markdown(f"**{pf}x** — you make **{pf} KWD** for every **1 KWD** lost")
-                _c1, _c2 = st.columns(2)
-                with _c1:
-                    st.markdown(f"📈 **Gross Profits**")
-                    st.markdown(f"**+{win_rate_data['total_profit_kwd']:,.0f}** KWD")
-                    st.markdown(f"from {win_rate_data['winning_trades']} wins")
-                    st.markdown(f"Avg: +{_avg_w:,.0f} KWD")
-                with _c2:
-                    st.markdown(f"📉 **Gross Losses**")
-                    st.markdown(f"**-{win_rate_data['total_loss_kwd']:,.0f}** KWD")
-                    st.markdown(f"from {win_rate_data['losing_trades']} losses")
-                    st.markdown(f"Avg: -{_avg_l:,.0f} KWD")
-                st.markdown(f"**Net P&L:** {'+' if _net_pnl >= 0 else ''}{_net_pnl:,.0f} KWD")
-                st.markdown(f"**Risk-Reward Ratio:** {_rr}x")
-                st.caption(">2.0 Excellent · 1.5-2.0 Good · 1.0-1.5 Fair · <1.0 Poor")
-        else:
-            st.metric("⚖️ Profit Factor", "N/A")
-            st.caption("No completed trades yet")
+        st.markdown('</div>', unsafe_allow_html=True)
 
-    # DEBUG: Show MWRR calculation details (can remove later)
+    with heatmap_cols[1]:
+        st.markdown('<div class="heatmap-container">', unsafe_allow_html=True)
+
+        # Win Rate Card
+        _wr = win_rate_data.get('win_rate')
+        _wr_class = "positive" if _wr is not None and _wr > 55 else "negative" if _wr is not None and _wr < 50 else ""
+        _wr_wins = win_rate_data.get('winning_trades', 0)
+        _wr_losses = win_rate_data.get('losing_trades', 0)
+        _wr_pf = win_rate_data.get('profit_factor', 'N/A')
+        st.markdown(f"""
+        <div class="heatmap-card {_wr_class}">
+            <div class="heatmap-label">🎯 Win Rate</div>
+            <div class="heatmap-value">{f'{_wr:.1f}%' if _wr is not None else 'N/A'}</div>
+            <div class="heatmap-sub">{_wr_wins}W / {_wr_losses}L • PF {_wr_pf}x</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # Sharpe Ratio Card
+        _sr_val = sharpe_ratio
+        _sr_class = "positive" if _sr_val is not None and _sr_val > 1.0 else "negative" if _sr_val is not None and _sr_val < 0 else ""
+        st.markdown(f"""
+        <div class="heatmap-card {_sr_class}">
+            <div class="heatmap-label">🔷 Sharpe Ratio</div>
+            <div class="heatmap-value">{f'{_sr_val:.2f}' if _sr_val is not None else 'N/A'}</div>
+            <div class="heatmap-sub">Risk-adjusted return • CBK Rate: {rf_rate_percent:.2f}%</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # Sortino Ratio Card
+        _so_val = sortino_ratio
+        _so_class = "positive" if _so_val is not None and _so_val > 2.0 else "negative" if _so_val is not None and _so_val < 1.0 else ""
+        st.markdown(f"""
+        <div class="heatmap-card {_so_class}">
+            <div class="heatmap-label">🔶 Sortino Ratio</div>
+            <div class="heatmap-value">{f'{_so_val:.2f}' if _so_val is not None else 'N/A'}</div>
+            <div class="heatmap-sub">Downside risk focus • MAR: 0%</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    # ======================
+    # RISK-ADJUSTED PERFORMANCE (4-Column)
+    # ======================
+    st.markdown('<div class="section-header"><div class="section-icon blue">🛡️</div><div class="section-title">Risk-Adjusted Performance</div></div>', unsafe_allow_html=True)
+
+    risk_col1, risk_col2, risk_col3, risk_col4 = st.columns(4)
+
+    with risk_col1:
+        _sr_class = "positive" if sharpe_ratio is not None and sharpe_ratio > 1.0 else "negative" if sharpe_ratio is not None and sharpe_ratio < 0 else ""
+        _sr_icon = "positive" if sharpe_ratio is not None and sharpe_ratio > 1.0 else "negative" if sharpe_ratio is not None and sharpe_ratio < 0 else "primary"
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-icon {_sr_icon}">🔷</div>
+            <div class="metric-label">SHARPE RATIO</div>
+            <div class="metric-value {_sr_class}">{f'{sharpe_ratio:.2f}' if sharpe_ratio is not None else 'N/A'}</div>
+            <div class="metric-sub">Risk-adjusted return • CBK: {rf_rate_percent:.2f}%</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with risk_col2:
+        _so_class = "positive" if sortino_ratio is not None and sortino_ratio > 2.0 else "negative" if sortino_ratio is not None and sortino_ratio < 1.0 else ""
+        _so_icon = "positive" if sortino_ratio is not None and sortino_ratio > 2.0 else "negative" if sortino_ratio is not None and sortino_ratio < 1.0 else "warning"
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-icon {_so_icon}">🔶</div>
+            <div class="metric-label">SORTINO RATIO</div>
+            <div class="metric-value {_so_class}">{f'{sortino_ratio:.2f}' if sortino_ratio is not None else 'N/A'}</div>
+            <div class="metric-sub">Downside risk focus • MAR: 0%</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with risk_col3:
+        _wr2 = win_rate_data.get('win_rate')
+        _wr2_class = "positive" if _wr2 is not None and _wr2 > 55 else "negative" if _wr2 is not None and _wr2 < 50 else ""
+        _wr2_icon = "positive" if _wr2 is not None and _wr2 > 55 else "negative" if _wr2 is not None and _wr2 < 50 else "primary"
+        _wr2_wins = win_rate_data.get('winning_trades', 0)
+        _wr2_losses = win_rate_data.get('losing_trades', 0)
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-icon {_wr2_icon}">🎯</div>
+            <div class="metric-label">WIN RATE</div>
+            <div class="metric-value {_wr2_class}">{f'{_wr2:.1f}%' if _wr2 is not None else 'N/A'}</div>
+            <div class="metric-sub">{_wr2_wins}W / {_wr2_losses}L trades</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with risk_col4:
+        _pf_raw = win_rate_data.get('profit_factor')
+        try:
+            _pf_val = float(_pf_raw) if _pf_raw is not None else None
+        except (ValueError, TypeError):
+            _pf_val = None
+        _pf_class = "positive" if _pf_val is not None and _pf_val > 1.5 else "negative" if _pf_val is not None and _pf_val < 1.0 else ""
+        _pf_icon = "positive" if _pf_val is not None and _pf_val > 1.5 else "negative" if _pf_val is not None and _pf_val < 1.0 else "purple"
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-icon {_pf_icon}">⚖️</div>
+            <div class="metric-label">PROFIT FACTOR</div>
+            <div class="metric-value {_pf_class}">{f'{_pf_val:.2f}x' if _pf_val is not None else 'N/A'}</div>
+            <div class="metric-sub">Gross profits / Gross losses</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # MWRR Debug (collapsed)
     with st.expander("🔧 MWRR Debug Info", expanded=False):
         st.write(f"**User ID:** {user_id}")
         st.write(f"**Portfolio History Rows:** {len(portfolio_history)}")
@@ -20447,9 +20654,6 @@ def ui_overview():
         if not cash_flows_mwrr.empty:
             st.write("**Cash Flow Sample (first 5):**")
             st.dataframe(cash_flows_mwrr.head(5))
-
-    st.divider()
-    st.subheader("📉 Valuation Drift")
 
     # --- Calculate Portfolio P/E ---
     # 1. Gather all holdings
@@ -20510,33 +20714,40 @@ def ui_overview():
         cash_yield_val = total_dividends_kwd / total_deposits_kwd
         cash_yield_dividend_display = f"{cash_yield_val:.2%}"
 
-    # Render Card
-    col_val1, col_val2, col_val3, col_val4 = st.columns(4)
-    with col_val1:
+    # ======================
+    # VALUATION METRICS
+    # ======================
+    st.markdown('<div class="section-header"><div class="section-icon purple">📉</div><div class="section-title">Valuation Metrics</div></div>', unsafe_allow_html=True)
+
+    val_col1, val_col2 = st.columns(2)
+
+    with val_col1:
         st.markdown(f"""
-        <div class="ov-card">
-            <div class="ov-title">Portfolio P/E</div>
-            <div class="ov-value">{portfolio_pe_display}</div>
-            <div class="ov-sub">Yield: {portfolio_earnings_yield_display}</div>
-        </div>
-        """, unsafe_allow_html=True)
-        
-    with col_val2:
-        st.markdown(f"""
-        <div class="ov-card">
-            <div class="ov-title">Cash Yield Dividend</div>
-            <div class="ov-value">{cash_yield_dividend_display}</div>
-            <div class="ov-sub">Divs / Deposits</div>
+        <div class="metric-card">
+            <div class="metric-icon purple">🏷️</div>
+            <div class="metric-label">PORTFOLIO P/E RATIO</div>
+            <div class="metric-value">{portfolio_pe_display}</div>
+            <div class="metric-sub">Earnings Yield: {portfolio_earnings_yield_display}</div>
         </div>
         """, unsafe_allow_html=True)
 
-    st.divider()
-    
-    # ==========================================
-    # 🤖 AI ANALYST WIDGET (Embedded in Overview)
-    # ==========================================
-    with st.expander("🤖 AI Financial Intelligence & Reporting", expanded=False):
-        st.caption("Generate professional insights and PDF reports based on your current portfolio overview.")
+    with val_col2:
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-icon pink">💸</div>
+            <div class="metric-label">CASH YIELD DIVIDEND</div>
+            <div class="metric-value">{cash_yield_dividend_display}</div>
+            <div class="metric-sub">Dividends / Total Deposits</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # ======================
+    # AI SECTION
+    # ======================
+    st.markdown('<div class="section-header"><div class="section-icon pink">🤖</div><div class="section-title">AI Financial Intelligence</div></div>', unsafe_allow_html=True)
+
+    with st.expander("✨ Generate Professional Investment Report", expanded=False):
+        st.caption("Get AI-powered insights, recommendations, and PDF reports based on your portfolio data")
 
         # 1. API Key Check
         # Check for key in Session or DB
@@ -20751,6 +20962,43 @@ If the data shows "No active stock holdings" or empty sections, acknowledge this
         else:
             st.info("🔑 Please enter API Key to enable AI features.")
             st.markdown("[👉 Get Free API Key](https://aistudio.google.com/app/apikey)")
+
+    # ======================
+    # FOOTER (Theme-Aware)
+    # ======================
+    _footer_class = 'neon-footer' if is_dark else 'light-footer'
+    _badge_bg = 'rgba(255, 255, 255, 0.05)' if is_dark else 'rgba(99, 102, 241, 0.06)'
+    _badge_glow1 = 'text-shadow: 0 0 10px rgba(138, 43, 226, 0.3);' if is_dark else ''
+    _badge_glow2 = 'text-shadow: 0 0 10px rgba(76, 201, 240, 0.3);' if is_dark else ''
+    st.markdown(f"""
+    <div class="{_footer_class}">
+        <div style="display: flex; justify-content: space-between; flex-wrap: wrap; gap: 1.5rem;">
+            <div>
+                <div style="font-size: 1.1rem; font-weight: 700; color: var(--text-primary); margin-bottom: 0.5rem; letter-spacing: -0.5px;">
+                    📈 Portfolio Intelligence Dashboard
+                </div>
+                <div style="color: var(--text-secondary); line-height: 1.6; font-size: 0.95rem;">
+                    Real-time analytics • Risk-adjusted returns • AI-powered insights<br>
+                    Data updated: <strong>{datetime.now().strftime("%b %d, %Y at %I:%M %p")}</strong> • All values in KWD
+                </div>
+            </div>
+            <div style="display: flex; align-items: center; gap: 1rem;">
+                <div style="background: {_badge_bg}; border-radius: 12px; padding: 0.75rem 1.25rem; text-align: center; border: 1px solid var(--section-border-color);">
+                    <div style="font-weight: 700; font-size: 1.4rem; color: var(--accent-primary); margin-bottom: 0.25rem; {_badge_glow1}">
+                        {num_stocks}
+                    </div>
+                    <div style="color: var(--text-secondary); font-size: 0.9rem;">Active Stocks</div>
+                </div>
+                <div style="background: {_badge_bg}; border-radius: 12px; padding: 0.75rem 1.25rem; text-align: center; border: 1px solid var(--section-border-color);">
+                    <div style="font-weight: 700; font-size: 1.4rem; color: var(--accent-secondary); margin-bottom: 0.25rem; {_badge_glow2}">
+                        {num_txns}
+                    </div>
+                    <div style="color: var(--text-secondary); font-size: 0.9rem;">Total Transactions</div>
+                </div>
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
 
 # =========================
