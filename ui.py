@@ -14418,8 +14418,25 @@ def ui_backup_restore():
                         # IMPORTANT: Reset file pointer for reading sheets again
                         uploaded_file.seek(0)
                         
-                        conn = get_conn()
+                        # Use a FRESH connection for restore (not the cached persistent one)
+                        # This avoids "connection already closed" from stale pooled connections
+                        from db_layer import get_conn as _db_fresh_conn
+                        conn = _db_fresh_conn()
                         cur = conn.cursor()
+                        
+                        # PostgreSQL savepoint helpers:
+                        # When a single INSERT fails on PostgreSQL, it aborts the ENTIRE transaction.
+                        # All subsequent SQL calls fail with "current transaction is aborted".
+                        # Savepoints allow us to rollback just the failed row and continue.
+                        _pg = is_postgres()
+                        def _sp_begin():
+                            if _pg: cur.execute("SAVEPOINT row_sp")
+                        def _sp_ok():
+                            if _pg: cur.execute("RELEASE SAVEPOINT row_sp")
+                        def _sp_fail():
+                            if _pg:
+                                try: cur.execute("ROLLBACK TO SAVEPOINT row_sp")
+                                except Exception: pass
                         
                         try:
                             progress = st.progress(0, text="Initializing...")
@@ -14462,6 +14479,7 @@ def ui_backup_restore():
                                         # Handle both 'name' (SQLite) and 'company_name' (PostgreSQL) columns
                                         stock_name = safe_str(row.get('name')) or safe_str(row.get('company_name')) or symbol
                                         
+                                        _sp_begin()
                                         # Check if exists (use same cursor to stay on same connection)
                                         check_cur = conn.cursor()
                                         db_execute(check_cur, "SELECT id FROM stocks WHERE symbol = ? AND user_id = ?", (symbol, user_id))
@@ -14496,7 +14514,9 @@ def ui_backup_restore():
                                             ))
                                             stocks_updated += 1
                                         imported += 1
+                                        _sp_ok()
                                     except Exception as e:
+                                        _sp_fail()
                                         errors += 1
                                         error_details.append(f"Stock {row.get('symbol')}: {e}")
                                 conn.commit()
@@ -14514,6 +14534,7 @@ def ui_backup_restore():
                                 txn_errors = 0
                                 for idx, row in df.iterrows():
                                     try:
+                                        _sp_begin()
                                         raw_stock_sym = safe_str(row.get('stock_symbol'))
                                         txn_date = safe_date(row.get('txn_date'))
                                         txn_type = safe_str(row.get('txn_type'), 'Buy')
@@ -14561,7 +14582,9 @@ def ui_backup_restore():
                                         ))
                                         imported += 1
                                         txn_count += 1
+                                        _sp_ok()
                                     except Exception as e:
+                                        _sp_fail()
                                         errors += 1
                                         txn_errors += 1
                                         error_details.append(f"Transaction row {idx} ({row.get('stock_symbol')}): {str(e)[:100]}")
@@ -14577,6 +14600,7 @@ def ui_backup_restore():
                                 
                                 for _, row in df.iterrows():
                                     try:
+                                        _sp_begin()
                                         db_execute(cur, """
                                             INSERT INTO cash_deposits 
                                             (user_id, portfolio, amount, currency, deposit_date, 
@@ -14596,7 +14620,9 @@ def ui_backup_restore():
                                         ))
                                         imported += 1
                                         cash_count += 1
+                                        _sp_ok()
                                     except Exception as e:
+                                        _sp_fail()
                                         errors += 1
                                         error_details.append(f"Cash deposit: {e}")
                                 conn.commit()
@@ -14609,6 +14635,7 @@ def ui_backup_restore():
                                 df = pd.read_excel(uploaded_file, sheet_name='portfolio_cash')
                                 for _, row in df.iterrows():
                                     try:
+                                        _sp_begin()
                                         portfolio = safe_str(row.get('portfolio'))
                                         check_cur = conn.cursor()
                                         db_execute(check_cur, "SELECT id FROM portfolio_cash WHERE portfolio = ? AND user_id = ?", (portfolio, user_id))
@@ -14635,7 +14662,9 @@ def ui_backup_restore():
                                                 portfolio, user_id
                                             ))
                                         imported += 1
+                                        _sp_ok()
                                     except Exception as e:
+                                        _sp_fail()
                                         errors += 1
                                 conn.commit()
                             
@@ -14652,6 +14681,7 @@ def ui_backup_restore():
                                 
                                 for _, row in df.iterrows():
                                     try:
+                                        _sp_begin()
                                         snap_date = safe_date(row.get('snapshot_date'))
                                         portfolio_value = safe_float(row.get('portfolio_value'))
                                         daily_movement = safe_float(row.get('daily_movement'))
@@ -14692,9 +14722,11 @@ def ui_backup_restore():
                                             ))
                                             imported += 1
                                             snap_count += 1
+                                        _sp_ok()
                                     except Exception as e:
+                                        _sp_fail()
                                         errors += 1
-                                        error_details.append(f"Snapshot {snap_date}: {e}")
+                                        error_details.append(f"Snapshot: {e}")
                                 conn.commit()
                                 error_details.append(f"Portfolio Snapshots: {snap_count} imported")
                             
@@ -14709,6 +14741,7 @@ def ui_backup_restore():
                                         security_id = safe_str(row.get('security_id'))
                                         if not security_id:
                                             continue
+                                        _sp_begin()
                                         db_execute(cur, """
                                             INSERT OR IGNORE INTO securities_master 
                                             (security_id, exchange, canonical_ticker, display_name, isin,
@@ -14729,7 +14762,9 @@ def ui_backup_restore():
                                         ))
                                         imported += 1
                                         sec_count += 1
+                                        _sp_ok()
                                     except Exception as e:
+                                        _sp_fail()
                                         errors += 1
                                 conn.commit()
                                 error_details.append(f"Securities Master: {sec_count} imported")
@@ -14746,6 +14781,7 @@ def ui_backup_restore():
                                         alias_name = safe_str(row.get('alias_name'))
                                         if not security_id or not alias_name:
                                             continue
+                                        _sp_begin()
                                         db_execute(cur, """
                                             INSERT OR IGNORE INTO security_aliases 
                                             (security_id, alias_name, alias_type, valid_from, valid_until, created_at)
@@ -14760,13 +14796,18 @@ def ui_backup_restore():
                                         ))
                                         imported += 1
                                         alias_count += 1
+                                        _sp_ok()
                                     except Exception as e:
+                                        _sp_fail()
                                         errors += 1
                                 conn.commit()
                                 error_details.append(f"Security Aliases: {alias_count} imported")
                             
                             progress.progress(100, text="✅ Complete!")
-                            conn.close()
+                            try:
+                                conn.close()
+                            except Exception:
+                                pass
                             
                             # Show results with details
                             st.success(f"✅ **Restore completed! {imported:,} total records processed.**")
@@ -14789,6 +14830,10 @@ def ui_backup_restore():
                         except Exception as e:
                             try:
                                 conn.rollback()
+                            except Exception:
+                                pass
+                            try:
+                                conn.close()
                             except Exception:
                                 pass
                             st.error(f"❌ Restore failed: {e}")
