@@ -6861,6 +6861,8 @@ def init_db() -> None:
                 # Still ensure critical columns exist (fast operation)
                 for tbl in ["stocks", "transactions", "portfolio_cash", "cash_deposits"]:
                     add_column_if_missing(tbl, "user_id", "INTEGER DEFAULT 1")
+                # Ensure manual_override column exists on portfolio_cash
+                add_column_if_missing("portfolio_cash", "manual_override", "INTEGER DEFAULT 0")
                 # Ensure securities tables exist (added later in development)
                 _ensure_securities_tables()
                 _ensure_normalized_schema()
@@ -6901,6 +6903,8 @@ def init_db() -> None:
         add_column_if_missing("stocks", "tradingview_exchange", "TEXT")
         add_column_if_missing("transactions", "portfolio", "TEXT DEFAULT 'KFH'")
         add_column_if_missing("transactions", "category", "TEXT DEFAULT 'portfolio'")
+        # Ensure manual_override column exists on portfolio_cash
+        add_column_if_missing("portfolio_cash", "manual_override", "INTEGER DEFAULT 0")
         # Ensure securities tables exist (added later in development)
         _ensure_securities_tables()
         _ensure_normalized_schema()
