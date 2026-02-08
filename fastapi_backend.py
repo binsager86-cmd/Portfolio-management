@@ -362,10 +362,38 @@ async def cron_endpoint(action: str, key: str = ""):
     if key != expected_key:
         raise HTTPException(status_code=401, detail="Invalid key")
     
-    if action not in ["update_prices", "snapshot", "daily_update"]:
-        raise HTTPException(status_code=400, detail=f"Invalid action: {action}. Use: update_prices, snapshot, or daily_update")
+    if action not in ["update_prices", "snapshot", "daily_update", "recalculate"]:
+        raise HTTPException(status_code=400, detail=f"Invalid action: {action}. Use: update_prices, snapshot, daily_update, or recalculate")
     
     try:
+        if action == "recalculate":
+            # Force recalculate avg_cost, realized_pnl for all transactions
+            # This fixes stale/NULL stored values in the database
+            import sys, os
+            sys.path.insert(0, os.path.dirname(__file__))
+            from ui import recalculate_and_store_avg_costs, get_conn, db_execute
+            
+            # Get all user IDs
+            conn = get_conn()
+            cur = conn.cursor()
+            db_execute(cur, "SELECT DISTINCT id FROM users")
+            user_ids = [row[0] for row in cur.fetchall()]
+            conn.close()
+            
+            total_stats = {'updated': 0, 'positions': 0, 'errors': []}
+            for uid in user_ids:
+                stats = recalculate_and_store_avg_costs(uid)
+                total_stats['updated'] += stats.get('updated', 0)
+                total_stats['positions'] += stats.get('positions_processed', 0)
+                total_stats['errors'].extend(stats.get('errors', []))
+            
+            return {
+                "status": "OK", 
+                "action": "recalculate",
+                "message": f"Recalculated {total_stats['updated']} transactions across {total_stats['positions']} positions for {len(user_ids)} users",
+                "errors": total_stats['errors'][:10] if total_stats['errors'] else []
+            }
+        
         from auto_price_scheduler import run_price_update_job
         run_price_update_job()
         return {"status": "OK", "action": action, "message": f"Cron '{action}' executed successfully"}
