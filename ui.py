@@ -18008,6 +18008,32 @@ def ui_trading_section():
     
     user_id = st.session_state.get('user_id', 1)
     
+    # ============================================================
+    # AUTO-RECALCULATE: Ensure stored avg_cost/P&L values exist
+    # Runs ONCE per session on first Trading Section visit.
+    # Checks if any Sell transactions have NULL avg_cost_at_txn.
+    # If so, triggers full recalculation to populate stored values.
+    # ============================================================
+    if not st.session_state.get('_avg_cost_recalculated', False):
+        try:
+            null_count = query_val("""
+                SELECT COUNT(*) FROM transactions 
+                WHERE user_id = ? AND txn_type = 'Sell' 
+                AND (avg_cost_at_txn IS NULL OR avg_cost_at_txn = 0)
+                AND (is_deleted = 0 OR is_deleted IS NULL)
+            """, (user_id,)) or 0
+            if null_count > 0:
+                with st.spinner(f"Auto-recalculating avg costs for {null_count} sell transactions..."):
+                    recalculate_and_store_avg_costs(user_id)
+                    build_portfolio_table.clear()
+                st.session_state['_avg_cost_recalculated'] = True
+                st.rerun()
+            else:
+                st.session_state['_avg_cost_recalculated'] = True
+        except Exception as e:
+            logger.warning(f"Auto-recalc check failed (non-fatal): {e}")
+            st.session_state['_avg_cost_recalculated'] = True
+    
     # Add refresh button - recalculates avg costs, P&L, and refreshes all data
     col_refresh, col_spacer = st.columns([1, 5])
     with col_refresh:
