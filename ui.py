@@ -9082,8 +9082,12 @@ def compute_stock_metrics(tx_df: pd.DataFrame):
     total_sell_value = float(sell["sell_value"].sum())
     total_reinvested = float(tx_df["reinvested_dividend"].sum())
 
-    current_shares = float(buy["shares"].sum() - sell["shares"].sum() + tx_df.get("bonus_shares", 0).sum())
-    avg_cost = (total_buy_cost / current_shares) if current_shares > 0 else 0.0
+    # Use CFA/IFRS-Compliant Weighted Average Cost Method for accurate avg_cost
+    # This properly handles: sells reducing cost basis proportionally, fees in cost basis,
+    # and bonus shares diluting avg_cost — unlike the naive total_buy_cost/current_shares formula
+    h = compute_holdings_avg_cost(tx_df)
+    current_shares = h["shares"]
+    avg_cost = h["avg_cost"]
 
     return {
         "total_buy_cost": total_buy_cost,
@@ -18166,10 +18170,16 @@ def ui_trading_section():
             buy_shares = float(txn['shares'])
             buy_cost = float(txn['purchase_cost'])  # Already includes price × shares
             fees = float(txn['fees'])
+            bonus_on_buy = float(txn['bonus_shares']) if txn['bonus_shares'] and float(txn['bonus_shares']) > 0 else 0
             
             new_cost = buy_cost + fees  # Total cost of this purchase
             state['total_cost'] += new_cost
             state['total_shares'] += buy_shares
+            
+            # Handle bonus shares attached to buy transaction (free shares, dilute avg cost)
+            if bonus_on_buy > 0:
+                state['total_shares'] += bonus_on_buy
+            
             state['avg_cost'] = state['total_cost'] / state['total_shares'] if state['total_shares'] > 0 else 0
             state['position_open'] = True  # Position is open
             
@@ -24732,19 +24742,19 @@ def main():
     # AUTO-RECALCULATE STORED AVG COST / P&L (once per session)
     # =============================
     # Ensures stored avg_cost_at_txn and realized_pnl_at_txn are populated
-    # for all Sell transactions. Runs silently on first session load.
+    # for ALL transactions (Buy, Sell, etc.). Runs silently on first session load.
     # This permanently fixes any stale/NULL values from before code fixes.
     if not st.session_state.get('_avg_cost_synced', False):
         try:
             user_id = st.session_state.get('user_id', 1)
-            null_sells = query_val("""
+            null_txns = query_val("""
                 SELECT COUNT(*) FROM transactions 
-                WHERE user_id = ? AND txn_type = 'Sell' 
+                WHERE user_id = ? AND txn_type IN ('Buy', 'Sell') 
                 AND (avg_cost_at_txn IS NULL OR avg_cost_at_txn = 0)
                 AND (is_deleted = 0 OR is_deleted IS NULL)
             """, (user_id,)) or 0
-            if null_sells > 0:
-                logger.info(f"🔄 Auto-recalculating avg costs for {null_sells} sell transactions...")
+            if null_txns > 0:
+                logger.info(f"🔄 Auto-recalculating avg costs for {null_txns} transactions with missing avg_cost...")
                 recalculate_and_store_avg_costs(user_id)
                 build_portfolio_table.clear()
                 logger.info("✅ Auto-recalculation complete")
