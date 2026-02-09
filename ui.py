@@ -9676,9 +9676,9 @@ def ui_cash_deposits():
                             current_acc = float(existing["accumulated_cash"].iloc[0]) if pd.notna(existing["accumulated_cash"].iloc[0]) else 0
                             new_accumulated = current_acc + convert_to_kwd(float(amount), currency)
                             
-                            # Recalculate net_gain and ROI with new accumulated cash
-                            current_beginning_diff = float(existing["beginning_difference"].iloc[0]) if pd.notna(existing["beginning_difference"].iloc[0]) else 0
-                            new_net_gain = current_beginning_diff - new_accumulated
+                            # Recalculate net_gain = Portfolio Value - Accumulated Cash
+                            current_portfolio_value = float(existing["portfolio_value"].iloc[0]) if pd.notna(existing["portfolio_value"].iloc[0]) else 0
+                            new_net_gain = current_portfolio_value - new_accumulated
                             
                             # Get net invested capital for ROI (exclude soft-deleted deposits)
                             _soft_del_dep = _soft_delete_filter_deposits()
@@ -9738,7 +9738,7 @@ def ui_cash_deposits():
                             else:
                                 beginning_diff = 0.0
                             
-                            net_gain = beginning_diff - accumulated_cash
+                            net_gain = live_portfolio_value - accumulated_cash
                             
                             # Get net invested capital for ROI (exclude soft-deleted)
                             _soft_del_dep = _soft_delete_filter_deposits()
@@ -9936,8 +9936,8 @@ def ui_cash_deposits():
                                             # Update existing snapshot - calculate accumulated_cash DIRECTLY from deposits
                                             new_accumulated = calculate_accumulated_cash(user_id, deposit_date_str)
                                             
-                                            current_beginning_diff = float(existing["beginning_difference"].iloc[0]) if pd.notna(existing["beginning_difference"].iloc[0]) else 0
-                                            new_net_gain = current_beginning_diff - new_accumulated
+                                            current_portfolio_value = float(existing["portfolio_value"].iloc[0]) if pd.notna(existing["portfolio_value"].iloc[0]) else 0
+                                            new_net_gain = current_portfolio_value - new_accumulated
                                             
                                             exec_sql(
                                                 """UPDATE portfolio_snapshots 
@@ -16887,7 +16887,7 @@ def ui_portfolio_tracker():
                 else:
                     beginning_diff = 0.0
             
-            # Net Gain = Beginning Diff - Accumulated Cash (Corrected Formula)
+            # Net Gain = Beginning Diff - Accumulated Cash (Relative Logic)
             net_gain = beginning_diff - accumulated_cash
             
             # Calculate NET INVESTED CAPITAL (Deposits - Withdrawals, all converted to KWD)
@@ -16920,8 +16920,8 @@ def ui_portfolio_tracker():
             # Net Invested Capital = Deposits - Withdrawals
             net_invested_capital = total_deposits_kwd - total_withdrawals_kwd
             
-            # ROI % = Net Gain / Net Invested Capital * 100
-            roi_percent = (net_gain / net_invested_capital * 100) if net_invested_capital > 0 else 0.0
+            # ROI % = Net Gain / Accumulated Cash * 100 (Relative Logic)
+            roi_percent = (net_gain / accumulated_cash * 100) if accumulated_cash > 0 else 0.0
             change_percent = ((live_portfolio_value - prev_value) / prev_value * 100) if prev_value > 0 else 0.0
             
             # 5. Insert or Update
@@ -17115,10 +17115,10 @@ def ui_portfolio_tracker():
                             
                             net_invested_capital = total_deposits_kwd - total_withdrawals_kwd
                             
-                            # Net gain from stocks = Beginning Difference - Accumulated Cash (Corrected Formula)
+                            # Net Gain = Beginning Diff - Accumulated Cash (Relative Logic)
                             net_gain = beginning_diff - accumulated_cash if accumulated_cash else beginning_diff
-                            # ROI % = Net Gain / Net Invested Capital * 100
-                            roi_percent = (net_gain / net_invested_capital * 100) if net_invested_capital > 0 else 0
+                            # ROI % = Net Gain / Accumulated Cash * 100 (Relative Logic)
+                            roi_percent = (net_gain / accumulated_cash * 100) if accumulated_cash and accumulated_cash > 0 else 0
                             # Change % = change from previous day
                             change_percent = ((portfolio_value - prev_value) / prev_value * 100) if prev_value > 0 else 0
                             
@@ -17237,8 +17237,8 @@ def ui_portfolio_tracker():
                 
                 net_invested_capital = total_deposits_kwd - total_withdrawals_kwd
                 
-                # ROI % = Net Gain / Net Invested Capital * 100
-                roi_percent = (net_gain / net_invested_capital * 100) if net_invested_capital > 0 else 0.0
+                # ROI % = Net Gain / Accumulated Cash * 100 (Relative Logic)
+                roi_percent = (net_gain / accumulated_cash * 100) if accumulated_cash > 0 else 0.0
                 change_percent = ((portfolio_value - prev_value) / prev_value * 100) if prev_value > 0 else 0.0
                 
                 exec_sql(
@@ -17606,10 +17606,11 @@ def ui_portfolio_tracker():
                             running_accumulated += deposit_cash
                             correct_accumulated = running_accumulated
                             
-                            # Calculate Net Gain = Beginning Diff - Accumulated Cash
+                            # Calculate Net Gain = Beginning Diff - Accumulated Cash (Relative Logic)
+                            portfolio_val = float(snap_row['portfolio_value']) if pd.notna(snap_row['portfolio_value']) else 0.0
                             new_net_gain = beginning_diff - correct_accumulated
                             
-                            # Calculate ROI % = Net Gain / Accumulated Cash * 100
+                            # Calculate ROI % = Net Gain / Accumulated Cash * 100 (Relative Logic)
                             new_roi = (new_net_gain / correct_accumulated * 100) if correct_accumulated > 0 else 0.0
                             
                             # Update the snapshot
@@ -21967,7 +21968,6 @@ def render_snapshot_table(df: pd.DataFrame) -> None:
     Formatting Rules:
     - Value: 2 decimal places + thousands separator
     - Daily Movement: 2 decimals, green/red coloring
-    - Beginning Diff: 2 decimals + thousands separator  
     - Deposit Cash: No decimals, thousands separator
     - Accumulated Cash: No decimals, thousands separator
     - Net Gain: 2 decimals, green/red, parentheses for negative
@@ -22024,7 +22024,7 @@ def render_snapshot_table(df: pd.DataFrame) -> None:
         ("snapshot_date", "Date", "date"),
         ("portfolio_value", "Value", "money_2dp"),
         ("daily_movement", "Daily Movement", "money_colored"),
-        ("beginning_difference", "Beginning Diff", "money_2dp"),
+        ("beginning_difference", "Beginning Diff", "money_colored"),
         ("deposit_cash", "Deposit Cash", "money_0dp"),
         ("accumulated_cash", "Accumulated Cash", "money_0dp"),
         ("net_gain", "Net Gain", "money_colored"),
@@ -22837,8 +22837,348 @@ def ui_pfm():
         """Generic delete function for any PFM list."""
         if list_key in st.session_state and 0 <= index < len(st.session_state[list_key]):
             st.session_state[list_key].pop(index)
-    st.header("💰 Personal Financial Management")
-    st.markdown("Track your complete financial picture: income, expenses, assets, and liabilities. Generate P&L statements, balance sheets, and analyze growth over time.")
+
+    # ═══════════════════════════════════════════════════════════════════
+    # THEME-AWARE CSS  (mirrors Overview dark / light system)
+    # ═══════════════════════════════════════════════════════════════════
+    is_dark = st.session_state.get("theme", "light") == "dark"
+
+    if is_dark:
+        _pfm_css = """
+        <style>
+        /* ── PFM Dark Theme ── */
+        :root {
+            --pfm-bg: #0a0a15;
+            --pfm-bg2: #121220;
+            --pfm-card: #1a1a2e;
+            --pfm-card-hover: #22223e;
+            --pfm-text: #e6e6f0;
+            --pfm-text2: #a0a0b0;
+            --pfm-accent: #8a2be2;
+            --pfm-accent2: #4cc9f0;
+            --pfm-success: #00d4ff;
+            --pfm-danger: #ff4757;
+            --pfm-warning: #ff9e00;
+            --pfm-border: 1px solid rgba(138,43,226,0.18);
+            --pfm-shadow: 0 4px 20px rgba(0,0,0,0.25);
+            --pfm-divider: rgba(138,43,226,0.15);
+        }
+        /* Page background */
+        [data-testid="stAppViewContainer"] {
+            background: linear-gradient(135deg, #0a0a15 0%, #0d0d25 100%) !important;
+        }
+        /* Text colours */
+        [data-testid="stMarkdown"] p,
+        [data-testid="stMarkdown"] h1,
+        [data-testid="stMarkdown"] h2,
+        [data-testid="stMarkdown"] h3,
+        [data-testid="stMarkdown"] h4 { color: var(--pfm-text) !important; }
+
+        /* ── Tabs ── */
+        [data-testid="stTabs"] [data-baseweb="tab-list"] {
+            background: var(--pfm-card) !important;
+            border-radius: 12px !important;
+            padding: 4px !important;
+            border: var(--pfm-border) !important;
+            gap: 4px !important;
+        }
+        [data-testid="stTabs"] [data-baseweb="tab"] {
+            background: transparent !important;
+            color: var(--pfm-text2) !important;
+            border-radius: 8px !important;
+            font-weight: 500 !important;
+            padding: 0.5rem 1rem !important;
+            transition: all 0.2s ease !important;
+        }
+        [data-testid="stTabs"] [aria-selected="true"] {
+            background: rgba(138,43,226,0.2) !important;
+            color: #fff !important;
+            font-weight: 600 !important;
+        }
+        [data-testid="stTabs"] [data-baseweb="tab-highlight"] {
+            background-color: var(--pfm-accent) !important;
+        }
+        [data-testid="stTabs"] [data-baseweb="tab-border"] {
+            display: none !important;
+        }
+
+        /* ── Metric cards ── */
+        [data-testid="stMetric"] {
+            background: var(--pfm-card) !important;
+            border: var(--pfm-border) !important;
+            border-radius: 12px !important;
+            padding: 1rem 1.25rem !important;
+            box-shadow: var(--pfm-shadow) !important;
+        }
+        [data-testid="stMetric"] label { color: var(--pfm-text2) !important; font-weight: 500 !important; }
+        [data-testid="stMetric"] [data-testid="stMetricValue"] { color: var(--pfm-text) !important; }
+
+        /* ── Buttons ── */
+        [data-testid="stButton"] button {
+            background: linear-gradient(135deg, var(--pfm-accent), var(--pfm-accent2)) !important;
+            color: #fff !important;
+            border: none !important;
+            border-radius: 8px !important;
+            font-weight: 600 !important;
+            transition: all 0.25s ease !important;
+            box-shadow: 0 2px 10px rgba(138,43,226,0.3) !important;
+        }
+        [data-testid="stButton"] button:hover {
+            transform: translateY(-2px) !important;
+            box-shadow: 0 4px 16px rgba(138,43,226,0.5) !important;
+        }
+
+        /* ── Form / data editors ── */
+        [data-testid="stForm"] {
+            background: var(--pfm-card) !important;
+            border: var(--pfm-border) !important;
+            border-radius: 14px !important;
+            padding: 1.5rem !important;
+            box-shadow: var(--pfm-shadow) !important;
+        }
+        [data-testid="stDataEditor"] {
+            border-radius: 12px !important;
+            overflow: hidden !important;
+            border: 1px solid rgba(71,85,105,0.5) !important;
+        }
+        /* Glide Data Grid canvas-based theming (--gdg-* vars) */
+        [data-testid="stDataEditor"] {
+            --gdg-bg-cell: #1e293b !important;
+            --gdg-bg-cell-medium: #1e293b !important;
+            --gdg-bg-header: rgba(15,23,42,0.95) !important;
+            --gdg-bg-header-has-focus: rgba(15,23,42,1) !important;
+            --gdg-bg-header-hovered: rgba(30,41,59,0.9) !important;
+            --gdg-border-color: rgba(71,85,105,0.5) !important;
+            --gdg-horizontal-border-color: rgba(71,85,105,0.4) !important;
+            --gdg-text-dark: #f1f5f9 !important;
+            --gdg-text-medium: #94a3b8 !important;
+            --gdg-text-light: #64748b !important;
+            --gdg-text-header: #94a3b8 !important;
+            --gdg-text-header-selected: #e2e8f0 !important;
+            --gdg-text-bubble: #94a3b8 !important;
+            --gdg-bg-bubble: rgba(30,41,59,0.8) !important;
+            --gdg-bg-bubble-selected: rgba(59,130,246,0.3) !important;
+            --gdg-accent-color: #3b82f6 !important;
+            --gdg-accent-light: rgba(59,130,246,0.15) !important;
+            --gdg-accent-fg: #ffffff !important;
+            --gdg-bg-search-result: rgba(59,130,246,0.15) !important;
+            --gdg-cell-horizontal-padding: 10px !important;
+            --gdg-cell-vertical-padding: 6px !important;
+            --gdg-editor-font-size: 14px !important;
+        }
+        /* stDataFrame (read-only tables) - standard HTML table styling */
+        .stDataFrame {
+            background: rgba(30,41,59,0.5) !important;
+            border: 1px solid rgba(71,85,105,0.5) !important;
+            border-radius: 12px !important;
+            overflow: hidden !important;
+        }
+        .stDataFrame table { background: transparent !important; }
+        .stDataFrame thead tr { background: rgba(15,23,42,0.8) !important; }
+        .stDataFrame thead th {
+            color: #94a3b8 !important; font-weight: 600 !important;
+            font-size: 0.875rem !important; text-transform: uppercase !important;
+            letter-spacing: 0.05em !important; padding: 0.85rem 1rem !important;
+        }
+        .stDataFrame tbody tr {
+            border-top: 1px solid rgba(71,85,105,0.5) !important;
+            transition: background 0.2s ease !important;
+        }
+        .stDataFrame tbody tr:hover { background: rgba(71,85,105,0.15) !important; }
+        .stDataFrame tbody td { color: #f1f5f9 !important; padding: 0.85rem 1rem !important; }
+
+        /* ── Dividers ── */
+        [data-testid="stMarkdown"] hr {
+            border-color: var(--pfm-divider) !important;
+        }
+
+        /* ── Expanders ── */
+        [data-testid="stExpander"] {
+            background: var(--pfm-card) !important;
+            border: var(--pfm-border) !important;
+            border-radius: 12px !important;
+        }
+        [data-testid="stExpander"] summary { color: var(--pfm-text) !important; font-weight: 600 !important; }
+
+        /* ── Info / Success / Warning boxes ── */
+        [data-testid="stAlert"] {
+            border-radius: 10px !important;
+        }
+
+        /* ── Financial statement row classes ── */
+        .fin-section { font-weight: bold; background-color: #1a1a2e; color: #00d4ff; padding: 8px 12px; margin-top: 10px; }
+        .fin-total { font-weight: 800; background-color: #16213e; color: #fff; border-top: 2px solid #00d4ff; }
+        .fin-subtotal { font-weight: 600; background-color: #0f3460; color: #e2e2e2; }
+
+        /* ── PFM header ── */
+        .pfm-hero {
+            background: linear-gradient(135deg, rgba(138,43,226,0.10) 0%, rgba(76,201,240,0.08) 100%);
+            border: 1px solid rgba(138,43,226,0.18);
+            border-radius: 16px; padding: 1.5rem 2rem; margin-bottom: 1.5rem;
+        }
+        .pfm-hero h2 { margin: 0 0 0.3rem 0; font-size: 1.8rem; font-weight: 700; color: #e6e6f0; }
+        .pfm-hero p  { margin: 0; font-size: 0.95rem; color: #a0a0b0; }
+
+        /* ── Section sub-headers inside form ── */
+        .pfm-section-title {
+            display: flex; align-items: center; gap: 0.5rem;
+            font-size: 1.25rem; font-weight: 700; color: var(--pfm-text);
+            padding-bottom: 0.5rem; margin-bottom: 0.75rem;
+            border-bottom: 2px solid var(--pfm-divider);
+        }
+
+        /* ── Multiselect / selectbox ── */
+        [data-testid="stMultiSelect"], [data-testid="stSelectbox"] {
+            border-radius: 10px !important;
+        }
+        </style>
+        """
+    else:
+        _pfm_css = """
+        <style>
+        /* ── PFM Light Theme ── */
+        :root {
+            --pfm-bg: #f8fafc;
+            --pfm-bg2: #ffffff;
+            --pfm-card: #ffffff;
+            --pfm-card-hover: #f1f5f9;
+            --pfm-text: #1e293b;
+            --pfm-text2: #64748b;
+            --pfm-accent: #6366f1;
+            --pfm-accent2: #3b82f6;
+            --pfm-success: #10b981;
+            --pfm-danger: #ef4444;
+            --pfm-warning: #f59e0b;
+            --pfm-border: 1px solid rgba(203,213,225,0.5);
+            --pfm-shadow: 0 2px 12px rgba(0,0,0,0.05);
+            --pfm-divider: rgba(203,213,225,0.5);
+        }
+
+        /* ── Tabs ── */
+        [data-testid="stTabs"] [data-baseweb="tab-list"] {
+            background: var(--pfm-card) !important;
+            border-radius: 12px !important;
+            padding: 4px !important;
+            border: var(--pfm-border) !important;
+            box-shadow: var(--pfm-shadow) !important;
+            gap: 4px !important;
+        }
+        [data-testid="stTabs"] [data-baseweb="tab"] {
+            background: transparent !important;
+            color: var(--pfm-text2) !important;
+            border-radius: 8px !important;
+            font-weight: 500 !important;
+            padding: 0.5rem 1rem !important;
+            transition: all 0.2s ease !important;
+        }
+        [data-testid="stTabs"] [aria-selected="true"] {
+            background: rgba(99,102,241,0.1) !important;
+            color: var(--pfm-accent) !important;
+            font-weight: 600 !important;
+        }
+        [data-testid="stTabs"] [data-baseweb="tab-highlight"] {
+            background-color: var(--pfm-accent) !important;
+        }
+        [data-testid="stTabs"] [data-baseweb="tab-border"] {
+            display: none !important;
+        }
+
+        /* ── Metric cards ── */
+        [data-testid="stMetric"] {
+            background: var(--pfm-card) !important;
+            border: var(--pfm-border) !important;
+            border-radius: 12px !important;
+            padding: 1rem 1.25rem !important;
+            box-shadow: var(--pfm-shadow) !important;
+        }
+        [data-testid="stMetric"] label { color: var(--pfm-text2) !important; font-weight: 500 !important; }
+        [data-testid="stMetric"] [data-testid="stMetricValue"] { color: var(--pfm-text) !important; }
+
+        /* ── Buttons ── */
+        [data-testid="stButton"] button {
+            background: linear-gradient(135deg, #6366f1, #3b82f6) !important;
+            color: #fff !important;
+            border: none !important;
+            border-radius: 8px !important;
+            font-weight: 600 !important;
+            transition: all 0.25s ease !important;
+            box-shadow: 0 2px 8px rgba(99,102,241,0.2) !important;
+        }
+        [data-testid="stButton"] button:hover {
+            transform: translateY(-2px) !important;
+            box-shadow: 0 4px 14px rgba(99,102,241,0.3) !important;
+        }
+
+        /* ── Form / data editors ── */
+        [data-testid="stForm"] {
+            background: var(--pfm-card) !important;
+            border: var(--pfm-border) !important;
+            border-radius: 14px !important;
+            padding: 1.5rem !important;
+            box-shadow: var(--pfm-shadow) !important;
+        }
+        [data-testid="stDataEditor"] {
+            border-radius: 10px !important;
+            overflow: hidden !important;
+        }
+
+        /* ── Dividers ── */
+        [data-testid="stMarkdown"] hr {
+            border-color: var(--pfm-divider) !important;
+        }
+
+        /* ── Expanders ── */
+        [data-testid="stExpander"] {
+            background: var(--pfm-card) !important;
+            border: var(--pfm-border) !important;
+            border-radius: 12px !important;
+            box-shadow: var(--pfm-shadow) !important;
+        }
+        [data-testid="stExpander"] summary { color: var(--pfm-text) !important; font-weight: 600 !important; }
+
+        /* ── Info / Success / Warning boxes ── */
+        [data-testid="stAlert"] {
+            border-radius: 10px !important;
+        }
+
+        /* ── Financial statement row classes ── */
+        .fin-section { font-weight: bold; background-color: #eef2ff; color: #4338ca; padding: 8px 12px; margin-top: 10px; border-radius: 6px; }
+        .fin-total { font-weight: 800; background-color: #f0fdf4; color: #166534; border-top: 2px solid #6366f1; }
+        .fin-subtotal { font-weight: 600; background-color: #f8fafc; color: #334155; }
+
+        /* ── PFM header ── */
+        .pfm-hero {
+            background: linear-gradient(135deg, rgba(99,102,241,0.06) 0%, rgba(59,130,246,0.04) 100%);
+            border: 1px solid rgba(203,213,225,0.5);
+            border-radius: 16px; padding: 1.5rem 2rem; margin-bottom: 1.5rem;
+        }
+        .pfm-hero h2 { margin: 0 0 0.3rem 0; font-size: 1.8rem; font-weight: 700; color: #1e293b; }
+        .pfm-hero p  { margin: 0; font-size: 0.95rem; color: #64748b; }
+
+        /* ── Section sub-headers inside form ── */
+        .pfm-section-title {
+            display: flex; align-items: center; gap: 0.5rem;
+            font-size: 1.25rem; font-weight: 700; color: var(--pfm-text);
+            padding-bottom: 0.5rem; margin-bottom: 0.75rem;
+            border-bottom: 2px solid var(--pfm-divider);
+        }
+
+        /* ── Multiselect / selectbox ── */
+        [data-testid="stMultiSelect"], [data-testid="stSelectbox"] {
+            border-radius: 10px !important;
+        }
+        </style>
+        """
+
+    st.markdown(_pfm_css, unsafe_allow_html=True)
+
+    # ── Styled page header ──
+    st.markdown("""
+    <div class="pfm-hero">
+        <h2>💰 Personal Financial Management</h2>
+        <p>Track your complete financial picture — income, expenses, assets & liabilities. Generate P&L statements, balance sheets, and analyze growth over time.</p>
+    </div>
+    """, unsafe_allow_html=True)
 
     # Sub-tabs for PFM sections
     pfm_tabs = st.tabs(["📝 Data Entry", "📊 Financial Statement", "📋 Balance Sheet", "📈 Ratios & Growth"])
@@ -22847,14 +23187,14 @@ def ui_pfm():
     # TAB 1: DATA ENTRY (Form-based to prevent refresh while typing)
     # ═══════════════════════════════════════════════════════════════════════════
     with pfm_tabs[0]:
-        st.subheader("📝 Financial Data Entry")
+        st.markdown('<div class="pfm-section-title">📝 Financial Data Entry</div>', unsafe_allow_html=True)
         
-        # --- YEAR SELECTOR FOR QUICK NAVIGATION ---
+        # --- SNAPSHOT SELECTOR ---
         conn = get_conn()
         try:
             cur = conn.cursor()
             db_execute(cur, """
-                SELECT id, snapshot_date, notes FROM pfm_snapshots
+                SELECT id, snapshot_date FROM pfm_snapshots
                 WHERE user_id = ?
                 ORDER BY snapshot_date DESC
             """, (user_id,))
@@ -22864,37 +23204,34 @@ def ui_pfm():
         finally:
             conn.close()
         
-        # Extract unique years from snapshots
-        saved_years = set()
-        snapshots_by_year = {}
+        # Build list of saved snapshot dates
+        saved_snapshot_dates = []
         for snap in all_snapshots:
             try:
-                snap_year = snap[1][:4]  # Get year from date string
-                saved_years.add(snap_year)
-                if snap_year not in snapshots_by_year:
-                    snapshots_by_year[snap_year] = []
-                snapshots_by_year[snap_year].append(snap)
+                saved_snapshot_dates.append(snap[1])  # "YYYY-MM-DD"
             except:
                 pass
         
-        # Add current year if not in list
-        current_year = str(datetime.today().year)
-        all_years = sorted(saved_years | {current_year}, reverse=True)
-        
         # --- Configuration outside form (for immediate UI updates) ---
-        col_year, col_snap, col_notes = st.columns([1, 2, 2])
+        col_date, col_snap, col_clone, col_del = st.columns([1.5, 2, 1, 1])
         
-        with col_year:
-            selected_year = st.selectbox("📅 Year", all_years, key="pfm_year_select")
+        with col_date:
+            snapshot_date = st.date_input(
+                "📅 Snapshot Date",
+                value=datetime.today().date(),
+                format="DD/MM/YYYY",
+                key="pfm_date_input"
+            )
         
         with col_snap:
-            # Show snapshots for selected year
-            year_snapshots = snapshots_by_year.get(selected_year, [])
-            if year_snapshots:
-                snap_options = ["➕ New Snapshot"] + [f"{s[1]} - {s[2] or 'No notes'}" for s in year_snapshots]
-                snap_dates_list = [None] + [s[1] for s in year_snapshots]
+            # Show saved snapshots for quick selection
+            if saved_snapshot_dates:
+                snap_options = ["➕ New Snapshot"] + [
+                    datetime.strptime(d, "%Y-%m-%d").strftime("%d/%m/%Y") for d in saved_snapshot_dates
+                ]
+                snap_dates_list = [None] + saved_snapshot_dates
                 selected_snap_idx = st.selectbox(
-                    "Select Snapshot",
+                    "📋 Saved Snapshots",
                     range(len(snap_options)),
                     format_func=lambda x: snap_options[x],
                     key="pfm_snap_select"
@@ -22905,22 +23242,125 @@ def ui_pfm():
                         snapshot_date = datetime.strptime(selected_date_str, "%Y-%m-%d").date()
                     except:
                         snapshot_date = datetime.today().date()
-                else:
-                    # New snapshot - default to Dec 31 of selected year for year-end, or today if current year
-                    if selected_year == current_year:
-                        snapshot_date = datetime.today().date()
-                    else:
-                        snapshot_date = datetime(int(selected_year), 12, 31).date()
             else:
-                st.info(f"No snapshots for {selected_year}")
-                # Default to Dec 31 of selected year
-                if selected_year == current_year:
-                    snapshot_date = datetime.today().date()
-                else:
-                    snapshot_date = datetime(int(selected_year), 12, 31).date()
+                st.info("No saved snapshots yet.")
         
-        with col_notes:
-            snapshot_notes = st.text_input("Notes", key="pfm_snapshot_notes", placeholder="e.g., Year-end snapshot")
+        with col_clone:
+            # --- Clone Snapshot ---
+            st.markdown("<div style='margin-top:4px'></div>", unsafe_allow_html=True)
+            if saved_snapshot_dates:
+                if st.button("📋 Clone", key="pfm_clone_btn", use_container_width=True,
+                             help="Copy all data from the selected snapshot to today's date"):
+                    # Find the source snapshot to clone
+                    source_date_str = None
+                    if 'pfm_snap_select' in st.session_state and st.session_state.pfm_snap_select > 0:
+                        source_date_str = snap_dates_list[st.session_state.pfm_snap_select]
+                    else:
+                        source_date_str = saved_snapshot_dates[0]  # Most recent
+                    
+                    target_date = datetime.today().date()
+                    
+                    if source_date_str == str(target_date):
+                        st.warning("Source and target dates are the same. Pick a different snapshot to clone.")
+                    else:
+                        try:
+                            conn = get_conn()
+                            cur = conn.cursor()
+                            # Get source snapshot
+                            db_execute(cur, "SELECT id FROM pfm_snapshots WHERE user_id = ? AND snapshot_date = ?",
+                                       (user_id, source_date_str))
+                            src = cur.fetchone()
+                            if not src:
+                                st.error("Source snapshot not found.")
+                            else:
+                                src_id = src[0]
+                                # Create or get target snapshot
+                                db_execute(cur, "SELECT id FROM pfm_snapshots WHERE user_id = ? AND snapshot_date = ?",
+                                           (user_id, str(target_date)))
+                                tgt = cur.fetchone()
+                                if tgt:
+                                    tgt_id = tgt[0]
+                                    # Clear existing target data
+                                    db_execute(cur, "DELETE FROM pfm_income_expense_items WHERE snapshot_id = ? AND user_id = ?", (tgt_id, user_id))
+                                    db_execute(cur, "DELETE FROM pfm_asset_items WHERE snapshot_id = ? AND user_id = ?", (tgt_id, user_id))
+                                    db_execute(cur, "DELETE FROM pfm_liability_items WHERE snapshot_id = ? AND user_id = ?", (tgt_id, user_id))
+                                else:
+                                    db_execute(cur, """
+                                        INSERT INTO pfm_snapshots (user_id, snapshot_date, notes, created_at)
+                                        VALUES (?, ?, '', ?)
+                                    """, (user_id, str(target_date), int(time.time())))
+                                    tgt_id = cur.lastrowid
+                                
+                                # Clone income/expense items
+                                db_execute(cur, """
+                                    INSERT INTO pfm_income_expense_items (snapshot_id, user_id, kind, category, monthly_amount, is_finance_cost, is_gna)
+                                    SELECT ?, user_id, kind, category, monthly_amount, is_finance_cost, is_gna
+                                    FROM pfm_income_expense_items WHERE snapshot_id = ? AND user_id = ?
+                                """, (tgt_id, src_id, user_id))
+                                
+                                # Clone asset items
+                                db_execute(cur, """
+                                    INSERT INTO pfm_asset_items (snapshot_id, user_id, asset_type, category, name, quantity, price, currency, value_kwd)
+                                    SELECT ?, user_id, asset_type, category, name, quantity, price, currency, value_kwd
+                                    FROM pfm_asset_items WHERE snapshot_id = ? AND user_id = ?
+                                """, (tgt_id, src_id, user_id))
+                                
+                                # Clone liability items
+                                db_execute(cur, """
+                                    INSERT INTO pfm_liability_items (snapshot_id, user_id, category, amount_kwd, is_current, is_long_term)
+                                    SELECT ?, user_id, category, amount_kwd, is_current, is_long_term
+                                    FROM pfm_liability_items WHERE snapshot_id = ? AND user_id = ?
+                                """, (tgt_id, src_id, user_id))
+                                
+                                conn.commit()
+                                src_display = datetime.strptime(source_date_str, "%Y-%m-%d").strftime("%d/%m/%Y")
+                                st.success(f"✅ Cloned snapshot from {src_display} → {target_date.strftime('%d/%m/%Y')}. Refresh to edit.")
+                                time.sleep(1)
+                                st.rerun()
+                            conn.close()
+                        except Exception as e:
+                            st.error(f"Clone error: {e}")
+
+        with col_del:
+            # --- Delete Snapshot (hard delete from DB) ---
+            st.markdown("<div style='margin-top:4px'></div>", unsafe_allow_html=True)
+            if saved_snapshot_dates:
+                if st.button("🗑️ Delete", key="pfm_delete_btn", use_container_width=True, type="secondary",
+                             help="Permanently delete the selected snapshot"):
+                    # Determine which snapshot to delete
+                    del_date_str = None
+                    if 'pfm_snap_select' in st.session_state and st.session_state.pfm_snap_select > 0:
+                        del_date_str = snap_dates_list[st.session_state.pfm_snap_select]
+                    
+                    if not del_date_str:
+                        st.warning("Select a saved snapshot to delete.")
+                    else:
+                        try:
+                            conn = get_conn()
+                            cur = conn.cursor()
+                            db_execute(cur, "SELECT id FROM pfm_snapshots WHERE user_id = ? AND snapshot_date = ?",
+                                       (user_id, del_date_str))
+                            snap_row = cur.fetchone()
+                            if snap_row:
+                                snap_id = snap_row[0]
+                                db_execute(cur, "DELETE FROM pfm_income_expense_items WHERE snapshot_id = ? AND user_id = ?", (snap_id, user_id))
+                                db_execute(cur, "DELETE FROM pfm_asset_items WHERE snapshot_id = ? AND user_id = ?", (snap_id, user_id))
+                                db_execute(cur, "DELETE FROM pfm_liability_items WHERE snapshot_id = ? AND user_id = ?", (snap_id, user_id))
+                                db_execute(cur, "DELETE FROM pfm_snapshots WHERE id = ? AND user_id = ?", (snap_id, user_id))
+                                conn.commit()
+                                del_display = datetime.strptime(del_date_str, "%Y-%m-%d").strftime("%d/%m/%Y")
+                                # Clear PFM session state
+                                for key in list(st.session_state.keys()):
+                                    if key.startswith("pfm_"):
+                                        del st.session_state[key]
+                                st.success(f"✅ Snapshot {del_display} permanently deleted!")
+                                time.sleep(1)
+                                st.rerun()
+                            else:
+                                st.warning("Snapshot not found.")
+                            conn.close()
+                        except Exception as e:
+                            st.error(f"Delete error: {e}")
 
         # Check for existing snapshot
         conn = get_conn()
@@ -22940,28 +23380,7 @@ def ui_pfm():
             conn.close()
 
         if existing_snapshot:
-            col_info, col_del = st.columns([4, 1])
-            with col_info:
-                st.info(f"📌 Editing existing snapshot for {snapshot_date}")
-            with col_del:
-                if st.button("🗑️ Delete Snapshot", type="secondary", key="delete_snapshot"):
-                    try:
-                        conn = get_conn()
-                        cur = conn.cursor()
-                        # Security: Add user_id filter to prevent cross-user deletion
-                        db_execute(cur, "DELETE FROM pfm_income_expense_items WHERE snapshot_id = ? AND user_id = ?", (existing_snapshot["id"], user_id))
-                        db_execute(cur, "DELETE FROM pfm_asset_items WHERE snapshot_id = ? AND user_id = ?", (existing_snapshot["id"], user_id))
-                        db_execute(cur, "DELETE FROM pfm_liability_items WHERE snapshot_id = ? AND user_id = ?", (existing_snapshot["id"], user_id))
-                        db_execute(cur, "DELETE FROM pfm_snapshots WHERE id = ? AND user_id = ?", (existing_snapshot["id"], user_id))
-                        conn.commit()
-                        conn.close()
-                        for key in list(st.session_state.keys()):
-                            if key.startswith("pfm_"):
-                                del st.session_state[key]
-                        st.success(f"✅ Snapshot deleted!")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Error: {e}")
+            st.info(f"📌 Editing existing snapshot for {snapshot_date.strftime('%d/%m/%Y')}")
 
         # --- Load existing data or set defaults ---
         default_income = [
@@ -22969,6 +23388,10 @@ def ui_pfm():
             {"Category": "Rental Income", "Monthly (KWD)": 0.0},
             {"Category": "Dividends", "Monthly (KWD)": 0.0},
             {"Category": "Side Business", "Monthly (KWD)": 0.0},
+        ]
+        default_annual_income = [
+            {"Category": "Annual Bonus", "Annual (KWD)": 0.0},
+            {"Category": "Annual Dividends", "Annual (KWD)": 0.0},
         ]
         default_expense = [
             {"Category": "Housing/Rent", "Monthly (KWD)": 0.0, "Finance Cost": False, "G&A": False},
@@ -22982,6 +23405,7 @@ def ui_pfm():
         default_gold = [{"Type": "Bars", "Grams": 0.0, "Price/Gram (KWD)": 0.0}]
         default_cash = [{"Account": "", "Amount": 0.0, "Currency": "KWD"}]
         default_crypto = [{"Coin": "", "Qty": 0.0, "Price (USD)": 0.0}]
+        default_other_assets = [{"Name": "", "Value (KWD)": 0.0, "Type": "Current"}]
         default_liabilities = [
             {"Category": "Credit Card", "Amount (KWD)": 0.0, "Type": "Current"},
             {"Category": "Bank Loan", "Amount (KWD)": 0.0, "Type": "Long-term"},
@@ -22999,6 +23423,12 @@ def ui_pfm():
             if income_rows:
                 default_income = [{"Category": r[0], "Monthly (KWD)": float(r[1])} for r in income_rows]
             
+            # Load annual income
+            db_execute(cur, "SELECT category, monthly_amount FROM pfm_income_expense_items WHERE snapshot_id = ? AND kind = 'annual_income' ORDER BY id", (snap_id,))
+            annual_income_rows = cur.fetchall()
+            if annual_income_rows:
+                default_annual_income = [{"Category": r[0], "Annual (KWD)": float(r[1])} for r in annual_income_rows]
+            
             # Load expenses
             db_execute(cur, "SELECT category, monthly_amount, is_finance_cost, is_gna FROM pfm_income_expense_items WHERE snapshot_id = ? AND kind = 'expense' ORDER BY id", (snap_id,))
             expense_rows = cur.fetchall()
@@ -23009,7 +23439,7 @@ def ui_pfm():
             db_execute(cur, "SELECT asset_type, category, name, quantity, price, currency, value_kwd FROM pfm_asset_items WHERE snapshot_id = ? ORDER BY asset_type, id", (snap_id,))
             asset_rows = cur.fetchall()
             
-            re_data, shares_data, gold_data, cash_data, crypto_data = [], [], [], [], []
+            re_data, shares_data, gold_data, cash_data, crypto_data, other_data = [], [], [], [], [], []
             for r in asset_rows:
                 atype, cat, name, qty, price, curr, val = r
                 if atype == "real_estate":
@@ -23022,12 +23452,16 @@ def ui_pfm():
                     cash_data.append({"Account": name or cat, "Amount": float(qty or 0), "Currency": curr or "KWD"})
                 elif atype == "crypto":
                     crypto_data.append({"Coin": name, "Qty": float(qty or 0), "Price (USD)": float(price or 0)})
+                elif atype == "other_asset":
+                    oa_type = "Current" if cat == "Current" else "Non-Current"
+                    other_data.append({"Name": name or "", "Value (KWD)": float(val or 0), "Type": oa_type})
             
             if re_data: default_real_estate = re_data
             if shares_data: default_shares = shares_data
             if gold_data: default_gold = gold_data
             if cash_data: default_cash = cash_data
             if crypto_data: default_crypto = crypto_data
+            if other_data: default_other_assets = other_data
             
             # Load liabilities
             db_execute(cur, "SELECT category, amount_kwd, is_current, is_long_term FROM pfm_liability_items WHERE snapshot_id = ? ORDER BY id", (snap_id,))
@@ -23037,16 +23471,102 @@ def ui_pfm():
             
             conn.close()
 
+        # --- Auto-Import Portfolio Button (outside form for immediate action) ---
+        _pfm_auto_import_col1, _pfm_auto_import_col2 = st.columns([3, 1])
+        with _pfm_auto_import_col1:
+            st.caption("📈 **Quick Import:** Click to auto-populate the Shares & Cash sections with your current portfolio holdings, live prices, and cash positions.")
+        with _pfm_auto_import_col2:
+            if st.button("📥 Import Portfolio", type="secondary", key="pfm_apply_auto_import", use_container_width=True):
+                try:
+                    conn = get_conn()
+                    cur = conn.cursor()
+                    # --- Import shares ---
+                    db_execute(cur, """
+                        SELECT 
+                            t.stock_symbol as symbol,
+                            COALESCE(s.name, t.stock_symbol) as name,
+                            SUM(CASE WHEN t.txn_type = 'Buy' THEN t.shares ELSE 0 END) - 
+                            SUM(CASE WHEN t.txn_type = 'Sell' THEN t.shares ELSE 0 END) as net_shares,
+                            COALESCE(s.current_price, 0) as current_price,
+                            COALESCE(s.currency, 'KWD') as currency
+                        FROM transactions t
+                        LEFT JOIN stocks s ON UPPER(TRIM(t.stock_symbol)) = UPPER(TRIM(s.symbol)) AND s.user_id = t.user_id
+                        WHERE t.user_id = ? 
+                          AND t.is_deleted = 0
+                          AND t.txn_type IN ('Buy', 'Sell')
+                        GROUP BY t.stock_symbol
+                        HAVING (SUM(CASE WHEN t.txn_type = 'Buy' THEN t.shares ELSE 0 END) - 
+                            SUM(CASE WHEN t.txn_type = 'Sell' THEN t.shares ELSE 0 END)) > 0
+                    """, (user_id,))
+                    portfolio_rows = cur.fetchall()
+                    
+                    # --- Import cash positions ---
+                    db_execute(cur, """
+                        SELECT portfolio, COALESCE(balance, 0)
+                        FROM portfolio_cash
+                        WHERE user_id = ?
+                    """, (user_id,))
+                    cash_rows = cur.fetchall()
+                    conn.close()
+                    
+                    imported_count = 0
+                    if portfolio_rows:
+                        imported = []
+                        for row in portfolio_rows:
+                            ticker, name, qty, price, curr = row
+                            imported.append({
+                                "Ticker": ticker or "",
+                                "Name": name or "",
+                                "Qty": float(qty) if qty else 0.0,
+                                "Price": float(price) if price else 0.0,
+                                "Currency": curr or "KWD",
+                            })
+                        st.session_state["pfm_imported_shares"] = imported
+                        imported_count += len(imported)
+                    
+                    # Build cash import list from portfolio_cash balances
+                    if cash_rows:
+                        imported_cash = []
+                        for crow in cash_rows:
+                            ptf, balance = crow
+                            bal = float(balance) if balance else 0.0
+                            if bal > 0:
+                                ccy = PORTFOLIO_CCY.get(ptf, "KWD")
+                                imported_cash.append({
+                                    "Account": f"Cash in Portfolio ({ptf})",
+                                    "Amount": bal,
+                                    "Currency": ccy,
+                                })
+                        if imported_cash:
+                            st.session_state["pfm_imported_cash"] = imported_cash
+                    
+                    if imported_count > 0 or "pfm_imported_cash" in st.session_state:
+                        parts = []
+                        if imported_count > 0:
+                            parts.append(f"{imported_count} holdings")
+                        if "pfm_imported_cash" in st.session_state and st.session_state["pfm_imported_cash"]:
+                            parts.append(f"{len(st.session_state['pfm_imported_cash'])} cash positions")
+                        st.success(f"✅ Imported {' & '.join(parts)}! Scroll down to review.")
+                        st.rerun()
+                    else:
+                        st.warning("No portfolio holdings or cash found.")
+                except Exception as e:
+                    st.error(f"Error importing portfolio: {e}")
+
+        # Check if we have imported shares to use as defaults
+        if "pfm_imported_shares" in st.session_state and st.session_state["pfm_imported_shares"]:
+            default_shares = st.session_state["pfm_imported_shares"]
+
         # ═══════════════════════════════════════════════════════════════════
         # FORM: Batch all inputs to prevent refresh while typing
         # ═══════════════════════════════════════════════════════════════════
         with st.form("pfm_data_entry_form"):
             # --- INCOME & EXPENSES ---
-            st.markdown("### 💵 Income & Expenses (Monthly)")
+            st.markdown('<div class="pfm-section-title">💵 Income & Expenses (Monthly)</div>', unsafe_allow_html=True)
             col_inc, col_exp = st.columns(2)
             
             with col_inc:
-                st.markdown("#### 📈 Income Sources")
+                st.markdown("#### 📈 Monthly Income")
                 income_df = st.data_editor(
                     pd.DataFrame(default_income),
                     num_rows="dynamic",
@@ -23057,9 +23577,22 @@ def ui_pfm():
                         "Monthly (KWD)": st.column_config.NumberColumn(format="%.3f", min_value=0)
                     }
                 )
+
+                # Annual Income (received once a year) — aligned under monthly income
+                st.markdown("#### 📅 Annual Income (received yearly)")
+                annual_income_df = st.data_editor(
+                    pd.DataFrame(default_annual_income),
+                    num_rows="dynamic",
+                    width="stretch",
+                    key=f"pfm_annual_inc_{snapshot_date}",
+                    column_config={
+                        "Category": st.column_config.TextColumn(width="medium"),
+                        "Annual (KWD)": st.column_config.NumberColumn(format="%.3f", min_value=0)
+                    }
+                )
             
             with col_exp:
-                st.markdown("#### 📉 Expenses")
+                st.markdown("#### 📉 Monthly Expenses")
                 expense_df = st.data_editor(
                     pd.DataFrame(default_expense),
                     num_rows="dynamic",
@@ -23074,24 +23607,37 @@ def ui_pfm():
                 )
 
             # Summary metrics
-            total_income = income_df["Monthly (KWD)"].sum() if not income_df.empty else 0
+            total_monthly_income = income_df["Monthly (KWD)"].sum() if not income_df.empty else 0
+            total_annual_income_items = annual_income_df["Annual (KWD)"].sum() if not annual_income_df.empty else 0
             total_expense = expense_df["Monthly (KWD)"].sum() if not expense_df.empty else 0
-            net_monthly = total_income - total_expense
+            net_monthly = total_monthly_income - total_expense
+            total_annual = (total_monthly_income * 12) + total_annual_income_items - (total_expense * 12)
             
-            col_m1, col_m2, col_m3 = st.columns(3)
+            col_m1, col_m2, col_m3, col_m4 = st.columns(4)
             with col_m1:
-                st.metric("Monthly Income", f"{total_income:,.2f} KWD")
+                st.metric("Monthly Income", f"{total_monthly_income:,.2f} KWD")
             with col_m2:
                 st.metric("Monthly Expenses", f"{total_expense:,.2f} KWD")
             with col_m3:
-                st.metric("Net Monthly", f"{net_monthly:,.2f} KWD", delta=f"{(net_monthly/total_income*100) if total_income else 0:.1f}%")
+                st.metric("Net Monthly", f"{net_monthly:,.2f} KWD")
+            with col_m4:
+                st.metric("Net Annual", f"{total_annual:,.2f} KWD")
 
             st.divider()
 
             # --- ASSETS & LIABILITIES ---
-            st.markdown("### 🏦 Assets & Liabilities")
+            st.markdown('<div class="pfm-section-title">🏦 Assets & Liabilities</div>', unsafe_allow_html=True)
             
-            asset_tabs = st.tabs(["🏡 Real Estate", "📈 Shares", "🪙 Gold", "💵 Cash", "₿ Crypto", "💳 Liabilities"])
+            # Initialize totals (will be computed inside each tab)
+            re_total = 0.0
+            shares_total_kwd = 0.0
+            gold_total = 0.0
+            cash_total = 0.0
+            crypto_total = 0.0
+            other_total = 0.0
+            liab_total = 0.0
+            
+            asset_tabs = st.tabs(["🏡 Real Estate", "📈 Shares", "🪙 Gold", "💵 Cash", "₿ Crypto", "📦 Other Assets", "💳 Liabilities"])
             
             # Real Estate
             with asset_tabs[0]:
@@ -23110,102 +23656,40 @@ def ui_pfm():
 
             # Shares
             with asset_tabs[1]:
-                # Auto-Import toggle inside the Shares section
-                shares_mode = st.radio(
-                    "📊 Shares Entry Mode",
-                    ["Manual Entry", "Auto-Import from Portfolio"],
-                    horizontal=True,
-                    key="pfm_shares_mode",
-                    help="Auto-Import will pull your current portfolio holdings with live prices"
-                )
-                
-                if shares_mode == "Auto-Import from Portfolio":
-                    st.info("📊 Importing shares from your portfolio holdings at current market values...")
-                    
-                    # Warning about double-counting with Portfolio Analysis
-                    exclude_from_networth = st.checkbox(
-                        "⚠️ Exclude from Net Worth calculations (avoid double-counting)",
-                        value=False,
-                        key="pfm_exclude_shares_networth",
-                        help="Check this if you already track these investments in Portfolio Analysis. "
-                             "This prevents counting the same assets twice in your total net worth."
-                    )
-                    if exclude_from_networth:
-                        st.caption("💡 These shares will be displayed but NOT added to your Net Worth total.")
-                    
-                    # Calculate portfolio value
-                    try:
-                        conn = get_conn()
-                        cur = conn.cursor()
-                        # Calculate holdings directly from transactions (grouped by symbol + portfolio)
-                        # This matches how build_portfolio_table works
-                        db_execute(cur, """
-                            SELECT 
-                                t.stock_symbol as symbol,
-                                COALESCE(s.name, t.stock_symbol) as name,
-                                t.portfolio,
-                                SUM(CASE WHEN t.txn_type = 'Buy' THEN t.shares ELSE 0 END) - 
-                                SUM(CASE WHEN t.txn_type = 'Sell' THEN t.shares ELSE 0 END) as net_shares,
-                                COALESCE(s.current_price, 0) as current_price,
-                                COALESCE(s.currency, 'KWD') as currency
-                            FROM transactions t
-                            LEFT JOIN stocks s ON t.stock_symbol = s.symbol AND t.portfolio = s.portfolio AND s.user_id = t.user_id
-                            WHERE t.user_id = ? 
-                              AND t.is_deleted = 0
-                              AND t.txn_type IN ('Buy', 'Sell')
-                            GROUP BY t.stock_symbol, t.portfolio
-                            HAVING (SUM(CASE WHEN t.txn_type = 'Buy' THEN t.shares ELSE 0 END) - 
-                                SUM(CASE WHEN t.txn_type = 'Sell' THEN t.shares ELSE 0 END)) > 0
-                        """, (user_id,))
-                        portfolio_rows = cur.fetchall()
-                        conn.close()
-                        
-                        if portfolio_rows:
-                            port_data = []
-                            total_port = 0.0
-                            for row in portfolio_rows:
-                                ticker, name, portfolio, qty, price, curr = row
-                                qty = float(qty) if qty else 0
-                                price = float(price) if price else 0
-                                val = qty * price
-                                val_kwd = convert_to_kwd(val, curr) if curr != "KWD" else val
-                                total_port += val_kwd
-                                port_data.append({"Ticker": ticker, "Company": name, "Portfolio": portfolio, "Shares": qty, "Price": price, "Currency": curr, "Value (KWD)": val_kwd})
-                            
-                            st.dataframe(pd.DataFrame(port_data), use_container_width=True, hide_index=True)
-                            
-                            # Show appropriate message based on exclusion flag
-                            if exclude_from_networth:
-                                st.warning(f"**Portfolio Value: {total_port:,.2f} KWD** — ⚠️ EXCLUDED from Net Worth (already tracked in Portfolio Analysis)")
-                            else:
-                                st.success(f"**Total Portfolio Value:** {total_port:,.2f} KWD")
-                            
-                            shares_df = pd.DataFrame([{"auto_import": True, "value": total_port}])
-                        else:
-                            st.warning("No portfolio holdings found. Add stocks in the Transactions tab first.")
-                            shares_df = pd.DataFrame()
-                    except Exception as e:
-                        st.error(f"Error loading portfolio: {e}")
-                        shares_df = pd.DataFrame()
+                if "pfm_imported_shares" in st.session_state and st.session_state["pfm_imported_shares"]:
+                    st.info("📊 Shares imported from portfolio. You can edit values below before saving.")
                 else:
-                    st.caption("Enter your shares manually below, or switch to Auto-Import to pull from your portfolio.")
-                    shares_df = st.data_editor(
-                        pd.DataFrame(default_shares),
-                        num_rows="dynamic",
-                        use_container_width=True,
-                        key=f"pfm_shares_{snapshot_date}",
-                        column_config={
-                            "Ticker": st.column_config.TextColumn(width="small"),
-                            "Name": st.column_config.TextColumn(width="medium"),
-                            "Qty": st.column_config.NumberColumn(format="%.0f", min_value=0),
-                            "Price": st.column_config.NumberColumn(format="%.3f", min_value=0),
-                            "Currency": st.column_config.SelectboxColumn(options=["KWD", "USD", "SAR", "AED", "BHD", "OMR", "QAR"])
-                        }
+                    st.caption("Enter shares manually, or use the **Import Portfolio into Shares** button above to auto-populate.")
+                
+                # Pre-compute Value column for display (converted to KWD)
+                _shares_input = pd.DataFrame(default_shares)
+                if not _shares_input.empty and "Qty" in _shares_input.columns and "Price" in _shares_input.columns:
+                    _shares_input["Value"] = _shares_input.apply(
+                        lambda r: convert_to_kwd(float(r["Qty"] or 0) * float(r["Price"] or 0), r.get("Currency", "KWD") or "KWD"), axis=1
                     )
-                    if not shares_df.empty and "Qty" in shares_df.columns and "Price" in shares_df.columns:
-                        shares_df["Value"] = shares_df["Qty"] * shares_df["Price"]
-                        shares_total = shares_df["Value"].sum()
-                        st.markdown(f"**Total Shares Value:** {shares_total:,.2f}")
+                elif "Value" not in _shares_input.columns:
+                    _shares_input["Value"] = 0.0
+                
+                shares_df = st.data_editor(
+                    _shares_input,
+                    num_rows="dynamic",
+                    use_container_width=True,
+                    key=f"pfm_shares_{snapshot_date}",
+                    column_config={
+                        "Ticker": st.column_config.TextColumn(width="small"),
+                        "Name": st.column_config.TextColumn(width="medium"),
+                        "Qty": st.column_config.NumberColumn(format="%.0f", min_value=0),
+                        "Price": st.column_config.NumberColumn(format="%.3f", min_value=0),
+                        "Currency": st.column_config.SelectboxColumn(options=["KWD", "USD", "SAR", "AED", "BHD", "OMR", "QAR"]),
+                        "Value": st.column_config.NumberColumn(label="Value (KWD)", format="%.3f", disabled=True),
+                    }
+                )
+                if not shares_df.empty and "Qty" in shares_df.columns and "Price" in shares_df.columns:
+                    shares_df["Value"] = shares_df.apply(
+                        lambda r: convert_to_kwd(float(r["Qty"] or 0) * float(r["Price"] or 0), r.get("Currency", "KWD") or "KWD"), axis=1
+                    )
+                    shares_total_kwd = shares_df["Value"].sum()
+                    st.markdown(f"**Total Shares Value: {shares_total_kwd:,.3f} KWD**")
 
             # Gold
             with asset_tabs[2]:
@@ -23227,6 +23711,16 @@ def ui_pfm():
 
             # Cash
             with asset_tabs[3]:
+                # Prepend imported cash positions if available
+                if "pfm_imported_cash" in st.session_state and st.session_state["pfm_imported_cash"]:
+                    # Only prepend if not already loaded from existing snapshot
+                    if not existing_snapshot:
+                        default_cash = st.session_state["pfm_imported_cash"]
+                    else:
+                        # Merge: keep existing non-portfolio rows, replace portfolio cash rows
+                        non_portfolio = [r for r in default_cash if "Cash in Portfolio" not in str(r.get("Account", ""))]
+                        default_cash = st.session_state["pfm_imported_cash"] + non_portfolio
+                
                 cash_df = st.data_editor(
                     pd.DataFrame(default_cash),
                     num_rows="dynamic",
@@ -23266,8 +23760,24 @@ def ui_pfm():
                     crypto_total = crypto_df["Value (KWD)"].sum()
                     st.markdown(f"**Total Crypto:** {crypto_total:,.2f} KWD")
 
-            # Liabilities
+            # Other Assets
             with asset_tabs[5]:
+                other_df = st.data_editor(
+                    pd.DataFrame(default_other_assets),
+                    num_rows="dynamic",
+                    width="stretch",
+                    key=f"pfm_other_{snapshot_date}",
+                    column_config={
+                        "Name": st.column_config.TextColumn(width="large"),
+                        "Value (KWD)": st.column_config.NumberColumn(format="%.3f", min_value=0),
+                        "Type": st.column_config.SelectboxColumn(options=["Current", "Non-Current"])
+                    }
+                )
+                other_total = other_df["Value (KWD)"].sum() if not other_df.empty and "Value (KWD)" in other_df.columns else 0
+                st.markdown(f"**Total Other Assets:** {other_total:,.2f} KWD")
+
+            # Liabilities
+            with asset_tabs[6]:
                 liab_df = st.data_editor(
                     pd.DataFrame(default_liabilities),
                     num_rows="dynamic",
@@ -23281,6 +23791,19 @@ def ui_pfm():
                 )
                 liab_total = liab_df["Amount (KWD)"].sum() if not liab_df.empty and "Amount (KWD)" in liab_df.columns else 0
                 st.markdown(f"**Total Liabilities:** {liab_total:,.2f} KWD")
+
+            # --- SUMMARY: Total Assets / Total Liabilities / Net Worth ---
+            _total_assets = re_total + shares_total_kwd + gold_total + cash_total + crypto_total + other_total
+            _total_liabilities = liab_total
+            _net_worth = _total_assets - _total_liabilities
+            
+            col_a, col_l, col_nw = st.columns(3)
+            with col_a:
+                st.metric("Total Assets", f"{_total_assets:,.2f} KWD")
+            with col_l:
+                st.metric("Total Liabilities", f"{_total_liabilities:,.2f} KWD")
+            with col_nw:
+                st.metric("Net Worth", f"{_net_worth:,.2f} KWD")
 
             st.divider()
             
@@ -23308,8 +23831,8 @@ def ui_pfm():
                 else:
                     db_execute(cur, """
                         INSERT INTO pfm_snapshots (user_id, snapshot_date, notes, created_at)
-                        VALUES (?, ?, ?, ?)
-                    """, (user_id, str(snapshot_date), snapshot_notes, int(time.time())))
+                        VALUES (?, ?, '', ?)
+                    """, (user_id, str(snapshot_date), int(time.time())))
                     snapshot_id = cur.lastrowid
                 
                 # Save income items
@@ -23320,6 +23843,16 @@ def ui_pfm():
                         db_execute(cur, """
                             INSERT INTO pfm_income_expense_items (snapshot_id, user_id, kind, category, monthly_amount, is_finance_cost, is_gna)
                             VALUES (?, ?, 'income', ?, ?, 0, 0)
+                        """, (snapshot_id, user_id, cat, amt))
+                
+                # Save annual income items
+                for _, row in annual_income_df.iterrows():
+                    cat = str(row.get("Category", "")).strip()
+                    amt = float(row.get("Annual (KWD)", 0) or 0)
+                    if cat and amt > 0:
+                        db_execute(cur, """
+                            INSERT INTO pfm_income_expense_items (snapshot_id, user_id, kind, category, monthly_amount, is_finance_cost, is_gna)
+                            VALUES (?, ?, 'annual_income', ?, ?, 0, 0)
                         """, (snapshot_id, user_id, cat, amt))
                 
                 # Save expense items
@@ -23345,21 +23878,7 @@ def ui_pfm():
                         """, (snapshot_id, user_id, name, val, val))
                 
                 # Save shares
-                # Check if user wants to exclude from net worth (double-counting prevention)
-                exclude_shares = st.session_state.get("pfm_exclude_shares_networth", False)
-                
-                if shares_mode == "Auto-Import from Portfolio" and not shares_df.empty and "auto_import" in shares_df.columns:
-                    val = float(shares_df["value"].iloc[0])
-                    if val > 0:
-                        # Store exclusion flag in notes column (if exists) or value_kwd = 0 if excluded
-                        stored_val = 0 if exclude_shares else val
-                        db_execute(cur, """
-                            INSERT INTO pfm_asset_items (snapshot_id, user_id, asset_type, category, name, quantity, price, currency, value_kwd)
-                            VALUES (?, ?, 'shares', 'Portfolio', ?, 1, ?, 'KWD', ?)
-                        """, (snapshot_id, user_id, 
-                              f"Auto-imported{'  [EXCLUDED from Net Worth]' if exclude_shares else ''}", 
-                              val, stored_val))
-                elif not shares_df.empty and "Ticker" in shares_df.columns:
+                if not shares_df.empty and "Ticker" in shares_df.columns:
                     for _, row in shares_df.iterrows():
                         ticker = str(row.get("Ticker", "")).strip()
                         name = str(row.get("Name", "")).strip()
@@ -23413,6 +23932,18 @@ def ui_pfm():
                                 VALUES (?, ?, 'crypto', '', ?, ?, ?, 'USD', ?)
                             """, (snapshot_id, user_id, coin, qty, price, val_kwd))
                 
+                # Save other assets
+                if not other_df.empty and "Value (KWD)" in other_df.columns:
+                    for _, row in other_df.iterrows():
+                        name = str(row.get("Name", "")).strip()
+                        val = float(row.get("Value (KWD)", 0) or 0)
+                        oa_type = row.get("Type", "Current")
+                        if val > 0:
+                            db_execute(cur, """
+                                INSERT INTO pfm_asset_items (snapshot_id, user_id, asset_type, category, name, quantity, price, currency, value_kwd)
+                                VALUES (?, ?, 'other_asset', ?, ?, 1, ?, 'KWD', ?)
+                            """, (snapshot_id, user_id, oa_type, name, val, val))
+                
                 # Save liabilities
                 if not liab_df.empty and "Amount (KWD)" in liab_df.columns:
                     for _, row in liab_df.iterrows():
@@ -23430,7 +23961,13 @@ def ui_pfm():
                 conn.commit()
                 conn.close()
                 
-                st.success(f"✅ Financial snapshot saved for {snapshot_date}!")
+                # Clear imported data from session state after successful save
+                if "pfm_imported_shares" in st.session_state:
+                    del st.session_state["pfm_imported_shares"]
+                if "pfm_imported_cash" in st.session_state:
+                    del st.session_state["pfm_imported_cash"]
+                
+                st.success(f"✅ Financial snapshot saved for {snapshot_date.strftime('%d/%m/%Y')}!")
                 st.balloons()
                 time.sleep(1)
                 st.rerun()
@@ -23442,7 +23979,7 @@ def ui_pfm():
     # TAB 2: UNIFIED FINANCIAL STATEMENT (P&L + Balance Sheet + Ratios)
     # ═══════════════════════════════════════════════════════════════════════════
     with pfm_tabs[1]:
-        st.subheader("📊 Unified Financial Statement")
+        st.markdown('<div class="pfm-section-title">📊 Unified Financial Statement</div>', unsafe_allow_html=True)
         
         # Load all snapshots for user
         conn = get_conn()
@@ -23488,10 +24025,15 @@ def ui_pfm():
                 db_execute(cur, "SELECT category, monthly_amount FROM pfm_income_expense_items WHERE snapshot_id = ? AND kind = 'income'", (snap_id,))
                 income_rows = cur.fetchall()
                 
+                db_execute(cur, "SELECT category, monthly_amount FROM pfm_income_expense_items WHERE snapshot_id = ? AND kind = 'annual_income'", (snap_id,))
+                annual_income_rows = cur.fetchall()
+                
                 db_execute(cur, "SELECT category, monthly_amount, is_finance_cost, is_gna FROM pfm_income_expense_items WHERE snapshot_id = ? AND kind = 'expense'", (snap_id,))
                 expense_rows = cur.fetchall()
                 
-                turnover = sum(r[1] for r in income_rows) * 12 if income_rows else 0
+                monthly_inc_total = sum(r[1] for r in income_rows) if income_rows else 0
+                annual_inc_total = sum(r[1] for r in annual_income_rows) if annual_income_rows else 0
+                turnover = (monthly_inc_total * 12) + annual_inc_total
                 exp_fin = sum(r[1] for r in expense_rows if r[2]) * 12 if expense_rows else 0
                 exp_gna = sum(r[1] for r in expense_rows if not r[2]) * 12 if expense_rows else 0
                 net_profit = turnover - (exp_fin + exp_gna)
@@ -23590,13 +24132,7 @@ def ui_pfm():
                 add_val("Savings Rate %", snap_date, savings_rate)
             
             # === RENDER UNIFIED STATEMENT ===
-            st.markdown("""
-            <style>
-            .fin-section { font-weight: bold; background-color: #1a1a2e; color: #00d4ff; padding: 8px 12px; margin-top: 10px; }
-            .fin-total { font-weight: 800; background-color: #16213e; color: #fff; border-top: 2px solid #00d4ff; }
-            .fin-subtotal { font-weight: 600; background-color: #0f3460; color: #e2e2e2; }
-            </style>
-            """, unsafe_allow_html=True)
+            # (fin-section/fin-total/fin-subtotal styles are in the theme CSS above)
             
             # Convert to DataFrame
             df_stmt = pd.DataFrame(report_data).T
@@ -23707,7 +24243,7 @@ def ui_pfm():
     # TAB 3: BALANCE SHEET (Legacy - kept for detailed view)
     # ═══════════════════════════════════════════════════════════════════════════
     with pfm_tabs[2]:
-        st.subheader("📋 Balance Sheet & Net Worth")
+        st.markdown('<div class="pfm-section-title">📋 Balance Sheet & Net Worth</div>', unsafe_allow_html=True)
 
         conn = get_conn()
         try:
@@ -23823,7 +24359,7 @@ def ui_pfm():
     # TAB 4: RATIOS & GROWTH
     # ═══════════════════════════════════════════════════════════════════════════
     with pfm_tabs[3]:
-        st.subheader("📈 Financial Ratios & Growth Analysis")
+        st.markdown('<div class="pfm-section-title">📈 Financial Ratios & Growth Analysis</div>', unsafe_allow_html=True)
 
         conn = get_conn()
         try:
@@ -23855,7 +24391,12 @@ def ui_pfm():
                     WHERE snapshot_id = ?
                     GROUP BY kind
                 """, (snap_id,))
-                ie_rows = {r[0]: float(r[1]) * 12 for r in cur.fetchall()}
+                ie_rows = {}
+                for r in cur.fetchall():
+                    if r[0] == 'annual_income':
+                        ie_rows['annual_income'] = float(r[1])  # already annual
+                    else:
+                        ie_rows[r[0]] = float(r[1]) * 12  # monthly → annual
                 
                 # Get assets
                 db_execute(cur, """
@@ -23879,7 +24420,7 @@ def ui_pfm():
                 total_liab = float(liab_row[2] or 0) if liab_row else 0
                 conn.close()
 
-                total_income = ie_rows.get("income", 0)
+                total_income = ie_rows.get("income", 0) + ie_rows.get("annual_income", 0)
                 total_expense = ie_rows.get("expense", 0)
                 net_income = total_income - total_expense
                 total_assets = sum(assets.values())
@@ -23997,7 +24538,7 @@ def ui_pfm():
             # WEALTH TRAJECTORY VISUALIZATION
             # ═══════════════════════════════════════════════════════════════════════════
             st.divider()
-            st.subheader("📈 Wealth Trajectory")
+            st.markdown('<div class="pfm-section-title">📈 Wealth Trajectory</div>', unsafe_allow_html=True)
             
             if len(all_metrics) >= 2:
                 # Prepare trend data for visualization
