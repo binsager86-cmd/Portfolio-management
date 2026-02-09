@@ -17727,6 +17727,435 @@ def ui_portfolio_tracker():
                 st.error(f"Error saving changes: {e}")
 
 
+def _ui_yield_calculator_tab():
+    """Standalone yield calculator — uses the same theme system as Overview."""
+
+    PAR_VALUE = 0.100  # Par value constant for KSE stocks
+    is_dark = st.session_state.get("theme", "light") == "dark"
+
+    # ── Theme-aware CSS (same variable system as Overview) ──
+    if is_dark:
+        _yc_vars = """
+        :root {
+            --yc-bg-card: #1a1a2e;
+            --yc-bg-secondary: #121220;
+            --yc-text-primary: #e6e6f0;
+            --yc-text-secondary: #a0a0b0;
+            --yc-text-muted: #6b6b80;
+            --yc-accent: #8a2be2;
+            --yc-accent2: #4cc9f0;
+            --yc-accent3: #ff00cc;
+            --yc-success: #00d4ff;
+            --yc-warning: #ff9e00;
+            --yc-danger: #ff4757;
+            --yc-card-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            --yc-card-border: 1px solid rgba(138, 43, 226, 0.2);
+            --yc-glow: 0 0 15px rgba(138, 43, 226, 0.6);
+            --yc-icon-bg: rgba(138, 43, 226, 0.1);
+            --yc-sub-border: 1px dashed rgba(255, 255, 255, 0.06);
+            --yc-section-border: rgba(138, 43, 226, 0.3);
+            --yc-cell-border: rgba(255, 255, 255, 0.05);
+            --yc-table-header-bg: rgba(138, 43, 226, 0.15);
+            --yc-table-even-bg: rgba(138, 43, 226, 0.05);
+            --yc-placeholder-bg: rgba(138, 43, 226, 0.06);
+        }
+        """
+    else:
+        _yc_vars = """
+        :root {
+            --yc-bg-card: #ffffff;
+            --yc-bg-secondary: #f8fafc;
+            --yc-text-primary: #1e293b;
+            --yc-text-secondary: #64748b;
+            --yc-text-muted: #94a3b8;
+            --yc-accent: #6366f1;
+            --yc-accent2: #3b82f6;
+            --yc-accent3: #ec4899;
+            --yc-success: #10b981;
+            --yc-warning: #f59e0b;
+            --yc-danger: #ef4444;
+            --yc-card-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
+            --yc-card-border: 1px solid rgba(203, 213, 225, 0.6);
+            --yc-glow: 0 4px 20px rgba(99, 102, 241, 0.15);
+            --yc-icon-bg: rgba(99, 102, 241, 0.08);
+            --yc-sub-border: 1px dashed rgba(0, 0, 0, 0.08);
+            --yc-section-border: rgba(99, 102, 241, 0.25);
+            --yc-cell-border: rgba(0, 0, 0, 0.06);
+            --yc-table-header-bg: #f1f5f9;
+            --yc-table-even-bg: #f8fafc;
+            --yc-placeholder-bg: rgba(99, 102, 241, 0.04);
+        }
+        """
+
+    _yc_css = """
+    /* ── YC Dashboard Card ── */
+    .yc-dashboard-card {
+        background: var(--yc-bg-card); border-radius: 16px;
+        border: var(--yc-card-border); box-shadow: var(--yc-card-shadow);
+        padding: 1.5rem; margin-bottom: 1.5rem;
+        transition: all 0.3s ease; position: relative; overflow: hidden;
+        backdrop-filter: blur(10px);
+    }
+    .yc-dashboard-card:hover {
+        transform: translateY(-5px);
+        box-shadow: var(--yc-glow), var(--yc-card-shadow);
+        border-color: var(--yc-accent);
+    }
+    .yc-dashboard-card::before {
+        content: ''; position: absolute;
+        top: -2px; left: -2px; right: -2px; bottom: -2px;
+        background: linear-gradient(45deg, var(--yc-accent), var(--yc-accent2), var(--yc-accent3));
+        z-index: -1; border-radius: 18px;
+        filter: blur(10px); opacity: 0; transition: 0.3s ease;
+    }
+    .yc-dashboard-card:hover::before { opacity: """ + ("0.3" if is_dark else "0") + """; }
+
+    /* ── YC Metric Card (mirrors .metric-card) ── */
+    .yc-metric {
+        background: var(--yc-bg-secondary); border-radius: """ + ("12px" if is_dark else "20px") + """;
+        padding: 1.25rem; display: flex; flex-direction: column;
+        height: 100%; position: relative; overflow: hidden;
+        border: 1px solid var(--yc-cell-border);
+        transition: all 0.3s ease;
+    }
+    .yc-metric:hover {
+        transform: translateY(-3px);
+        border-color: var(--yc-accent);
+        box-shadow: 0 8px 20px rgba(0, 0, 0, 0.12);
+    }
+    .yc-metric::before {
+        content: ''; position: absolute;
+        top: 0; left: 0; right: 0; height: 4px;
+        background: linear-gradient(90deg, var(--yc-accent), var(--yc-accent2));
+    }
+    .yc-metric .yc-icon {
+        font-size: 2rem; margin-bottom: 0.5rem;
+        width: 52px; height: 52px; border-radius: 14px;
+        display: flex; align-items: center; justify-content: center;
+        background: var(--yc-icon-bg);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+    }
+    .yc-metric .yc-label {
+        font-size: 0.85rem; color: var(--yc-text-secondary);
+        font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;
+        margin-bottom: 0.25rem;
+    }
+    .yc-metric .yc-val {
+        font-size: 1.9rem; font-weight: 800; line-height: 1.2;
+        margin: 0.5rem 0; color: var(--yc-text-primary);
+    }
+    .yc-metric .yc-sub {
+        font-size: 0.85rem; color: var(--yc-text-secondary);
+        margin-top: auto; padding-top: 0.75rem;
+        border-top: var(--yc-sub-border);
+    }
+
+    /* icon colour variants */
+    .yc-icon-blue   { background: rgba(59, 130, 246, 0.12) !important; color: var(--yc-accent2); }
+    .yc-icon-green  { background: rgba(16, 185, 129, 0.12) !important; color: var(--yc-success); }
+    .yc-icon-purple { background: rgba(99, 102, 241, 0.12) !important; color: var(--yc-accent); }
+    .yc-icon-amber  { background: rgba(245, 158, 11, 0.12) !important; color: var(--yc-warning); }
+    .yc-icon-pink   { background: rgba(236, 72, 153, 0.12) !important; color: var(--yc-accent3); }
+
+    /* value colour variants */
+    .yc-val-green  { color: var(--yc-success) !important; """ + ("text-shadow: 0 0 10px rgba(0, 212, 255, 0.5);" if is_dark else "") + """ }
+    .yc-val-blue   { color: var(--yc-accent2) !important; }
+    .yc-val-purple { color: var(--yc-accent) !important; }
+    .yc-val-amber  { color: var(--yc-warning) !important; }
+    .yc-val-pink   { color: var(--yc-accent3) !important; }
+
+    /* ── Section Header (mirrors .section-header) ── */
+    .yc-section {
+        display: flex; align-items: center; gap: 0.75rem;
+        padding-bottom: 0.75rem; margin: 2rem 0 1.25rem;
+        border-bottom: 2px solid var(--yc-section-border);
+    }
+    .yc-section-title {
+        font-size: 1.4rem; font-weight: 700; color: var(--yc-text-primary);
+        letter-spacing: -0.3px;
+    }
+    .yc-section-icon {
+        width: 36px; height: 36px; border-radius: 10px;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 1.3rem; background: var(--yc-icon-bg);
+        box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    }
+
+    /* ── Total Yield Cards ── */
+    .yc-total-card {
+        border-radius: 16px; padding: 1.5rem; text-align: center;
+        color: white; position: relative; overflow: hidden;
+        transition: all 0.3s ease;
+    }
+    .yc-total-card:hover { transform: translateY(-4px); }
+    .yc-total-card .yc-total-label {
+        font-size: 0.85rem; font-weight: 600; text-transform: uppercase;
+        letter-spacing: 0.5px; opacity: 0.9; margin-bottom: 0.5rem;
+    }
+    .yc-total-card .yc-total-val {
+        font-size: 2.4rem; font-weight: 800; line-height: 1.2;
+    }
+    .yc-total-card .yc-total-amount {
+        font-size: 2.4rem; font-weight: 800; opacity: 0.95; margin-top: 0.35rem;
+        line-height: 1.2; letter-spacing: 0.3px;
+    }
+    .yc-total-card .yc-total-sub {
+        font-size: 0.85rem; opacity: 0.8; margin-top: 0.5rem;
+    }
+    .yc-total-before {
+        background: linear-gradient(135deg, var(--yc-accent), var(--yc-accent2));
+        box-shadow: 0 8px 30px """ + ("rgba(138, 43, 226, 0.4)" if is_dark else "rgba(99, 102, 241, 0.25)") + """;
+    }
+    .yc-total-after {
+        background: linear-gradient(135deg, var(--yc-success), """ + ("#059669" if not is_dark else "#0891b2") + """);
+        box-shadow: 0 8px 30px """ + ("rgba(0, 212, 255, 0.3)" if is_dark else "rgba(16, 185, 129, 0.25)") + """;
+    }
+
+    /* ── Breakdown Table ── */
+    .yc-table {
+        width: 100%; border-collapse: separate; border-spacing: 0;
+        border-radius: 12px; overflow: hidden; margin-top: 0.5rem;
+        border: 1px solid var(--yc-cell-border); font-size: 0.85rem;
+    }
+    .yc-table th {
+        background: var(--yc-table-header-bg); color: var(--yc-text-secondary);
+        font-weight: 700; text-transform: uppercase; font-size: 0.72rem;
+        letter-spacing: 0.06em; padding: 12px 16px; text-align: left;
+    }
+    .yc-table td {
+        padding: 10px 16px; border-top: 1px solid var(--yc-cell-border);
+        color: var(--yc-text-primary);
+    }
+    .yc-table tr:nth-child(even) td { background: var(--yc-table-even-bg); }
+    .yc-table .fm {
+        color: var(--yc-text-muted);
+        font-family: 'SF Mono', SFMono-Regular, Consolas, monospace;
+        font-size: 0.8rem;
+    }
+    .yc-table .rs {
+        font-weight: 700; color: var(--yc-text-primary); text-align: right;
+    }
+
+    /* ── Placeholder ── */
+    .yc-placeholder {
+        text-align: center; padding: 3.5rem 1rem;
+        color: var(--yc-text-muted);
+        background: var(--yc-placeholder-bg);
+        border-radius: 16px; border: 1px dashed var(--yc-section-border);
+        margin-top: 1rem;
+    }
+    .yc-placeholder .yc-ph-icon { font-size: 3rem; margin-bottom: 0.75rem; }
+    .yc-placeholder .yc-ph-text { font-size: 1rem; font-weight: 600; }
+
+    @media (max-width: 768px) {
+        .yc-metric .yc-val { font-size: 1.5rem; }
+        .yc-total-card .yc-total-val { font-size: 1.8rem; }
+    }
+    """
+
+    st.markdown(f"<style>{_yc_vars}\n{_yc_css}</style>", unsafe_allow_html=True)
+
+    # ── Header (same pattern as Overview) ──
+    if is_dark:
+        st.markdown("""
+        <div class="yc-dashboard-card">
+            <div style="text-align:center; padding:1rem 0;">
+                <h1 style="font-size:2.2rem; font-weight:800; margin:0; color:var(--yc-text-primary); letter-spacing:-1px; text-shadow:0 0 15px rgba(138,43,226,0.5);">
+                    📈 YIELD CALCULATOR
+                </h1>
+                <p style="font-size:1rem; color:var(--yc-text-secondary); margin:0.5rem 0 0; font-weight:500;">
+                    Estimate dividend &amp; bonus share yields · Pre &amp; Post Ex-Date analysis
+                </p>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        st.markdown("""
+        <div class="yc-dashboard-card">
+            <div style="text-align:center; padding:1rem 0;">
+                <h1 style="font-size:2.2rem; font-weight:800; margin:0; color:var(--yc-text-primary); letter-spacing:-1px;">
+                    📈 Yield Calculator
+                </h1>
+                <p style="font-size:1rem; color:var(--yc-text-secondary); margin:0.5rem 0 0; font-weight:500;">
+                    Estimate dividend &amp; bonus share yields · Pre &amp; Post Ex-Date analysis
+                </p>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # ── Form ──
+    with st.form(key="yc_form"):
+        c1, c2 = st.columns(2, gap="large")
+        with c1:
+            purchase_price = st.number_input(
+                "Purchase Price", min_value=0.0, value=0.0, step=0.001, format="%.3f",
+                key="yc_purchase_price", help="Your average purchase price per share"
+            )
+            num_shares = st.number_input(
+                "Number of Shares", min_value=0, value=0, step=100,
+                key="yc_num_shares", help="Total shares you own"
+            )
+            cash_div_pct = st.number_input(
+                "Cash Dividend %", min_value=0.0, value=0.0, step=0.5, format="%.2f",
+                key="yc_cash_div_pct", help="Cash dividend percentage (e.g. 10 = 10%)"
+            )
+        with c2:
+            expected_price = st.number_input(
+                "Expected Price Before Ex-Date", min_value=0.0, value=0.0, step=0.001, format="%.3f",
+                key="yc_expected_price", help="Expected market price just before ex-date"
+            )
+            bonus_pct = st.number_input(
+                "Bonus Shares %", min_value=0.0, value=0.0, step=0.5, format="%.2f",
+                key="yc_bonus_pct", help="Bonus share percentage (e.g. 5 = 5%)"
+            )
+
+        submitted = st.form_submit_button("🧮  Calculate Yield", type="primary", use_container_width=True)
+
+    if not submitted:
+        st.markdown("""
+        <div class="yc-placeholder">
+            <div class="yc-ph-icon">📊</div>
+            <div class="yc-ph-text">Enter your parameters above and press <b>Calculate Yield</b></div>
+        </div>
+        """, unsafe_allow_html=True)
+        return
+
+    # ── Calculations ──
+    total_cost = num_shares * purchase_price
+    cash_div_rate = cash_div_pct / 100.0
+    bonus_rate = bonus_pct / 100.0
+
+    cash_dividend_amount = num_shares * cash_div_rate * PAR_VALUE
+    bonus_shares_qty = num_shares * bonus_rate
+    price_after_ex = expected_price / (1 + bonus_rate) if bonus_rate > 0 else expected_price
+
+    cash_div_yield_pct = (cash_dividend_amount / total_cost * 100) if total_cost > 0 else 0
+
+    bonus_value_before_ex = bonus_shares_qty * expected_price
+    bonus_yield_before_ex_pct = (bonus_value_before_ex / total_cost * 100) if total_cost > 0 else 0
+
+    bonus_value_after_ex = bonus_shares_qty * price_after_ex
+    bonus_yield_after_ex_pct = (bonus_value_after_ex / total_cost * 100) if total_cost > 0 else 0
+
+    total_yield_before_pct = cash_div_yield_pct + bonus_yield_before_ex_pct
+    total_yield_after_pct = cash_div_yield_pct + bonus_yield_after_ex_pct
+
+    total_value_before = cash_dividend_amount + bonus_value_before_ex
+    total_value_after = cash_dividend_amount + bonus_value_after_ex
+
+    # ── helper: metric card (mirrors Overview's .metric-card) ──
+    def _mc(icon, icon_cls, label, value, val_cls, sub):
+        return f"""
+        <div class="yc-metric">
+            <div class="yc-icon {icon_cls}">{icon}</div>
+            <div class="yc-label">{label}</div>
+            <div class="yc-val {val_cls}">{value}</div>
+            <div class="yc-sub">{sub}</div>
+        </div>"""
+
+    # ── Cost & Dividend ──
+    st.markdown("""
+    <div class="yc-section">
+        <div class="yc-section-icon" style="background:rgba(59,130,246,0.12);color:var(--yc-accent2);">💰</div>
+        <div class="yc-section-title">Cost &amp; Cash Dividend</div>
+    </div>""", unsafe_allow_html=True)
+
+    k1, k2, k3 = st.columns(3)
+    with k1:
+        st.markdown(_mc("💼", "yc-icon-blue", "Total Cost", f"{total_cost:,.3f}",
+                        "yc-val-blue", f"{num_shares:,} shares × {purchase_price:.3f}"), unsafe_allow_html=True)
+    with k2:
+        st.markdown(_mc("💵", "yc-icon-green", "Cash Dividend", f"{cash_dividend_amount:,.3f}",
+                        "yc-val-green", f"{num_shares:,} × {cash_div_rate:.2%} × {PAR_VALUE:.3f} par"), unsafe_allow_html=True)
+    with k3:
+        st.markdown(_mc("📊", "yc-icon-green", "Cash Div Yield", f"{cash_div_yield_pct:,.2f}%",
+                        "yc-val-green", "Dividend ÷ Total Cost"), unsafe_allow_html=True)
+
+    # ── Bonus Shares ──
+    st.markdown("""
+    <div class="yc-section">
+        <div class="yc-section-icon" style="background:rgba(99,102,241,0.12);color:var(--yc-accent);">🎁</div>
+        <div class="yc-section-title">Bonus Shares</div>
+    </div>""", unsafe_allow_html=True)
+
+    b1, b2, b3 = st.columns(3)
+    with b1:
+        st.markdown(_mc("🎁", "yc-icon-purple", "Bonus Shares", f"{bonus_shares_qty:,.0f}",
+                        "yc-val-purple", f"{num_shares:,} × {bonus_rate:.2%}"), unsafe_allow_html=True)
+    with b2:
+        st.markdown(_mc("📈", "yc-icon-amber", "Value Before Ex", f"{bonus_value_before_ex:,.3f}",
+                        "yc-val-amber", f"{bonus_shares_qty:,.0f} × {expected_price:.3f}"), unsafe_allow_html=True)
+    with b3:
+        st.markdown(_mc("📉", "yc-icon-pink", "Value After Ex", f"{bonus_value_after_ex:,.3f}",
+                        "yc-val-pink", f"{bonus_shares_qty:,.0f} × {price_after_ex:.3f}"), unsafe_allow_html=True)
+
+    st.markdown('<div style="height:0.5rem"></div>', unsafe_allow_html=True)
+
+    p1, p2, p3 = st.columns(3)
+    with p1:
+        st.markdown(_mc("🏷️", "yc-icon-blue", "Price After Ex", f"{price_after_ex:,.3f}",
+                        "yc-val-blue", f"{expected_price:.3f} ÷ (1 + {bonus_rate:.2%})"), unsafe_allow_html=True)
+    with p2:
+        st.markdown(_mc("📊", "yc-icon-purple", "Bonus Yield Before", f"{bonus_yield_before_ex_pct:,.2f}%",
+                        "yc-val-purple", "Bonus value ÷ Total cost"), unsafe_allow_html=True)
+    with p3:
+        st.markdown(_mc("📊", "yc-icon-pink", "Bonus Yield After", f"{bonus_yield_after_ex_pct:,.2f}%",
+                        "yc-val-pink", "Bonus value ÷ Total cost"), unsafe_allow_html=True)
+
+    # ── Total Yield ──
+    st.markdown("""
+    <div class="yc-section">
+        <div class="yc-section-icon" style="background:rgba(16,185,129,0.12);color:var(--yc-success);">✅</div>
+        <div class="yc-section-title">Total Yield</div>
+    </div>""", unsafe_allow_html=True)
+
+    t1, t2 = st.columns(2)
+    with t1:
+        st.markdown(f"""
+        <div class="yc-total-card yc-total-before">
+            <div class="yc-total-label">Total Yield Before Ex-Date</div>
+            <div class="yc-total-val">{total_yield_before_pct:,.2f}%</div>
+            <div class="yc-total-amount">Total Value: {total_value_before:,.3f}</div>
+            <div class="yc-total-sub">Cash {cash_div_yield_pct:.2f}% + Bonus {bonus_yield_before_ex_pct:.2f}%</div>
+        </div>""", unsafe_allow_html=True)
+    with t2:
+        st.markdown(f"""
+        <div class="yc-total-card yc-total-after">
+            <div class="yc-total-label">Total Yield After Ex-Date</div>
+            <div class="yc-total-val">{total_yield_after_pct:,.2f}%</div>
+            <div class="yc-total-amount">Total Value: {total_value_after:,.3f}</div>
+            <div class="yc-total-sub">Cash {cash_div_yield_pct:.2f}% + Bonus {bonus_yield_after_ex_pct:.2f}%</div>
+        </div>""", unsafe_allow_html=True)
+
+    # ── Breakdown Table ──
+    with st.expander("📋 Detailed Calculation Breakdown", expanded=False):
+        rows = [
+            ("Total Cost", f"{num_shares:,} × {purchase_price:.3f}", f"{total_cost:,.3f}"),
+            ("Cash Dividend", f"{num_shares:,} × {cash_div_rate:.2%} × {PAR_VALUE:.3f} (par)", f"{cash_dividend_amount:,.3f}"),
+            ("Cash Dividend Yield", f"{cash_dividend_amount:,.3f} / {total_cost:,.3f}", f"{cash_div_yield_pct:,.2f}%"),
+            ("Bonus Shares Qty", f"{num_shares:,} × {bonus_rate:.2%}", f"{bonus_shares_qty:,.0f}"),
+            ("Price After Ex-Date", f"{expected_price:.3f} / (1 + {bonus_rate:.2%})", f"{price_after_ex:,.3f}"),
+            ("Bonus Value Before Ex", f"{bonus_shares_qty:,.0f} × {expected_price:.3f}", f"{bonus_value_before_ex:,.3f}"),
+            ("Bonus Yield Before Ex", f"{bonus_value_before_ex:,.3f} / {total_cost:,.3f}", f"{bonus_yield_before_ex_pct:,.2f}%"),
+            ("Bonus Value After Ex", f"{bonus_shares_qty:,.0f} × {price_after_ex:.3f}", f"{bonus_value_after_ex:,.3f}"),
+            ("Bonus Yield After Ex", f"{bonus_value_after_ex:,.3f} / {total_cost:,.3f}", f"{bonus_yield_after_ex_pct:,.2f}%"),
+            ("Total Value Before Ex", f"{cash_dividend_amount:,.3f} + {bonus_value_before_ex:,.3f}", f"{total_value_before:,.3f}"),
+            ("Total Yield Before Ex", f"Cash {cash_div_yield_pct:.2f}% + Bonus {bonus_yield_before_ex_pct:.2f}%", f"{total_yield_before_pct:,.2f}%"),
+            ("Total Value After Ex", f"{cash_dividend_amount:,.3f} + {bonus_value_after_ex:,.3f}", f"{total_value_after:,.3f}"),
+            ("Total Yield After Ex", f"Cash {cash_div_yield_pct:.2f}% + Bonus {bonus_yield_after_ex_pct:.2f}%", f"{total_yield_after_pct:,.2f}%"),
+        ]
+        trs = "".join(
+            f'<tr><td>{item}</td><td class="fm">{formula}</td><td class="rs">{val}</td></tr>'
+            for item, formula, val in rows
+        )
+        st.markdown(f"""
+        <table class="yc-table">
+            <thead><tr><th>Item</th><th>Formula</th><th style="text-align:right">Value</th></tr></thead>
+            <tbody>{trs}</tbody>
+        </table>
+        """, unsafe_allow_html=True)
+
+
 def ui_dividends_tracker():
     st.subheader("💰 Dividends Tracker")
     
@@ -17758,6 +18187,8 @@ def ui_dividends_tracker():
     
     if dividends_df.empty:
         st.info("📊 No dividend data found. Dividends are stored with your transactions - add cash dividends, bonus shares, or reinvested dividends when recording transactions.")
+        # Still show the Yield Calculator even with no dividend data
+        _ui_yield_calculator_tab()
         return
     
     # Convert cash_dividend to KWD for consistent totals
@@ -17804,7 +18235,7 @@ def ui_dividends_tracker():
     st.divider()
     
     # Tabs for different views
-    tab1, tab2, tab3 = st.tabs(["📋 All Dividends", "📊 Summary by Stock", "🎁 Bonus Shares"])
+    tab1, tab2, tab3, tab4 = st.tabs(["📋 All Dividends", "📊 Summary by Stock", "🎁 Bonus Shares", "📈 Yield Calculator"])
     
     with tab1:
         st.subheader("All Dividend Transactions")
@@ -17997,6 +18428,9 @@ def ui_dividends_tracker():
                 file_name=f"bonus_shares_{date.today()}.csv",
                 mime="text/csv"
             )
+
+    with tab4:
+        _ui_yield_calculator_tab()
 
 
 def ui_trading_section():
