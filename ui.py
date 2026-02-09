@@ -24843,6 +24843,111 @@ def main():
     </style>
     """, unsafe_allow_html=True)
 
+    # --- SIDEBAR DARK-MODE CSS ---
+    is_dark_sidebar = st.session_state.get("theme", "light") == "dark"
+    if is_dark_sidebar:
+        st.markdown("""
+        <style>
+        /* ===== SIDEBAR DARK MODE ===== */
+        /* Sidebar background */
+        section[data-testid="stSidebar"] {
+            background-color: #0f172a !important;
+            border-right: 1px solid rgba(71, 85, 105, 0.5) !important;
+        }
+        section[data-testid="stSidebar"] > div {
+            background-color: #0f172a !important;
+        }
+        /* All sidebar text white */
+        section[data-testid="stSidebar"] * {
+            color: #e2e8f0 !important;
+        }
+        /* Sidebar headings */
+        section[data-testid="stSidebar"] h1,
+        section[data-testid="stSidebar"] h2,
+        section[data-testid="stSidebar"] h3,
+        section[data-testid="stSidebar"] h4 {
+            color: #f1f5f9 !important;
+        }
+        /* Sidebar radio labels (navigation) */
+        section[data-testid="stSidebar"] .stRadio label {
+            color: #e2e8f0 !important;
+        }
+        section[data-testid="stSidebar"] .stRadio label:hover {
+            color: #ffffff !important;
+            background-color: rgba(59, 130, 246, 0.15) !important;
+            border-radius: 6px;
+        }
+        /* Sidebar radio selected item */
+        section[data-testid="stSidebar"] .stRadio [data-checked="true"] + label,
+        section[data-testid="stSidebar"] .stRadio input:checked + label {
+            color: #60a5fa !important;
+            font-weight: 600;
+        }
+        /* Sidebar buttons */
+        section[data-testid="stSidebar"] .stButton button {
+            color: #ffffff !important;
+            background: rgba(59, 130, 246, 0.2) !important;
+            border: 1px solid rgba(59, 130, 246, 0.3) !important;
+        }
+        section[data-testid="stSidebar"] .stButton button:hover {
+            background: rgba(59, 130, 246, 0.35) !important;
+        }
+        /* Sidebar captions / small text */
+        section[data-testid="stSidebar"] .stCaption,
+        section[data-testid="stSidebar"] small,
+        section[data-testid="stSidebar"] caption {
+            color: #94a3b8 !important;
+        }
+        /* Sidebar divider / hr */
+        section[data-testid="stSidebar"] hr {
+            border-color: rgba(71, 85, 105, 0.5) !important;
+        }
+        /* Sidebar toggle labels */
+        section[data-testid="stSidebar"] .stToggle label,
+        section[data-testid="stSidebar"] [data-testid="stWidgetLabel"] {
+            color: #e2e8f0 !important;
+        }
+        /* Sidebar expander */
+        section[data-testid="stSidebar"] .streamlit-expanderHeader {
+            color: #e2e8f0 !important;
+            background: rgba(30, 41, 59, 0.5) !important;
+            border: 1px solid rgba(71, 85, 105, 0.4) !important;
+        }
+        /* Sidebar selectbox / dropdown */
+        section[data-testid="stSidebar"] .stSelectbox label,
+        section[data-testid="stSidebar"] .stSelectbox div[data-baseweb="select"] {
+            color: #e2e8f0 !important;
+        }
+        /* SAC menu items (streamlit-antd-components) */
+        section[data-testid="stSidebar"] .ant-menu,
+        section[data-testid="stSidebar"] .ant-menu-item,
+        section[data-testid="stSidebar"] .ant-menu-submenu-title {
+            color: #e2e8f0 !important;
+            background: transparent !important;
+        }
+        section[data-testid="stSidebar"] .ant-menu-item:hover,
+        section[data-testid="stSidebar"] .ant-menu-submenu-title:hover {
+            color: #ffffff !important;
+            background: rgba(59, 130, 246, 0.15) !important;
+        }
+        section[data-testid="stSidebar"] .ant-menu-item-selected {
+            color: #60a5fa !important;
+            background: rgba(59, 130, 246, 0.2) !important;
+        }
+        /* Sidebar links */
+        section[data-testid="stSidebar"] a {
+            color: #60a5fa !important;
+        }
+        /* Sidebar markdown/HTML text */
+        section[data-testid="stSidebar"] .stMarkdown,
+        section[data-testid="stSidebar"] .stMarkdown p,
+        section[data-testid="stSidebar"] .stMarkdown span,
+        section[data-testid="stSidebar"] .stMarkdown div {
+            color: #e2e8f0 !important;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+
     def toggle_theme():
         new_theme = "light" if st.session_state.theme == "dark" else "dark"
         st.session_state.theme = new_theme
@@ -24877,11 +24982,15 @@ def main():
         )
 
     # --- PROFESSIONAL SIDEBAR ---
+    # Sidebar theme colors
+    sb_text = "#f1f5f9" if st.session_state.get("theme", "light") == "dark" else "#333"
+    sb_border = "rgba(71, 85, 105, 0.5)" if st.session_state.get("theme", "light") == "dark" else "#ddd"
+
     with st.sidebar:
         # User Profile Header
         st.markdown(f"""
-        <div style="padding: 10px; border-bottom: 1px solid #ddd; margin-bottom: 10px;">
-            <h4 style="margin:0; color: #333;">👤 {st.session_state.get('username', 'User')}</h4>
+        <div style="padding: 10px; border-bottom: 1px solid {sb_border}; margin-bottom: 10px;">
+            <h4 style="margin:0; color: {sb_text};">👤 {st.session_state.get('username', 'User')}</h4>
         </div>
         """, unsafe_allow_html=True)
 
