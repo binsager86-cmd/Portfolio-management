@@ -18435,7 +18435,8 @@ def ui_dividends_tracker():
 
 
 def ui_trading_section():
-    """Trading Section - Full view of ALL transactions from main transactions table.
+    """Trading Section - Theme-Aware (Neon Dark / Clean Light).
+    Full view of ALL transactions from main transactions table.
     
     Key features:
     - NO data entry - all new transactions must use "Add Transactions" or other tabs
@@ -18443,7 +18444,35 @@ def ui_trading_section():
     - Edits UPDATE the 'transactions' table directly
     - Shows ALL transaction types: Buy, Sell, Deposit, Withdrawal, Dividend, Bonus Shares, etc.
     """
-    st.subheader("📈 Trading Section - All Transactions")
+    is_dark = _inject_page_theme_css()
+
+    # ===== THEMED HEADER =====
+    if is_dark:
+        st.markdown("""
+        <div class="dashboard-card">
+            <div style="text-align: center; padding: 1rem 0;">
+                <h1 style="font-size: 2.5rem; font-weight: 800; margin: 0; color: var(--text-primary); letter-spacing: -1px; text-shadow: 0 0 15px rgba(138, 43, 226, 0.5);">
+                    📈 TRADING SECTION
+                </h1>
+                <p style="font-size: 1.1rem; color: var(--text-secondary); margin: 0.5rem 0 0; font-weight: 500;">
+                    All transactions • Real-time P&L • CFA-compliant cost basis
+                </p>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        st.markdown("""
+        <div class="dashboard-card">
+            <div style="text-align: center; padding: 1rem 0;">
+                <h1 style="font-size: 2.5rem; font-weight: 800; margin: 0; color: var(--text-primary); letter-spacing: -1px;">
+                    📈 Trading Section
+                </h1>
+                <p style="font-size: 1.1rem; color: var(--text-secondary); margin: 0.5rem 0 0; font-weight: 500;">
+                    All transactions • Real-time P&L • CFA-compliant cost basis
+                </p>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
     
     user_id = st.session_state.get('user_id', 1)
     
@@ -18464,14 +18493,18 @@ def ui_trading_section():
                 time.sleep(0.5)
             st.rerun()
     
-    st.info("""
-    **📋 This shows ALL your saved transactions.**
-    
-    • **Buy/Sell** trades, **Cash Deposits/Withdrawals**, **Dividends**, **Bonus Shares** - all in one view.
-    • To add new transactions, use the **"Add Transactions"** or **"Cash Management"** tabs.
-    • You can **edit** existing transactions here, which updates the main transaction record.
-    • Portfolio positions and cash are calculated from the same data.
-    """)
+    # Themed info card instead of plain st.info
+    st.markdown(f"""
+    <div class="dashboard-card" style="padding: 1rem 1.5rem;">
+        <div style="font-weight: 700; color: var(--text-primary); margin-bottom: 0.5rem; font-size: 1.05rem;">📋 This shows ALL your saved transactions</div>
+        <div style="color: var(--text-secondary); line-height: 1.8; font-size: 0.9rem;">
+            • <strong>Buy/Sell</strong> trades, <strong>Cash Deposits/Withdrawals</strong>, <strong>Dividends</strong>, <strong>Bonus Shares</strong> - all in one view.<br>
+            • To add new transactions, use the <strong>"Add Transactions"</strong> or <strong>"Cash Management"</strong> tabs.<br>
+            • You can <strong>edit</strong> existing transactions here, which updates the main transaction record.<br>
+            • Portfolio positions and cash are calculated from the same data.
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
     
     # Query ALL transactions from the main transactions table (no date filter in query)
     conn = get_conn()
@@ -18923,9 +18956,10 @@ def ui_trading_section():
     df['pnl_pct'] = df.apply(calc_pnl_pct, axis=1)
     
     # ============================================================
-    # Summary Metrics (CFA/IFRS Compliant)
+    # Summary Metrics (CFA/IFRS Compliant) — Themed Metric Cards
     # ============================================================
-    st.divider()
+    st.markdown('<div class="section-header"><div class="section-icon purple">📊</div><div class="section-title">Trading Summary</div></div>', unsafe_allow_html=True)
+
     buy_df = df[df['type'] == 'Buy']
     sell_df = df[df['type'] == 'Sell']
     
@@ -19035,44 +19069,149 @@ def ui_trading_section():
     total_pnl = total_unrealized_pnl + total_realized_pnl  # Capital gains ONLY
     total_return = total_pnl + total_dividends_received  # Total return including cash dividend income
     
-    # Summary row 1: Trade activity
+    # Summary row 1: Trade activity — Themed Metric Cards
     k1, k2, k3, k4 = st.columns(4)
-    k1.metric("🛒 Total Buys", f"{total_buys:,.0f}", f"{len(buy_df)} txns")
-    k2.metric("💰 Total Sells", f"{total_sells:,.0f}", f"{len(sell_df)} txns")
-    k3.metric("📥 Deposits", f"{total_deposits:,.0f}", f"{deposit_count} deposits",
-              help="Source: Cash Deposits table (single source of truth)")
-    k4.metric("📤 Withdrawals", f"{total_withdrawals:,.0f}", f"{len(withdrawal_df)} txns")
+    with k1:
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-icon primary">🛒</div>
+            <div class="metric-label">TOTAL BUYS</div>
+            <div class="metric-value">{total_buys:,.0f}</div>
+            <div class="metric-sub">{len(buy_df)} transactions</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with k2:
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-icon green">💰</div>
+            <div class="metric-label">TOTAL SELLS</div>
+            <div class="metric-value">{total_sells:,.0f}</div>
+            <div class="metric-sub">{len(sell_df)} transactions</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with k3:
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-icon purple">📥</div>
+            <div class="metric-label">DEPOSITS</div>
+            <div class="metric-value">{total_deposits:,.0f}</div>
+            <div class="metric-sub">{deposit_count} deposits</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with k4:
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-icon warning">📤</div>
+            <div class="metric-label">WITHDRAWALS</div>
+            <div class="metric-value">{total_withdrawals:,.0f}</div>
+            <div class="metric-sub">{len(withdrawal_df)} transactions</div>
+        </div>
+        """, unsafe_allow_html=True)
     
-    # Summary row 2: P&L metrics (CFA compliant)
+    # Summary row 2: P&L metrics (CFA compliant) — Themed Metric Cards
+    st.markdown('<div style="height:1rem"></div>', unsafe_allow_html=True)
     k5, k6, k7, k8 = st.columns(4)
-    k5.metric("📈 Unrealized P&L", f"{total_unrealized_pnl:+,.2f}", "Open positions",
-              help="Market value minus cost basis for positions still held")
-    k6.metric("📊 Realized P&L", f"{total_realized_pnl:+,.2f}", "Closed positions",
-              help="Profit/loss from shares sold (FIFO method)")
-    k7.metric("💵 Total P&L", f"{total_pnl:+,.2f}", "Capital gains",
-              delta_color="normal" if total_pnl >= 0 else "inverse",
-              help="Capital gains only. Does NOT include dividends to avoid double-counting with reinvested amounts.")
-    k8.metric("📝 Total Txns", f"{len(df):,}")
+    with k5:
+        _u_class = "positive" if total_unrealized_pnl >= 0 else "negative"
+        _u_sign = "+" if total_unrealized_pnl >= 0 else ""
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-icon {'positive' if total_unrealized_pnl >= 0 else 'negative'}">📈</div>
+            <div class="metric-label">UNREALIZED P&L</div>
+            <div class="metric-value {_u_class}">{_u_sign}{total_unrealized_pnl:,.2f}</div>
+            <div class="metric-sub">Open positions</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with k6:
+        _r_class = "positive" if total_realized_pnl >= 0 else "negative"
+        _r_sign = "+" if total_realized_pnl >= 0 else ""
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-icon {'positive' if total_realized_pnl >= 0 else 'negative'}">📊</div>
+            <div class="metric-label">REALIZED P&L</div>
+            <div class="metric-value {_r_class}">{_r_sign}{total_realized_pnl:,.2f}</div>
+            <div class="metric-sub">Closed positions</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with k7:
+        _t_class = "positive" if total_pnl >= 0 else "negative"
+        _t_sign = "+" if total_pnl >= 0 else ""
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-icon {'positive' if total_pnl >= 0 else 'negative'}">💵</div>
+            <div class="metric-label">TOTAL P&L</div>
+            <div class="metric-value {_t_class}">{_t_sign}{total_pnl:,.2f}</div>
+            <div class="metric-sub">Capital gains only</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with k8:
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-icon primary">📝</div>
+            <div class="metric-label">TOTAL TXNS</div>
+            <div class="metric-value">{len(df):,}</div>
+            <div class="metric-sub">All transaction types</div>
+        </div>
+        """, unsafe_allow_html=True)
     
-    # Summary row 3: Other metrics
+    # Summary row 3: Other metrics — Themed Metric Cards
+    st.markdown('<div style="height:1rem"></div>', unsafe_allow_html=True)
     k9, k10, k11, k12 = st.columns(4)
-    k9.metric("💵 Cash Dividends", f"{total_dividends_received:,.2f}", f"{len(dividend_df)} txns",
-              help="Cash dividends ONLY. Reinvested dividends are reflected in share count, not cash income.")
-    k10.metric("📊 Fees", f"{total_fees:,.2f}")
+    with k9:
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-icon pink">💵</div>
+            <div class="metric-label">CASH DIVIDENDS</div>
+            <div class="metric-value">{total_dividends_received:,.2f}</div>
+            <div class="metric-sub">{len(dividend_df)} dividend records</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with k10:
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-icon warning">📊</div>
+            <div class="metric-label">TOTAL FEES</div>
+            <div class="metric-value">{total_fees:,.2f}</div>
+            <div class="metric-sub">Brokerage & commissions</div>
+        </div>
+        """, unsafe_allow_html=True)
     net_cash_flow = total_sells + total_deposits + total_dividends_received - total_buys - total_withdrawals - total_fees
-    k11.metric("💵 Net Cash Flow", f"{net_cash_flow:+,.0f}", 
-              delta_color="normal" if net_cash_flow >= 0 else "inverse")
-    if total_buys > 0:
-        total_return_pct = (total_return / total_buys) * 100
-        k12.metric("📈 Total Return %", f"{total_return_pct:+.2f}%", "Incl. dividends",
-                   help="P&L + Cash Dividends / Total Invested. Includes cash dividend income but NOT reinvested (already in shares).")
-    else:
-        k12.metric("📈 Total Return %", "N/A")
+    with k11:
+        _ncf_class = "positive" if net_cash_flow >= 0 else "negative"
+        _ncf_sign = "+" if net_cash_flow >= 0 else ""
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-icon {'positive' if net_cash_flow >= 0 else 'negative'}">💵</div>
+            <div class="metric-label">NET CASH FLOW</div>
+            <div class="metric-value {_ncf_class}">{_ncf_sign}{net_cash_flow:,.0f}</div>
+            <div class="metric-sub">Sells + Deposits - Buys - Fees</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with k12:
+        if total_buys > 0:
+            total_return_pct = (total_return / total_buys) * 100
+            _tr_class = "positive" if total_return_pct >= 0 else "negative"
+            _tr_sign = "+" if total_return_pct >= 0 else ""
+            st.markdown(f"""
+            <div class="metric-card">
+                <div class="metric-icon {'positive' if total_return_pct >= 0 else 'negative'}">📈</div>
+                <div class="metric-label">TOTAL RETURN %</div>
+                <div class="metric-value {_tr_class}">{_tr_sign}{total_return_pct:.2f}%</div>
+                <div class="metric-sub">Including dividends</div>
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.markdown("""
+            <div class="metric-card">
+                <div class="metric-icon primary">📈</div>
+                <div class="metric-label">TOTAL RETURN %</div>
+                <div class="metric-value">N/A</div>
+                <div class="metric-sub">No buy transactions</div>
+            </div>
+            """, unsafe_allow_html=True)
     
-    st.divider()
-    
-    # === FILTERS SECTION ===
-    st.markdown("**Filters:**")
+    # ===== FILTERS SECTION (Themed) =====
+    st.markdown('<div class="section-header"><div class="section-icon blue">🔍</div><div class="section-title">Filters</div></div>', unsafe_allow_html=True)
     
     # Date range filter
     col1, col2, col3, col4, col5 = st.columns([2, 2, 1, 1, 1])
@@ -19116,7 +19255,7 @@ def ui_trading_section():
         st.session_state['trading_end_date'] = end_date
     
     # Transaction Type Filter - Checkboxes for each type
-    st.markdown("**Filter by Type:**")
+    st.markdown('<div class="filter-label">🏷️ Filter by Type</div>', unsafe_allow_html=True)
     all_types = ["Buy", "Sell", "Deposit", "Withdrawal", "DIVIDEND_ONLY", "Dividend", "Bonus Shares"]
     
     # Create checkboxes in columns - use session state for values
@@ -19128,7 +19267,7 @@ def ui_trading_section():
             selected_types.append(txn_type)
     
     # Source Filter - Filter by how the transaction was entered
-    st.markdown("**Filter by Source:**")
+    st.markdown('<div class="filter-label">📦 Filter by Source</div>', unsafe_allow_html=True)
     source_types = ["MANUAL", "UPLOAD", "RESTORE", "API", "LEGACY"]
     source_cols = st.columns(len(source_types))
     selected_sources = []
@@ -19138,7 +19277,7 @@ def ui_trading_section():
             selected_sources.append(src_type)
     
     # Smart Search Filter
-    st.markdown("**🔍 Search:**")
+    st.markdown('<div class="filter-label">🔍 Search Transactions</div>', unsafe_allow_html=True)
     search_query = st.text_input(
         "Search transactions", 
         placeholder="Type to search... (symbol, notes, portfolio, amount, etc.)",
@@ -19215,11 +19354,14 @@ def ui_trading_section():
     if selected_sources:
         display_data = display_data[display_data['source'].isin(selected_sources)]
     
+    # ===== TRANSACTIONS TABLE (Themed) =====
+    st.markdown('<div class="section-header"><div class="section-icon green">📋</div><div class="section-title">Transaction Log</div></div>', unsafe_allow_html=True)
+
     # View/Edit mode toggle
     view_mode = st.radio("", ["📊 View", "✏️ Edit"], horizontal=True, label_visibility="collapsed", key="trading_view_mode")
     
     if view_mode == "📊 View":
-        # Display table (read-only) with all relevant columns including P&L and Source
+        # Display table (read-only) with themed HTML table matching Portfolio Tracker style
         display_df = display_data[['id', 'date', 'symbol', 'portfolio', 'type', 'status', 'source', 'quantity', 'avg_cost', 'price', 'current_price', 'sell_price', 'value', 'pnl', 'pnl_pct', 'fees', 'dividend', 'bonus_shares', 'notes']].copy()
         
         # Current price only for Unrealized (Buy) transactions
@@ -19227,49 +19369,8 @@ def ui_trading_section():
             lambda r: r['current_price'] if r['status'] == 'Unrealized' else 0, axis=1
         )
         
-        # Add source badge with emoji for visual distinction
-        def format_source_badge(src):
-            badges = {
-                'MANUAL': '✍️ Manual',
-                'UPLOAD': '📤 Upload',
-                'RESTORE': '🔄 Restore',
-                'API': '🔌 API',
-                'LEGACY': '📜 Legacy',
-                None: '✍️ Manual'
-            }
-            return badges.get(src, f'📋 {src}')
-        
-        display_df['source'] = display_df['source'].apply(format_source_badge)
-        
-        # Rename columns for clarity
-        display_df = display_df.rename(columns={
-            'dividend': 'Cash Dividend',
-            'bonus_shares': 'Bonus Shares',
-            'pnl': 'P&L',
-            'pnl_pct': 'P&L %',
-            'avg_cost': 'Avg Cost',
-            'sell_price': 'Sell Price',
-            'current_price': 'Current Price',
-            'source': 'Source'
-        })
-        
-        # Format date to show only date (no time)
-        display_df['date'] = display_df['date'].apply(lambda x: x.strftime('%Y-%m-%d') if pd.notna(x) else "")
-        
-        # Format for display
-        display_df['quantity'] = display_df['quantity'].apply(lambda x: f"{x:,.0f}" if pd.notna(x) and x != 0 else "")
-        display_df['price'] = display_df['price'].apply(lambda x: f"{x:.3f}" if pd.notna(x) and x > 0 else "")
-        display_df['value'] = display_df['value'].apply(lambda x: f"{x:,.2f}" if pd.notna(x) and x != 0 else "")
-        display_df['P&L'] = display_df['P&L'].apply(lambda x: f"{x:+,.2f}" if pd.notna(x) and x != 0 else "")
-        display_df['P&L %'] = display_df['P&L %'].apply(lambda x: f"{x:+.2f}%" if pd.notna(x) and x != 0 else "")
-        display_df['Avg Cost'] = display_df['Avg Cost'].apply(lambda x: f"{x:.3f}" if pd.notna(x) and x > 0 else "")
-        display_df['Current Price'] = display_df['Current Price'].apply(lambda x: f"{x:.3f}" if pd.notna(x) and x > 0 else "")
-        display_df['Sell Price'] = display_df['Sell Price'].apply(lambda x: f"{x:.3f}" if pd.notna(x) and x > 0 else "")
-        display_df['fees'] = display_df['fees'].apply(lambda x: f"{x:.2f}" if pd.notna(x) and x > 0 else "")
-        display_df['Cash Dividend'] = display_df['Cash Dividend'].apply(lambda x: f"{x:.2f}" if pd.notna(x) and x > 0 else "")
-        display_df['Bonus Shares'] = display_df['Bonus Shares'].apply(lambda x: f"{x:.0f}" if pd.notna(x) and x > 0 else "")
-        
-        st.dataframe(display_df, hide_index=True, use_container_width=True)
+        # Render with themed HTML table (formatting handled inside renderer)
+        render_trading_table(display_df)
         st.caption("Switch to **Edit** mode to modify transactions.")
         
     else:
@@ -19456,8 +19557,9 @@ def ui_trading_section():
             except Exception as e:
                 st.error(f"Error saving: {e}")
     
-    # Download section
-    st.divider()
+    # ===== DOWNLOAD SECTION (Themed) =====
+    st.markdown('<div class="section-header"><div class="section-icon pink">📥</div><div class="section-title">Export</div></div>', unsafe_allow_html=True)
+
     from io import BytesIO
     output = BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
@@ -19470,6 +19572,29 @@ def ui_trading_section():
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         key="trading_download"
     )
+
+    # ===== FOOTER =====
+    _footer_class = 'neon-footer' if is_dark else 'light-footer'
+    st.markdown(f"""
+    <div class="{_footer_class}">
+        <div style="display: flex; justify-content: space-between; flex-wrap: wrap; gap: 1.5rem;">
+            <div>
+                <div style="font-size: 1rem; font-weight: 600; color: var(--text-primary); margin-bottom: 0.25rem;">📈 Trading Section</div>
+                <div style="color: var(--text-secondary); font-size: 0.85rem;">CFA/IFRS-compliant cost basis • Weighted average cost method • Real-time P&L</div>
+            </div>
+            <div style="display: flex; align-items: center; gap: 1rem;">
+                <div style="background: {'rgba(255,255,255,0.05)' if is_dark else 'rgba(99,102,241,0.06)'}; border-radius: 12px; padding: 0.6rem 1.1rem; text-align: center; border: 1px solid var(--section-border-color);">
+                    <div style="font-weight: 700; font-size: 1.3rem; color: var(--accent-primary);">{len(df):,}</div>
+                    <div style="color: var(--text-secondary); font-size: 0.8rem;">Total Transactions</div>
+                </div>
+                <div style="background: {'rgba(255,255,255,0.05)' if is_dark else 'rgba(99,102,241,0.06)'}; border-radius: 12px; padding: 0.6rem 1.1rem; text-align: center; border: 1px solid var(--section-border-color);">
+                    <div style="font-weight: 700; font-size: 1.3rem; color: var(--accent-secondary);">{len(buy_df) + len(sell_df)}</div>
+                    <div style="color: var(--text-secondary); font-size: 0.8rem;">Buy/Sell Trades</div>
+                </div>
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
 
 # =========================
@@ -21959,6 +22084,395 @@ def calculate_peer_metrics(hist, info, financials):
     return metrics
 
 # =========================
+# UI - SHARED THEME CSS HELPER
+# =========================
+def _inject_page_theme_css():
+    """Inject the shared dark/light theme CSS used by Overview and other pages.
+    
+    Returns is_dark (bool) so callers can branch on theme.
+    Injects all CSS variables, card styles, metric styles, heatmap styles,
+    button styles, expander styles, section headers, and chart containers.
+    """
+    is_dark = st.session_state.get("theme", "light") == "dark"
+
+    if is_dark:
+        _css_vars = """
+        :root {
+            --bg-primary: #0a0a15;
+            --bg-secondary: #121220;
+            --bg-card: #1a1a2e;
+            --bg-card-hover: #22223e;
+            --text-primary: #e6e6f0;
+            --text-secondary: #a0a0b0;
+            --accent-primary: #8a2be2;
+            --accent-secondary: #4cc9f0;
+            --accent-tertiary: #ff00cc;
+            --success: #00d4ff;
+            --warning: #ff9e00;
+            --danger: #ff4757;
+            --card-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            --card-border: 1px solid rgba(138, 43, 226, 0.2);
+            --neon-glow: 0 0 15px rgba(138, 43, 226, 0.6);
+            --icon-bg-base: rgba(138, 43, 226, 0.1);
+            --icon-shadow-base: 0 4px 12px rgba(138, 43, 226, 0.2);
+            --sub-border: 1px dashed rgba(255, 255, 255, 0.06);
+            --section-border-color: rgba(138, 43, 226, 0.3);
+            --hm-border-default: rgba(255, 255, 255, 0.05);
+        }
+        [data-testid="stAppViewContainer"] {
+            background: linear-gradient(135deg, #0a0a15 0%, #0d0d25 100%) !important;
+            background-attachment: fixed;
+        }
+        [data-testid="stAppViewContainer"] > section { background: transparent !important; }
+        [data-testid="stVerticalBlock"] > div { background: transparent !important; }
+        [data-testid="stMarkdown"] p,
+        [data-testid="stMarkdown"] h1,
+        [data-testid="stMarkdown"] h2,
+        [data-testid="stMarkdown"] h3,
+        [data-testid="stMarkdown"] h4,
+        [data-testid="stMarkdown"] h5,
+        [data-testid="stMarkdown"] h6 { color: var(--text-primary) !important; }
+        """
+        _css_btn = """
+        [data-testid="stButton"] button {
+            background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary)) !important;
+            color: white !important; border: none !important;
+            border-radius: 10px !important; padding: 0.8rem 1.5rem !important;
+            font-weight: 600 !important; font-size: 1rem !important;
+            transition: all 0.3s ease !important;
+            box-shadow: 0 4px 15px rgba(138, 43, 226, 0.4) !important;
+            position: relative !important; overflow: hidden !important;
+        }
+        [data-testid="stButton"] button:hover {
+            transform: translateY(-3px) !important;
+            box-shadow: 0 6px 20px rgba(138, 43, 226, 0.7) !important;
+            background: linear-gradient(135deg, var(--accent-secondary), var(--accent-tertiary)) !important;
+        }
+        """
+        _css_expander = """
+        [data-testid="stExpander"] {
+            background: var(--bg-card) !important; border-radius: 12px !important;
+            border: var(--card-border) !important; box-shadow: var(--card-shadow) !important;
+            margin-bottom: 1rem !important;
+        }
+        [data-testid="stExpander"] > div { background: transparent !important; }
+        [data-testid="stExpander"] summary {
+            background: transparent !important; color: var(--text-primary) !important;
+            font-weight: 600 !important; font-size: 1.1rem !important;
+        }
+        [data-testid="stExpanderContent"] { background: transparent !important; color: var(--text-primary) !important; }
+        """
+        _css_card_extras = """
+        .dashboard-card:hover::before { opacity: 0.3; }
+        .metric-value { text-shadow: 0 0 10px rgba(138, 43, 226, 0.3); }
+        .metric-value.positive { text-shadow: 0 0 10px rgba(0, 212, 255, 0.5); }
+        .metric-value.negative { text-shadow: 0 0 10px rgba(255, 71, 87, 0.5); }
+        .heatmap-value {
+            background: linear-gradient(45deg, var(--success), var(--accent-secondary));
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+        }
+        .heatmap-card.positive .heatmap-value {
+            background: linear-gradient(45deg, var(--success), #059669);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+        }
+        .heatmap-card.negative .heatmap-value {
+            background: linear-gradient(45deg, var(--danger), #dc2626);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+        }
+        /* Dark theme inputs */
+        [data-testid="stTextInput"] input,
+        [data-testid="stSelectbox"] > div > div,
+        [data-testid="stDateInput"] input,
+        [data-testid="stNumberInput"] input {
+            background: var(--bg-card) !important;
+            color: var(--text-primary) !important;
+            border: 1px solid rgba(138, 43, 226, 0.3) !important;
+            border-radius: 8px !important;
+        }
+        [data-testid="stTextInput"] label,
+        [data-testid="stSelectbox"] label,
+        [data-testid="stDateInput"] label,
+        [data-testid="stNumberInput"] label,
+        [data-testid="stCheckbox"] label {
+            color: var(--text-secondary) !important;
+        }
+        /* Dark theme radio/checkbox */
+        [data-testid="stRadio"] label,
+        [data-testid="stCheckbox"] label span {
+            color: var(--text-primary) !important;
+        }
+        /* Dark theme metrics */
+        [data-testid="stMetric"] {
+            background: var(--bg-card) !important;
+            border-radius: 12px !important;
+            padding: 1rem !important;
+            border: var(--card-border) !important;
+        }
+        [data-testid="stMetric"] label { color: var(--text-secondary) !important; }
+        [data-testid="stMetric"] [data-testid="stMetricValue"] { color: var(--text-primary) !important; }
+        [data-testid="stMetric"] [data-testid="stMetricDelta"] { font-size: 0.85rem !important; }
+        /* Dark theme info/warning/error boxes */
+        [data-testid="stAlert"] {
+            background: var(--bg-card) !important;
+            border-radius: 10px !important;
+            border: var(--card-border) !important;
+            color: var(--text-primary) !important;
+        }
+        /* Dark theme caption */
+        [data-testid="stCaptionContainer"] { color: var(--text-secondary) !important; }
+        /* Dark theme divider */
+        [data-testid="stMarkdown"] hr {
+            border-color: rgba(138, 43, 226, 0.2) !important;
+        }
+        /* Dark theme dataframe */
+        [data-testid="stDataFrame"] {
+            border-radius: 12px !important;
+            overflow: hidden !important;
+        }
+        """
+    else:
+        _css_vars = """
+        :root {
+            --bg-primary: #f8fafc;
+            --bg-secondary: #ffffff;
+            --bg-card: #ffffff;
+            --bg-card-hover: #f1f5f9;
+            --text-primary: #1e293b;
+            --text-secondary: #64748b;
+            --text-muted: #64748b;
+            --accent-primary: #6366f1;
+            --accent-secondary: #3b82f6;
+            --accent-tertiary: #ec4899;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --card-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
+            --card-shadow-hover: 0 8px 24px rgba(0, 0, 0, 0.1);
+            --card-border: 1px solid rgba(203, 213, 225, 0.6);
+            --neon-glow: 0 4px 20px rgba(99, 102, 241, 0.15);
+            --icon-bg-base: rgba(99, 102, 241, 0.08);
+            --icon-shadow-base: 0 2px 8px rgba(99, 102, 241, 0.1);
+            --sub-border: 1px dashed rgba(0, 0, 0, 0.08);
+            --section-border-color: rgba(99, 102, 241, 0.25);
+            --hm-border-default: rgba(0, 0, 0, 0.06);
+        }
+        """
+        _css_btn = """
+        [data-testid="stButton"] button {
+            background: linear-gradient(135deg, #6366f1, #3b82f6) !important;
+            color: white !important; border: none !important;
+            border-radius: 10px !important; padding: 0.8rem 1.5rem !important;
+            font-weight: 600 !important; font-size: 1rem !important;
+            transition: all 0.3s ease !important;
+            box-shadow: 0 4px 12px rgba(99, 102, 241, 0.25) !important;
+        }
+        [data-testid="stButton"] button:hover {
+            transform: translateY(-2px) !important;
+            box-shadow: 0 6px 18px rgba(99, 102, 241, 0.35) !important;
+        }
+        """
+        _css_expander = """
+        [data-testid="stExpander"] {
+            background: var(--bg-card) !important; border-radius: 12px !important;
+            border: var(--card-border) !important; box-shadow: var(--card-shadow) !important;
+            margin-bottom: 1rem !important;
+        }
+        [data-testid="stExpander"] summary {
+            font-weight: 600 !important; font-size: 1.05rem !important;
+            color: var(--text-primary) !important;
+        }
+        """
+        _css_card_extras = """
+        .dashboard-card:hover::before { opacity: 0; }
+        .metric-card { border-radius: 20px; }
+        .metric-card:hover { box-shadow: var(--card-shadow-hover); }
+        .metric-value { text-shadow: none; }
+        .metric-value.positive { text-shadow: none; }
+        .metric-value.negative { text-shadow: none; }
+        .heatmap-value { color: var(--text-primary); }
+        .heatmap-card.positive .heatmap-value { color: var(--success); }
+        .heatmap-card.negative .heatmap-value { color: var(--danger); }
+        .light-footer {
+            margin-top: 3rem; padding: 1.5rem;
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.04) 0%, rgba(59, 130, 246, 0.04) 100%);
+            border-radius: 16px; border: 1px solid rgba(203, 213, 225, 0.4);
+        }
+        """
+
+    _css_shared = """
+    /* ===== DASHBOARD CARD ===== */
+    .dashboard-card {
+        background: var(--bg-card); border-radius: 16px;
+        border: var(--card-border); box-shadow: var(--card-shadow);
+        padding: 1.5rem; margin-bottom: 1.5rem;
+        transition: all 0.3s ease; position: relative;
+        overflow: hidden; backdrop-filter: blur(10px);
+    }
+    .dashboard-card:hover {
+        transform: translateY(-5px);
+        box-shadow: var(--neon-glow), var(--card-shadow);
+        border-color: var(--accent-primary);
+    }
+    .dashboard-card::before {
+        content: ''; position: absolute;
+        top: -2px; left: -2px; right: -2px; bottom: -2px;
+        background: linear-gradient(45deg, var(--accent-primary), var(--accent-secondary), var(--accent-tertiary));
+        z-index: -1; border-radius: 18px;
+        filter: blur(10px); opacity: 0; transition: 0.3s ease;
+    }
+
+    /* ===== METRIC CARDS ===== */
+    .metric-card {
+        background: var(--bg-secondary); border-radius: 12px;
+        padding: 1.25rem; display: flex; flex-direction: column;
+        height: 100%; position: relative; overflow: hidden;
+        border: 1px solid var(--hm-border-default);
+        transition: all 0.3s ease;
+    }
+    .metric-card:hover {
+        transform: translateY(-3px);
+        border-color: var(--accent-primary);
+        box-shadow: 0 8px 20px rgba(0, 0, 0, 0.12);
+    }
+    .metric-card::before {
+        content: ''; position: absolute;
+        top: 0; left: 0; right: 0; height: 4px;
+        background: linear-gradient(90deg, var(--accent-primary), var(--accent-secondary));
+    }
+    .metric-icon {
+        font-size: 2.5rem; margin-bottom: 0.75rem;
+        width: 60px; height: 60px; border-radius: 16px;
+        display: flex; align-items: center; justify-content: center;
+        margin-right: auto;
+        background: var(--icon-bg-base);
+        box-shadow: var(--icon-shadow-base);
+    }
+    .metric-icon.positive { background: rgba(16, 185, 129, 0.12); color: var(--success); }
+    .metric-icon.negative { background: rgba(239, 68, 68, 0.12); color: var(--danger); }
+    .metric-icon.primary { background: rgba(99, 102, 241, 0.12); color: var(--accent-primary); }
+    .metric-icon.warning { background: rgba(245, 158, 11, 0.12); color: var(--warning); }
+    .metric-icon.purple { background: rgba(139, 92, 246, 0.12); color: var(--accent-primary); }
+    .metric-icon.pink { background: rgba(236, 72, 153, 0.12); color: var(--accent-tertiary); }
+    .metric-icon.green { background: rgba(16, 185, 129, 0.12); color: var(--success); }
+    .metric-value {
+        font-size: 2.25rem; font-weight: 800; line-height: 1.2;
+        margin: 0.75rem 0; color: var(--text-primary);
+    }
+    .metric-value.positive { color: var(--success); }
+    .metric-value.negative { color: var(--danger); }
+    .metric-label {
+        font-size: 0.95rem; color: var(--text-secondary);
+        font-weight: 600; margin-bottom: 0.25rem;
+        text-transform: uppercase; letter-spacing: 0.5px;
+    }
+    .metric-sub {
+        font-size: 0.9rem; color: var(--text-secondary);
+        margin-top: auto; padding-top: 0.75rem;
+        border-top: var(--sub-border);
+    }
+    .metric-sub.positive { color: var(--success); font-weight: 600; }
+    .metric-sub.negative { color: var(--danger); font-weight: 600; }
+
+    /* ===== SECTION HEADERS ===== */
+    .section-header {
+        display: flex; align-items: center; gap: 0.75rem;
+        padding-bottom: 0.75rem; margin: 2rem 0 1.25rem;
+        border-bottom: 2px solid var(--section-border-color);
+    }
+    .section-title {
+        font-size: 1.8rem; font-weight: 700; color: var(--text-primary);
+        display: flex; align-items: center; gap: 0.75rem;
+        letter-spacing: -0.5px;
+    }
+    .section-icon {
+        width: 40px; height: 40px; border-radius: 12px;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 1.6rem;
+        background: var(--icon-bg-base);
+        box-shadow: var(--icon-shadow-base);
+    }
+    .section-icon.blue { background: rgba(59, 130, 246, 0.12); color: var(--accent-secondary); }
+    .section-icon.green { background: rgba(16, 185, 129, 0.12); color: var(--success); }
+    .section-icon.purple { background: rgba(99, 102, 241, 0.12); color: var(--accent-primary); }
+    .section-icon.pink { background: rgba(236, 72, 153, 0.12); color: var(--accent-tertiary); }
+
+    /* ===== CHART CONTAINER ===== */
+    .chart-container {
+        background: var(--bg-card); border-radius: 16px;
+        padding: 1.5rem; box-shadow: var(--card-shadow);
+        margin: 1.5rem 0; border: var(--card-border);
+        backdrop-filter: blur(10px);
+    }
+    .chart-title {
+        font-size: 1.5rem; font-weight: 700; color: var(--text-primary);
+        margin-bottom: 1.25rem; display: flex; align-items: center;
+        gap: 0.75rem; letter-spacing: -0.5px;
+    }
+
+    /* ===== PERFORMANCE HEATMAP ===== */
+    .heatmap-container {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+        gap: 1.25rem; margin-top: 1rem;
+    }
+    .heatmap-card {
+        background: var(--bg-secondary); border-radius: 14px;
+        padding: 1.25rem; box-shadow: 0 3px 10px rgba(0, 0, 0, 0.08);
+        border-left: 4px solid var(--accent-primary);
+        transition: all 0.25s ease;
+        border: 1px solid var(--hm-border-default);
+    }
+    .heatmap-card:hover {
+        transform: translateX(4px);
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+        border-left-color: var(--accent-secondary);
+    }
+    .heatmap-card.positive { border-left-color: var(--success); }
+    .heatmap-card.negative { border-left-color: var(--danger); }
+    .heatmap-value {
+        font-size: 1.8rem; font-weight: 800; margin: 0.25rem 0;
+        color: var(--text-primary);
+    }
+    .heatmap-label { font-size: 0.95rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.25rem; }
+    .heatmap-sub { font-size: 0.85rem; color: var(--text-secondary); }
+
+    /* ===== FOOTER ===== */
+    .neon-footer {
+        margin-top: 3rem; padding: 1.5rem;
+        background: linear-gradient(135deg, rgba(99, 102, 241, 0.08) 0%, rgba(59, 130, 246, 0.08) 100%);
+        border-radius: 16px; border: 1px solid var(--section-border-color);
+        backdrop-filter: blur(10px);
+    }
+
+    /* ===== FILTER PILLS ===== */
+    .filter-section {
+        background: var(--bg-card); border-radius: 14px;
+        padding: 1.25rem; margin-bottom: 1.25rem;
+        border: var(--card-border); box-shadow: var(--card-shadow);
+    }
+    .filter-label {
+        font-size: 0.9rem; font-weight: 600; color: var(--text-primary);
+        text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.5rem;
+    }
+    /* Checkbox labels in filter sections */
+    [data-testid="stCheckbox"] label span,
+    [data-testid="stCheckbox"] label p {
+        color: var(--text-primary) !important;
+    }
+
+    /* ===== RESPONSIVE ===== */
+    @media (max-width: 768px) {
+        .section-title { font-size: 1.5rem; }
+        .metric-value { font-size: 1.8rem; }
+        .heatmap-container { grid-template-columns: 1fr; }
+    }
+    """
+
+    st.markdown(f"<style>{_css_vars}\n{_css_shared}\n{_css_card_extras}\n{_css_btn}\n{_css_expander}</style>", unsafe_allow_html=True)
+    return is_dark
+
+
+# =========================
 # UI - HELPERS
 # =========================
 def render_snapshot_table(df: pd.DataFrame) -> None:
@@ -22205,17 +22719,367 @@ def render_styled_table(df: pd.DataFrame, highlight_logic: bool = True) -> None:
     st.markdown(css + "".join(html_out), unsafe_allow_html=True)
 
 
+def render_trading_table(df: pd.DataFrame) -> None:
+    """
+    Render Trading Section transactions with themed HTML table matching
+    Portfolio Tracker's render_snapshot_table() visual style.
+    Uses st.components.v1.html() so that JavaScript click-to-sort works.
+    Expects RAW (unformatted) DataFrame with original column names.
+    """
+    import streamlit.components.v1 as components
+
+    if df is None or df.empty:
+        st.info("No transactions to display.")
+        return
+
+    is_dark = st.session_state.get("theme", "light") == "dark"
+
+    # Theme colours – identical palette to render_snapshot_table
+    c_bg_card   = "rgba(17, 24, 39, 0.6)" if is_dark else "rgba(255, 255, 255, 0.8)"
+    c_border    = "#1f2937" if is_dark else "#e5e7eb"
+    c_header_bg = "rgba(31, 41, 55, 0.5)" if is_dark else "#f9fafb"
+    c_text_p    = "#ffffff" if is_dark else "#111827"
+    c_text_s    = "#9ca3af" if is_dark else "#6b7280"
+    c_hover     = "rgba(31, 41, 55, 0.3)" if is_dark else "rgba(243, 244, 246, 0.8)"
+    c_pos       = "#10b981"
+    c_neg       = "#ef4444"
+    c_buy_bg    = "rgba(16, 185, 129, 0.08)" if is_dark else "rgba(16, 185, 129, 0.05)"
+    c_sell_bg   = "rgba(239, 68, 68, 0.08)" if is_dark else "rgba(239, 68, 68, 0.05)"
+    c_body_bg   = "transparent"
+
+    css_block = f"""
+    * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+    body {{ background: {c_body_bg}; }}
+    .txn-table-wrap {{
+        background-color: {c_bg_card};
+        border: 1px solid {c_border};
+        border-radius: 12px;
+        overflow: hidden;
+        box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
+        font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+    }}
+    .txn-table-scroll {{ overflow-x: auto; }}
+    .txn-table {{ width: 100%; border-collapse: collapse; font-size: 0.84rem; }}
+    .txn-table th {{
+        text-align: right; padding: 11px 14px; background: {c_header_bg};
+        color: {c_text_p}; font-weight: 600; border-bottom: 2px solid {c_border};
+        white-space: nowrap; text-transform: uppercase; font-size: 0.78rem;
+        letter-spacing: 0.3px; cursor: pointer; user-select: none;
+        position: relative; transition: background 0.15s ease;
+    }}
+    .txn-table th:hover {{ background: {c_hover}; }}
+    .txn-table th .sort-arrow {{
+        display: inline-block; margin-left: 4px; font-size: 0.7rem;
+        opacity: 0.35; transition: opacity 0.15s;
+    }}
+    .txn-table th.sort-asc .sort-arrow,
+    .txn-table th.sort-desc .sort-arrow {{ opacity: 1; }}
+    .txn-table th:first-child, .txn-table th:nth-child(2), .txn-table th:nth-child(3),
+    .txn-table th:nth-child(4), .txn-table th:nth-child(5), .txn-table th:nth-child(6),
+    .txn-table th:nth-child(7) {{ text-align: left; }}
+    .txn-table td {{
+        padding: 9px 14px; color: {c_text_p}; border-bottom: 1px solid {c_border};
+        white-space: nowrap; text-align: right;
+    }}
+    .txn-table td:first-child, .txn-table td:nth-child(2), .txn-table td:nth-child(3),
+    .txn-table td:nth-child(4), .txn-table td:nth-child(5), .txn-table td:nth-child(6),
+    .txn-table td:nth-child(7) {{ text-align: left; }}
+    .txn-table td:first-child {{ font-weight: 600; color: {c_text_s}; font-size: 0.8rem; }}
+    .txn-table tr:hover td {{ background-color: {c_hover}; }}
+    .txn-table tr.txn-buy  {{ background-color: {c_buy_bg}; }}
+    .txn-table tr.txn-sell {{ background-color: {c_sell_bg}; }}
+    .txn-pos {{ color: {c_pos} !important; font-weight: 600; }}
+    .txn-neg {{ color: {c_neg} !important; font-weight: 600; }}
+    .txn-muted {{ color: {c_text_s} !important; }}
+    .txn-badge {{
+        display: inline-block; padding: 2px 8px; border-radius: 6px;
+        font-size: 0.75rem; font-weight: 600; letter-spacing: 0.3px;
+    }}
+    .txn-badge-buy  {{ background: rgba(16, 185, 129, 0.15); color: {c_pos}; }}
+    .txn-badge-sell {{ background: rgba(239, 68, 68, 0.15); color: {c_neg}; }}
+    .txn-badge-div  {{ background: rgba(59, 130, 246, 0.15); color: #3b82f6; }}
+    .txn-badge-dep  {{ background: rgba(245, 158, 11, 0.15); color: #f59e0b; }}
+    .txn-badge-other {{ background: rgba(156, 163, 175, 0.15); color: {c_text_s}; }}
+    .txn-status-realized {{ color: {c_text_s}; font-style: italic; }}
+    .txn-status-unrealized {{ color: {c_pos}; font-weight: 600; }}
+    .txn-src {{ font-size: 0.78rem; }}
+    """
+
+    # Column definitions: (df_key, header_label, format_type)
+    columns = [
+        ("id",            "ID",            "id"),
+        ("date",          "Date",          "date"),
+        ("symbol",        "Symbol",        "text_bold"),
+        ("portfolio",     "Portfolio",     "text"),
+        ("type",          "Type",          "type_badge"),
+        ("status",        "Status",        "status"),
+        ("source",        "Source",        "source"),
+        ("quantity",      "Qty",           "quantity"),
+        ("avg_cost",      "Avg Cost",      "price"),
+        ("price",         "Price",         "price"),
+        ("current_price", "Current Price", "price"),
+        ("sell_price",    "Sell Price",    "price"),
+        ("value",         "Value",         "money"),
+        ("pnl",           "P&L",           "money_colored"),
+        ("pnl_pct",       "P&L %",         "percent_colored"),
+        ("fees",          "Fees",          "money_small"),
+        ("dividend",      "Dividend",      "money_small"),
+        ("bonus_shares",  "Bonus",         "quantity"),
+        ("notes",         "Notes",         "text"),
+    ]
+
+    # ---- Format helpers ----
+    def _fmt(val, fmt_type, row=None):
+        """Return (display_str, css_class)."""
+        if pd.isna(val) or val is None:
+            return "-", "txn-muted"
+        if fmt_type == "id":
+            try:
+                return str(int(val)), "txn-muted"
+            except (ValueError, TypeError):
+                return str(val), "txn-muted"
+        if fmt_type == "date":
+            s = str(val)[:10]
+            return s if s and s != "NaT" else "-", ""
+        if fmt_type == "text":
+            return html.escape(str(val)), ""
+        if fmt_type == "text_bold":
+            return html.escape(str(val)), ""
+        if fmt_type == "type_badge":
+            t = str(val).strip()
+            t_lower = t.lower()
+            if "buy" in t_lower:
+                return f'<span class="txn-badge txn-badge-buy">{html.escape(t)}</span>', "__html__"
+            elif "sell" in t_lower:
+                return f'<span class="txn-badge txn-badge-sell">{html.escape(t)}</span>', "__html__"
+            elif "div" in t_lower:
+                return f'<span class="txn-badge txn-badge-div">{html.escape(t)}</span>', "__html__"
+            elif "deposit" in t_lower or "withdraw" in t_lower:
+                return f'<span class="txn-badge txn-badge-dep">{html.escape(t)}</span>', "__html__"
+            else:
+                return f'<span class="txn-badge txn-badge-other">{html.escape(t)}</span>', "__html__"
+        if fmt_type == "status":
+            s = str(val).strip()
+            if "realized" in s.lower() and "un" not in s.lower():
+                return html.escape(s), "txn-status-realized"
+            elif "unrealized" in s.lower():
+                return html.escape(s), "txn-status-unrealized"
+            return html.escape(s), ""
+        if fmt_type == "source":
+            badges = {'MANUAL': '✍️ Manual', 'UPLOAD': '📤 Upload', 'RESTORE': '🔄 Restore',
+                      'API': '🔌 API', 'LEGACY': '📜 Legacy'}
+            s = str(val).strip() if val else ""
+            display = badges.get(s, f'📋 {s}' if s else '✍️ Manual')
+            return f'<span class="txn-src">{display}</span>', "__html__"
+        if fmt_type == "quantity":
+            try:
+                n = float(val)
+                if n == 0:
+                    return "-", "txn-muted"
+                return f"{n:,.0f}", ""
+            except (ValueError, TypeError):
+                return str(val), ""
+        if fmt_type == "price":
+            try:
+                n = float(val)
+                if n <= 0:
+                    return "-", "txn-muted"
+                return f"{n:,.3f}", ""
+            except (ValueError, TypeError):
+                return str(val), ""
+        if fmt_type == "money":
+            try:
+                n = float(val)
+                if n == 0:
+                    return "-", "txn-muted"
+                return f"{n:,.2f}", ""
+            except (ValueError, TypeError):
+                return str(val), ""
+        if fmt_type == "money_colored":
+            try:
+                n = float(val)
+                if n == 0:
+                    return "-", "txn-muted"
+                if n > 0:
+                    return f"+{n:,.2f}", "txn-pos"
+                return f"{n:,.2f}", "txn-neg"
+            except (ValueError, TypeError):
+                return str(val), ""
+        if fmt_type == "percent_colored":
+            try:
+                n = float(val)
+                if n == 0:
+                    return "-", "txn-muted"
+                if n > 0:
+                    return f"+{n:.2f}%", "txn-pos"
+                return f"{n:.2f}%", "txn-neg"
+            except (ValueError, TypeError):
+                return str(val), ""
+        if fmt_type == "money_small":
+            try:
+                n = float(val)
+                if n <= 0:
+                    return "-", "txn-muted"
+                return f"{n:,.2f}", ""
+            except (ValueError, TypeError):
+                return str(val), ""
+        return str(val), ""
+
+    # Map format_type to sort kind for JS
+    _sort_kind = {
+        "id": "num", "date": "text", "text_bold": "text", "text": "text",
+        "type_badge": "text", "status": "text", "source": "text",
+        "quantity": "num", "price": "num", "money": "num",
+        "money_colored": "num", "percent_colored": "num",
+        "money_small": "num",
+    }
+
+    # ---- Build HTML ----
+    parts = [
+        '<div class="txn-table-wrap"><div class="txn-table-scroll">',
+        '<table class="txn-table" id="txnSortTable"><thead><tr>',
+    ]
+    for col_idx, (_, label, fmt_type) in enumerate(columns):
+        sk = _sort_kind.get(fmt_type, "text")
+        parts.append(
+            f'<th data-col="{col_idx}" data-sort-type="{sk}" onclick="txnSort(this)">'
+            f'{html.escape(label)}<span class="sort-arrow">⇅</span></th>'
+        )
+    parts.append("</tr></thead><tbody>")
+
+    for _, row in df.iterrows():
+        # Row class based on type
+        txn_type = str(row.get("type", "")).lower()
+        row_cls = ""
+        if "buy" in txn_type:
+            row_cls = ' class="txn-buy"'
+        elif "sell" in txn_type:
+            row_cls = ' class="txn-sell"'
+        parts.append(f"<tr{row_cls}>")
+
+        for col_key, _, fmt_type in columns:
+            val = row.get(col_key, None)
+            formatted, css_cls = _fmt(val, fmt_type, row)
+
+            # Compute raw sort value
+            raw_sort = ""
+            if pd.isna(val) or val is None:
+                raw_sort = ""
+            elif fmt_type in ("id", "quantity", "price", "money", "money_colored", "percent_colored", "money_small"):
+                try:
+                    raw_sort = str(float(val))
+                except (ValueError, TypeError):
+                    raw_sort = ""
+            else:
+                raw_sort = str(val).strip()[:50]
+
+            if css_cls == "__html__":
+                parts.append(f'<td data-sort-val="{html.escape(raw_sort)}">{formatted}</td>')
+            elif css_cls:
+                parts.append(f'<td data-sort-val="{html.escape(raw_sort)}" class="{css_cls}">{html.escape(str(formatted))}</td>')
+            elif fmt_type == "text_bold":
+                parts.append(f'<td data-sort-val="{html.escape(raw_sort)}" style="font-weight:600">{html.escape(str(formatted))}</td>')
+            else:
+                parts.append(f'<td data-sort-val="{html.escape(raw_sort)}">{html.escape(str(formatted))}</td>')
+
+        parts.append("</tr>")
+
+    parts.append("</tbody></table></div></div>")
+
+    # JavaScript for click-to-sort
+    sort_js = """
+    function txnSort(th) {
+        var table = th.closest('table');
+        var tbody = table.querySelector('tbody');
+        var colIdx = parseInt(th.getAttribute('data-col'));
+        var sortType = th.getAttribute('data-sort-type');
+        var rows = Array.from(tbody.querySelectorAll('tr'));
+
+        var isAsc = th.classList.contains('sort-asc');
+        table.querySelectorAll('th').forEach(function(h) {
+            h.classList.remove('sort-asc', 'sort-desc');
+            var a = h.querySelector('.sort-arrow');
+            if (a) a.textContent = '⇅';
+        });
+
+        var dir = isAsc ? -1 : 1;
+        th.classList.add(dir === 1 ? 'sort-asc' : 'sort-desc');
+        var arrow = th.querySelector('.sort-arrow');
+        if (arrow) arrow.textContent = dir === 1 ? '↑' : '↓';
+
+        rows.sort(function(a, b) {
+            var aVal = a.children[colIdx] ? (a.children[colIdx].getAttribute('data-sort-val') || '') : '';
+            var bVal = b.children[colIdx] ? (b.children[colIdx].getAttribute('data-sort-val') || '') : '';
+            if (sortType === 'num') {
+                var aNum = parseFloat(aVal) || 0;
+                var bNum = parseFloat(bVal) || 0;
+                return (aNum - bNum) * dir;
+            }
+            return aVal.localeCompare(bVal) * dir;
+        });
+        rows.forEach(function(r) { tbody.appendChild(r); });
+    }
+    """
+
+    # Build self-contained HTML document for components.html()
+    full_html = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<style>{css_block}</style>
+</head><body>
+{"".join(parts)}
+<script>{sort_js}</script>
+</body></html>"""
+
+    # Calculate iframe height: header(~40px) + rows * ~38px + padding
+    row_count = len(df)
+    iframe_height = 44 + (row_count * 38) + 16  # header + rows + bottom padding
+    iframe_height = max(iframe_height, 120)       # minimum height
+    iframe_height = min(iframe_height, 2400)      # cap for very large tables
+
+    components.html(full_html, height=iframe_height, scrolling=True)
+
+
 # =========================
 # UI - PEER ANALYSIS
 # =========================
 def ui_peer_analysis():
-    st.subheader("📊 Peer Analysis")
-    st.caption("Compare multiple stocks side-by-side using Yahoo Finance data.")
+    """Peer Analysis - Theme-Aware (Neon Dark / Clean Light)"""
+    is_dark = _inject_page_theme_css()
+
+    # ===== THEMED HEADER =====
+    if is_dark:
+        st.markdown("""
+        <div class="dashboard-card">
+            <div style="text-align: center; padding: 1rem 0;">
+                <h1 style="font-size: 2.5rem; font-weight: 800; margin: 0; color: var(--text-primary); letter-spacing: -1px; text-shadow: 0 0 15px rgba(138, 43, 226, 0.5);">
+                    👥 PEER ANALYSIS
+                </h1>
+                <p style="font-size: 1.1rem; color: var(--text-secondary); margin: 0.5rem 0 0; font-weight: 500;">
+                    Compare multiple stocks side-by-side • Yahoo Finance data • Real-time metrics
+                </p>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        st.markdown("""
+        <div class="dashboard-card">
+            <div style="text-align: center; padding: 1rem 0;">
+                <h1 style="font-size: 2.5rem; font-weight: 800; margin: 0; color: var(--text-primary); letter-spacing: -1px;">
+                    👥 Peer Analysis Dashboard
+                </h1>
+                <p style="font-size: 1.1rem; color: var(--text-secondary); margin: 0.5rem 0 0; font-weight: 500;">
+                    Compare multiple stocks side-by-side • Yahoo Finance data • Real-time metrics
+                </p>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
 
     if 'peer_tickers' not in st.session_state:
         st.session_state.peer_tickers = []
 
-    # Input Section
+    # ===== INPUT SECTION (Themed) =====
+    st.markdown('<div class="section-header"><div class="section-icon blue">➕</div><div class="section-title">Add Stocks</div></div>', unsafe_allow_html=True)
+
     with st.expander("➕ Add Stocks to Compare", expanded=True):
         col1, col2 = st.columns([3, 1])
         with col1:
@@ -22262,20 +23126,35 @@ def ui_peer_analysis():
                 elif not manual_ticker.strip():  # Only show error if no manual input was attempted
                     st.error("Please select a stock or enter a ticker.")
 
-    st.divider()
-
-    # Display & Manage List
+    # ===== SELECTED PEERS DISPLAY (Themed) =====
     if st.session_state.peer_tickers:
-        col_list, col_clear = st.columns([4, 1])
-        with col_list:
-            st.write(f"**Selected Peers ({len(st.session_state.peer_tickers):,})**: " + ", ".join(st.session_state.peer_tickers))
-        
+        st.markdown('<div class="section-header"><div class="section-icon purple">📋</div><div class="section-title">Selected Peers</div></div>', unsafe_allow_html=True)
+
+        # Show peer tickers as styled cards
+        _peer_tags_html = ''.join(
+            f'<span style="display:inline-block; background: var(--icon-bg-base); color: var(--accent-primary); '
+            f'padding: 0.4rem 0.9rem; border-radius: 20px; font-weight: 600; font-size: 0.9rem; '
+            f'margin: 0.25rem; border: 1px solid var(--section-border-color);">{t}</span>'
+            for t in st.session_state.peer_tickers
+        )
+        st.markdown(f"""
+        <div class="dashboard-card" style="padding: 1rem 1.25rem;">
+            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem;">
+                <div>
+                    <span style="font-weight: 700; color: var(--text-primary); margin-right: 0.75rem;">Selected ({len(st.session_state.peer_tickers)}):</span>
+                    {_peer_tags_html}
+                </div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        col_clear, _ = st.columns([1, 5])
         with col_clear:
             if st.button("🗑️ Clear All", key="clear_all_peers", type="secondary"):
                 st.session_state.peer_tickers = []
                 st.rerun()
         
-        with st.expander("Manage List", expanded=False):
+        with st.expander("⚙️ Manage List", expanded=False):
              cols = st.columns(5)
              for i, tick in enumerate(st.session_state.peer_tickers):
                  col_idx = i % 5
@@ -22284,11 +23163,9 @@ def ui_peer_analysis():
                          st.session_state.peer_tickers.remove(tick)
                          st.rerun()
         
-        st.markdown("---")
-        
-        # ----------------------------------------------------
-        # FETCH DATA & RENDER TABLES (New Implementation)
-        # ----------------------------------------------------
+        # ===== FETCH & ANALYZE =====
+        st.markdown('<div class="section-header"><div class="section-icon green">🚀</div><div class="section-title">Analysis</div></div>', unsafe_allow_html=True)
+
         if st.button("🚀 Fetch Data & Run Analysis", type="primary", width="stretch"):
             # Lazy-load yfinance
             if not _ensure_yfinance():
@@ -22386,9 +23263,17 @@ def ui_peer_analysis():
                 
                 return f"{val:,.2f}"
 
-            # 2. Render 8 Tables
+            # 2. Render 8 Tables (Themed Section Headers)
+            _peer_section_icons = {
+                'Total Return': ('📈', 'green'), 'Dividends': ('💰', 'purple'),
+                'Valuation': ('🏷️', 'blue'), 'Growth': ('🌱', 'green'),
+                'Profitability': ('💎', 'pink'), 'Performance': ('⚡', 'purple'),
+                'Income Statement (TTM/MRQ)': ('📋', 'blue'), 'Balance Sheet (MRQ)': ('🏦', 'purple'),
+                'Cash Flow': ('💵', 'green')
+            }
             for section_name, metrics_map in PEER_METRICS.items():
-                st.subheader(section_name)
+                _icon, _color = _peer_section_icons.get(section_name, ('📊', 'purple'))
+                st.markdown(f'<div class="section-header"><div class="section-icon {_color}">{_icon}</div><div class="section-title">{section_name}</div></div>', unsafe_allow_html=True)
                 
                 # Build Data Frame: Index=Metrics, Cols=Tickers
                 section_data = {}
@@ -22457,7 +23342,24 @@ def ui_peer_analysis():
                 # st.dataframe(df_table, width="stretch") # Replaced
 
     else:
-        st.info("Add stocks above to begin comparison.")
+        st.markdown(f"""
+        <div class="dashboard-card" style="text-align: center; padding: 2.5rem 1rem;">
+            <div style="font-size: 3rem; margin-bottom: 1rem;">👥</div>
+            <div style="font-size: 1.3rem; font-weight: 700; color: var(--text-primary); margin-bottom: 0.5rem;">No Peers Selected</div>
+            <div style="color: var(--text-secondary); font-size: 1rem;">Add stocks above to begin side-by-side comparison.</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # ===== FOOTER =====
+    _footer_class = 'neon-footer' if is_dark else 'light-footer'
+    st.markdown(f"""
+    <div class="{_footer_class}">
+        <div style="text-align: center;">
+            <div style="font-size: 1rem; font-weight: 600; color: var(--text-primary); margin-bottom: 0.25rem;">👥 Peer Analysis</div>
+            <div style="color: var(--text-secondary); font-size: 0.85rem;">Data from Yahoo Finance • Cached for 12 hours • All metrics auto-calculated</div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
 
 # =========================
