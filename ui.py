@@ -25924,10 +25924,17 @@ def get_full_financial_context(user_id):
     """
     Aggregates comprehensive financial data STRICTLY for the provided user_id.
     All values are clearly labeled for AI interpretation.
+    
+    IMPORTANT: This function uses the SAME data sources as ui_overview() to ensure
+    the AI sees the exact numbers displayed on screen:
+      - Holdings:       build_portfolio_table() per portfolio
+      - Deposits:       cash_deposits table with soft-delete filter
+      - Realized P&L:   calculate_realized_profit_details() (CFA avg-cost method)
+      - Dividends:      calculate_total_cash_dividends()
+      - Cash balance:   portfolio_cash table
     """
-    import sqlite3
     import pandas as pd
-    from datetime import datetime, timedelta
+    from datetime import datetime
     
     if not user_id:
         return "ERROR: No user logged in."
@@ -25945,10 +25952,9 @@ def get_full_financial_context(user_id):
         if current_sess_id != user_id:
             return "ERROR: Session User ID mismatch."
 
-        conn = get_conn()
-        
         # ========================================
         # SECTION 1: CURRENT STOCK HOLDINGS
+        # (Same source as Overview: build_portfolio_table per portfolio)
         # ========================================
         holdings_data = []
         total_cost_basis = 0.0
@@ -25972,7 +25978,7 @@ def get_full_financial_context(user_id):
                             currency = r.get('Currency', 'KWD')
                             cost_basis = shares * avg_cost
                             
-                            # Convert to KWD for totals
+                            # Convert to KWD for totals (same as Overview)
                             market_value_kwd = convert_to_kwd(market_value, currency)
                             unrealized_pnl_kwd = convert_to_kwd(unrealized_pnl, currency)
                             cost_basis_kwd = convert_to_kwd(cost_basis, currency)
@@ -26027,140 +26033,155 @@ def get_full_financial_context(user_id):
 
         # ========================================
         # SECTION 2: REALIZED PROFITS (Closed Trades)
+        # (Same source as Overview: calculate_realized_profit_details)
         # ========================================
         context_parts.append("\n" + "=" * 60)
         context_parts.append("SECTION 2: REALIZED PROFITS (COMPLETED TRADES)")
         context_parts.append("=" * 60)
         
         try:
-            # From main transactions table (portfolio sells)
-            sell_df = pd.read_sql_query(
-                convert_sql_placeholders("""
-                    SELECT stock_symbol, txn_date, shares, purchase_cost, sell_value,
-                           (sell_value - purchase_cost) as profit
-                    FROM transactions 
-                    WHERE user_id = ? AND txn_type = 'Sell' AND sell_value > 0
-                    ORDER BY txn_date DESC
-                """),
-                conn,
-                params=(user_id,)
-            )
+            realized_details = calculate_realized_profit_details(user_id)
+            total_realized = realized_details['total_realized_kwd']
+            total_profits = realized_details['total_profit_kwd']
+            total_losses = realized_details['total_loss_kwd']
+            realized_trades_df = realized_details['details']
             
-            portfolio_realized = 0.0
-            if not sell_df.empty:
-                portfolio_realized = sell_df['profit'].sum()
-                context_parts.append(f"\nPORTFOLIO REALIZED PROFIT: {portfolio_realized:,.3f} KWD")
+            context_parts.append(f"\nREALIZED PROFIT SUMMARY (CFA Avg-Cost Method):")
+            context_parts.append(f"  • Total Realized P&L: {total_realized:,.3f} KWD")
+            context_parts.append(f"  • Total Profits (winners): {total_profits:,.3f} KWD")
+            context_parts.append(f"  • Total Losses (losers): {total_losses:,.3f} KWD")
+            
+            if not realized_trades_df.empty:
+                num_winners = len(realized_trades_df[realized_trades_df['Profit/Loss (KWD)'] > 0])
+                num_losers = len(realized_trades_df[realized_trades_df['Profit/Loss (KWD)'] < 0])
+                context_parts.append(f"  • Winning Trades: {num_winners}")
+                context_parts.append(f"  • Losing Trades: {num_losers}")
+                win_rate = (num_winners / len(realized_trades_df) * 100) if len(realized_trades_df) > 0 else 0
+                context_parts.append(f"  • Win Rate: {win_rate:.1f}%")
+                
                 context_parts.append("\nRecent Closed Trades:")
-                for _, row in sell_df.head(10).iterrows():
-                    profit = safe_float(row['profit'], 0)
-                    context_parts.append(f"  • {row['stock_symbol']}: Sold {row['shares']:,.0f} shares on {row['txn_date']}")
-                    context_parts.append(f"    Cost: {row['purchase_cost']:,.3f} | Sold For: {row['sell_value']:,.3f} | Profit: {profit:,.3f} KWD")
+                for _, row in realized_trades_df.tail(10).iterrows():
+                    pnl = row.get('Profit/Loss (KWD)', 0)
+                    context_parts.append(f"  • {row['Stock']} ({row['Portfolio']}): Sold {row['Shares']:,.0f} shares on {row['Sell Date']}")
+                    context_parts.append(f"    Avg Cost: {row['Avg Cost']:.4f} | Sell Value: {row['Sell Value']:,.3f} | P&L: {pnl:+,.3f} KWD")
             else:
-                context_parts.append("\nNo portfolio sell transactions recorded.")
-            
-            # Calculate FIFO-based realized profit from transactions table
-            trading_realized = calculate_trading_realized_profit(user_id)
-            
-            if trading_realized != 0:
-                context_parts.append(f"\nTRADING REALIZED PROFIT (FIFO): {trading_realized:,.3f} KWD")
-                context_parts.append(f"  • (Calculated from matched buy/sell pairs only)")
-            else:
-                context_parts.append("\nNo closed trading positions with realized profits.")
-            
-            total_realized = portfolio_realized + trading_realized
-            context_parts.append(f"\n** TOTAL REALIZED PROFIT: {total_realized:,.3f} KWD **")
+                context_parts.append("\n  No closed trading positions recorded.")
             
         except Exception as e:
+            total_realized = 0.0
             context_parts.append(f"\nError calculating realized profits: {e}")
 
         # ========================================
         # SECTION 3: DIVIDENDS RECEIVED
+        # (Same source as Overview: calculate_total_cash_dividends)
         # ========================================
         context_parts.append("\n" + "=" * 60)
         context_parts.append("SECTION 3: DIVIDENDS & BONUS SHARES")
         context_parts.append("=" * 60)
         
         try:
-            div_df = pd.read_sql_query(
-                convert_sql_placeholders("""
-                    SELECT t.stock_symbol, t.txn_date, 
-                           t.cash_dividend, t.bonus_shares,
-                           COALESCE(s.currency, 'KWD') as currency
-                    FROM transactions t
-                    LEFT JOIN stocks s ON t.stock_symbol = s.symbol AND s.user_id = t.user_id
-                    WHERE t.user_id = ? AND (t.cash_dividend > 0 OR t.bonus_shares > 0)
-                    ORDER BY t.txn_date DESC
-                """),
-                conn,
-                params=(user_id,)
-            )
-            div_df = div_df.rename(columns={
-                'stock_symbol': 'Stock', 'txn_date': 'Date',
-                'cash_dividend': 'Cash_Dividend', 'bonus_shares': 'Bonus_Shares',
-                'currency': 'Currency'
-            })
+            total_dividends_kwd, dividend_count, _ = calculate_total_cash_dividends(user_id, debug=False)
             
-            if not div_df.empty:
-                total_cash_div = 0.0
-                for _, row in div_df.iterrows():
-                    total_cash_div += convert_to_kwd(safe_float(row['Cash_Dividend'], 0), row['Currency'])
-                total_bonus = div_df['Bonus_Shares'].sum()
-                
-                context_parts.append(f"\nDIVIDEND SUMMARY:")
-                context_parts.append(f"  • Total Cash Dividends Received: {total_cash_div:,.3f} KWD")
-                context_parts.append(f"  • Total Bonus Shares Received: {total_bonus:,.0f} shares")
+            context_parts.append(f"\nDIVIDEND SUMMARY:")
+            context_parts.append(f"  • Total Cash Dividends Received: {total_dividends_kwd:,.3f} KWD")
+            context_parts.append(f"  • Number of Dividend Records: {dividend_count}")
+            
+            # Also fetch bonus shares and detail list for AI context
+            conn = get_conn()
+            _sd = _soft_delete_filter()
+            div_detail = query_df(f"""
+                SELECT t.stock_symbol, t.txn_date, t.cash_dividend, t.bonus_shares,
+                       COALESCE(s.currency, 'KWD') as currency
+                FROM transactions t
+                LEFT JOIN stocks s ON UPPER(t.stock_symbol) = UPPER(s.symbol) AND s.user_id = t.user_id
+                WHERE t.user_id = ? AND (t.cash_dividend > 0 OR t.bonus_shares > 0){_sd}
+                ORDER BY t.txn_date DESC
+            """, (user_id,))
+            conn.close()
+            
+            if not div_detail.empty:
+                total_bonus = div_detail['bonus_shares'].sum()
+                if total_bonus > 0:
+                    context_parts.append(f"  • Total Bonus Shares Received: {total_bonus:,.0f} shares")
                 
                 context_parts.append("\nDividend History:")
-                for _, row in div_df.head(15).iterrows():
-                    if row['Cash_Dividend'] > 0:
-                        context_parts.append(f"  • {row['Stock']}: Cash Dividend of {row['Cash_Dividend']:,.3f} {row['Currency']} on {row['Date']}")
-                    if row['Bonus_Shares'] > 0:
-                        context_parts.append(f"  • {row['Stock']}: Bonus Shares of {row['Bonus_Shares']:,.0f} on {row['Date']}")
+                for _, row in div_detail.head(15).iterrows():
+                    if safe_float(row.get('cash_dividend', 0), 0) > 0:
+                        context_parts.append(f"  • {row['stock_symbol']}: Cash Dividend of {row['cash_dividend']:,.3f} {row['currency']} on {row['txn_date']}")
+                    if safe_float(row.get('bonus_shares', 0), 0) > 0:
+                        context_parts.append(f"  • {row['stock_symbol']}: Bonus Shares of {row['bonus_shares']:,.0f} on {row['txn_date']}")
             else:
-                context_parts.append("\n⚠️ No dividends or bonus shares recorded.")
+                context_parts.append("\n  No dividend or bonus share records found.")
         except Exception as e:
+            total_dividends_kwd = 0.0
             context_parts.append(f"\nError reading dividends: {e}")
 
         # ========================================
         # SECTION 4: CASH DEPOSITS & BALANCES
+        # (Same source as Overview: cash_deposits with soft-delete filter + portfolio_cash)
         # ========================================
         context_parts.append("\n" + "=" * 60)
         context_parts.append("SECTION 4: CASH DEPOSITS & AVAILABLE FUNDS")
         context_parts.append("=" * 60)
         
         try:
-            deposits_df = pd.read_sql_query(
-                convert_sql_placeholders(
-                    "SELECT deposit_date, amount, currency, bank_name FROM cash_deposits WHERE user_id = ? ORDER BY deposit_date DESC"
-                ),
-                conn,
-                params=(user_id,)
-            )
+            # PRIMARY SOURCE: cash_deposits table with soft-delete filter (matches Overview)
+            _soft_del_dep = _soft_delete_filter_deposits()
+            all_deposits = query_df(f"""
+                SELECT deposit_date, amount, currency, bank_name, portfolio, include_in_analysis
+                FROM cash_deposits
+                WHERE user_id = ?{_soft_del_dep}
+                ORDER BY deposit_date DESC
+            """, (user_id,))
             
             total_deposits_kwd = 0.0
-            if not deposits_df.empty:
-                for _, row in deposits_df.iterrows():
-                    total_deposits_kwd += convert_to_kwd(safe_float(row['amount'], 0), row.get('currency', 'KWD'))
+            if not all_deposits.empty:
+                all_deposits["amount_in_kwd"] = all_deposits.apply(
+                    lambda row: convert_to_kwd(safe_float(row["amount"], 0), row.get("currency", "KWD")),
+                    axis=1
+                )
+                total_deposits_kwd = all_deposits["amount_in_kwd"].sum()
                 
                 context_parts.append(f"\nTOTAL CASH DEPOSITED: {total_deposits_kwd:,.3f} KWD")
+                context_parts.append(f"  • Number of Deposits: {len(all_deposits)}")
                 context_parts.append("\nRecent Deposits:")
-                for _, row in deposits_df.head(10).iterrows():
-                    context_parts.append(f"  • {row['deposit_date']}: {row['amount']:,.3f} {row['currency']} to {row['bank_name']}")
+                for _, row in all_deposits.head(10).iterrows():
+                    context_parts.append(f"  • {row['deposit_date']}: {row['amount']:,.3f} {row['currency']} to {row.get('bank_name', 'N/A')}")
             else:
-                total_deposits_kwd = 0.0
-                context_parts.append("\n⚠️ No cash deposits recorded.")
+                # FALLBACK: same as Overview (Buy - Sell totals)
+                _soft_del_txn = _soft_delete_filter()
+                buys_df = query_df(f"""
+                    SELECT portfolio, purchase_cost FROM transactions
+                    WHERE user_id = ? AND txn_type = 'Buy' AND purchase_cost IS NOT NULL{_soft_del_txn}
+                """, (user_id,))
+                sells_df = query_df(f"""
+                    SELECT portfolio, sell_value FROM transactions
+                    WHERE user_id = ? AND txn_type = 'Sell' AND sell_value IS NOT NULL{_soft_del_txn}
+                """, (user_id,))
+                
+                total_buys = 0.0
+                if not buys_df.empty:
+                    for _, row in buys_df.iterrows():
+                        ccy = PORTFOLIO_CCY.get(row.get('portfolio', 'KFH'), 'KWD')
+                        total_buys += convert_to_kwd(safe_float(row['purchase_cost'], 0), ccy)
+                total_sells = 0.0
+                if not sells_df.empty:
+                    for _, row in sells_df.iterrows():
+                        ccy = PORTFOLIO_CCY.get(row.get('portfolio', 'KFH'), 'KWD')
+                        total_sells += convert_to_kwd(safe_float(row['sell_value'], 0), ccy)
+                
+                total_deposits_kwd = total_buys - total_sells
+                context_parts.append(f"\nTOTAL INVESTED (calculated from Buy-Sell): {total_deposits_kwd:,.3f} KWD")
             
-            # Cash Balance
-            cash_df = pd.read_sql_query(
-                convert_sql_placeholders("SELECT balance, currency FROM portfolio_cash WHERE user_id = ?"),
-                conn,
-                params=(user_id,)
-            )
+            # Cash Balance from portfolio_cash (same as Overview)
+            cash_recs = query_df("SELECT balance, currency FROM portfolio_cash WHERE user_id=?", (user_id,))
             cash_balance_kwd = 0.0
-            if not cash_df.empty:
-                for _, row in cash_df.iterrows():
-                    cash_balance_kwd += convert_to_kwd(safe_float(row['balance'], 0), row['currency'])
+            if not cash_recs.empty:
+                for _, cr in cash_recs.iterrows():
+                    cash_balance_kwd += convert_to_kwd(safe_float(cr["balance"], 0), cr["currency"])
                 context_parts.append(f"\nAVAILABLE CASH BALANCE: {cash_balance_kwd:,.3f} KWD")
+            else:
+                context_parts.append(f"\nAVAILABLE CASH BALANCE: 0.000 KWD")
         except Exception as e:
             total_deposits_kwd = 0.0
             cash_balance_kwd = 0.0
@@ -26214,38 +26235,49 @@ def get_full_financial_context(user_id):
 
         # ========================================
         # SECTION 6: PERFORMANCE SUMMARY
+        # (Same calculations as Overview metric cards)
         # ========================================
         context_parts.append("\n" + "=" * 60)
         context_parts.append("SECTION 6: OVERALL PERFORMANCE SUMMARY")
         context_parts.append("=" * 60)
         
         try:
+            # LIVE portfolio value = stock market value + cash (matches Overview)
+            live_portfolio_value = total_market_value + cash_balance_kwd
+            
+            # Net Gain = Live Value - Total Deposits (matches Overview)
+            net_gain = live_portfolio_value - total_deposits_kwd
+            
+            # ROI (matches Overview)
+            roi = (net_gain / total_deposits_kwd * 100) if total_deposits_kwd > 0 else 0
+            
+            # Combined P&L
             combined_pnl = total_unrealized_pnl + total_realized
-            total_portfolio_value = total_market_value + cash_balance_kwd
+            
+            # Total Profit including dividends (matches Overview)
+            total_profit = total_realized + total_unrealized_pnl + total_dividends_kwd
             
             context_parts.append(f"\nPORTFOLIO VALUE BREAKDOWN:")
             context_parts.append(f"  • Stock Holdings Value: {total_market_value:,.3f} KWD")
             context_parts.append(f"  • Cash Balance: {cash_balance_kwd:,.3f} KWD")
-            context_parts.append(f"  • TOTAL PORTFOLIO VALUE: {total_portfolio_value:,.3f} KWD")
+            context_parts.append(f"  • TOTAL PORTFOLIO VALUE: {live_portfolio_value:,.3f} KWD")
             
             context_parts.append(f"\nPROFIT/LOSS SUMMARY:")
             context_parts.append(f"  • Unrealized P/L (Open Positions): {total_unrealized_pnl:,.3f} KWD")
             context_parts.append(f"  • Realized P/L (Closed Trades): {total_realized:,.3f} KWD")
-            context_parts.append(f"  • COMBINED TOTAL P/L: {combined_pnl:,.3f} KWD")
+            context_parts.append(f"  • Cash Dividends Received: {total_dividends_kwd:,.3f} KWD")
+            context_parts.append(f"  • COMBINED TOTAL P&L (incl. dividends): {total_profit:,.3f} KWD")
+            context_parts.append(f"  • Capital Gains P&L (excl. dividends): {combined_pnl:,.3f} KWD")
             
-            # Calculate ROI
-            if total_deposits_kwd > 0:
-                roi = ((total_portfolio_value - total_deposits_kwd) / total_deposits_kwd) * 100
-                context_parts.append(f"\nRETURN ON INVESTMENT:")
-                context_parts.append(f"  • Total Deposited: {total_deposits_kwd:,.3f} KWD")
-                context_parts.append(f"  • Current Value: {total_portfolio_value:,.3f} KWD")
-                context_parts.append(f"  • Net Gain/Loss: {(total_portfolio_value - total_deposits_kwd):,.3f} KWD")
-                context_parts.append(f"  • ROI Percentage: {roi:.2f}%")
+            context_parts.append(f"\nRETURN ON INVESTMENT:")
+            context_parts.append(f"  • Total Deposited: {total_deposits_kwd:,.3f} KWD")
+            context_parts.append(f"  • Current Portfolio Value: {live_portfolio_value:,.3f} KWD")
+            context_parts.append(f"  • Net Gain/Loss: {net_gain:+,.3f} KWD")
+            context_parts.append(f"  • ROI Percentage: {roi:+.2f}%")
             
         except Exception as e:
             context_parts.append(f"\nError calculating performance: {e}")
 
-        conn.close()
         context_parts.append("\n" + "=" * 60)
         context_parts.append("END OF FINANCIAL DATA REPORT")
         context_parts.append("=" * 60)
