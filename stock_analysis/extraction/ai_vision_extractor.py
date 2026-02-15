@@ -246,20 +246,32 @@ _CLASSIFY_PROMPT = """\
 Look at this financial document image carefully.
 Determine what type of financial statement it shows.
 
-Common names for each type:
+Common names for each type (English AND Arabic):
 - balance_sheet: "Balance Sheet", "Statement of Financial Position",
-  "Consolidated Statement of Financial Position"
+  "Consolidated Statement of Financial Position",
+  Arabic: "بيان المركز المالي", "الميزانية العمومية",
+  "قائمة المركز المالي الموحدة"
 - income_statement: "Income Statement", "Statement of Profit or Loss",
   "Consolidated Statement of Profit or Loss", "Statement of Income",
-  "Statement of Comprehensive Income"
+  "Statement of Comprehensive Income",
+  Arabic: "بيان الربح أو الخسارة", "قائمة الدخل",
+  "بيان الدخل الشامل"
 - cash_flow: "Cash Flow Statement", "Statement of Cash Flows",
   "Consolidated Statement of Cash Flows", "Cash Flows",
-  any page showing "Operating Activities", "Investing Activities",
-  or "Financing Activities" sections
+  Arabic: "بيان التدفقات النقدية", "قائمة التدفقات النقدية",
+  "التدفقات النقدية الموحدة"
 
-If the page is a continuation of a financial table (no header but has
-numbered rows with financial data), classify it the same as the
-statement it continues.
+IMPORTANT CLASSIFICATION HINTS:
+- If the page mentions "Operating Activities", "Investing Activities",
+  or "Financing Activities" (or their Arabic equivalents: "أنشطة تشغيلية",
+  "أنشطة استثمارية", "أنشطة تمويلية") → it is cash_flow.
+- If the page has rows like "Cash and cash equivalents at beginning/end",
+  "Net cash from/used in" → it is cash_flow.
+- If the page is a continuation of a financial table (no header but has
+  numbered rows with financial data), classify it the same as the
+  statement it continues.
+- When in doubt between cash_flow and unknown, prefer cash_flow if the
+  page contains monetary amounts in a tabular format with activity sections.
 
 Return ONLY one of these exact strings (no quotes, no extra text):
 balance_sheet
@@ -546,6 +558,50 @@ def _classify_page(client: Any, png_bytes: bytes) -> str:
         return "unknown"
     except Exception as exc:
         logger.warning("Page classification failed: %s", exc)
+        return "unknown"
+
+
+def _classify_page_targeted(
+    client: Any, png_bytes: bytes, candidates: set
+) -> str:
+    """Re-classify an unknown page with a narrower prompt.
+
+    *candidates* is the set of statement types still missing
+    (e.g. ``{"cash_flow"}``).  The prompt tells Gemini to pick one
+    of those or ``unknown``.
+    """
+    from google.genai import types
+
+    options = "\n".join(sorted(candidates)) + "\nunknown"
+    prompt = (
+        "This financial document page was not identified on the first try.\n"
+        "Look carefully at the content — headings, row labels, section titles.\n\n"
+        "It might be one of these statement types:\n"
+        f"{options}\n\n"
+        "Hints:\n"
+        "- If you see 'Operating Activities', 'Investing Activities', "
+        "'Financing Activities', 'Net cash', or Arabic equivalents "
+        "('أنشطة تشغيلية', 'أنشطة استثمارية', 'أنشطة تمويلية', "
+        "'التدفقات النقدية') → it is cash_flow.\n"
+        "- If you see 'Total Assets', 'Total Equity', 'Liabilities' → balance_sheet.\n"
+        "- If you see 'Revenue', 'Net Income', 'Earnings per share' → income_statement.\n\n"
+        "Return ONLY one of these exact strings:\n"
+        f"{options}\n"
+    )
+
+    image_part = types.Part.from_bytes(data=png_bytes, mime_type="image/png")
+    try:
+        raw = _call_gemini(client, [image_part, prompt], max_tokens=32, temperature=0.0)
+        answer = raw.strip().lower().replace(" ", "_")
+        if "balance" in answer:
+            return "balance_sheet"
+        if "income" in answer or "profit" in answer:
+            return "income_statement"
+        if "cash" in answer:
+            return "cash_flow"
+        return "unknown"
+    except Exception as exc:
+        logger.warning("Targeted re-classification failed: %s", exc)
         return "unknown"
 
 
@@ -954,8 +1010,18 @@ def ai_extract_financials(
     if not force:
         cached = _get_cached(cache_key)
         if cached is not None:
-            cached["_from_cache"] = True
-            return cached
+            # Invalidate cache if any statement type was missed
+            cached_stmts = set(cached.get("statements", {}).keys())
+            cached_ptypes = cached.get("page_types", {})
+            has_unknown = any(v == "unknown" for v in cached_ptypes.values())
+            if has_unknown and cached_stmts != _VALID_STMT_TYPES:
+                logger.info(
+                    "Cache invalidated — had unknown pages and only %s",
+                    cached_stmts,
+                )
+            else:
+                cached["_from_cache"] = True
+                return cached
 
     # ── 2. Render pages to PNG ───────────────────────────────────
     t0 = time.time()
@@ -1007,23 +1073,41 @@ def ai_extract_financials(
             elif stype == "unknown":
                 unknown_pages.append(idx)
 
-        # ── 5b. Fallback: reclassify unknown pages for missing types ─
+        # ── 5b. Fallback: assign unknown pages to missing types ────
         missing_types = _VALID_STMT_TYPES - set(type_to_pages.keys())
         if missing_types and unknown_pages:
             logger.info(
                 "Missing %s — re-examining %d unknown page(s)",
                 missing_types, len(unknown_pages),
             )
-            for idx in unknown_pages:
-                if not missing_types:
-                    break
-                # Retry classification
-                ptype = _classify_page(client, page_images[idx])
-                if ptype in missing_types:
-                    page_types[idx] = ptype
-                    type_to_pages.setdefault(ptype, []).append(idx)
-                    missing_types.discard(ptype)
-                    logger.info("Re-classified page %d → %s", idx + 1, ptype)
+
+            # DEDUCTIVE: exactly 1 missing type + unknown pages → assign
+            if len(missing_types) == 1:
+                the_type = next(iter(missing_types))
+                for idx in unknown_pages:
+                    page_types[idx] = the_type
+                    type_to_pages.setdefault(the_type, []).append(idx)
+                    logger.info(
+                        "Deductively assigned page %d → %s "
+                        "(only missing type)",
+                        idx + 1, the_type,
+                    )
+                missing_types.clear()
+            else:
+                # Multiple missing types → targeted re-classification
+                for idx in list(unknown_pages):
+                    if not missing_types:
+                        break
+                    ptype = _classify_page_targeted(
+                        client, page_images[idx], missing_types,
+                    )
+                    if ptype in missing_types:
+                        page_types[idx] = ptype
+                        type_to_pages.setdefault(ptype, []).append(idx)
+                        missing_types.discard(ptype)
+                        logger.info(
+                            "Re-classified page %d → %s", idx + 1, ptype
+                        )
 
         if not type_to_pages:
             flags.append("no_statements_classified")
