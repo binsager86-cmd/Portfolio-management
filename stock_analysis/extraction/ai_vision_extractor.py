@@ -4,15 +4,24 @@ AI-Vision Financial Statement Extractor
 Extracts Income Statement, Balance Sheet, and Cash Flow data from
 scanned-image PDFs using **Gemini Vision** (AI-first, not OCR-first).
 
-Pipeline
+Pipeline  (v2 — Speed-optimized)
 --------
-1. **Render** — PyMuPDF (fitz) renders each PDF page at 350 DPI → PNG bytes.
-2. **Classify** — Gemini vision identifies statement type per page.
-3. **Extract** — Gemini vision returns strict JSON with 2-period data.
+1. **Render** — PyMuPDF (fitz) renders each PDF page at 250 DPI → PNG bytes.
+2. **Batch extract** — ALL pages sent in a SINGLE Gemini call that
+   auto-detects each page's statement type AND extracts structured JSON.
+3. **Fallback** — Any missing statement types get a parallel targeted
+   extraction via ``ThreadPoolExecutor``.
 4. **Normalize** — Raw labels are mapped to canonical keys.
 5. **Validate** — Accounting checks flag errors but NEVER discard data.
 6. **Persist** — Raw AI output, normalized rows, and validation results
    are stored via ``storage.py``.
+
+Speedups vs. v1
+~~~~~~~~~~~~~~~~
+- Batch prompt replaces 6 sequential API calls (3 classify + 3 extract)
+  with **1 combined call**.
+- Fallback extractions run in **parallel** via threads.
+- DPI lowered 350 → 250 (~50 % smaller images, faster upload/inference).
 
 Public API
 ----------
@@ -22,6 +31,7 @@ Public API
 
 from __future__ import annotations
 
+import concurrent.futures
 import hashlib
 import json
 import logging
@@ -88,10 +98,11 @@ def _get_json_repair():
 # Constants
 # ─────────────────────────────────────────────────────────────────────
 
-EXTRACTOR_VERSION = "vision-v1.0"
-_RENDER_DPI = 350
+EXTRACTOR_VERSION = "vision-v2.0"
+_RENDER_DPI = 250          # Lowered from 350 — 50% smaller, still plenty for tables
 _CACHE_TTL_SECONDS = 86_400  # 24 h
 _VALID_STMT_TYPES = {"balance_sheet", "income_statement", "cash_flow"}
+_MAX_PARALLEL_WORKERS = 3  # ThreadPoolExecutor for parallel API calls
 
 # ─────────────────────────────────────────────────────────────────────
 # Canonical key mappings (label_raw → key)
@@ -278,6 +289,74 @@ balance_sheet
 income_statement
 cash_flow
 unknown
+"""
+
+# ── BATCH PROMPT — classify + extract ALL statements in ONE call ──
+_BATCH_EXTRACT_PROMPT = """\
+You are a financial statement extraction engine.
+I am giving you {n_pages} page(s) from a financial report.
+
+TASK — do BOTH classification AND extraction in a single pass:
+1) Identify which financial statement each page shows:
+   - balance_sheet (Statement of Financial Position / الميزانية العمومية)
+   - income_statement (Profit or Loss / قائمة الدخل)
+   - cash_flow (Cash Flows / التدفقات النقدية)
+   Pages that belong to the SAME statement type should be merged.
+2) Extract ALL line items with both year columns for each statement.
+3) Detect currency and unit scale (e.g. KD, KD'000, USD millions).
+4) Parentheses or negative signs → NEGATIVE numbers.
+5) Dash or blank → null.
+6) Do NOT invent lines that aren't visible.
+
+CLASSIFICATION HINTS:
+- "Operating Activities", "Investing Activities", "Financing Activities"
+  (or Arabic: "أنشطة تشغيلية", "أنشطة استثمارية", "أنشطة تمويلية") → cash_flow
+- "Total Assets", "Total Equity", "Liabilities" → balance_sheet
+- "Revenue", "Net Income", "Earnings per share" → income_statement
+
+OUTPUT THIS EXACT JSON — an ARRAY of statement objects:
+[
+  {{
+    "statement_type": "balance_sheet",
+    "source_pages": [1],
+    "currency": "KWD",
+    "unit_scale": 1,
+    "periods": [
+      {{"label": "2025-12-31", "col_name": "2025"}},
+      {{"label": "2024-12-31", "col_name": "2024"}}
+    ],
+    "items": [
+      {{
+        "label_raw": "Cash and bank balances",
+        "key": "cash_and_bank_balances",
+        "values": {{"2025-12-31": 67007011, "2024-12-31": 74286447}},
+        "is_total": false
+      }}
+    ]
+  }},
+  {{
+    "statement_type": "income_statement",
+    "source_pages": [2],
+    ...
+  }},
+  {{
+    "statement_type": "cash_flow",
+    "source_pages": [3],
+    ...
+  }}
+]
+
+RULES:
+- "values" must contain numbers or null — never strings.
+- Parentheses (1,234) → -1234.
+- Dash or blank → null.
+- Detect unit_scale: if header says "KD'000" set unit_scale=1000.
+- period labels should be ISO dates if year is visible, otherwise "col_1"/"col_2".
+- is_total=true for subtotals and totals.
+- source_pages is 1-indexed (page 1, 2, 3…).
+- If TWO pages belong to the same statement (e.g. cash flow spans 2 pages),
+  merge them into ONE entry with source_pages=[2,3].
+- Return ONLY the JSON array. No markdown fences, no explanation.
 """
 
 _EXTRACT_PROMPT_TEMPLATE = """\
@@ -702,6 +781,187 @@ def _extract_multi_page(
 
 
 # ─────────────────────────────────────────────────────────────────────
+# ██ SPEED-OPTIMIZED: batch + parallel extraction ██
+# ─────────────────────────────────────────────────────────────────────
+
+def _batch_extract_all(
+    client: Any,
+    page_images: List[bytes],
+) -> Tuple[Dict[str, Dict[str, Any]], Dict[int, str]]:
+    """Send ALL page images in ONE Gemini call.
+
+    The model auto-detects each page's statement type and extracts
+    structured data, eliminating separate classification calls.
+
+    Returns
+    -------
+    (statements_dict, page_types_dict)
+        statements_dict: {stmt_type: raw_parsed_dict}
+        page_types_dict: {page_idx: stmt_type}
+    """
+    from google.genai import types
+
+    prompt = _BATCH_EXTRACT_PROMPT.format(n_pages=len(page_images))
+
+    # Build contents: all images first, then the prompt
+    contents: list = []
+    for i, png_bytes in enumerate(page_images):
+        contents.append(
+            types.Part.from_bytes(data=png_bytes, mime_type="image/png")
+        )
+    contents.append(prompt)
+
+    raw_text = _call_gemini(
+        client, contents,
+        max_tokens=16384,       # Large — up to 3 full statements
+        temperature=0.1,
+    )
+
+    parsed = _repair_json(raw_text)
+
+    # Accept both a list and a single dict
+    if isinstance(parsed, dict):
+        parsed = [parsed]
+
+    if not isinstance(parsed, list):
+        raise RuntimeError(f"Batch extract returned unexpected type: {type(parsed)}")
+
+    # Build outputs
+    statements: Dict[str, Dict[str, Any]] = {}
+    page_types: Dict[int, str] = {}
+
+    for entry in parsed:
+        if not isinstance(entry, dict):
+            continue
+        stmt_type = entry.get("statement_type", "unknown")
+        if stmt_type not in _VALID_STMT_TYPES:
+            # Try normalizing
+            st_lower = stmt_type.lower().replace(" ", "_")
+            if "balance" in st_lower:
+                stmt_type = "balance_sheet"
+            elif "income" in st_lower or "profit" in st_lower:
+                stmt_type = "income_statement"
+            elif "cash" in st_lower:
+                stmt_type = "cash_flow"
+            else:
+                continue  # Skip truly unrecognized
+
+        # Track source pages
+        src_pages = entry.get("source_pages", [])
+        for p in src_pages:
+            if isinstance(p, int):
+                page_types[p - 1] = stmt_type  # Convert 1-indexed → 0-indexed
+
+        # Ensure required keys
+        entry["statement_type"] = stmt_type
+        entry.setdefault("currency", "KWD")
+        entry.setdefault("unit_scale", 1)
+        entry.setdefault("periods", [])
+        entry.setdefault("items", [])
+
+        # If same type seen twice (e.g. 2-page cash flow parsed separately),
+        # merge items into the first occurrence
+        if stmt_type in statements:
+            existing = statements[stmt_type]
+            existing["items"].extend(entry.get("items", []))
+            existing_pages = existing.get("source_pages", [])
+            existing_pages.extend(src_pages)
+            existing["source_pages"] = existing_pages
+        else:
+            statements[stmt_type] = entry
+
+    # Fill any pages not in source_pages
+    for i in range(len(page_images)):
+        if i not in page_types:
+            page_types[i] = "unknown"
+
+    return statements, page_types
+
+
+def _extract_single_fallback(
+    client: Any,
+    png_list: List[bytes],
+    stmt_type: str,
+) -> Dict[str, Any]:
+    """Fallback: extract a single statement type (single or multi-page)."""
+    if len(png_list) == 1:
+        return _extract_page(client, png_list[0], stmt_type)
+    return _extract_multi_page(client, png_list, stmt_type)
+
+
+def _parallel_fallback_extract(
+    client: Any,
+    missing_types: set,
+    page_images: List[bytes],
+    page_types: Dict[int, str],
+) -> Dict[str, Dict[str, Any]]:
+    """Extract missing statement types in PARALLEL using threads.
+
+    For each missing type, figure out which pages are unassigned
+    and send them through ``_extract_single_fallback``.
+    """
+    if not missing_types:
+        return {}
+
+    # Unassigned pages
+    unassigned = [
+        i for i, t in page_types.items()
+        if t == "unknown"
+    ]
+
+    # Build work items: {stmt_type: [page_images]}
+    work: Dict[str, List[bytes]] = {}
+    missing_list = sorted(missing_types)
+
+    if len(missing_list) == 1 and unassigned:
+        # Deductive: all unassigned pages → the only missing type
+        the_type = missing_list[0]
+        work[the_type] = [page_images[i] for i in unassigned]
+        for i in unassigned:
+            page_types[i] = the_type
+        logger.info("Deductively assigned %d page(s) → %s", len(unassigned), the_type)
+    elif unassigned:
+        # Classify unknown pages then extract in parallel
+        for idx in unassigned:
+            ptype = _classify_page(client, page_images[idx])
+            if ptype in missing_types:
+                page_types[idx] = ptype
+                work.setdefault(ptype, []).append(page_images[idx])
+                missing_types.discard(ptype)
+                logger.info("Fallback classified page %d → %s", idx + 1, ptype)
+    else:
+        # No unassigned pages — send ALL pages for each missing type
+        for mt in missing_list:
+            work[mt] = list(page_images)
+
+    results: Dict[str, Dict[str, Any]] = {}
+    if not work:
+        return results
+
+    # Run extractions in parallel
+    with concurrent.futures.ThreadPoolExecutor(
+        max_workers=_MAX_PARALLEL_WORKERS
+    ) as executor:
+        futures = {
+            executor.submit(
+                _extract_single_fallback, client, imgs, stype
+            ): stype
+            for stype, imgs in work.items()
+        }
+        for future in concurrent.futures.as_completed(futures):
+            stype = futures[future]
+            try:
+                result = future.result()
+                results[stype] = result
+                logger.info("Fallback extracted %s (%d items)",
+                            stype, len(result.get("items", [])))
+            except Exception as exc:
+                logger.error("Fallback extraction failed for %s: %s", stype, exc)
+
+    return results
+
+
+# ─────────────────────────────────────────────────────────────────────
 # Normalization
 # ─────────────────────────────────────────────────────────────────────
 
@@ -1055,105 +1315,55 @@ def ai_extract_financials(
     statements: Dict[str, Dict[str, Any]] = {}
 
     try:
-        # ── 5. Classify each page ────────────────────────────────
+        # ── 5. BATCH: classify + extract ALL pages in ONE call ───
         t0 = time.time()
-        page_types: Dict[int, str] = {}
-        for idx, png in enumerate(page_images):
-            ptype = _classify_page(client, png)
-            page_types[idx] = ptype
-            logger.info("Page %d → %s", idx + 1, ptype)
-        timings["classify"] = round(time.time() - t0, 2)
+        batch_statements, page_types = _batch_extract_all(client, page_images)
+        timings["batch_extract"] = round(time.time() - t0, 2)
+        logger.info(
+            "Batch extraction got %d statement type(s) in %.2fs: %s",
+            len(batch_statements), timings["batch_extract"],
+            list(batch_statements.keys()),
+        )
 
-        # Group pages by statement type
-        type_to_pages: Dict[str, List[int]] = {}
-        unknown_pages: List[int] = []
-        for idx, stype in page_types.items():
-            if stype in _VALID_STMT_TYPES:
-                type_to_pages.setdefault(stype, []).append(idx)
-            elif stype == "unknown":
-                unknown_pages.append(idx)
+        # ── 5b. Fallback: any missing types? Extract in parallel ─
+        found_types = set(batch_statements.keys())
+        missing_types = _VALID_STMT_TYPES - found_types
 
-        # ── 5b. Fallback: assign unknown pages to missing types ────
-        missing_types = _VALID_STMT_TYPES - set(type_to_pages.keys())
-        if missing_types and unknown_pages:
-            logger.info(
-                "Missing %s — re-examining %d unknown page(s)",
-                missing_types, len(unknown_pages),
-            )
-
-            # DEDUCTIVE: exactly 1 missing type + unknown pages → assign
-            if len(missing_types) == 1:
-                the_type = next(iter(missing_types))
-                for idx in unknown_pages:
-                    page_types[idx] = the_type
-                    type_to_pages.setdefault(the_type, []).append(idx)
-                    logger.info(
-                        "Deductively assigned page %d → %s "
-                        "(only missing type)",
-                        idx + 1, the_type,
-                    )
-                missing_types.clear()
-            else:
-                # Multiple missing types → targeted re-classification
-                for idx in list(unknown_pages):
-                    if not missing_types:
-                        break
-                    ptype = _classify_page_targeted(
-                        client, page_images[idx], missing_types,
-                    )
-                    if ptype in missing_types:
-                        page_types[idx] = ptype
-                        type_to_pages.setdefault(ptype, []).append(idx)
-                        missing_types.discard(ptype)
-                        logger.info(
-                            "Re-classified page %d → %s", idx + 1, ptype
-                        )
-
-        if not type_to_pages:
-            flags.append("no_statements_classified")
-            logger.warning("No financial statements classified in %d pages", len(page_images))
-
-        # ── 6. Extract each statement (multi-page aware) ─────────
-        for stmt_type, page_idxs in type_to_pages.items():
+        if missing_types:
+            logger.info("Missing from batch: %s — running parallel fallback", missing_types)
             t0 = time.time()
+            fallback_results = _parallel_fallback_extract(
+                client, missing_types, page_images, page_types,
+            )
+            timings["fallback_extract"] = round(time.time() - t0, 2)
+            batch_statements.update(fallback_results)
+        else:
+            timings["fallback_extract"] = 0.0
 
+        if not batch_statements:
+            flags.append("no_statements_classified")
+            logger.warning("No financial statements found in %d pages", len(page_images))
+
+        # ── 6. Normalize all statements ──────────────────────────
+        for stmt_type, raw_result in batch_statements.items():
             try:
-                if len(page_idxs) == 1:
-                    # Single-page statement
-                    raw_result = _extract_page(
-                        client, page_images[page_idxs[0]], stmt_type
-                    )
-                else:
-                    # Multi-page: send ALL pages for this statement
-                    raw_result = _extract_multi_page(
-                        client,
-                        [page_images[i] for i in page_idxs],
-                        stmt_type,
-                    )
                 raw_json_str = json.dumps(raw_result, ensure_ascii=False, default=str)
                 raw_outputs[stmt_type] = raw_json_str
 
-                # ── 7. Normalize ─────────────────────────────────
                 normalized = _normalize_statement(raw_result)
                 statements[stmt_type] = normalized
 
                 logger.info(
-                    "Extracted %s from page(s) %s: %d items, %d periods",
+                    "Normalized %s: %d items, %d periods",
                     stmt_type,
-                    [p + 1 for p in page_idxs],
                     len(normalized.get("items", [])),
                     len(normalized.get("periods", [])),
                 )
             except Exception as exc:
-                logger.error(
-                    "Extraction failed for %s (page(s) %s): %s",
-                    stmt_type, [p + 1 for p in page_idxs], exc,
-                )
+                logger.error("Normalization failed for %s: %s", stmt_type, exc)
                 flags.append(f"extraction_failed_{stmt_type}")
 
-            timings[f"extract_{stmt_type}"] = round(time.time() - t0, 2)
-
-        # ── 8. Validate ──────────────────────────────────────────
+        # ── 7. Validate ──────────────────────────────────────────
         t0 = time.time()
         validations, needs_review = _validate_statements(statements)
         timings["validate"] = round(time.time() - t0, 2)
@@ -1174,12 +1384,12 @@ def ai_extract_financials(
         if needs_review:
             flags.append("validation_needs_review")
 
-        # ── 9. Persist ───────────────────────────────────────────
+        # ── 8. Persist ───────────────────────────────────────────
         t0 = time.time()
         _persist(upload_id, statements, raw_outputs, validations, page_hashes)
         timings["persist"] = round(time.time() - t0, 2)
 
-        # ── 10. Determine status ─────────────────────────────────
+        # ── 9. Determine status ──────────────────────────────────
         total_items = sum(len(s.get("items", [])) for s in statements.values())
         if total_items == 0:
             status = "failed"
@@ -1220,7 +1430,7 @@ def ai_extract_financials(
         timings["total"],
     )
 
-    # ── 11. Cache ────────────────────────────────────────────────
+    # ── 10. Cache ────────────────────────────────────────────────
     _save_cache(cache_key, result)
 
     return result

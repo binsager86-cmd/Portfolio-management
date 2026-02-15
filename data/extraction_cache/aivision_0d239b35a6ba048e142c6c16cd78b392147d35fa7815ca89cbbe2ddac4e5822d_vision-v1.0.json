@@ -1,0 +1,847 @@
+{
+  "upload_id": 7,
+  "cache_key": "0d239b35a6ba048e142c6c16cd78b392147d35fa7815ca89cbbe2ddac4e5822d_vision-v1.0",
+  "extractor_version": "vision-v1.0",
+  "status": "success",
+  "flags": [],
+  "statements": {
+    "balance_sheet": {
+      "statement_type": "balance_sheet",
+      "currency": "KWD",
+      "unit_scale": 1,
+      "periods": [
+        {
+          "label": "2023-12-31",
+          "col_name": "2023"
+        },
+        {
+          "label": "2022-12-31",
+          "col_name": "2022"
+        }
+      ],
+      "items": [
+        {
+          "label_raw": "Cash and bank balances",
+          "key": "cash_and_bank_balances",
+          "values": {
+            "2023-12-31": 75245933.0,
+            "2022-12-31": 80441222.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Trade and other receivables",
+          "key": "trade_and_other_receivables",
+          "values": {
+            "2023-12-31": 24959613.0,
+            "2022-12-31": 26146730.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Inventories",
+          "key": "inventories",
+          "values": {
+            "2023-12-31": null,
+            "2022-12-31": 4633.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Investment in associate",
+          "key": "investment_in_associate",
+          "values": {
+            "2023-12-31": 6683.0,
+            "2022-12-31": 6662.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Total current assets",
+          "key": "total_current_assets",
+          "values": {
+            "2023-12-31": 100212229.0,
+            "2022-12-31": 106599247.0
+          },
+          "is_total": true
+        },
+        {
+          "label_raw": "Right-of-use assets",
+          "key": "right_of_use_assets",
+          "values": {
+            "2023-12-31": 590505.0,
+            "2022-12-31": 705326.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Property and equipment",
+          "key": "property_and_equipment",
+          "values": {
+            "2023-12-31": 39551827.0,
+            "2022-12-31": 41222966.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Intangible assets",
+          "key": "intangible_assets",
+          "values": {
+            "2023-12-31": 6869034.0,
+            "2022-12-31": 6909637.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Total non-current assets",
+          "key": "total_non_current_assets",
+          "values": {
+            "2023-12-31": 47011366.0,
+            "2022-12-31": 48837929.0
+          },
+          "is_total": true
+        },
+        {
+          "label_raw": "Total assets",
+          "key": "total_assets",
+          "values": {
+            "2023-12-31": 147223595.0,
+            "2022-12-31": 155437176.0
+          },
+          "is_total": true
+        },
+        {
+          "label_raw": "Trade and other payables",
+          "key": "trade_and_other_payables",
+          "values": {
+            "2023-12-31": 530952.0,
+            "2022-12-31": 581738.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Accrued expenses and other liabilities",
+          "key": "accrued_expenses_and_other_liabilities",
+          "values": {
+            "2023-12-31": 5454752.0,
+            "2022-12-31": 5264577.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Lease liabilities",
+          "key": "lease_liabilities_current",
+          "values": {
+            "2023-12-31": 116157.0,
+            "2022-12-31": 109582.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Deferred income",
+          "key": "deferred_income",
+          "values": {
+            "2023-12-31": 7024891.0,
+            "2022-12-31": 7107142.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Retentions payable",
+          "key": "retentions_payable",
+          "values": {
+            "2023-12-31": 152951.0,
+            "2022-12-31": 172469.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Current portion of long-term debt",
+          "key": "current_portion_of_long_term_debt",
+          "values": {
+            "2023-12-31": null,
+            "2022-12-31": 2321723.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Total current liabilities",
+          "key": "total_current_liabilities",
+          "values": {
+            "2023-12-31": 13279703.0,
+            "2022-12-31": 15557231.0
+          },
+          "is_total": true
+        },
+        {
+          "label_raw": "Lease liabilities",
+          "key": "lease_liabilities_non_current",
+          "values": {
+            "2023-12-31": 559156.0,
+            "2022-12-31": 628663.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Provision for staff indemnity",
+          "key": "provision_for_staff_indemnity",
+          "values": {
+            "2023-12-31": 6518175.0,
+            "2022-12-31": 5507146.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Total non-current liabilities",
+          "key": "total_non_current_liabilities",
+          "values": {
+            "2023-12-31": 7077331.0,
+            "2022-12-31": 6135809.0
+          },
+          "is_total": true
+        },
+        {
+          "label_raw": "Total liabilities",
+          "key": "total_liabilities",
+          "values": {
+            "2023-12-31": 20357034.0,
+            "2022-12-31": 21693040.0
+          },
+          "is_total": true
+        },
+        {
+          "label_raw": "Share capital",
+          "key": "share_capital",
+          "values": {
+            "2023-12-31": 12834864.0,
+            "2022-12-31": 12223680.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Share premium",
+          "key": "share_premium",
+          "values": {
+            "2023-12-31": 1512000.0,
+            "2022-12-31": 1512000.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Statutory reserve",
+          "key": "statutory_reserve",
+          "values": {
+            "2023-12-31": 9894240.0,
+            "2022-12-31": 9894240.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Voluntary reserve",
+          "key": "voluntary_reserve",
+          "values": {
+            "2023-12-31": 6418432.0,
+            "2022-12-31": 6112840.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Treasury shares",
+          "key": "treasury_shares",
+          "values": {
+            "2023-12-31": -288877.0,
+            "2022-12-31": -288877.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Treasury shares reserve",
+          "key": "treasury_shares_reserve",
+          "values": {
+            "2023-12-31": 564013.0,
+            "2022-12-31": 564013.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Retained earnings",
+          "key": "retained_earnings",
+          "values": {
+            "2023-12-31": 95917043.0,
+            "2022-12-31": 103717264.0
+          },
+          "is_total": false
+        }
+      ]
+    },
+    "income_statement": {
+      "statement_type": "income_statement",
+      "currency": "KWD",
+      "unit_scale": 1,
+      "periods": [
+        {
+          "label": "2023-12-31",
+          "col_name": "2023"
+        },
+        {
+          "label": "2022-12-31",
+          "col_name": "2022"
+        }
+      ],
+      "items": [
+        {
+          "label_raw": "Revenue",
+          "key": "revenue",
+          "values": {
+            "2023-12-31": 78974673.0,
+            "2022-12-31": 83625055.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Cost of operations",
+          "key": "cost_of_operations",
+          "values": {
+            "2023-12-31": -15422008.0,
+            "2022-12-31": -15085793.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Gross profit",
+          "key": "gross_profit",
+          "values": {
+            "2023-12-31": 63552665.0,
+            "2022-12-31": 68539262.0
+          },
+          "is_total": true
+        },
+        {
+          "label_raw": "General and administrative expenses",
+          "key": "general_and_administrative_expenses",
+          "values": {
+            "2023-12-31": -16852539.0,
+            "2022-12-31": -14051860.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Selling expenses",
+          "key": "selling_expenses",
+          "values": {
+            "2023-12-31": -5288219.0,
+            "2022-12-31": -2730499.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Finance charges",
+          "key": "finance_charges",
+          "values": {
+            "2023-12-31": -155467.0,
+            "2022-12-31": -180471.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Share of loss of associates",
+          "key": "share_of_loss_of_associates",
+          "values": {
+            "2023-12-31": null,
+            "2022-12-31": -1699.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Other income",
+          "key": "other_income",
+          "values": {
+            "2023-12-31": 2939374.0,
+            "2022-12-31": 1782811.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Profit before contribution to Kuwait Foundation for Advancement of Sciences (\"KFAS\"), National Labour Support Tax (\"NLST\"), Zakat and Directors' remuneration",
+          "key": "profit_before_kfas_nlst_zakat_and_directors_remuneration",
+          "values": {
+            "2023-12-31": 44195814.0,
+            "2022-12-31": 53357544.0
+          },
+          "is_total": true
+        },
+        {
+          "label_raw": "Contribution to KFAS",
+          "key": "contribution_to_kfas",
+          "values": {
+            "2023-12-31": -448625.0,
+            "2022-12-31": -538870.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "NLST",
+          "key": "nlst",
+          "values": {
+            "2023-12-31": -1223185.0,
+            "2022-12-31": -1352099.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Zakat",
+          "key": "zakat",
+          "values": {
+            "2023-12-31": -495708.0,
+            "2022-12-31": -547489.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Directors' remuneration",
+          "key": "directors_remuneration",
+          "values": {
+            "2023-12-31": -250000.0,
+            "2022-12-31": -250000.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Profit for the year",
+          "key": "profit_for_the_year",
+          "values": {
+            "2023-12-31": 41778296.0,
+            "2022-12-31": 50669086.0
+          },
+          "is_total": true
+        },
+        {
+          "label_raw": "Basic and diluted earnings per share (fils)",
+          "key": "basic_and_diluted_earnings_per_share_fils",
+          "values": {
+            "2023-12-31": 327.0,
+            "2022-12-31": 397.0
+          },
+          "is_total": false
+        }
+      ]
+    },
+    "cash_flow": {
+      "statement_type": "cash_flow",
+      "currency": "KWD",
+      "unit_scale": 1,
+      "periods": [
+        {
+          "label": "2023-12-31",
+          "col_name": "2023"
+        },
+        {
+          "label": "2022-12-31",
+          "col_name": "2022"
+        }
+      ],
+      "items": [
+        {
+          "label_raw": "Profit before contribution to KFAS, NLST, Zakat and Directors' remuneration",
+          "key": "profit_before_contribution_to_kfas_nlst_zakat_and_directors_remuneration",
+          "values": {
+            "2023-12-31": 44195814.0,
+            "2022-12-31": 53357544.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Depreciation and amortisation",
+          "key": "depreciation_and_amortisation",
+          "values": {
+            "2023-12-31": 3331255.0,
+            "2022-12-31": 3416691.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Provision for staff indemnity",
+          "key": "provision_for_staff_indemnity",
+          "values": {
+            "2023-12-31": 1268335.0,
+            "2022-12-31": 958402.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Provision for inventories",
+          "key": "provision_for_inventories",
+          "values": {
+            "2023-12-31": 4142.0,
+            "2022-12-31": null
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Expected credit loss on financial assets",
+          "key": "expected_credit_loss_on_financial_assets",
+          "values": {
+            "2023-12-31": 2396899.0,
+            "2022-12-31": 94810.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Gain on disposal of property and equipment",
+          "key": "gain_on_disposal_of_property_and_equipment",
+          "values": {
+            "2023-12-31": -4091.0,
+            "2022-12-31": -3501.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Property and equipment and Intangible assets written off",
+          "key": "property_and_equipment_and_intangible_assets_written_off",
+          "values": {
+            "2023-12-31": null,
+            "2022-12-31": 24274.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Finance charges",
+          "key": "finance_charges",
+          "values": {
+            "2023-12-31": 155467.0,
+            "2022-12-31": 180471.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Share of loss of associates",
+          "key": "share_of_loss_of_associates",
+          "values": {
+            "2023-12-31": null,
+            "2022-12-31": 1699.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Interest income",
+          "key": "interest_income",
+          "values": {
+            "2023-12-31": -2834626.0,
+            "2022-12-31": -1624874.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Loss from disposal of associate",
+          "key": "loss_from_disposal_of_associate",
+          "values": {
+            "2023-12-31": null,
+            "2022-12-31": 2860.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Operating cash flows before working capital changes",
+          "key": "operating_cash_flows_before_working_capital_changes",
+          "values": {
+            "2023-12-31": 48513195.0,
+            "2022-12-31": 56408376.0
+          },
+          "is_total": true
+        },
+        {
+          "label_raw": "Trade and other receivables",
+          "key": "trade_and_other_receivables",
+          "values": {
+            "2023-12-31": -1209107.0,
+            "2022-12-31": -4959104.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Inventories",
+          "key": "inventories",
+          "values": {
+            "2023-12-31": 491.0,
+            "2022-12-31": 486.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Trade and other payables",
+          "key": "trade_and_other_payables",
+          "values": {
+            "2023-12-31": -50786.0,
+            "2022-12-31": -157183.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Accrued expenses and other liabilities",
+          "key": "accrued_expenses_and_other_liabilities",
+          "values": {
+            "2023-12-31": 310930.0,
+            "2022-12-31": -149695.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Deferred income",
+          "key": "deferred_income",
+          "values": {
+            "2023-12-31": -82251.0,
+            "2022-12-31": -2205866.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Retentions payable",
+          "key": "retentions_payable",
+          "values": {
+            "2023-12-31": -19518.0,
+            "2022-12-31": -109607.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Subtotal operating cash flows after working capital changes",
+          "key": "subtotal_operating_cash_flows_after_working_capital_changes",
+          "values": {
+            "2023-12-31": 47462954.0,
+            "2022-12-31": 48827407.0
+          },
+          "is_total": true
+        },
+        {
+          "label_raw": "Payment of staff indemnity",
+          "key": "payment_of_staff_indemnity",
+          "values": {
+            "2023-12-31": -257385.0,
+            "2022-12-31": -391692.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Payment of KFAS",
+          "key": "payment_of_kfas",
+          "values": {
+            "2023-12-31": -538870.0,
+            "2022-12-31": -663457.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Payment of NLST",
+          "key": "payment_of_nlst",
+          "values": {
+            "2023-12-31": -1351622.0,
+            "2022-12-31": -1655063.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Payment of Zakat",
+          "key": "payment_of_zakat",
+          "values": {
+            "2023-12-31": -546868.0,
+            "2022-12-31": -670751.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Directors' remuneration paid",
+          "key": "directors_remuneration_paid",
+          "values": {
+            "2023-12-31": -250000.0,
+            "2022-12-31": -250000.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Net cash from operating activities",
+          "key": "net_cash_from_operating_activities",
+          "values": {
+            "2023-12-31": 44518209.0,
+            "2022-12-31": 45196444.0
+          },
+          "is_total": true
+        },
+        {
+          "label_raw": "Purchase of property and equipment",
+          "key": "purchase_of_property_and_equipment",
+          "values": {
+            "2023-12-31": -1480025.0,
+            "2022-12-31": -479524.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Payments for intangible assets",
+          "key": "payments_for_intangible_assets",
+          "values": {
+            "2023-12-31": -24745.0,
+            "2022-12-31": -50528.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Proceeds from disposal of property and equipment",
+          "key": "proceeds_from_disposal_of_property_and_equipment",
+          "values": {
+            "2023-12-31": 4200.0,
+            "2022-12-31": 3600.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Proceeds from liquidation of investments in associates",
+          "key": "proceeds_from_liquidation_of_investments_in_associates",
+          "values": {
+            "2023-12-31": null,
+            "2022-12-31": 513049.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Margin deposits and restricted deposits",
+          "key": "margin_deposits_and_restricted_deposits",
+          "values": {
+            "2023-12-31": -293159.0,
+            "2022-12-31": -217170.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Term deposits",
+          "key": "term_deposits",
+          "values": {
+            "2023-12-31": -15000000.0,
+            "2022-12-31": 21000000.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Interest received",
+          "key": "interest_received",
+          "values": {
+            "2023-12-31": 2833951.0,
+            "2022-12-31": 1813833.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Net cash (used in)/from investing activities",
+          "key": "net_cash_used_in_from_investing_activities",
+          "values": {
+            "2023-12-31": -13959778.0,
+            "2022-12-31": 22583260.0
+          },
+          "is_total": true
+        },
+        {
+          "label_raw": "Repayment of long-term debts",
+          "key": "repayment_of_long_term_debts",
+          "values": {
+            "2023-12-31": -2321723.0,
+            "2022-12-31": -2400000.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Finance charges paid",
+          "key": "finance_charges_paid",
+          "values": {
+            "2023-12-31": -165501.0,
+            "2022-12-31": -182697.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Repayment of principal portion of lease liabilities",
+          "key": "repayment_of_principal_portion_of_lease_liabilities",
+          "values": {
+            "2023-12-31": -62932.0,
+            "2022-12-31": -106020.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Dividend paid",
+          "key": "dividend_paid",
+          "values": {
+            "2023-12-31": -48502620.0,
+            "2022-12-31": -48411987.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Net cash used in financing activities",
+          "key": "net_cash_used_in_financing_activities",
+          "values": {
+            "2023-12-31": -51052776.0,
+            "2022-12-31": -51100704.0
+          },
+          "is_total": true
+        },
+        {
+          "label_raw": "Net (decrease)/increase in cash and cash equivalents",
+          "key": "net_decrease_increase_in_cash_and_cash_equivalents",
+          "values": {
+            "2023-12-31": -20494345.0,
+            "2022-12-31": 16679000.0
+          },
+          "is_total": true
+        },
+        {
+          "label_raw": "Effects of exchange rate changes on cash and cash equivalents",
+          "key": "effects_of_exchange_rate_changes_on_cash_and_cash_equivalents",
+          "values": {
+            "2023-12-31": 5897.0,
+            "2022-12-31": -87668.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Cash and cash equivalents at beginning of the year",
+          "key": "cash_and_cash_equivalents_at_beginning_of_the_year",
+          "values": {
+            "2023-12-31": 27621289.0,
+            "2022-12-31": 11029957.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Cash and cash equivalents at end of the year",
+          "key": "cash_and_cash_equivalents_at_end_of_the_year",
+          "values": {
+            "2023-12-31": 7132841.0,
+            "2022-12-31": 27621289.0
+          },
+          "is_total": true
+        }
+      ]
+    }
+  },
+  "validations": [],
+  "page_types": {
+    "0": "balance_sheet",
+    "1": "income_statement",
+    "2": "cash_flow"
+  },
+  "page_hashes": {
+    "0": "6b522cbe414aaf6a",
+    "1": "15fbe14c5a1c4dbc",
+    "2": "efee7a0658e7be4a"
+  },
+  "timings": {
+    "render": 1.28,
+    "classify": 14.13,
+    "extract_balance_sheet": 30.3,
+    "extract_income_statement": 13.62,
+    "extract_cash_flow": 25.15,
+    "validate": 0.0,
+    "persist": 1.32,
+    "total": 86.85
+  },
+  "_from_cache": false
+}

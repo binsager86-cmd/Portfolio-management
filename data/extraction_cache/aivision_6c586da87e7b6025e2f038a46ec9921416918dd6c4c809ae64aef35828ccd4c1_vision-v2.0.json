@@ -1,0 +1,839 @@
+{
+  "upload_id": 9,
+  "cache_key": "6c586da87e7b6025e2f038a46ec9921416918dd6c4c809ae64aef35828ccd4c1_vision-v2.0",
+  "extractor_version": "vision-v2.0",
+  "status": "needs_review",
+  "flags": [
+    "validation_needs_review"
+  ],
+  "statements": {
+    "balance_sheet": {
+      "statement_type": "balance_sheet",
+      "currency": "KWD",
+      "unit_scale": 1,
+      "periods": [
+        {
+          "label": "2016-12-31",
+          "col_name": "2016"
+        },
+        {
+          "label": "2015-12-31",
+          "col_name": "2015"
+        }
+      ],
+      "items": [
+        {
+          "label_raw": "Cash and bank balances",
+          "key": "cash_and_bank_balances",
+          "values": {
+            "2016-12-31": 19824506.0,
+            "2015-12-31": 16838231.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Trade and other receivables",
+          "key": "trade_and_other_receivables",
+          "values": {
+            "2016-12-31": 18037809.0,
+            "2015-12-31": 15726709.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Inventories",
+          "key": "inventories",
+          "values": {
+            "2016-12-31": 67412.0,
+            "2015-12-31": 81734.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Total Current assets",
+          "key": "total_current_assets",
+          "values": {
+            "2016-12-31": 37929727.0,
+            "2015-12-31": 32646674.0
+          },
+          "is_total": true
+        },
+        {
+          "label_raw": "Property and equipment",
+          "key": "property_and_equipment",
+          "values": {
+            "2016-12-31": 39769288.0,
+            "2015-12-31": 29759900.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Intangible assets",
+          "key": "intangible_assets",
+          "values": {
+            "2016-12-31": 7321603.0,
+            "2015-12-31": 7181669.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Investment in associates",
+          "key": "investment_in_associates",
+          "values": {
+            "2016-12-31": 629118.0,
+            "2015-12-31": 563893.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Investment available for sale",
+          "key": "investment_available_for_sale",
+          "values": {
+            "2016-12-31": 468.0,
+            "2015-12-31": 468.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Total Non-current assets",
+          "key": "total_non_current_assets",
+          "values": {
+            "2016-12-31": 47720577.0,
+            "2015-12-31": 37505930.0
+          },
+          "is_total": true
+        },
+        {
+          "label_raw": "Total Assets",
+          "key": "total_assets",
+          "values": {
+            "2016-12-31": 85650304.0,
+            "2015-12-31": 70152595.0
+          },
+          "is_total": true
+        },
+        {
+          "label_raw": "Bank overdrafts",
+          "key": "bank_overdrafts",
+          "values": {
+            "2016-12-31": 1499284.0,
+            "2015-12-31": 982959.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Short-term loan",
+          "key": "short_term_loan",
+          "values": {
+            "2016-12-31": 2000000.0,
+            "2015-12-31": 4000000.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Trade and other payables",
+          "key": "trade_and_other_payables",
+          "values": {
+            "2016-12-31": 1419479.0,
+            "2015-12-31": 1575708.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Accruals and other liabilities",
+          "key": "accruals_and_other_liabilities",
+          "values": {
+            "2016-12-31": 7062834.0,
+            "2015-12-31": 4902234.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Deferred income",
+          "key": "deferred_income",
+          "values": {
+            "2016-12-31": 5081711.0,
+            "2015-12-31": 5208072.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Retentions payable",
+          "key": "retentions_payable",
+          "values": {
+            "2016-12-31": 1094119.0,
+            "2015-12-31": 1027552.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Current portion of long-term debts",
+          "key": "current_portion_of_long_term_debts",
+          "values": {
+            "2016-12-31": 3013503.0,
+            "2015-12-31": 4014000.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Total Current liabilities",
+          "key": "total_current_liabilities",
+          "values": {
+            "2016-12-31": 21170930.0,
+            "2015-12-31": 21790925.0
+          },
+          "is_total": true
+        },
+        {
+          "label_raw": "Long-term debts",
+          "key": "long_term_debts",
+          "values": {
+            "2016-12-31": 13847513.0,
+            "2015-12-31": 8542255.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Provision for staff indemnity",
+          "key": "provision_for_staff_indemnity",
+          "values": {
+            "2016-12-31": 2080800.0,
+            "2015-12-31": 1607793.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Total Non-current liabilities",
+          "key": "total_non_current_liabilities",
+          "values": {
+            "2016-12-31": 15928313.0,
+            "2015-12-31": 10150048.0
+          },
+          "is_total": true
+        },
+        {
+          "label_raw": "Total liabilities",
+          "key": "total_liabilities",
+          "values": {
+            "2016-12-31": 37399243.0,
+            "2015-12-31": 31940973.0
+          },
+          "is_total": true
+        },
+        {
+          "label_raw": "Share capital",
+          "key": "share_capital",
+          "values": {
+            "2016-12-31": 12223680.0,
+            "2015-12-31": 12223680.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Share premium",
+          "key": "share_premium",
+          "values": {
+            "2016-12-31": 1512000.0,
+            "2015-12-31": 1512000.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Statutory reserve",
+          "key": "statutory_reserve",
+          "values": {
+            "2016-12-31": 4111840.0,
+            "2015-12-31": 3908463.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Voluntary reserve",
+          "key": "voluntary_reserve",
+          "values": {
+            "2016-12-31": 6111840.0,
+            "2015-12-31": 4908463.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Treasury shares",
+          "key": "treasury_shares",
+          "values": {
+            "2016-12-31": -288877.0,
+            "2015-12-31": -113725.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Gain on sale of treasury shares",
+          "key": "gain_on_sale_of_treasury_shares",
+          "values": {
+            "2016-12-31": 364013.0,
+            "2015-12-31": 364013.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Retained earnings",
+          "key": "retained_earnings",
+          "values": {
+            "2016-12-31": 21903526.0,
+            "2015-12-31": 14093907.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Foreign currency translation reserve",
+          "key": "foreign_currency_translation_reserve",
+          "values": {
+            "2016-12-31": 113352.0,
+            "2015-12-31": 116223.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Total equity",
+          "key": "total_equity",
+          "values": {
+            "2016-12-31": 46251074.0,
+            "2015-12-31": 38211624.0
+          },
+          "is_total": true
+        },
+        {
+          "label_raw": "Total liabilities and equity",
+          "key": "total_liabilities_and_equity",
+          "values": {
+            "2016-12-31": 85650304.0,
+            "2015-12-31": 70152595.0
+          },
+          "is_total": true
+        }
+      ]
+    },
+    "income_statement": {
+      "statement_type": "income_statement",
+      "currency": "KWD",
+      "unit_scale": 1,
+      "periods": [
+        {
+          "label": "2016-12-31",
+          "col_name": "2016"
+        },
+        {
+          "label": "2015-12-31",
+          "col_name": "2015"
+        }
+      ],
+      "items": [
+        {
+          "label_raw": "Revenue",
+          "key": "revenue",
+          "values": {
+            "2016-12-31": 54504496.0,
+            "2015-12-31": 43638227.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Cost of operations",
+          "key": "cost_of_operations",
+          "values": {
+            "2016-12-31": -12710707.0,
+            "2015-12-31": -10299463.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Gross profit",
+          "key": "gross_profit",
+          "values": {
+            "2016-12-31": 41793789.0,
+            "2015-12-31": 33338764.0
+          },
+          "is_total": true
+        },
+        {
+          "label_raw": "General and administrative expenses",
+          "key": "general_and_administrative_expenses",
+          "values": {
+            "2016-12-31": -12771290.0,
+            "2015-12-31": -11849771.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Selling expenses",
+          "key": "selling_expenses",
+          "values": {
+            "2016-12-31": -2701751.0,
+            "2015-12-31": -2616885.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Finance charges",
+          "key": "finance_charges",
+          "values": {
+            "2016-12-31": -1125457.0,
+            "2015-12-31": -709828.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Share of profit of associates",
+          "key": "share_of_profit_of_associates",
+          "values": {
+            "2016-12-31": 60725.0,
+            "2015-12-31": 18211.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Other income",
+          "key": "other_income",
+          "values": {
+            "2016-12-31": 283241.0,
+            "2015-12-31": 271839.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Profit before contribution to Kuwait Foundation for Advancement of Sciences (\"KFAS\"), National Labour Support Tax (\"NLST\"), Zakat and Directors' remuneration",
+          "key": "profit_before_contribution_to_kuwait_foundation_for_advancement_of_sciences_kfas_national_labour_support_tax_nlst_zakat_and_directors_remuneration",
+          "values": {
+            "2016-12-31": 25539257.0,
+            "2015-12-31": 18452330.0
+          },
+          "is_total": true
+        },
+        {
+          "label_raw": "Contribution to KFAS",
+          "key": "contribution_to_kfas",
+          "values": {
+            "2016-12-31": -262002.0,
+            "2015-12-31": -169974.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "NLST",
+          "key": "nlst",
+          "values": {
+            "2016-12-31": -654499.0,
+            "2015-12-31": -474020.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Zakat",
+          "key": "zakat",
+          "values": {
+            "2016-12-31": -267733.0,
+            "2015-12-31": -193031.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Directors' remuneration",
+          "key": "directors_remuneration",
+          "values": {
+            "2016-12-31": -150000.0,
+            "2015-12-31": -100000.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Profit for the year",
+          "key": "profit_for_the_year",
+          "values": {
+            "2016-12-31": 24205023.0,
+            "2015-12-31": 17515305.0
+          },
+          "is_total": true
+        },
+        {
+          "label_raw": "Basic and diluted earnings per share (fils)",
+          "key": "basic_and_diluted_earnings_per_share_fils",
+          "values": {
+            "2016-12-31": 199.0,
+            "2015-12-31": 144.0
+          },
+          "is_total": false
+        }
+      ]
+    },
+    "cash_flow": {
+      "statement_type": "cash_flow",
+      "currency": "KWD",
+      "unit_scale": 1,
+      "periods": [
+        {
+          "label": "2016-12-31",
+          "col_name": "2016"
+        },
+        {
+          "label": "2015-12-31",
+          "col_name": "2015"
+        }
+      ],
+      "items": [
+        {
+          "label_raw": "Profit before contribution to KFAS, NLST, Zakat and Directors' remuneration",
+          "key": "profit_before_contribution_to_kfas_nlst_zakat_and_directors_remuneration",
+          "values": {
+            "2016-12-31": 25539257.0,
+            "2015-12-31": 18452330.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Depreciation and amortisation",
+          "key": "depreciation_and_amortisation",
+          "values": {
+            "2016-12-31": 1974364.0,
+            "2015-12-31": 1662224.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Provision for staff indemnity",
+          "key": "provision_for_staff_indemnity",
+          "values": {
+            "2016-12-31": 614674.0,
+            "2015-12-31": 542838.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Allowance for doubtful debts",
+          "key": "allowance_for_doubtful_debts",
+          "values": {
+            "2016-12-31": 209348.0,
+            "2015-12-31": 125985.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Gain on disposal of property and equipment",
+          "key": "gain_on_disposal_of_property_and_equipment",
+          "values": {
+            "2016-12-31": -842.0,
+            "2015-12-31": null
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Finance charges",
+          "key": "finance_charges",
+          "values": {
+            "2016-12-31": 1125457.0,
+            "2015-12-31": 709828.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Share of (profit) / loss of associates",
+          "key": "share_of_profit_loss_of_associates",
+          "values": {
+            "2016-12-31": -60725.0,
+            "2015-12-31": -18211.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Interest income",
+          "key": "interest_income",
+          "values": {
+            "2016-12-31": -24.0,
+            "2015-12-31": null
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Increase in trade and other receivables",
+          "key": "increase_in_trade_and_other_receivables",
+          "values": {
+            "2016-12-31": -2521555.0,
+            "2015-12-31": -3796127.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Decrease in inventories",
+          "key": "decrease_in_inventories",
+          "values": {
+            "2016-12-31": 14322.0,
+            "2015-12-31": 13446.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "(Decrease) / increase in trade and other payables",
+          "key": "decrease_increase_in_trade_and_other_payables",
+          "values": {
+            "2016-12-31": -156229.0,
+            "2015-12-31": 952991.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Increase in accruals and other liabilities",
+          "key": "increase_in_accruals_and_other_liabilities",
+          "values": {
+            "2016-12-31": 2049684.0,
+            "2015-12-31": 909371.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Decrease in deferred income",
+          "key": "decrease_in_deferred_income",
+          "values": {
+            "2016-12-31": -206761.0,
+            "2015-12-31": -69937.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Increase in retentions payable",
+          "key": "increase_in_retentions_payable",
+          "values": {
+            "2016-12-31": 64867.0,
+            "2015-12-31": 255483.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Payment of staff indemnity",
+          "key": "payment_of_staff_indemnity",
+          "values": {
+            "2016-12-31": -142879.0,
+            "2015-12-31": -78240.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Payment of KFAS",
+          "key": "payment_of_kfas",
+          "values": {
+            "2016-12-31": -169974.0,
+            "2015-12-31": -94159.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Payment of NLST",
+          "key": "payment_of_nlst",
+          "values": {
+            "2016-12-31": -474020.0,
+            "2015-12-31": -250880.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Payment of Zakat",
+          "key": "payment_of_zakat",
+          "values": {
+            "2016-12-31": -193031.0,
+            "2015-12-31": -108173.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Directors remuneration paid",
+          "key": "directors_remuneration_paid",
+          "values": {
+            "2016-12-31": -150000.0,
+            "2015-12-31": -100000.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Net cash generated from operating activities",
+          "key": "net_cash_generated_from_operating_activities",
+          "values": {
+            "2016-12-31": 27518094.0,
+            "2015-12-31": 19527069.0
+          },
+          "is_total": true
+        },
+        {
+          "label_raw": "Purchase of property and equipment",
+          "key": "purchase_of_property_and_equipment",
+          "values": {
+            "2016-12-31": -11963142.0,
+            "2015-12-31": -11241855.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Payments for intangible assets",
+          "key": "payments_for_intangible_assets",
+          "values": {
+            "2016-12-31": -160792.0,
+            "2015-12-31": -299480.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Proceeds from disposal of property and equipment",
+          "key": "proceeds_from_disposal_of_property_and_equipment",
+          "values": {
+            "2016-12-31": 2300.0,
+            "2015-12-31": null
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Interest income received",
+          "key": "interest_income_received",
+          "values": {
+            "2016-12-31": 24.0,
+            "2015-12-31": null
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Net cash used in investing activities",
+          "key": "net_cash_used_in_investing_activities",
+          "values": {
+            "2016-12-31": -12121610.0,
+            "2015-12-31": -11541335.0
+          },
+          "is_total": true
+        },
+        {
+          "label_raw": "(Decrease) / increase in short-term loan",
+          "key": "decrease_increase_in_short_term_loan",
+          "values": {
+            "2016-12-31": -2000000.0,
+            "2015-12-31": 1000000.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Increase in long-term debts",
+          "key": "increase_in_long_term_debts",
+          "values": {
+            "2016-12-31": 4304758.0,
+            "2015-12-31": 6909023.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Purchase of treasury shares",
+          "key": "purchase_of_treasury_shares",
+          "values": {
+            "2016-12-31": -172152.0,
+            "2015-12-31": null
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Finance charges paid",
+          "key": "finance_charges_paid",
+          "values": {
+            "2016-12-31": -1123211.0,
+            "2015-12-31": -677852.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Dividend paid",
+          "key": "dividend_paid",
+          "values": {
+            "2016-12-31": -13929097.0,
+            "2015-12-31": -10938741.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Net cash used in financing activities",
+          "key": "net_cash_used_in_financing_activities",
+          "values": {
+            "2016-12-31": -12919702.0,
+            "2015-12-31": -4107568.0
+          },
+          "is_total": true
+        },
+        {
+          "label_raw": "Net increase in cash and cash equivalents",
+          "key": "net_increase_in_cash_and_cash_equivalents",
+          "values": {
+            "2016-12-31": 2477782.0,
+            "2015-12-31": 3878166.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Effects of exchange rate changes on cash and cash equivalents",
+          "key": "effects_of_exchange_rate_changes_on_cash_and_cash_equivalents",
+          "values": {
+            "2016-12-31": -7832.0,
+            "2015-12-31": 45246.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Cash and cash equivalents at beginning of the year",
+          "key": "cash_and_cash_equivalents_at_beginning_of_the_year",
+          "values": {
+            "2016-12-31": 15855272.0,
+            "2015-12-31": 11931881.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Cash and cash equivalents at end of the year",
+          "key": "cash_and_cash_equivalents_at_end_of_the_year",
+          "values": {
+            "2016-12-31": 18325222.0,
+            "2015-12-31": 15855272.0
+          },
+          "is_total": true
+        }
+      ]
+    }
+  },
+  "validations": [
+    {
+      "statement_type": "balance_sheet",
+      "rule_name": "assets_eq_liab_plus_equity",
+      "expected": 83650317.0,
+      "actual": 85650304.0,
+      "diff": 1999987.0,
+      "passed": false,
+      "note": "period=2016-12-31 diff=1,999,987 (2.34%)"
+    },
+    {
+      "statement_type": "balance_sheet",
+      "rule_name": "assets_eq_liab_plus_equity",
+      "expected": 70152597.0,
+      "actual": 70152595.0,
+      "diff": 2.0,
+      "passed": true,
+      "note": "period=2015-12-31 diff=2 (0.00%)"
+    }
+  ],
+  "page_types": {
+    "0": "balance_sheet",
+    "1": "income_statement",
+    "2": "cash_flow"
+  },
+  "page_hashes": {
+    "0": "9703e09a1e3abe80",
+    "1": "a589c1763660044d",
+    "2": "eeafbd430bd6ddb8"
+  },
+  "timings": {
+    "render": 0.67,
+    "batch_extract": 44.35,
+    "fallback_extract": 0.0,
+    "validate": 0.0,
+    "persist": 1.17,
+    "total": 47.23
+  },
+  "_from_cache": false
+}
