@@ -415,7 +415,6 @@ class FinancialDataManager:
         internally DELETEs the parent row first, which violates FKs
         from financial_line_items).
         """
-        import sqlite3 as _sqlite3
 
         # ── Verify stock exists BEFORE insert ──
         stock_check = self.db.execute_query(
@@ -509,8 +508,9 @@ class FinancialDataManager:
 
             return statement_id
 
-        except _sqlite3.IntegrityError as e:
-            if "FOREIGN KEY" in str(e):
+        except Exception as e:
+            err_msg = str(e).upper()
+            if "FOREIGN KEY" in err_msg or "INTEGRITY" in err_msg or "VIOLATES" in err_msg:
                 raise ValueError(
                     f"Database integrity error: Stock ID {stock_id} missing. "
                     "Please recreate the stock profile and try again."
@@ -861,12 +861,14 @@ class FinancialDataManager:
     # ──────────────────────────────────────────────────────────────────
 
     @staticmethod
-    def _portfolio_db_path() -> str:
-        import os
-        return os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-            "portfolio.db",
-        )
+    def _get_db_helpers():
+        """Import db_layer helpers lazily to avoid circular imports."""
+        import sys, os
+        repo = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        if repo not in sys.path:
+            sys.path.insert(0, repo)
+        from db_layer import get_conn, convert_sql, convert_params, is_postgres
+        return get_conn, convert_sql, convert_params, is_postgres
 
     @staticmethod
     def get_user_gemini_key(user_id: int) -> Optional[str]:
@@ -877,33 +879,41 @@ class FinancialDataManager:
           2. Legacy plaintext column (``gemini_api_key``)
           3. ``None``
         """
-        import sqlite3
-        db_path = FinancialDataManager._portfolio_db_path()
+        get_conn, convert_sql, convert_params, is_postgres = FinancialDataManager._get_db_helpers()
         try:
-            conn = sqlite3.connect(db_path)
-            cur = conn.cursor()
-            cur.execute(
-                "SELECT gemini_api_key_encrypted, gemini_api_key FROM users WHERE id = ?",
-                (user_id,),
+            conn = get_conn()
+            sql = convert_sql(
+                "SELECT gemini_api_key_encrypted, gemini_api_key FROM users WHERE id = ?"
             )
-            row = cur.fetchone()
+            if is_postgres():
+                from psycopg2.extras import RealDictCursor
+                cur = conn.cursor(cursor_factory=RealDictCursor)
+                cur.execute(sql, convert_params((user_id,)))
+                row = cur.fetchone()
+            else:
+                cur = conn.cursor()
+                cur.execute(sql, (user_id,))
+                row = cur.fetchone()
             conn.close()
             if not row:
                 return None
 
+            enc_key = row['gemini_api_key_encrypted'] if isinstance(row, dict) else row[0]
+            plain_key = row['gemini_api_key'] if isinstance(row, dict) else row[1]
+
             # Try encrypted first
-            if row[0]:
+            if enc_key:
                 try:
                     from stock_analysis.utils.encryption import decrypt_api_key
-                    decrypted = decrypt_api_key(row[0])
+                    decrypted = decrypt_api_key(enc_key)
                     if decrypted:
                         return decrypted
                 except Exception:
                     pass
 
             # Fall back to plaintext
-            if row[1] and not row[1].startswith("your_"):
-                return row[1]
+            if plain_key and not str(plain_key).startswith("your_"):
+                return plain_key
         except Exception:
             pass
         return None
@@ -911,26 +921,31 @@ class FinancialDataManager:
     @staticmethod
     def increment_user_quota(user_id: int) -> None:
         """Bump daily Gemini usage counter for *user_id*."""
-        import sqlite3
-        db_path = FinancialDataManager._portfolio_db_path()
+        get_conn, convert_sql, convert_params, is_postgres = FinancialDataManager._get_db_helpers()
         today = int(time.time() / 86400)  # days since epoch
         try:
-            conn = sqlite3.connect(db_path)
-            cur = conn.cursor()
-            cur.execute(
-                "SELECT gemini_quota_reset_at, gemini_requests_today FROM users WHERE id = ?",
-                (user_id,),
+            conn = get_conn()
+            sql = convert_sql(
+                "SELECT gemini_quota_reset_at, gemini_requests_today FROM users WHERE id = ?"
             )
-            row = cur.fetchone()
+            if is_postgres():
+                from psycopg2.extras import RealDictCursor
+                cur = conn.cursor(cursor_factory=RealDictCursor)
+                cur.execute(sql, convert_params((user_id,)))
+                row = cur.fetchone()
+            else:
+                cur = conn.cursor()
+                cur.execute(sql, (user_id,))
+                row = cur.fetchone()
             if row:
-                last_reset = row[0] or 0
-                reqs = row[1] or 0
+                last_reset = (row['gemini_quota_reset_at'] if isinstance(row, dict) else row[0]) or 0
+                reqs = (row['gemini_requests_today'] if isinstance(row, dict) else row[1]) or 0
                 if last_reset < today:
                     reqs = 0  # new day — reset
-                conn.execute(
-                    "UPDATE users SET gemini_requests_today = ?, gemini_quota_reset_at = ? WHERE id = ?",
-                    (reqs + 1, today, user_id),
+                upd_sql = convert_sql(
+                    "UPDATE users SET gemini_requests_today = ?, gemini_quota_reset_at = ? WHERE id = ?"
                 )
+                conn.cursor().execute(upd_sql, convert_params((reqs + 1, today, user_id)))
                 conn.commit()
             conn.close()
         except Exception:
@@ -939,21 +954,27 @@ class FinancialDataManager:
     @staticmethod
     def get_user_quota_remaining(user_id: int, daily_limit: int = 50) -> int:
         """Return how many free-tier requests remain today."""
-        import sqlite3
-        db_path = FinancialDataManager._portfolio_db_path()
+        get_conn, convert_sql, convert_params, is_postgres = FinancialDataManager._get_db_helpers()
         try:
-            conn = sqlite3.connect(db_path)
-            cur = conn.cursor()
-            cur.execute(
-                "SELECT gemini_quota_reset_at, gemini_requests_today FROM users WHERE id = ?",
-                (user_id,),
+            conn = get_conn()
+            sql = convert_sql(
+                "SELECT gemini_quota_reset_at, gemini_requests_today FROM users WHERE id = ?"
             )
-            row = cur.fetchone()
+            if is_postgres():
+                from psycopg2.extras import RealDictCursor
+                cur = conn.cursor(cursor_factory=RealDictCursor)
+                cur.execute(sql, convert_params((user_id,)))
+                row = cur.fetchone()
+            else:
+                cur = conn.cursor()
+                cur.execute(sql, (user_id,))
+                row = cur.fetchone()
             conn.close()
             if row:
                 today = int(time.time() / 86400)
-                reqs = row[1] or 0
-                if (row[0] or 0) < today:
+                last_reset = (row['gemini_quota_reset_at'] if isinstance(row, dict) else row[0]) or 0
+                reqs = (row['gemini_requests_today'] if isinstance(row, dict) else row[1]) or 0
+                if last_reset < today:
                     reqs = 0
                 return max(0, daily_limit - reqs)
         except Exception:

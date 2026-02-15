@@ -12,26 +12,24 @@ Usage:
 """
 
 import os
-import sqlite3
 import sys
 import time
 
-# Resolve default DB path the same way AnalysisDatabase does:
-# <repo>/data/stock_analysis.db
+# Resolve repo root and ensure db_layer is importable
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-DB_PATH = os.path.join(_REPO_ROOT, "data", "stock_analysis.db")
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+
+from db_layer import get_conn, convert_sql, convert_params, is_postgres, is_sqlite
 
 
-def fix_foreign_key_violations(db_path: str = DB_PATH) -> None:
-    if not os.path.exists(db_path):
-        print(f"❌ Database not found at {db_path}")
-        return
-
-    conn = sqlite3.connect(db_path)
+def fix_foreign_key_violations() -> None:
+    conn = get_conn()
     cursor = conn.cursor()
 
-    # Enable foreign keys (SQLite requires this per-connection)
-    cursor.execute("PRAGMA foreign_keys = ON;")
+    # Enable foreign keys (SQLite requires this per-connection; no-op on PG)
+    if is_sqlite():
+        cursor.execute("PRAGMA foreign_keys = ON;")
 
     # ── Find orphaned financial_statements ──
     cursor.execute("""
@@ -108,7 +106,5 @@ def fix_foreign_key_violations(db_path: str = DB_PATH) -> None:
 
 
 if __name__ == "__main__":
-    # Allow custom DB path via CLI argument
-    path = sys.argv[1] if len(sys.argv) > 1 else DB_PATH
-    print(f"🔍 Checking {path} ...")
-    fix_foreign_key_violations(path)
+    print("🔍 Checking database for orphaned records ...")
+    fix_foreign_key_violations()

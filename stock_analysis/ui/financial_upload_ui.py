@@ -150,15 +150,16 @@ def _save_key_to_db(api_key: str) -> None:
     if not user_id:
         return
     try:
-        import sqlite3
-        db_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-            "portfolio.db",
-        )
-        conn = sqlite3.connect(db_path)
-        conn.execute(
-            "UPDATE users SET gemini_api_key = ? WHERE id = ?",
-            (api_key, user_id),
+        import sys
+        _repo = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        if _repo not in sys.path:
+            sys.path.insert(0, _repo)
+        from db_layer import get_conn, convert_sql, convert_params
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute(
+            convert_sql("UPDATE users SET gemini_api_key = ? WHERE id = ?"),
+            convert_params((api_key, user_id)),
         )
         conn.commit()
         conn.close()
