@@ -1,0 +1,11 @@
+# requirements_analysis.txt
+# Additional dependencies for the Fundamental Analysis module
+# (most are already covered by the main requirements.txt)
+
+pdfplumber>=0.10.2          # PDF financial statement extraction
+python-dotenv>=1.0.1        # .env config loading
+openai>=1.0.0               # GPT-powered extraction (optional)
+openpyxl>=3.1.0             # Excel export for reports
+pandas>=2.0                 # DataFrames / financial tables
+numpy>=1.24                 # Numeric calculations
+streamlit>=1.28             # UI framework

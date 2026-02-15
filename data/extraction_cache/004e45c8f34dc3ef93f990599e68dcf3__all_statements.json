@@ -1,0 +1,28 @@
+[
+  {
+    "statement_type": "balance",
+    "fiscal_year": 2024,
+    "fiscal_quarter": 2,
+    "period_end_date": "2024-06-30",
+    "currency": "KWD",
+    "line_items": [
+      {
+        "code": "CASH_EQUIVALENTS",
+        "name": "Cash and bank balances",
+        "amount": 63568749,
+        "order": 1,
+        "is_total": false,
+        "parent": "TOTAL_CURRENT_ASSETS"
+      },
+      {
+        "code": ""
+      }
+    ],
+    "_meta": {
+      "cache_hit": false,
+      "elapsed_sec": 15.47,
+      "model_used": "models/gemini-2.5-flash",
+      "text_chars_sent": 10000
+    }
+  }
+]

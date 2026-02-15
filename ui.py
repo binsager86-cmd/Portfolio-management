@@ -2445,6 +2445,13 @@ try:
 except ImportError:
     sac = None
 
+# Stock Analysis / Fundamental Analysis module
+try:
+    from ui_fundamental_analysis import ui_fundamental_analysis
+except Exception as _fa_err:
+    ui_fundamental_analysis = None
+    logging.getLogger(__name__).warning("Fundamental Analysis import failed: %s", _fa_err)
+
 import numpy as np
 import io
 import sys
@@ -4286,6 +4293,7 @@ def _ensure_securities_tables() -> None:
             cur.execute("CREATE INDEX IF NOT EXISTS idx_txn_security_id ON transactions(security_id)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_txn_source ON transactions(source)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_txn_deleted ON transactions(is_deleted)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_users_gemini_validated ON users(gemini_api_key_last_validated)")
         else:
             # SQLite syntax
             cur.execute("""
@@ -7007,6 +7015,10 @@ def init_db() -> None:
         add_column_if_missing("users", "email", "TEXT")
         add_column_if_missing("users", "name", "TEXT")
         add_column_if_missing("users", "gemini_api_key", "TEXT")
+        add_column_if_missing("users", "gemini_api_key_encrypted", "TEXT")
+        add_column_if_missing("users", "gemini_api_key_last_validated", "INTEGER")
+        add_column_if_missing("users", "gemini_quota_reset_at", "INTEGER")
+        add_column_if_missing("users", "gemini_requests_today", "INTEGER DEFAULT 0")
         add_column_if_missing("cash_deposits", "portfolio", "TEXT DEFAULT 'KFH'")
         add_column_if_missing("cash_deposits", "include_in_analysis", "INTEGER DEFAULT 1")
         add_column_if_missing("cash_deposits", "currency", "TEXT DEFAULT 'KWD'")
@@ -7059,6 +7071,10 @@ def init_db() -> None:
     add_column_if_missing("users", "email", "TEXT")
     add_column_if_missing("users", "name", "TEXT")
     add_column_if_missing("users", "gemini_api_key", "TEXT")
+    add_column_if_missing("users", "gemini_api_key_encrypted", "TEXT")
+    add_column_if_missing("users", "gemini_api_key_last_validated", "INTEGER")
+    add_column_if_missing("users", "gemini_quota_reset_at", "INTEGER")
+    add_column_if_missing("users", "gemini_requests_today", "INTEGER DEFAULT 0")
 
     # ============================================
     # STEP 2: CREATE DEPENDENT TABLES (after users)
@@ -21727,10 +21743,10 @@ def ui_overview():
                 pass  # Silent save
             
             try:
-                import google.generativeai as genai
-                genai.configure(api_key=api_key)
+                from google import genai as _genai_mod
+                _client = _genai_mod.Client(api_key=api_key)
             except ImportError:
-                st.error("Library missing: pip install google-generativeai")
+                st.error("Library missing: pip install google-genai")
                 st.stop()
 
             # 2. Prompt Library
@@ -21870,13 +21886,17 @@ If the data shows "No active stock holdings" or empty sections, acknowledge this
                         st.success(f"✅ Analysis generated using: {used_model}")
                         
                     except Exception as e:
-                        import google.generativeai as genai
                         error_msg = str(e)
                         
                         st.error(f"❌ All AI models failed.")
                         
                         with st.expander("🔧 Troubleshooting Info", expanded=True):
-                            st.write(f"**Library Version:** {genai.__version__}")
+                            try:
+                                import importlib.metadata as _meta
+                                _sdk_ver = _meta.version("google-genai")
+                            except Exception:
+                                _sdk_ver = "unknown"
+                            st.write(f"**Library Version:** {_sdk_ver}")
                             st.code(error_msg, language="text")
                             
                             if "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg:
@@ -21884,7 +21904,7 @@ If the data shows "No active stock holdings" or empty sections, acknowledge this
                             elif "404" in error_msg:
                                 st.warning("💡 **Models not found.** Your API key may not have access to these models.")
                             else:
-                                st.info("💡 **Fix:** Check your API key is valid. Try: `pip install -U google-generativeai`")
+                                st.info("💡 **Fix:** Check your API key is valid. Try: `pip install -U google-genai`")
 
             # 4. Result & Export
             if 'overview_ai_analysis' in st.session_state:
@@ -25657,16 +25677,36 @@ def generate_content_safe(prompt):
     Tries each hardcoded stable model until one works.
     Returns: (response_text, model_name) on success, or raises Exception on total failure.
     """
-    import google.generativeai as genai
-    
+    from google import genai
+    import os, sqlite3
+
+    # Resolve API key: session → env → DB
+    api_key = os.getenv("GEMINI_API_KEY", "")
+    if not api_key or "your_" in api_key.lower():
+        try:
+            db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "portfolio.db")
+            conn = sqlite3.connect(db_path)
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT gemini_api_key FROM users "
+                "WHERE gemini_api_key IS NOT NULL AND gemini_api_key != '' LIMIT 1"
+            )
+            row = cur.fetchone()
+            conn.close()
+            if row and row[0]:
+                api_key = row[0]
+        except Exception:
+            pass
+
+    client = genai.Client(api_key=api_key)
+
     # HARDCODED STABLE MODELS - These are known to work on Free Tier
     # Order matters: Most reliable first
     models_to_try = [
-        "gemini-1.5-flash",      # Classic stable - highest chance
-        "gemini-2.0-flash",      # Standard 2.0
-        "gemini-flash-latest",   # Production alias
-        "gemini-1.5-pro",        # Pro fallback (lower rate limit)
-        "gemini-1.0-pro",        # Legacy stable
+        "models/gemini-2.5-flash",  # Primary - free tier compatible
+        "models/gemini-2.0-flash",  # Stable 2.0 fallback
+        "gemini-flash-latest",      # Production alias
+        "models/gemini-2.5-pro",    # Pro fallback (complex docs)
     ]
     
     last_error = None
@@ -25674,8 +25714,10 @@ def generate_content_safe(prompt):
     
     for model_name in models_to_try:
         try:
-            model = genai.GenerativeModel(model_name)
-            response = model.generate_content(prompt)
+            response = client.models.generate_content(
+                model=model_name,
+                contents=prompt,
+            )
             # Success!
             return response.text, model_name
             
@@ -25755,10 +25797,10 @@ def render_embedded_ai(context_data=None, role_desc="Senior Investment Analyst",
             pass
         
         try:
-            import google.generativeai as genai
-            genai.configure(api_key=api_key)
+            from google import genai as _genai_mod
+            _client = _genai_mod.Client(api_key=api_key)
         except ImportError:
-            st.error("Library missing: pip install google-generativeai")
+            st.error("Library missing: pip install google-genai")
             return
         
         # 3. Quick prompts + Query Input
@@ -26907,7 +26949,8 @@ def main():
         nav_options = [
             'Overview', 'Add Cash Deposit', 'Add Transactions', 'Portfolio Analysis',
             'Peer Analysis', 'Trading Section', 'Portfolio Tracker', 'Dividends Tracker',
-            'Planner', 'Backup & Restore', 'Securities Master', 'Data Integrity', 'Personal Finance'
+            'Planner', 'Backup & Restore', 'Securities Master', 'Data Integrity',
+            'Personal Finance', 'Fundamental Analysis'
         ]
         
         # Default selection - restore from session/cookies if available
@@ -26937,6 +26980,10 @@ def main():
                     sac.MenuItem('Securities Master', icon='database-fill'),
                     sac.MenuItem('Data Integrity', icon='shield-check'),
                     sac.MenuItem('Personal Finance', icon='file-earmark-spreadsheet-fill'),
+                    sac.MenuItem('Fundamental Analysis', icon='clipboard-data-fill'),
+                    sac.MenuItem('Settings', icon='gear-fill', children=[
+                        sac.MenuItem('API Keys', icon='key-fill'),
+                    ]),
                     sac.MenuItem(type='divider'),
                     sac.MenuItem('Account Security', icon='shield-lock-fill', children=[
                         sac.MenuItem('Change Password', icon='key'),
@@ -27023,6 +27070,22 @@ def main():
     elif selected_tab == 'Personal Finance':
         ui_pfm()
         
+    elif selected_tab == 'Fundamental Analysis':
+        if ui_fundamental_analysis is not None:
+            ui_fundamental_analysis()
+        else:
+            st.error("⚠️ Fundamental Analysis module is not installed. "
+                     "Please ensure the `stock_analysis` package is present.")
+
+    elif selected_tab == 'API Keys':
+        try:
+            from ui_user_settings import ui_api_key_settings
+            ui_api_key_settings(st.session_state.get('user_id', 1))
+        except ImportError:
+            st.error("⚠️ User settings module not found.")
+        except Exception as e:
+            st.error(f"Settings error: {e}")
+
     elif selected_tab == 'Change Password':
         st.header("🔐 Account Security")
         ui_user_profile_sidebar()  # Render security logic in the main area
