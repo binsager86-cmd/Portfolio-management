@@ -755,21 +755,315 @@ def init_postgres_schema():
             )
         """)
         
-        # Handle column migrations for existing tables
-        # Add 'name' column to stocks if it doesn't exist (for old schemas with company_name)
-        try:
-            cur.execute("ALTER TABLE stocks ADD COLUMN IF NOT EXISTS name TEXT")
-        except Exception:
-            pass
-        
+        # ── Financial Audit Log ─────────────────────────────────────
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS financial_audit_log (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                operation TEXT NOT NULL,
+                entity_type TEXT,
+                entity_id INTEGER,
+                old_value DOUBLE PRECISION,
+                new_value DOUBLE PRECISION,
+                delta DOUBLE PRECISION,
+                portfolio TEXT,
+                currency TEXT,
+                reason TEXT,
+                details TEXT,
+                created_at INTEGER NOT NULL
+            )
+        """)
+
+        # ══════════════════════════════════════════════════════════════
+        # DOMAIN: Stock Analysis / Fundamental Analysis
+        # ══════════════════════════════════════════════════════════════
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS analysis_stocks (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                symbol TEXT NOT NULL,
+                company_name TEXT NOT NULL,
+                exchange TEXT DEFAULT 'NYSE',
+                currency TEXT DEFAULT 'USD',
+                sector TEXT,
+                industry TEXT,
+                country TEXT,
+                isin TEXT,
+                cik TEXT,
+                description TEXT,
+                website TEXT,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                UNIQUE(user_id, symbol)
+            )
+        """)
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS financial_statements (
+                id SERIAL PRIMARY KEY,
+                stock_id INTEGER NOT NULL REFERENCES analysis_stocks(id),
+                statement_type TEXT NOT NULL,
+                fiscal_year INTEGER NOT NULL,
+                fiscal_quarter INTEGER,
+                period_end_date TEXT NOT NULL,
+                filing_date TEXT,
+                source_file TEXT,
+                extracted_by TEXT DEFAULT 'gemini',
+                confidence_score DOUBLE PRECISION,
+                verified_by_user BOOLEAN DEFAULT FALSE,
+                notes TEXT,
+                created_at INTEGER NOT NULL,
+                UNIQUE(stock_id, statement_type, period_end_date)
+            )
+        """)
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS financial_line_items (
+                id SERIAL PRIMARY KEY,
+                statement_id INTEGER NOT NULL REFERENCES financial_statements(id),
+                line_item_code TEXT NOT NULL,
+                line_item_name TEXT NOT NULL,
+                amount DOUBLE PRECISION NOT NULL,
+                currency TEXT DEFAULT 'USD',
+                order_index INTEGER,
+                parent_item_id INTEGER,
+                is_total BOOLEAN DEFAULT FALSE,
+                manually_edited BOOLEAN DEFAULT FALSE,
+                edited_by_user_id INTEGER,
+                edited_at INTEGER
+            )
+        """)
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS stock_metrics (
+                id SERIAL PRIMARY KEY,
+                stock_id INTEGER NOT NULL REFERENCES analysis_stocks(id),
+                fiscal_year INTEGER NOT NULL,
+                fiscal_quarter INTEGER,
+                period_end_date TEXT NOT NULL,
+                metric_type TEXT NOT NULL,
+                metric_name TEXT NOT NULL,
+                metric_value DOUBLE PRECISION,
+                created_at INTEGER NOT NULL,
+                UNIQUE(stock_id, metric_name, period_end_date)
+            )
+        """)
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS valuation_models (
+                id SERIAL PRIMARY KEY,
+                stock_id INTEGER NOT NULL REFERENCES analysis_stocks(id),
+                model_type TEXT NOT NULL,
+                valuation_date TEXT NOT NULL,
+                intrinsic_value DOUBLE PRECISION,
+                parameters TEXT,
+                assumptions TEXT,
+                created_by_user_id INTEGER,
+                created_at INTEGER NOT NULL
+            )
+        """)
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS stock_scores (
+                id SERIAL PRIMARY KEY,
+                stock_id INTEGER NOT NULL REFERENCES analysis_stocks(id),
+                scoring_date TEXT NOT NULL,
+                overall_score DOUBLE PRECISION,
+                fundamental_score DOUBLE PRECISION,
+                valuation_score DOUBLE PRECISION,
+                growth_score DOUBLE PRECISION,
+                quality_score DOUBLE PRECISION,
+                details TEXT,
+                analyst_notes TEXT,
+                created_by_user_id INTEGER,
+                created_at INTEGER NOT NULL
+            )
+        """)
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS analysis_audit_log (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                operation TEXT NOT NULL,
+                entity_type TEXT NOT NULL,
+                entity_id INTEGER,
+                old_value TEXT,
+                new_value TEXT,
+                reason TEXT,
+                details TEXT,
+                created_at INTEGER NOT NULL
+            )
+        """)
+
+        # ══════════════════════════════════════════════════════════════
+        # DOMAIN: Extraction Pipeline (AI Vision)
+        # ══════════════════════════════════════════════════════════════
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS financial_uploads (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                stock_id INTEGER NOT NULL REFERENCES analysis_stocks(id),
+                uploaded_at INTEGER NOT NULL,
+                pdf_path TEXT,
+                pdf_type TEXT DEFAULT 'text',
+                status TEXT DEFAULT 'processing',
+                error_message TEXT
+            )
+        """)
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS financial_raw_extraction (
+                id SERIAL PRIMARY KEY,
+                upload_id INTEGER NOT NULL REFERENCES financial_uploads(id),
+                statement_type TEXT,
+                page_num INTEGER,
+                method TEXT,
+                table_id INTEGER,
+                table_json TEXT,
+                header_context TEXT,
+                confidence_score DOUBLE PRECISION DEFAULT 0.0
+            )
+        """)
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS financial_normalized (
+                id SERIAL PRIMARY KEY,
+                upload_id INTEGER NOT NULL REFERENCES financial_uploads(id),
+                statement_type TEXT NOT NULL,
+                period_end_date TEXT,
+                currency TEXT DEFAULT 'USD',
+                unit_scale INTEGER DEFAULT 1,
+                line_item_key TEXT NOT NULL,
+                label_raw TEXT,
+                value DOUBLE PRECISION,
+                source_page INTEGER,
+                source_table_id INTEGER
+            )
+        """)
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS financial_validation (
+                id SERIAL PRIMARY KEY,
+                upload_id INTEGER NOT NULL REFERENCES financial_uploads(id),
+                statement_type TEXT,
+                rule_name TEXT NOT NULL,
+                expected_value DOUBLE PRECISION,
+                actual_value DOUBLE PRECISION,
+                diff DOUBLE PRECISION,
+                pass_fail TEXT DEFAULT 'unknown',
+                notes TEXT
+            )
+        """)
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS financial_user_edits (
+                id SERIAL PRIMARY KEY,
+                upload_id INTEGER NOT NULL REFERENCES financial_uploads(id),
+                statement_type TEXT,
+                period TEXT,
+                line_item_key TEXT NOT NULL,
+                old_value DOUBLE PRECISION,
+                new_value DOUBLE PRECISION,
+                edited_at INTEGER NOT NULL,
+                edited_by INTEGER
+            )
+        """)
+
+        # ══════════════════════════════════════════════════════════════
+        # DOMAIN: Schema version tracking
+        # ══════════════════════════════════════════════════════════════
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS schema_version (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                version INTEGER NOT NULL DEFAULT 1,
+                migrated_at INTEGER NOT NULL
+            )
+        """)
+
+        # ══════════════════════════════════════════════════════════════
+        # Indexes — Analysis & Extraction
+        # ══════════════════════════════════════════════════════════════
+        _pg_indexes = [
+            # Core portfolio
+            "CREATE INDEX IF NOT EXISTS idx_snapshots_user_date ON portfolio_snapshots(user_id, snapshot_date)",
+            "CREATE INDEX IF NOT EXISTS idx_txn_user_symbol ON transactions(user_id, stock_symbol)",
+            "CREATE INDEX IF NOT EXISTS idx_txn_user_date ON transactions(user_id, txn_date)",
+            "CREATE INDEX IF NOT EXISTS idx_audit_user ON financial_audit_log(user_id)",
+            "CREATE INDEX IF NOT EXISTS idx_audit_created ON financial_audit_log(created_at)",
+            # Analysis
+            "CREATE INDEX IF NOT EXISTS idx_analysis_stocks_user ON analysis_stocks(user_id)",
+            "CREATE INDEX IF NOT EXISTS idx_analysis_stocks_symbol ON analysis_stocks(symbol)",
+            "CREATE INDEX IF NOT EXISTS idx_financial_statements_stock ON financial_statements(stock_id)",
+            "CREATE INDEX IF NOT EXISTS idx_financial_statements_type_date ON financial_statements(statement_type, period_end_date)",
+            "CREATE INDEX IF NOT EXISTS idx_line_items_statement ON financial_line_items(statement_id)",
+            "CREATE INDEX IF NOT EXISTS idx_line_items_code ON financial_line_items(line_item_code)",
+            "CREATE INDEX IF NOT EXISTS idx_stock_metrics_stock ON stock_metrics(stock_id)",
+            "CREATE INDEX IF NOT EXISTS idx_valuation_models_stock ON valuation_models(stock_id)",
+            "CREATE INDEX IF NOT EXISTS idx_stock_scores_stock ON stock_scores(stock_id)",
+            # Extraction
+            "CREATE INDEX IF NOT EXISTS idx_fin_uploads_user ON financial_uploads(user_id)",
+            "CREATE INDEX IF NOT EXISTS idx_fin_uploads_stock ON financial_uploads(stock_id)",
+            "CREATE INDEX IF NOT EXISTS idx_fin_raw_upload ON financial_raw_extraction(upload_id)",
+            "CREATE INDEX IF NOT EXISTS idx_fin_norm_upload ON financial_normalized(upload_id)",
+            "CREATE INDEX IF NOT EXISTS idx_fin_valid_upload ON financial_validation(upload_id)",
+            "CREATE INDEX IF NOT EXISTS idx_fin_edits_upload ON financial_user_edits(upload_id)",
+        ]
+        for idx_sql in _pg_indexes:
+            try:
+                cur.execute(idx_sql)
+            except Exception:
+                pass
+
+        # ══════════════════════════════════════════════════════════════
+        # Additive column migrations (ALTER TABLE … ADD COLUMN IF NOT EXISTS)
+        # ══════════════════════════════════════════════════════════════
+        _pg_additive_cols = [
+            # users — Gemini API fields
+            ("users", "gemini_api_key",                 "TEXT"),
+            ("users", "gemini_api_key_encrypted",       "TEXT"),
+            ("users", "gemini_api_key_last_validated",  "INTEGER"),
+            ("users", "gemini_quota_reset_at",          "INTEGER"),
+            ("users", "gemini_requests_today",          "INTEGER DEFAULT 0"),
+            # stocks
+            ("stocks", "name",                          "TEXT"),
+            ("stocks", "last_updated",                  "INTEGER"),
+            ("stocks", "price_source",                  "TEXT"),
+            ("stocks", "created_at",                    "INTEGER"),
+            # transactions
+            ("transactions", "fx_rate_at_txn",          "DOUBLE PRECISION"),
+            # portfolio_snapshots
+            ("portfolio_snapshots", "twr_percent",      "DOUBLE PRECISION"),
+            ("portfolio_snapshots", "mwrr_percent",     "DOUBLE PRECISION"),
+            # cash_deposits
+            ("cash_deposits", "fx_rate_at_deposit",     "DOUBLE PRECISION"),
+            ("cash_deposits", "is_deleted",             "INTEGER DEFAULT 0"),
+            ("cash_deposits", "deleted_at",             "INTEGER"),
+            ("cash_deposits", "deleted_by",             "INTEGER"),
+        ]
+        for tbl, col, coltype in _pg_additive_cols:
+            try:
+                cur.execute(f"ALTER TABLE {tbl} ADD COLUMN IF NOT EXISTS {col} {coltype}")
+            except Exception:
+                pass
+
         # Copy data from company_name to name if company_name exists
         try:
             cur.execute("UPDATE stocks SET name = company_name WHERE name IS NULL AND company_name IS NOT NULL")
         except Exception:
             pass
-        
+
+        # Record schema version
+        cur.execute("""
+            INSERT INTO schema_version (id, version, migrated_at)
+            VALUES (1, 1, EXTRACT(EPOCH FROM NOW())::INTEGER)
+            ON CONFLICT (id) DO UPDATE SET version = 1, migrated_at = EXTRACT(EPOCH FROM NOW())::INTEGER
+        """)
+
         conn.commit()
-        print("✅ PostgreSQL schema initialized")
+        print("✅ PostgreSQL schema initialized (core + analysis + extraction)")
 
 
 def init_db_schemas():

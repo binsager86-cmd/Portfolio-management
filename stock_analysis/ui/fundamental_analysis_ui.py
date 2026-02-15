@@ -22,7 +22,7 @@ from stock_analysis.utils.helpers import (
     colored_metric_html,
     fiscal_year_label,
 )
-from stock_analysis.config import STATEMENT_TYPES, METRIC_CATEGORIES
+from stock_analysis.config import STATEMENT_TYPES, METRIC_CATEGORIES, FINANCIAL_LINE_ITEM_CODES
 
 
 def _get_db() -> AnalysisDatabase:
@@ -69,6 +69,21 @@ def render_fundamental_analysis_page(user_id: int = 1) -> None:
         _render_score_tab(stock_id, user_id, db)
 
 
+# ── helper ────────────────────────────────────────────────────────────
+
+def _fmt_amt(val) -> str:
+    """Format a number with thousands separator; negatives in parentheses."""
+    if val is None or val == "":
+        return "—"
+    try:
+        num = float(val)
+    except (ValueError, TypeError):
+        return str(val)
+    if num < 0:
+        return f"({abs(num):,.0f})"
+    return f"{num:,.0f}"
+
+
 # ── statements tab ────────────────────────────────────────────────────
 
 def _render_statements_tab(stock_id: int, db: AnalysisDatabase) -> None:
@@ -86,28 +101,107 @@ def _render_statements_tab(stock_id: int, db: AnalysisDatabase) -> None:
         st.info(f"No {STATEMENT_TYPES[stmt_type]} data. Upload a PDF first.")
         return
 
+    type_label = STATEMENT_TYPES.get(stmt_type, stmt_type)
+
+    # Sort periods oldest → newest (left → right)
+    stmts.sort(key=lambda s: s.get("period_end_date", ""))
+    years = [str(s["fiscal_year"]) for s in stmts]
+
+    # ── collect line items across all years ────────────────────────
+    items_by_year: Dict[str, pd.DataFrame] = {}
+    all_codes_ordered: List[str] = []
+    code_to_display: Dict[str, str] = {}
+    code_is_total: Dict[str, bool] = {}
+
     for s in stmts:
-        label = f"FY{s['fiscal_year']} — {s['period_end_date']}"
-        with st.expander(label, expanded=(stmts.index(s) == 0)):
-            df = fdm.get_line_items_df(s["id"])
+        yr = str(s["fiscal_year"])
+        df = fdm.get_line_items_df(s["id"])
+        items_by_year[yr] = df
+        if not df.empty:
+            for _, row in df.iterrows():
+                code = row.get("line_item_code") or row.get("line_item_name", "")
+                if code and code not in code_to_display:
+                    all_codes_ordered.append(code)
+                    code_to_display[code] = (
+                        row.get("display_name")
+                        or FINANCIAL_LINE_ITEM_CODES.get(code, code)
+                    )
+                    code_is_total[code] = bool(row.get("is_total"))
+
+    if not all_codes_ordered:
+        st.info(f"No line items for {type_label}.")
+        return
+
+    # ── build display table ───────────────────────────────────────
+    table_data: List[Dict[str, Any]] = []
+    for code in all_codes_ordered:
+        row_dict: Dict[str, Any] = {
+            "Line Item": code_to_display.get(code, code),
+        }
+        for yr in years:
+            df = items_by_year.get(yr, pd.DataFrame())
             if df.empty:
-                st.write("No line items.")
-                continue
+                row_dict[yr] = "—"
+            else:
+                mask = pd.Series(False, index=df.index)
+                if "line_item_code" in df.columns:
+                    mask = mask | (df["line_item_code"] == code)
+                if "line_item_name" in df.columns:
+                    mask = mask | (df["line_item_name"] == code)
+                match = df[mask]
+                if not match.empty:
+                    row_dict[yr] = _fmt_amt(match.iloc[0]["amount"])
+                else:
+                    row_dict[yr] = "—"
+        table_data.append(row_dict)
 
-            # Format amounts
-            df["formatted"] = df["amount"].apply(
-                lambda x: fmt_number(x, abbreviate=True, prefix="$")
-            )
+    display_df = pd.DataFrame(table_data)
 
-            # Highlight totals
-            def _row_style(row):
-                if row.get("is_total"):
-                    return ["font-weight: bold"] * len(row)
-                return [""] * len(row)
+    # ── title ─────────────────────────────────────────────────────
+    period_range = (
+        f"year ended {stmts[-1].get('period_end_date', years[-1])}"
+        if stmts else ""
+    )
+    st.markdown(
+        f"### {type_label} "
+        f"<span style='font-size:0.75em;color:gray;'>— {period_range}</span>",
+        unsafe_allow_html=True,
+    )
 
-            display = df[["line_item_code", "display_name", "formatted", "is_total"]].copy()
-            display.columns = ["Code", "Name", "Amount", "Total"]
-            st.dataframe(display, use_container_width=True, hide_index=True)
+    # ── style: bold total rows, right-align numbers ───────────────
+    def _style_rows(row_series):
+        label = row_series.get("Line Item", "")
+        code_match = [
+            c for c, d in code_to_display.items() if d == label
+        ]
+        is_total = (
+            code_is_total.get(code_match[0], False) if code_match else False
+        )
+        n = len(row_series)
+        if is_total:
+            return ["font-weight:bold; border-top:1px solid #888;"] * n
+        return [""] * n
+
+    styled = (
+        display_df.style
+        .apply(_style_rows, axis=1)
+        .set_properties(
+            subset=years,
+            **{"text-align": "right"},
+        )
+        .set_properties(
+            subset=["Line Item"],
+            **{"text-align": "left", "min-width": "220px"},
+        )
+        .hide(axis="index")
+    )
+
+    st.dataframe(
+        styled,
+        use_container_width=True,
+        hide_index=True,
+        height=min(40 + len(all_codes_ordered) * 35, 800),
+    )
 
 
 # ── multi-period comparison ───────────────────────────────────────────
@@ -129,11 +223,11 @@ def _render_comparison_tab(stock_id: int, db: AnalysisDatabase) -> None:
 
     st.subheader(f"{STATEMENT_TYPES[stmt_type]} — Period Comparison")
 
-    # Format numbers in period columns
+    # Format numbers in period columns — full numbers, parentheses for negatives
     period_cols = [c for c in pivot.columns if c not in ("code", "name")]
     for col in period_cols:
         pivot[col] = pivot[col].apply(
-            lambda x: fmt_number(x, abbreviate=True, prefix="$") if pd.notna(x) else "—"
+            lambda x: _fmt_amt(x) if pd.notna(x) else "—"
         )
 
     st.dataframe(pivot, use_container_width=True, hide_index=True)
@@ -236,7 +330,7 @@ def _render_metrics_tab(
             elif "Days" in name or "Cycle" in name:
                 formatted = f"{val:.1f} days" if val is not None else "—"
             else:
-                formatted = fmt_number(val, abbreviate=True, prefix="$")
+                formatted = _fmt_amt(val)
 
             col.metric(name, formatted)
 

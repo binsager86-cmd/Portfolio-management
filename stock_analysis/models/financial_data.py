@@ -20,6 +20,13 @@ from stock_analysis.database.analysis_db import AnalysisDatabase
 from stock_analysis.models.financial_extractor import FinancialPDFExtractor
 from stock_analysis.config import STATEMENT_TYPES, FINANCIAL_LINE_ITEM_CODES
 
+# ── AI-type → legacy type mapping ────────────────────────────────────
+_AI_TYPE_TO_LEGACY = {
+    "income_statement": "income",
+    "balance_sheet": "balance",
+    "cash_flow": "cashflow",
+}
+
 
 class FinancialDataManager:
     """High-level CRUD for financial statements & line items."""
@@ -83,138 +90,161 @@ class FinancialDataManager:
         user_id: int = 1,
         api_key: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Upload PDF → Extract → Validate → Save.
+        """Upload PDF → AI Vision Extract → Validate → Save.
 
-        Accepts either:
-          • pdf_file  — a Streamlit UploadedFile (saved to temp)
-          • pdf_path  — an already-existing file on disk
-
-        If *api_key* is provided it is forwarded to the extractor
-        (supports per-user keys).
-
-        Returns dict with keys: success, statement_id, validation,
-        requires_review, extracted_data, error.
+        Delegates to ``upload_full_report`` (AI Vision) and returns
+        the result for the requested *statement_type* only.
         """
-        import os, tempfile
+        result = self.upload_full_report(
+            stock_id,
+            pdf_file=pdf_file,
+            pdf_path=pdf_path,
+            fiscal_year=fiscal_year,
+            source_filename=source_filename,
+            user_id=user_id,
+            api_key=api_key,
+        )
 
-        extractor = FinancialPDFExtractor(api_key=api_key) if api_key else FinancialPDFExtractor()
+        if not result.get("success"):
+            return result
 
-        # Resolve the actual file path
-        _tmp_path: Optional[str] = None
-        if pdf_file is not None:
-            # Streamlit UploadedFile → save to temp
-            suffix = ".pdf"
-            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-                tmp.write(pdf_file.read())
-                _tmp_path = tmp.name
-            actual_path = _tmp_path
-            source_filename = source_filename or getattr(pdf_file, "name", "upload.pdf")
-        elif pdf_path is not None:
-            actual_path = pdf_path
-            source_filename = source_filename or os.path.basename(pdf_path)
-        else:
-            return {"success": False, "error": "No PDF provided (pdf_file or pdf_path required)"}
-
-        try:
-            # Step 0 – validate PDF
-            pdf_check = extractor.validate_pdf(actual_path)
-            if not pdf_check["is_valid"]:
-                if pdf_check.get("reason") == "scanned":
-                    # Attempt OCR fallback
-                    try:
-                        pdf_text = extractor.extract_text_with_ocr(actual_path)
-                    except RuntimeError as ocr_err:
-                        return {
-                            "success": False,
-                            "error": str(ocr_err),
-                            "pdf_validation": pdf_check,
-                        }
-                    if not pdf_text.strip():
-                        return {
-                            "success": False,
-                            "error": (
-                                "Scanned PDF detected — OCR ran but extracted "
-                                "no usable text. The document may be too low "
-                                "quality, or use Manual Entry mode instead."
-                            ),
-                            "pdf_validation": pdf_check,
-                        }
-                else:
-                    return {
-                        "success": False,
-                        "error": pdf_check.get(
-                            "suggestion", "PDF validation failed."
-                        ),
-                        "pdf_validation": pdf_check,
-                    }
-            else:
-                # Step 1 – extract raw text (intelligent page selection)
-                pdf_text = extractor.extract_text_from_pdf(
-                    actual_path, statement_type=statement_type
-                )
-
-            # Step 2 – Gemini extraction
-            extracted_data = extractor.extract_financial_data(
-                pdf_text, statement_type
-            )
-            if not extracted_data:
+        # Find the requested statement_type among the extracted ones
+        for stmt in result.get("statements", []):
+            if stmt.get("statement_type") == statement_type:
                 return {
-                    "success": False,
-                    "error": "Gemini extraction returned empty data",
+                    "success": True,
+                    "statement_id": stmt.get("statement_id"),
+                    "validation": stmt.get("validation", {}),
+                    "requires_review": stmt.get("requires_review", False),
+                    "extracted_data": stmt.get("extracted_data", {}),
                 }
 
-            # Override fiscal year if caller specified it
-            if fiscal_year is not None:
-                extracted_data["fiscal_year"] = fiscal_year
-                if not extracted_data.get("period_end_date"):
-                    extracted_data["period_end_date"] = f"{fiscal_year}-12-31"
-
-            # Step 3 – validate
-            validation = extractor.validate_extraction(extracted_data)
-
-            # Step 4 – persist (even if warnings, let user review)
-            statement_id = self._save_financial_statement(
-                stock_id=stock_id,
-                statement_type=statement_type,
-                extracted_data=extracted_data,
-                source_file=source_filename,
-                confidence_score=extracted_data.get("confidence_score", 0.8),
-            )
-
-            return {
-                "success": True,
-                "statement_id": statement_id,
-                "validation": validation,
-                "requires_review": (
-                    len(validation.get("warnings", [])) > 0
-                    or extracted_data.get("confidence_score", 1.0) < 0.85
-                ),
-                "extracted_data": extracted_data,
-                "pages_used": extracted_data.get("pages_used", []),
-            }
-
-        except Exception as exc:
-            err = str(exc)
-            is_rate_limit = any(
-                kw in err.lower()
-                for kw in ("429", "quota", "rate limit", "resource has been exhausted")
-            )
-            return {
-                "success": False,
-                "error": err,
-                "rate_limited": is_rate_limit,
-            }
-        finally:
-            # Clean up temp file
-            if _tmp_path:
-                try:
-                    os.unlink(_tmp_path)
-                except OSError:
-                    pass
+        # Statement type not found in PDF
+        detected = result.get("detected_types", [])
+        return {
+            "success": False,
+            "error": (
+                f"Requested '{statement_type}' statement was not found. "
+                f"AI detected: {', '.join(detected) or 'none'}."
+            ),
+        }
 
     # ──────────────────────────────────────────────────────────────────
-    # Smart upload — auto-detect all statements from a full report
+    # AI Vision helpers
     # ──────────────────────────────────────────────────────────────────
+    @staticmethod
+    def _resolve_period_label(raw_period) -> Optional[str]:
+        """Extract a usable string label from a period that may be a
+        dict ``{"label": "2025-12-31", "col_name": "2025"}`` or a plain
+        string."""
+        if raw_period is None:
+            return None
+        if isinstance(raw_period, dict):
+            return (
+                raw_period.get("label")
+                or raw_period.get("col_name")
+                or str(raw_period)
+            )
+        return str(raw_period)
+
+    @staticmethod
+    def _year_and_date(period_label: Optional[str]):
+        """Return ``(fiscal_year, period_end_date)`` from a label."""
+        import re as _re
+        if not period_label:
+            return None, None
+        m = _re.search(r"(\d{4})", period_label)
+        fiscal_year = int(m.group(1)) if m else None
+        if _re.match(r"\d{4}-\d{2}-\d{2}", period_label):
+            period_end_date = period_label
+        elif fiscal_year:
+            period_end_date = f"{fiscal_year}-12-31"
+        else:
+            period_end_date = None
+        return fiscal_year, period_end_date
+
+    @staticmethod
+    def _convert_ai_vision_to_legacy(
+        ai_result: Dict[str, Any],
+        period_mode: str = "both",
+    ) -> List[Dict[str, Any]]:
+        """Convert ``ai_extract_financials()`` output → list of
+        legacy-shaped dicts that ``_save_financial_statement`` and the
+        review UI expect.
+
+        *period_mode* controls which columns are saved:
+
+        * ``"both"``     — one entry per period detected (e.g. 2025 **and** 2024).
+        * ``"latest"``   — only the most-recent period.
+        * ``"previous"`` — only the second / older period.
+
+        Each item has: statement_type, fiscal_year, period_end_date,
+        confidence_score, line_items=[{code, name, amount, is_total}].
+        """
+        legacy: List[Dict[str, Any]] = []
+        statements = ai_result.get("statements", {})
+        if not statements:
+            return legacy
+
+        for ai_type, stmt_data in statements.items():
+            legacy_type = _AI_TYPE_TO_LEGACY.get(ai_type, ai_type)
+            items = stmt_data.get("items", [])
+            periods = stmt_data.get("periods", [])
+
+            # Resolve all period labels
+            all_labels = [
+                FinancialDataManager._resolve_period_label(p)
+                for p in periods
+            ]
+            all_labels = [l for l in all_labels if l]  # drop None
+
+            # Decide which period(s) to emit
+            if period_mode == "latest":
+                target_labels = all_labels[:1]
+            elif period_mode == "previous":
+                target_labels = all_labels[1:2] if len(all_labels) > 1 else all_labels[:1]
+            else:  # "both"
+                target_labels = all_labels if all_labels else [None]
+
+            for period_label in target_labels:
+                fiscal_year, period_end_date = (
+                    FinancialDataManager._year_and_date(period_label)
+                )
+
+                # Flatten items → legacy line_items for this period
+                line_items: List[Dict[str, Any]] = []
+                for item in items:
+                    key = item.get("key", "UNKNOWN")
+                    label = item.get("label_raw", key)
+                    values = item.get("values", {})
+                    is_total = item.get("is_total", False)
+
+                    amount = None
+                    if period_label and period_label in values:
+                        amount = values[period_label]
+                    elif values:
+                        amount = next(iter(values.values()), None)
+                    if amount is None:
+                        amount = 0.0
+
+                    code = key.upper()
+                    line_items.append({
+                        "code": code,
+                        "name": label,
+                        "amount": float(amount) if amount is not None else 0.0,
+                        "is_total": is_total,
+                    })
+
+                legacy.append({
+                    "statement_type": legacy_type,
+                    "fiscal_year": fiscal_year,
+                    "period_end_date": period_end_date,
+                    "confidence_score": 0.85,
+                    "line_items": line_items,
+                })
+
+        return legacy
+
     def upload_full_report(
         self,
         stock_id: int,
@@ -226,12 +256,16 @@ class FinancialDataManager:
         user_id: int = 1,
         progress_callback=None,
         api_key: Optional[str] = None,
+        period_mode: str = "both",
     ) -> Dict[str, Any]:
-        """Upload a full financial report PDF → auto-detect & extract ALL
-        statements (income, balance, cashflow) in one pass.
+        """Upload a full financial report PDF → AI Vision extraction.
 
-        If *api_key* is provided it is forwarded to the extractor
-        (supports per-user keys).
+        *period_mode* — ``"both"`` | ``"latest"`` | ``"previous"``
+        controls which financial period(s) from the PDF are saved.
+
+        Uses ``ai_extract_financials()`` (Gemini Vision) to render
+        pages as images, classify statement types, and extract
+        structured financial data — **no OCR step required**.
 
         Returns::
 
@@ -248,11 +282,14 @@ class FinancialDataManager:
                     ...
                 ],
                 "detected_types": ["income", "balance", "cashflow"],
+                "ai_result": { … raw AI vision output … },
             }
         """
         import os, tempfile
 
-        extractor = FinancialPDFExtractor(api_key=api_key) if api_key else FinancialPDFExtractor()
+        from stock_analysis.extraction.ai_vision_extractor import (
+            ai_extract_financials,
+        )
 
         # --- resolve file path ---
         _tmp_path: Optional[str] = None
@@ -270,61 +307,40 @@ class FinancialDataManager:
             return {"success": False, "error": "No PDF provided."}
 
         try:
-            # 0) Validate PDF
+            # 1) AI Vision extraction — renders pages as images and
+            #    sends them directly to Gemini Vision (no OCR/text step)
             if progress_callback:
-                progress_callback("Validating PDF…", 0.05)
-            pdf_check = extractor.validate_pdf(actual_path)
+                progress_callback("🧠 AI Vision: rendering pages…", 0.05)
 
-            if not pdf_check["is_valid"]:
-                if pdf_check.get("reason") == "scanned":
-                    if progress_callback:
-                        progress_callback(
-                            "⚠️ Scanned PDF detected — running OCR…", 0.08
-                        )
-                    try:
-                        pdf_text = extractor.extract_text_with_ocr(actual_path)
-                    except RuntimeError as ocr_err:
-                        return {
-                            "success": False,
-                            "error": str(ocr_err),
-                            "pdf_validation": pdf_check,
-                        }
-                    if not pdf_text.strip():
-                        return {
-                            "success": False,
-                            "error": (
-                                "Scanned PDF detected — OCR ran but extracted "
-                                "no usable text. The document may be too low "
-                                "quality, or use Manual Entry mode instead."
-                            ),
-                            "pdf_validation": pdf_check,
-                        }
-                else:
-                    return {
-                        "success": False,
-                        "error": pdf_check.get(
-                            "suggestion", "PDF validation failed."
-                        ),
-                        "pdf_validation": pdf_check,
-                    }
-            else:
-                # 1) Extract full text
-                if progress_callback:
-                    progress_callback("Extracting text from PDF…", 0.10)
-                pdf_text = extractor.extract_text_from_pdf(actual_path)
+            ai_result = ai_extract_financials(
+                pdf_path=actual_path,
+                api_key=api_key,
+                user_id=user_id,
+                stock_id=stock_id,
+            )
 
-            if not pdf_text.strip():
-                return {"success": False, "error": "PDF appears empty or unreadable."}
-
-            # 2) AI auto-detect + extract all statements
             if progress_callback:
-                progress_callback("AI is identifying statements…", 0.30)
-            all_stmts = extractor.extract_all_statements(pdf_text)
+                progress_callback("🧠 AI Vision: extraction complete, processing…", 0.60)
 
+            ai_status = ai_result.get("status", "failed")
+            if ai_status == "failed" and not ai_result.get("statements"):
+                return {
+                    "success": False,
+                    "error": (
+                        "AI Vision could not extract any financial "
+                        "statements from this PDF. "
+                        + "; ".join(ai_result.get("flags", []))
+                    ),
+                    "ai_result": ai_result,
+                }
+
+            # 2) Convert AI format → legacy format for DB + UI
+            all_stmts = self._convert_ai_vision_to_legacy(ai_result, period_mode)
             if not all_stmts:
                 return {
                     "success": False,
-                    "error": "AI could not identify any financial statements in this PDF.",
+                    "error": "AI Vision returned no statement data.",
+                    "ai_result": ai_result,
                 }
 
             # 3) Validate and save each detected statement
@@ -337,9 +353,9 @@ class FinancialDataManager:
                 detected_types.append(stype)
 
                 if progress_callback:
-                    pct = 0.40 + 0.50 * ((idx + 1) / total)
+                    pct = 0.60 + 0.35 * ((idx + 1) / total)
                     progress_callback(
-                        f"Processing {stype} statement ({idx + 1}/{total})…",
+                        f"Saving {stype} statement ({idx + 1}/{total})…",
                         pct,
                     )
 
@@ -349,14 +365,28 @@ class FinancialDataManager:
                     if not stmt_data.get("period_end_date"):
                         stmt_data["period_end_date"] = f"{fiscal_year}-12-31"
 
-                validation = extractor.validate_extraction(stmt_data)
+                # Build validation dict from AI validations
+                ai_vals = [
+                    v for v in ai_result.get("validations", [])
+                    if v.get("statement_type") == _AI_TYPE_TO_LEGACY.get(stype, stype)
+                    or v.get("statement_type") == stype
+                ]
+                validation = {
+                    "is_valid": all(v.get("passed", True) for v in ai_vals),
+                    "errors": [],
+                    "warnings": [
+                        f"{v.get('rule_name', '?')}: expected={v.get('expected')}, "
+                        f"actual={v.get('actual')}, diff={v.get('diff')}"
+                        for v in ai_vals if not v.get("passed", True)
+                    ],
+                }
 
                 stmt_id = self._save_financial_statement(
                     stock_id=stock_id,
                     statement_type=stype,
                     extracted_data=stmt_data,
                     source_file=source_filename or "upload.pdf",
-                    confidence_score=stmt_data.get("confidence_score", 0.8),
+                    confidence_score=stmt_data.get("confidence_score", 0.85),
                 )
 
                 results.append({
@@ -365,18 +395,19 @@ class FinancialDataManager:
                     "validation": validation,
                     "extracted_data": stmt_data,
                     "requires_review": (
-                        len(validation.get("warnings", [])) > 0
-                        or stmt_data.get("confidence_score", 1.0) < 0.85
+                        ai_status == "needs_review"
+                        or len(validation.get("warnings", [])) > 0
                     ),
                 })
 
             if progress_callback:
-                progress_callback("Done!", 1.0)
+                progress_callback("Done! ✅", 1.0)
 
             return {
                 "success": True,
                 "statements": results,
                 "detected_types": detected_types,
+                "ai_result": ai_result,
             }
 
         except Exception as exc:
@@ -428,12 +459,20 @@ class FinancialDataManager:
             )
 
         # Check if a statement already exists for this stock/type/period
+        # Match by period_end_date first, fall back to fiscal_year so
+        # re-uploading the same year always overwrites.
         try:
             existing = self.db.execute_query(
                 """SELECT id FROM financial_statements
                    WHERE stock_id = ? AND statement_type = ? AND period_end_date = ?""",
                 (stock_id, statement_type, extracted_data["period_end_date"]),
             )
+            if not existing:
+                existing = self.db.execute_query(
+                    """SELECT id FROM financial_statements
+                       WHERE stock_id = ? AND statement_type = ? AND fiscal_year = ?""",
+                    (stock_id, statement_type, extracted_data["fiscal_year"]),
+                )
 
             if existing:
                 # UPDATE existing row (avoids DELETE that breaks FK constraints)
@@ -441,6 +480,7 @@ class FinancialDataManager:
                 self.db.execute_update(
                     """UPDATE financial_statements
                        SET fiscal_year = ?, fiscal_quarter = ?,
+                           period_end_date = ?,
                            filing_date = ?, source_file = ?,
                            extracted_by = 'gemini', confidence_score = ?,
                            created_at = ?
@@ -448,6 +488,7 @@ class FinancialDataManager:
                     (
                         extracted_data["fiscal_year"],
                         extracted_data.get("fiscal_quarter"),
+                        extracted_data["period_end_date"],
                         extracted_data.get("filing_date"),
                         source_file,
                         confidence_score,
@@ -483,10 +524,17 @@ class FinancialDataManager:
             # — Gemini may occasionally omit 'amount' or 'code').
             for item in extracted_data.get("line_items", []):
                 code = item.get("code") or item.get("name", "UNKNOWN").upper().replace(" ", "_")
-                amount = item.get("amount", item.get("value", 0.0))
+                amount = item.get("amount") or item.get("value") or 0.0
                 if isinstance(amount, str):
                     try:
                         amount = float(amount.replace(",", ""))
+                    except (ValueError, TypeError):
+                        amount = 0.0
+                elif amount is None:
+                    amount = 0.0
+                else:
+                    try:
+                        amount = float(amount)
                     except (ValueError, TypeError):
                         amount = 0.0
                 self.db.execute_update(

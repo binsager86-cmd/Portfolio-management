@@ -31,6 +31,12 @@ from stock_analysis.config import (
     MODEL_FALLBACK_ORDER,
 )
 
+# Lazy import for the new extraction pipeline
+def _get_pipeline(api_key: str):
+    """Lazy-load ExtractionPipeline to avoid hard dependency on fitz/camelot."""
+    from stock_analysis.extraction.pipeline import ExtractionPipeline
+    return ExtractionPipeline(api_key=api_key)
+
 # ── Default line items per statement type (for manual entry) ──────────
 _DEFAULT_LINE_ITEMS: Dict[str, List[Dict[str, Any]]] = {
     "income": [
@@ -367,11 +373,40 @@ def _show_extraction_debug(
 ) -> None:
     """Display cache-hit banner (always) and debug panel (if enabled).
 
-    For smart (multi-statement) results the meta lives inside each
-    statement's ``extracted_data["_meta"]``.  For single-statement
-    results it lives directly in ``result["extracted_data"]["_meta"]``.
+    Supports both legacy ``_meta`` dicts and AI Vision ``ai_result``.
     """
-    # Collect _meta dicts
+    # ── AI Vision result (preferred) ──
+    ai_res = result.get("ai_result", {})
+    if ai_res:
+        # Cache-hit banner
+        if ai_res.get("_from_cache"):
+            st.info("💾 **Using cached AI Vision extraction** — no API call needed.")
+
+        if debug_mode:
+            with st.expander("🔍 AI Vision Debug Info", expanded=True):
+                timings = ai_res.get("timings", {})
+                if timings:
+                    cols = st.columns(4)
+                    cols[0].metric("⏱ Total", f"{timings.get('total', '?')}s")
+                    cols[1].metric("📸 Render", f"{timings.get('render', '?')}s")
+                    cols[2].metric("🏷 Classify", f"{timings.get('classify', '?')}s")
+                    cols[3].metric("📊 Validate", f"{timings.get('validate', '?')}s")
+
+                flags = ai_res.get("flags", [])
+                if flags:
+                    st.warning(f"🏳️ Flags: {', '.join(flags)}")
+
+                page_types = ai_res.get("page_types", {})
+                if page_types:
+                    st.text("Page classifications:")
+                    for pg, ptype in page_types.items():
+                        st.text(f"  Page {int(pg) + 1}: {ptype}")
+
+                st.metric("🔑 Cache Key", ai_res.get("cache_key", "—")[:24] + "…")
+                st.metric("📌 Version", ai_res.get("extractor_version", "—"))
+        return
+
+    # ── Legacy _meta dicts (fallback) ──
     metas: List[Dict[str, Any]] = []
     if smart:
         for stmt in result.get("statements", []):
@@ -386,11 +421,9 @@ def _show_extraction_debug(
     if not metas:
         return
 
-    # ── Cache-hit banner (always shown) ──
     if any(m.get("cache_hit") for m in metas):
         st.info("💾 **Using cached extraction** — no API call needed.")
 
-    # ── Debug panel (only when toggled on) ──
     if debug_mode:
         with st.expander("🔍 Debug Info", expanded=True):
             for i, m in enumerate(metas):
@@ -498,13 +531,13 @@ def ui_upload_financial_statement() -> None:
     upload_mode = st.radio(
         "Upload Mode",
         [
-            "🧠 Smart Upload (Auto-Detect All Statements)",
-            "📄 Single Statement",
+            "🧠 AI Vision (Auto-Detect All Statements)",
             "📝 Manual Entry (No AI)",
         ],
         horizontal=True,
         key="upload_mode_radio",
-        help="Smart Upload uses AI to detect all statements. "
+        help="AI Vision renders PDF pages as images and sends them to Gemini Vision — "
+             "works with both text PDFs and scanned documents. "
              "Manual Entry lets you type values directly.",
     )
     is_smart = upload_mode.startswith("🧠")
@@ -545,19 +578,11 @@ def ui_upload_financial_statement() -> None:
             )
 
     with col2:
-        if not is_smart:
-            statement_type = st.selectbox(
-                "Statement Type",
-                list(STATEMENT_TYPES.keys()),
-                format_func=lambda x: STATEMENT_TYPES[x],
-                key="statement_type_upload",
-            )
-        else:
-            st.markdown(
-                "**Auto-Detect:** AI will identify Income Statement, "
-                "Balance Sheet & Cash Flow from the full report."
-            )
-            statement_type = None
+        st.markdown(
+            "**AI Vision:** renders each page as an image and sends it to "
+            "Gemini Vision — works with both text and scanned PDFs."
+        )
+        statement_type = None
 
         fiscal_year = st.number_input(
             "Fiscal Year",
@@ -565,6 +590,20 @@ def ui_upload_financial_statement() -> None:
             max_value=2030,
             value=2024,
             key="fiscal_year_upload",
+        )
+
+        period_mode = st.radio(
+            "Financial Periods to Extract",
+            ["both", "latest", "previous"],
+            format_func={
+                "both": "📊 Both Periods (e.g. 2025 & 2024)",
+                "latest": "📅 Latest Period Only",
+                "previous": "📅 Previous Period Only",
+            }.get,
+            horizontal=True,
+            key="period_mode_upload",
+            help="Most financial PDFs show 2 columns (current year & prior year). "
+                 "Choose which period(s) to save.",
         )
 
     # API key: session (per-user DB) → env → manual entry
@@ -585,128 +624,71 @@ def ui_upload_financial_statement() -> None:
         except Exception:
             pass
 
-    btn_label = "🧠 Smart Extract All Statements" if is_smart else "🤖 Extract with AI"
+    btn_label = "🧠 Extract with AI Vision"
 
     if uploaded_file and st.button(btn_label, type="primary", use_container_width=True):
         if not api_key:
             st.error("Gemini API key is required for extraction.")
             return
 
-        if is_smart:
-            # ── Smart upload: auto-detect all statements ──
-            progress_bar = st.progress(0, text="Starting…")
-            status_text = st.empty()
+        # ── AI Vision upload: auto-detect all statements ──
+        progress_bar = st.progress(0, text="Starting AI Vision extraction…")
+        status_text = st.empty()
 
-            def _progress(msg, pct):
-                progress_bar.progress(min(pct, 1.0), text=msg)
-                status_text.caption(msg)
+        def _progress(msg, pct):
+            progress_bar.progress(min(pct, 1.0), text=msg)
+            status_text.caption(msg)
 
-            try:
-                result = manager.upload_full_report(
-                    stock_id=stock_id,
-                    pdf_file=uploaded_file,
-                    fiscal_year=fiscal_year,
-                    user_id=user_id,
-                    progress_callback=_progress,
-                    api_key=api_key,
+        try:
+            result = manager.upload_full_report(
+                stock_id=stock_id,
+                pdf_file=uploaded_file,
+                fiscal_year=fiscal_year,
+                user_id=user_id,
+                progress_callback=_progress,
+                api_key=api_key,
+                period_mode=period_mode,
+            )
+            if result.get("success"):
+                st.session_state["smart_extraction_result"] = result
+                detected = result.get("detected_types", [])
+                st.success(
+                    f"✅ AI Vision detected **{len(detected)}** statement(s): "
+                    f"{', '.join(STATEMENT_TYPES.get(t, t) for t in detected)}"
                 )
-                if result.get("success"):
-                    st.session_state["smart_extraction_result"] = result
-                    detected = result.get("detected_types", [])
-                    st.success(
-                        f"✅ Auto-detected **{len(detected)}** statement(s): "
-                        f"{', '.join(STATEMENT_TYPES.get(t, t) for t in detected)}"
+
+                # Show AI vision page classifications
+                ai_res = result.get("ai_result", {})
+                page_types = ai_res.get("page_types", {})
+                if page_types:
+                    for pg_idx, pg_type in page_types.items():
+                        if pg_type != "unknown":
+                            st.info(
+                                f"📄 Page {int(pg_idx) + 1} → "
+                                f"**{pg_type.replace('_', ' ').title()}**"
+                            )
+
+                _show_extraction_debug(result, debug_mode, smart=True)
+            else:
+                err_msg = result.get("error", "Unknown error")
+                st.error(f"❌ {err_msg}")
+                if result.get("rate_limited"):
+                    _show_rate_limit_help()
+                if "empty or unreadable" in str(err_msg).lower():
+                    st.info(
+                        "**How to fix:**\n"
+                        "- Ensure the PDF is not corrupted\n"
+                        "- AI Vision works with both text and scanned PDFs\n"
+                        "- Or switch to **📝 Manual Entry** mode"
                     )
-                    # Show pages used per statement
-                    for _s_res in result.get("statements", []):
-                        _s_pages = _s_res.get("extracted_data", {}).get("pages_used", [])
-                        if _s_pages:
-                            _s_label = STATEMENT_TYPES.get(
-                                _s_res.get("statement_type", ""),
-                                _s_res.get("statement_type", ""),
-                            )
-                            st.info(
-                                f"📄 **{_s_label}** found on page(s): "
-                                f"{', '.join(map(str, _s_pages))}"
-                            )
-                    # ── cache / debug info ──
-                    _show_extraction_debug(result, debug_mode, smart=True)
-                else:
-                    err_msg = result.get("error", "Unknown error")
-                    st.error(f"❌ {err_msg}")
-                    if result.get("rate_limited"):
-                        _show_rate_limit_help()
-                    pv = result.get("pdf_validation", {})
-                    if pv.get("reason") == "scanned":
-                        st.info(
-                            "💡 **Tip:** Install `pytesseract` and `Pillow` "
-                            "for automatic OCR, or use **📝 Manual Entry** mode."
-                        )
-                    elif "empty or unreadable" in err_msg:
-                        st.info(
-                            "**How to fix:**\n"
-                            "- This PDF might be a scanned document (image-based)\n"
-                            "- Try uploading a text-based PDF instead\n"
-                            "- Or switch to **📝 Manual Entry** mode"
-                        )
-            except Exception as e:
-                st.error(f"❌ Smart extraction failed: {e}")
-        else:
-            # ── Single statement upload (original flow) ──
-            with st.spinner("Processing PDF and extracting financial data..."):
-                try:
-                    result = manager.upload_financial_statement(
-                        stock_id=stock_id,
-                        pdf_file=uploaded_file,
-                        statement_type=statement_type,
-                        fiscal_year=fiscal_year,
-                        user_id=user_id,
-                        api_key=api_key,
-                    )
-                    if result.get("success"):
-                        st.session_state["extraction_result"] = result
-                        _pages = result.get("pages_used", [])
-                        if _pages:
-                            st.success(
-                                f"✅ Extraction complete! "
-                                f"Data found on page(s): {', '.join(map(str, _pages))}"
-                            )
-                        else:
-                            st.success("✅ Extraction complete! Review below.")
-                        # ── cache / debug info ──
-                        _show_extraction_debug(result, debug_mode, smart=False)
-                    else:
-                        err_msg = result.get("error", "Unknown error")
-                        st.error(f"❌ {err_msg}")
-                        if result.get("rate_limited"):
-                            _show_rate_limit_help()
-                        pv = result.get("pdf_validation", {})
-                        if pv.get("reason") == "scanned":
-                            st.info(
-                                "💡 **Tip:** Install `pytesseract` and `Pillow` "
-                                "for automatic OCR, or use **📝 Manual Entry** mode."
-                            )
-                        elif "empty or unreadable" in err_msg:
-                            st.info(
-                                "**How to fix:**\n"
-                                "- This PDF might be a scanned document (image-based)\n"
-                                "- Try uploading a text-based PDF instead\n"
-                                "- Or switch to **📝 Manual Entry** mode"
-                            )
-                except Exception as e:
-                    st.error(f"❌ Extraction failed: {e}")
+        except Exception as e:
+            st.error(f"❌ AI Vision extraction failed: {e}")
 
     # -- Show smart extraction results --
     if "smart_extraction_result" in st.session_state:
         _show_smart_extraction_review(
             st.session_state["smart_extraction_result"],
             stock_id, manager, user_id,
-        )
-
-    # -- Show single extraction review --
-    if "extraction_result" in st.session_state:
-        show_extraction_review(
-            st.session_state["extraction_result"], stock_id, manager, user_id
         )
 
 
@@ -975,11 +957,12 @@ def _render_upload_tab(
         )
     tab_mode = st.radio(
         "Upload Mode",
-        ["🧠 Smart (Auto-Detect All)", "📄 Single Statement", "📝 Manual Entry"],
+        ["🧠 AI Vision (Auto-Detect All)", "📝 Manual Entry"],
         horizontal=True,
         key="tab_upload_mode",
     )
     is_smart_tab = tab_mode.startswith("🧠")
+    is_pipeline_tab = False  # removed — AI Vision handles everything
     is_manual_tab = tab_mode.startswith("📝")
 
     # -- Developer debug mode --
@@ -999,6 +982,9 @@ def _render_upload_tab(
         )
         show_manual_entry_form(manual_type, stock_id, db, user_id)
         return
+
+    if is_pipeline_tab:
+        pass  # Pipeline mode removed — AI Vision handles everything
 
     uploaded = st.file_uploader(
         "Upload PDF Financial Statement",
@@ -1023,157 +1009,76 @@ def _render_upload_tab(
     else:
         statement_type = None
 
-    btn_label = "🧠 Smart Extract All" if is_smart_tab else "🚀 Extract with Gemini AI"
+    period_mode_tab = st.radio(
+        "Financial Periods to Extract",
+        ["both", "latest", "previous"],
+        format_func={
+            "both": "📊 Both Periods",
+            "latest": "📅 Latest Only",
+            "previous": "📅 Previous Only",
+        }.get,
+        horizontal=True,
+        key="period_mode_tab",
+        help="Most financial PDFs show 2 year-columns. Choose which to save.",
+    )
+
+    btn_label = "🧠 Extract with AI Vision"
 
     if uploaded and st.button(btn_label, type="primary"):
         if not api_key:
             st.error("Gemini API key is required for extraction.")
             return
 
-        if is_smart_tab:
-            # ── Smart mode: auto-detect all statements ──
-            manager = FinancialDataManager(db)
-            progress_bar = st.progress(0, text="Starting…")
+        # ── AI Vision mode: all PDFs go through Gemini Vision ──
+        manager = FinancialDataManager(db)
+        progress_bar = st.progress(0, text="Starting AI Vision extraction…")
 
-            def _prog(msg, pct):
-                progress_bar.progress(min(pct, 1.0), text=msg)
+        def _prog(msg, pct):
+            progress_bar.progress(min(pct, 1.0), text=msg)
 
-            try:
-                result = manager.upload_full_report(
-                    stock_id=stock_id,
-                    pdf_file=uploaded,
-                    user_id=user_id,
-                    progress_callback=_prog,
-                    api_key=api_key,
+        try:
+            result = manager.upload_full_report(
+                stock_id=stock_id,
+                pdf_file=uploaded,
+                user_id=user_id,
+                progress_callback=_prog,
+                api_key=api_key,
+                period_mode=period_mode_tab,
+            )
+            if result.get("success"):
+                st.session_state["smart_tab_result"] = result
+                st.session_state["smart_tab_stock_id"] = stock_id
+                detected = result.get("detected_types", [])
+                st.success(
+                    f"✅ AI Vision detected **{len(detected)}** statement(s): "
+                    f"{', '.join(STATEMENT_TYPES.get(t, t) for t in detected)}"
                 )
-                if result.get("success"):
-                    st.session_state["smart_tab_result"] = result
-                    st.session_state["smart_tab_stock_id"] = stock_id
-                    detected = result.get("detected_types", [])
-                    st.success(
-                        f"✅ Detected **{len(detected)}** statement(s): "
-                        f"{', '.join(STATEMENT_TYPES.get(t, t) for t in detected)}"
+
+                # Show AI vision details
+                ai_res = result.get("ai_result", {})
+                page_types = ai_res.get("page_types", {})
+                if page_types:
+                    for pg_idx, pg_type in page_types.items():
+                        if pg_type != "unknown":
+                            st.info(f"📄 Page {int(pg_idx) + 1} → **{pg_type.replace('_', ' ').title()}**")
+
+                _show_extraction_debug(result, debug_mode, smart=True)
+            else:
+                err_msg = result.get("error", "Unknown error")
+                st.error(f"❌ {err_msg}")
+                if result.get("rate_limited"):
+                    _show_rate_limit_help()
+                if "empty or unreadable" in str(err_msg).lower():
+                    st.info(
+                        "**How to fix:**\n"
+                        "- Ensure the PDF is not corrupted\n"
+                        "- AI Vision works with both text and scanned PDFs\n"
+                        "- Or switch to **📝 Manual Entry** mode"
                     )
-                    # Show pages used per statement
-                    for _s_res in result.get("statements", []):
-                        _s_pages = _s_res.get("extracted_data", {}).get("pages_used", [])
-                        if _s_pages:
-                            _s_label = STATEMENT_TYPES.get(
-                                _s_res.get("statement_type", ""),
-                                _s_res.get("statement_type", ""),
-                            )
-                            st.info(
-                                f"📄 **{_s_label}** found on page(s): "
-                                f"{', '.join(map(str, _s_pages))}"
-                            )
-                    _show_extraction_debug(result, debug_mode, smart=True)
-                else:
-                    err_msg = result.get("error", "Unknown error")
-                    st.error(f"❌ {err_msg}")
-                    if result.get("rate_limited"):
-                        _show_rate_limit_help()
-                    pv = result.get("pdf_validation", {})
-                    if pv.get("reason") == "scanned":
-                        st.info(
-                            "💡 **Tip:** Install `pytesseract` and `Pillow` "
-                            "for automatic OCR, or use **📝 Manual Entry** mode."
-                        )
-                    elif "empty or unreadable" in err_msg:
-                        st.info(
-                            "**How to fix:**\n"
-                            "- This PDF might be a scanned document (image-based)\n"
-                            "- Try uploading a text-based PDF instead\n"
-                            "- Or switch to **📝 Manual Entry** mode"
-                        )
-            except Exception as e:
-                st.error(f"Smart extraction failed: {e}")
-        else:
-            # ── Single statement mode (original) ──
-            with st.spinner("Processing PDF & extracting data…"):
-                try:
-                    pdf_path = PDFProcessor.save_upload(uploaded)
+        except Exception as e:
+            st.error(f"AI Vision extraction failed: {e}")
 
-                    # ── PDF validation ──
-                    extractor = FinancialPDFExtractor(api_key=api_key)
-                    pdf_check = extractor.validate_pdf(pdf_path)
-
-                    if not pdf_check["is_valid"]:
-                        if pdf_check.get("reason") == "scanned":
-                            st.warning(
-                                "⚠️ Scanned PDF detected — attempting OCR extraction…"
-                            )
-                            try:
-                                pdf_text = extractor.extract_text_with_ocr(pdf_path)
-                            except RuntimeError as ocr_err:
-                                st.error(f"❌ {ocr_err}")
-                                try:
-                                    os.unlink(pdf_path)
-                                except OSError:
-                                    pass
-                                return
-                            if not pdf_text.strip():
-                                st.error(
-                                    "❌ OCR ran but extracted no usable text. "
-                                    "The document may be too low quality. "
-                                    "Try **📝 Manual Entry** mode instead."
-                                )
-                                try:
-                                    os.unlink(pdf_path)
-                                except OSError:
-                                    pass
-                                return
-                            st.info("✅ OCR text extracted — proceeding with AI…")
-                        else:
-                            st.error(
-                                f"❌ {pdf_check.get('suggestion', 'PDF validation failed.')}"
-                            )
-                            try:
-                                os.unlink(pdf_path)
-                            except OSError:
-                                pass
-                            return
-                    else:
-                        page_map = PDFProcessor.find_statement_pages(pdf_path)
-                        pages = page_map.get(statement_type, [])
-                        if pages:
-                            st.info(
-                                f"Detected {STATEMENT_TYPES[statement_type]} on "
-                                f"page(s): {pages}"
-                            )
-                        pdf_text = PDFProcessor.extract_text(pdf_path, max_pages=50)
-
-                    st.session_state["pdf_text_preview"] = pdf_text[:2000]
-
-                    extracted = extractor.extract_financial_data(
-                        pdf_text, statement_type
-                    )
-
-                    validation = extractor.validate_extraction(extracted)
-
-                    st.session_state["extracted_data"] = extracted
-                    st.session_state["extraction_validation"] = validation
-                    st.session_state["extraction_source_file"] = uploaded.name
-                    st.session_state["extraction_stock_id"] = stock_id
-
-                    st.success("✅ Extraction complete!")
-
-                    # ── cache / debug info ──
-                    _show_extraction_debug(
-                        {"extracted_data": extracted}, debug_mode, smart=False
-                    )
-
-                    try:
-                        os.unlink(pdf_path)
-                    except OSError:
-                        pass
-                except Exception as e:
-                    err_lower = str(e).lower()
-                    st.error(f"Extraction failed: {e}")
-                    if any(kw in err_lower for kw in ("rate", "429", "quota", "limit")):
-                        _show_rate_limit_help()
-                    return
-
-    # -- Smart mode results --
+    # -- AI Vision results --
     if (
         "smart_tab_result" in st.session_state
         and st.session_state.get("smart_tab_stock_id") == stock_id
@@ -1184,12 +1089,144 @@ def _render_upload_tab(
             stock_id, manager, user_id,
         )
 
-    # -- Single mode results --
-    if (
-        "extracted_data" in st.session_state
-        and st.session_state.get("extraction_stock_id") == stock_id
-    ):
-        _render_review_section(stock_id, user_id, db)
+
+# ── Pipeline mode helpers ─────────────────────────────────────────────
+
+def _run_pipeline_extraction(
+    uploaded,
+    stock_id: int,
+    user_id: int,
+    api_key: str,
+    db: AnalysisDatabase,
+    debug_mode: bool,
+) -> None:
+    """Execute the new tiered extraction pipeline and store result in
+    session state."""
+    import tempfile
+
+    progress = st.progress(0, text="Starting pipeline…")
+    try:
+        # Save uploaded file to temp path
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+            tmp.write(uploaded.read())
+            pdf_path = tmp.name
+
+        progress.progress(0.05, text="Classifying PDF…")
+        pipeline = _get_pipeline(api_key)
+
+        progress.progress(0.10, text="Running tiered extraction…")
+        result = pipeline.run(
+            pdf_path=pdf_path,
+            user_id=user_id,
+            stock_id=stock_id,
+        )
+
+        progress.progress(1.0, text="Done!")
+
+        # Clean up temp file
+        try:
+            os.unlink(pdf_path)
+        except OSError:
+            pass
+
+        # Store result for review
+        st.session_state["pipeline_result"] = result
+        st.session_state["pipeline_stock_id"] = stock_id
+
+        status = result.get("status", "unknown")
+        if status == "success":
+            st.success("✅ Pipeline extraction complete — all checks passed!")
+        elif status == "needs_review":
+            st.warning("⚠️ Extraction complete — some items need review.")
+        else:
+            st.error("❌ Pipeline could not extract financial data.")
+
+        if debug_mode:
+            timings = result.get("timings", {})
+            if timings:
+                with st.expander("⏱️ Pipeline Timings"):
+                    for step, secs in timings.items():
+                        st.text(f"  {step:25s} {secs:>6.2f}s")
+            flags = result.get("flags", [])
+            if flags:
+                with st.expander("🏳️ Flags"):
+                    for f in flags:
+                        st.text(f"  • {f}")
+
+    except Exception as e:
+        st.error(f"Pipeline extraction failed: {e}")
+        import traceback
+        if debug_mode:
+            st.code(traceback.format_exc())
+
+
+def _show_pipeline_review(result: Dict[str, Any]) -> None:
+    """Display pipeline extraction results for user review."""
+    st.divider()
+    st.subheader("⚡ Pipeline Extraction Results")
+
+    status = result.get("status", "unknown")
+    upload_id = result.get("upload_id", "—")
+    pdf_type = result.get("pdf_type", "—")
+
+    # Summary metrics
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Status", status.replace("_", " ").title())
+    c2.metric("Upload ID", upload_id)
+    c3.metric("PDF Type", pdf_type)
+    total_time = result.get("timings", {}).get("total", 0)
+    c4.metric("Total Time", f"{total_time:.1f}s")
+
+    statements = result.get("statements", {})
+
+    _LABELS = {
+        "income_statement": "Income Statement",
+        "balance_sheet": "Balance Sheet",
+        "cash_flow": "Cash Flow Statement",
+    }
+
+    for key, label in _LABELS.items():
+        stmt = statements.get(key, {})
+        periods = stmt.get("periods", [])
+        if not periods:
+            st.info(f"📄 **{label}** — not extracted")
+            continue
+
+        with st.expander(f"📊 {label} — {len(periods)} period(s)", expanded=True):
+            for p_idx, period in enumerate(periods):
+                period_date = period.get("period_end_date", "?")
+                items = period.get("items", [])
+                st.markdown(f"**Period ending:** {period_date}  •  **{len(items)} line items**")
+
+                if items:
+                    rows = []
+                    for item in items:
+                        rows.append({
+                            "Code": item.get("line_item_key", ""),
+                            "Label": item.get("label_raw", ""),
+                            "Value": item.get("value", 0),
+                        })
+                    df = pd.DataFrame(rows)
+                    st.dataframe(df, use_container_width=True,
+                                 height=min(35 * len(df) + 38, 500))
+
+    # Validations
+    validations = result.get("validations", [])
+    if validations:
+        with st.expander(f"✅ Validations ({len(validations)} checks)"):
+            for v in validations:
+                icon = "✅" if v.get("pass_fail") == "pass" else "❌"
+                st.text(
+                    f"  {icon} [{v.get('statement_type')}/{v.get('rule_name')}] "
+                    f"expected={v.get('expected_value')}  actual={v.get('actual_value')}  "
+                    f"diff={v.get('diff')}  — {v.get('notes', '')}"
+                )
+
+    # Discard
+    if st.button("🗑️ Discard Pipeline Results", key="discard_pipeline"):
+        st.session_state.pop("pipeline_result", None)
+        st.session_state.pop("pipeline_stock_id", None)
+        st.rerun()
 
 
 def _render_review_section(
@@ -1311,6 +1348,19 @@ def _render_review_section(
 
 # ── existing statements tab ───────────────────────────────────────────
 
+def _fmt_amount(val) -> str:
+    """Format a number with thousands separator; negatives in parentheses."""
+    if val is None or val == "":
+        return "—"
+    try:
+        num = float(val)
+    except (ValueError, TypeError):
+        return str(val)
+    if num < 0:
+        return f"({abs(num):,.0f})"
+    return f"{num:,.0f}"
+
+
 def _render_existing_tab(
     stock_id: int, user_id: int, db: AnalysisDatabase
 ) -> None:
@@ -1321,54 +1371,160 @@ def _render_existing_tab(
         st.info("No financial statements saved for this stock yet.")
         return
 
-    st.write(f"**{len(stmts)}** statement(s) on file")
-
+    # ── group statements by type ──────────────────────────────────────
+    # { "income": [ {stmt_dict, ...}, ... ], "balance": [...], ... }
+    grouped: Dict[str, List[Dict[str, Any]]] = {}
     for s in stmts:
-        label = (
-            f"{STATEMENT_TYPES.get(s['statement_type'], s['statement_type'])} — "
-            f"FY{s['fiscal_year']} — {s['period_end_date']}"
-        )
-        verified = "✅" if s.get("verified_by_user") else "⏳"
-        with st.expander(f"{verified} {label}", expanded=False):
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Source", s.get("source_file") or "—")
-            c2.metric("Extracted By", s.get("extracted_by") or "—")
-            conf = s.get("confidence_score")
-            c3.metric("Confidence", f"{conf:.0%}" if conf else "—")
+        grouped.setdefault(s["statement_type"], []).append(s)
 
+    # Canonical display order
+    type_order = ["income", "balance", "cashflow"]
+    ordered_types = [t for t in type_order if t in grouped]
+    # Append any unexpected types that don't appear in type_order
+    ordered_types += [t for t in grouped if t not in type_order]
+
+    for stype in ordered_types:
+        type_stmts = grouped[stype]
+        type_label = STATEMENT_TYPES.get(stype, stype)
+
+        # Sort periods oldest → newest (left → right)
+        type_stmts.sort(key=lambda s: s.get("period_end_date", ""))
+        years = [str(s["fiscal_year"]) for s in type_stmts]
+
+        # ── build combined table: line items × years ──────────────
+        # Collect line items from each statement, preserving order
+        items_by_year: Dict[str, pd.DataFrame] = {}
+        all_codes_ordered: List[str] = []
+        code_to_display: Dict[str, str] = {}
+        code_is_total: Dict[str, bool] = {}
+
+        for s in type_stmts:
+            yr = str(s["fiscal_year"])
             df = fdm.get_line_items_df(s["id"])
+            items_by_year[yr] = df
             if not df.empty:
-                st.dataframe(
-                    df[
-                        [
-                            "line_item_code",
-                            "display_name",
-                            "amount",
-                            "is_total",
-                            "manually_edited",
-                        ]
-                    ],
-                    use_container_width=True,
-                )
+                for _, row in df.iterrows():
+                    code = row.get("line_item_code") or row.get("line_item_name", "")
+                    if code and code not in code_to_display:
+                        all_codes_ordered.append(code)
+                        code_to_display[code] = (
+                            row.get("display_name")
+                            or FINANCIAL_LINE_ITEM_CODES.get(code, code)
+                        )
+                        code_is_total[code] = bool(row.get("is_total"))
 
-            ac1, ac2, ac3 = st.columns(3)
-            if not s.get("verified_by_user"):
-                if ac1.button("✅ Mark Verified", key=f"verify_{s['id']}"):
-                    fdm.mark_statement_verified(s["id"], user_id)
-                    st.success("Marked as verified")
-                    st.rerun()
+        if not all_codes_ordered:
+            st.info(f"No line items for {type_label}.")
+            continue
 
-            if ac2.button("🗑️ Delete Statement", key=f"delstmt_{s['id']}"):
-                st.session_state[f"confirm_del_stmt_{s['id']}"] = True
+        # Build display DataFrame
+        table_data: List[Dict[str, Any]] = []
+        for code in all_codes_ordered:
+            row_dict: Dict[str, Any] = {
+                "Line Item": code_to_display.get(code, code),
+            }
+            for yr in years:
+                df = items_by_year.get(yr, pd.DataFrame())
+                if df.empty:
+                    row_dict[yr] = "—"
+                else:
+                    mask = pd.Series(False, index=df.index)
+                    if "line_item_code" in df.columns:
+                        mask = mask | (df["line_item_code"] == code)
+                    if "line_item_name" in df.columns:
+                        mask = mask | (df["line_item_name"] == code)
+                    match = df[mask]
+                    if not match.empty:
+                        row_dict[yr] = _fmt_amount(match.iloc[0]["amount"])
+                    else:
+                        row_dict[yr] = "—"
+            table_data.append(row_dict)
 
-            if st.session_state.get(f"confirm_del_stmt_{s['id']}"):
-                st.warning("Delete this statement and all its line items?")
-                yc1, yc2 = st.columns(2)
-                if yc1.button("Yes", key=f"yes_delstmt_{s['id']}"):
-                    fdm.delete_statement(s["id"], user_id)
-                    del st.session_state[f"confirm_del_stmt_{s['id']}"]
-                    st.success("Deleted")
-                    st.rerun()
-                if yc2.button("No", key=f"no_delstmt_{s['id']}"):
-                    del st.session_state[f"confirm_del_stmt_{s['id']}"]
-                    st.rerun()
+        display_df = pd.DataFrame(table_data)
+
+        # ── Title + period range ──────────────────────────────────
+        period_range = (
+            f"year ended {type_stmts[-1].get('period_end_date', years[-1])}"
+            if type_stmts
+            else ""
+        )
+        st.markdown(
+            f"### {type_label} "
+            f"<span style='font-size:0.75em;color:gray;'>— {period_range}</span>",
+            unsafe_allow_html=True,
+        )
+
+        # ── Style: bold total rows, right-align numbers ───────────
+        def _style_rows(row_series):
+            """Return list of CSS styles per cell for the row."""
+            label = row_series.get("Line Item", "")
+            # Check if this line item is a total row
+            code_match = [
+                c for c, d in code_to_display.items() if d == label
+            ]
+            is_total = (
+                code_is_total.get(code_match[0], False) if code_match else False
+            )
+            n = len(row_series)
+            if is_total:
+                return ["font-weight:bold; border-top:1px solid #888;"] * n
+            return [""] * n
+
+        styled = (
+            display_df.style
+            .apply(_style_rows, axis=1)
+            .set_properties(
+                subset=years,
+                **{"text-align": "right"},
+            )
+            .set_properties(
+                subset=["Line Item"],
+                **{"text-align": "left", "min-width": "220px"},
+            )
+            .hide(axis="index")
+        )
+
+        st.dataframe(
+            styled,
+            use_container_width=True,
+            hide_index=True,
+            height=min(40 + len(all_codes_ordered) * 35, 800),
+        )
+
+        # ── Action buttons per year (verify / delete) ─────────────
+        btn_cols = st.columns(len(type_stmts))
+        for idx, s in enumerate(type_stmts):
+            yr = str(s["fiscal_year"])
+            verified = s.get("verified_by_user")
+            with btn_cols[idx]:
+                st.caption(f"**{yr}**")
+                if not verified:
+                    if st.button(
+                        "✅ Verify",
+                        key=f"verify_{s['id']}",
+                    ):
+                        fdm.mark_statement_verified(s["id"], user_id)
+                        st.success(f"Verified {yr}")
+                        st.rerun()
+                else:
+                    st.markdown("✅ Verified")
+
+                if st.button(
+                    "🗑️ Delete",
+                    key=f"delstmt_{s['id']}",
+                ):
+                    st.session_state[f"confirm_del_stmt_{s['id']}"] = True
+
+                if st.session_state.get(f"confirm_del_stmt_{s['id']}"):
+                    st.warning(f"Delete {yr}?")
+                    yc1, yc2 = st.columns(2)
+                    if yc1.button("Yes", key=f"yes_delstmt_{s['id']}"):
+                        fdm.delete_statement(s["id"], user_id)
+                        del st.session_state[f"confirm_del_stmt_{s['id']}"]
+                        st.success("Deleted")
+                        st.rerun()
+                    if yc2.button("No", key=f"no_delstmt_{s['id']}"):
+                        del st.session_state[f"confirm_del_stmt_{s['id']}"]
+                        st.rerun()
+
+        st.divider()
