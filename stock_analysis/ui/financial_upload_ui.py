@@ -389,7 +389,7 @@ def _show_extraction_debug(
                     cols = st.columns(4)
                     cols[0].metric("⏱ Total", f"{timings.get('total', '?')}s")
                     cols[1].metric("📸 Render", f"{timings.get('render', '?')}s")
-                    cols[2].metric("🏷 Classify", f"{timings.get('classify', '?')}s")
+                    cols[2].metric("🤖 Batch Extract", f"{timings.get('batch_extract', timings.get('classify', '?'))}s")
                     cols[3].metric("📊 Validate", f"{timings.get('validate', '?')}s")
 
                 flags = ai_res.get("flags", [])

@@ -308,6 +308,11 @@ def get_connection():
             conn = sqlite3.connect(DB_CONFIG['path'], check_same_thread=False)
         yield conn
     except psycopg2.OperationalError as e:
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
         error_msg = f"""
 ╔══════════════════════════════════════════════════════════════════╗
 ║  DATABASE CONNECTION FAILED                                      ║
@@ -323,6 +328,11 @@ Possible causes:
         print(error_msg, file=sys.stderr)
         raise
     except Exception as e:
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
         print(f"❌ Database connection error: {e}")
         print(f"   DB_TYPE: {DB_TYPE}")
         print(f"   DB_CONFIG keys: {list(DB_CONFIG.keys()) if DB_CONFIG else 'None'}")
@@ -572,416 +582,410 @@ def get_last_insert_id(cur) -> int:
 
 # PostgreSQL specific initialization
 def init_postgres_schema():
-    """Create PostgreSQL schema if using Supabase."""
+    """Create PostgreSQL schema if using Supabase.
+    
+    Uses SAVEPOINTs to isolate each DDL statement so that a single
+    failure (e.g. column type mismatch, missing FK target) does NOT
+    abort the entire transaction — the classic PostgreSQL
+    'current transaction is aborted' error.
+    """
     if DB_TYPE != 'postgres':
         return
     
+    def _safe_execute(cur, sql, label=""):
+        """Execute SQL inside a SAVEPOINT so failures are isolated."""
+        sp = f"sp_{label}" if label else "sp_safe"
+        try:
+            cur.execute(f"SAVEPOINT {sp}")
+            cur.execute(sql)
+            cur.execute(f"RELEASE SAVEPOINT {sp}")
+        except Exception as exc:
+            cur.execute(f"ROLLBACK TO SAVEPOINT {sp}")
+            if label:
+                print(f"  ⚠️ Skipped {label}: {str(exc)[:80]}")
+
     with get_connection() as conn:
         cur = conn.cursor()
         
-        # Users table
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                id SERIAL PRIMARY KEY,
-                email TEXT UNIQUE,
-                username TEXT NOT NULL UNIQUE,
-                password_hash TEXT NOT NULL,
-                name TEXT,
-                created_at INTEGER NOT NULL
-            )
-        """)
-        
-        # Password resets
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS password_resets (
-                email TEXT NOT NULL,
-                otp TEXT NOT NULL,
-                expires_at INTEGER NOT NULL,
-                created_at INTEGER NOT NULL
-            )
-        """)
-        
-        # User sessions
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS user_sessions (
-                token TEXT PRIMARY KEY,
-                user_id INTEGER NOT NULL REFERENCES users(id),
-                expires_at INTEGER NOT NULL,
-                created_at INTEGER NOT NULL
-            )
-        """)
-        
-        # Cash deposits
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS cash_deposits (
-                id SERIAL PRIMARY KEY,
-                user_id INTEGER,
-                portfolio TEXT DEFAULT 'KFH',
-                source TEXT DEFAULT 'MANUAL',
-                source_reference TEXT,
-                deposit_date TEXT NOT NULL,
-                amount DOUBLE PRECISION NOT NULL,
-                bank_name TEXT NOT NULL DEFAULT 'Cash Deposit',
-                description TEXT,
-                comments TEXT,
-                notes TEXT,
-                currency TEXT DEFAULT 'KWD',
-                include_in_analysis INTEGER DEFAULT 1,
-                fx_rate_at_deposit DOUBLE PRECISION,
-                is_deleted INTEGER DEFAULT 0,
-                deleted_at INTEGER,
-                deleted_by INTEGER,
-                created_at INTEGER NOT NULL
-            )
-        """)
-        
-        # Portfolio cash
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS portfolio_cash (
-                portfolio TEXT,
-                user_id INTEGER,
-                balance DOUBLE PRECISION,
-                currency TEXT DEFAULT 'KWD',
-                last_updated INTEGER,
-                manual_override INTEGER DEFAULT 0,
-                PRIMARY KEY (portfolio, user_id)
-            )
-        """)
-        
-        # Stocks
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS stocks (
-                id SERIAL PRIMARY KEY,
-                user_id INTEGER DEFAULT 1,
-                symbol TEXT NOT NULL,
-                name TEXT,
-                current_price DOUBLE PRECISION DEFAULT 0,
-                portfolio TEXT DEFAULT 'KFH',
-                currency TEXT DEFAULT 'KWD',
-                tradingview_symbol TEXT,
-                tradingview_exchange TEXT,
-                last_updated INTEGER,
-                price_source TEXT,
-                created_at INTEGER,
-                UNIQUE(symbol, user_id)
-            )
-        """)
-        
-        # Transactions
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS transactions (
-                id SERIAL PRIMARY KEY,
-                user_id INTEGER,
-                portfolio TEXT DEFAULT 'KFH',
-                stock_symbol TEXT NOT NULL,
-                txn_date TEXT NOT NULL,
-                txn_type TEXT NOT NULL,
-                purchase_cost DOUBLE PRECISION NOT NULL DEFAULT 0,
-                sell_value DOUBLE PRECISION NOT NULL DEFAULT 0,
-                shares DOUBLE PRECISION NOT NULL DEFAULT 0,
-                bonus_shares DOUBLE PRECISION NOT NULL DEFAULT 0,
-                cash_dividend DOUBLE PRECISION NOT NULL DEFAULT 0,
-                reinvested_dividend DOUBLE PRECISION NOT NULL DEFAULT 0,
-                price_override DOUBLE PRECISION,
-                planned_cum_shares DOUBLE PRECISION,
-                fees DOUBLE PRECISION DEFAULT 0,
-                broker TEXT,
-                reference TEXT,
-                notes TEXT,
-                category TEXT DEFAULT 'portfolio',
-                security_id TEXT,
-                source TEXT DEFAULT 'MANUAL',
-                source_reference TEXT,
-                is_deleted INTEGER DEFAULT 0,
-                deleted_at INTEGER,
-                deleted_by INTEGER,
-                avg_cost_at_txn DOUBLE PRECISION,
-                realized_pnl_at_txn DOUBLE PRECISION,
-                cost_basis_at_txn DOUBLE PRECISION,
-                shares_held_at_txn DOUBLE PRECISION,
-                stock_master_id INTEGER,
-                portfolio_id INTEGER,
-                account_id INTEGER,
-                created_at INTEGER NOT NULL
-            )
-        """)
-        
-        # Trading history
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS trading_history (
-                id SERIAL PRIMARY KEY,
-                user_id INTEGER,
-                stock_symbol TEXT NOT NULL,
-                txn_date TEXT NOT NULL,
-                txn_type TEXT NOT NULL,
-                purchase_cost DOUBLE PRECISION NOT NULL DEFAULT 0,
-                sell_value DOUBLE PRECISION NOT NULL DEFAULT 0,
-                shares DOUBLE PRECISION NOT NULL DEFAULT 0,
-                cash_dividend DOUBLE PRECISION NOT NULL DEFAULT 0,
-                bonus_shares DOUBLE PRECISION NOT NULL DEFAULT 0,
-                notes TEXT,
-                created_at INTEGER NOT NULL
-            )
-        """)
-        
-        # Portfolio snapshots (for tracking portfolio value over time)
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS portfolio_snapshots (
-                id SERIAL PRIMARY KEY,
-                user_id INTEGER,
-                snapshot_date TEXT NOT NULL,
-                portfolio_value DOUBLE PRECISION DEFAULT 0,
-                daily_movement DOUBLE PRECISION DEFAULT 0,
-                beginning_difference DOUBLE PRECISION DEFAULT 0,
-                deposit_cash DOUBLE PRECISION DEFAULT 0,
-                accumulated_cash DOUBLE PRECISION DEFAULT 0,
-                net_gain DOUBLE PRECISION DEFAULT 0,
-                change_percent DOUBLE PRECISION DEFAULT 0,
-                roi_percent DOUBLE PRECISION DEFAULT 0,
-                twr_percent DOUBLE PRECISION,
-                mwrr_percent DOUBLE PRECISION,
-                created_at INTEGER
-            )
-        """)
-        
-        # CBK rate cache (for caching Central Bank of Kuwait discount rate)
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS cbk_rate_cache (
-                id SERIAL PRIMARY KEY,
-                rate DOUBLE PRECISION NOT NULL,
-                fetched_date TEXT NOT NULL,
-                source TEXT NOT NULL,
-                created_at INTEGER DEFAULT EXTRACT(EPOCH FROM NOW())::INTEGER
-            )
-        """)
-        
-        # ── Financial Audit Log ─────────────────────────────────────
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS financial_audit_log (
-                id SERIAL PRIMARY KEY,
-                user_id INTEGER NOT NULL,
-                operation TEXT NOT NULL,
-                entity_type TEXT,
-                entity_id INTEGER,
-                old_value DOUBLE PRECISION,
-                new_value DOUBLE PRECISION,
-                delta DOUBLE PRECISION,
-                portfolio TEXT,
-                currency TEXT,
-                reason TEXT,
-                details TEXT,
-                created_at INTEGER NOT NULL
-            )
-        """)
+        # ── Core portfolio tables (order matters for FK deps) ────
+        _core_tables = [
+            ("users", """
+                CREATE TABLE IF NOT EXISTS users (
+                    id SERIAL PRIMARY KEY,
+                    email TEXT UNIQUE,
+                    username TEXT NOT NULL UNIQUE,
+                    password_hash TEXT NOT NULL,
+                    name TEXT,
+                    created_at INTEGER NOT NULL
+                )
+            """),
+            ("password_resets", """
+                CREATE TABLE IF NOT EXISTS password_resets (
+                    email TEXT NOT NULL,
+                    otp TEXT NOT NULL,
+                    expires_at INTEGER NOT NULL,
+                    created_at INTEGER NOT NULL
+                )
+            """),
+            ("user_sessions", """
+                CREATE TABLE IF NOT EXISTS user_sessions (
+                    token TEXT PRIMARY KEY,
+                    user_id INTEGER NOT NULL REFERENCES users(id),
+                    expires_at INTEGER NOT NULL,
+                    created_at INTEGER NOT NULL
+                )
+            """),
+            ("cash_deposits", """
+                CREATE TABLE IF NOT EXISTS cash_deposits (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER,
+                    portfolio TEXT DEFAULT 'KFH',
+                    source TEXT DEFAULT 'MANUAL',
+                    source_reference TEXT,
+                    deposit_date TEXT NOT NULL,
+                    amount DOUBLE PRECISION NOT NULL,
+                    bank_name TEXT NOT NULL DEFAULT 'Cash Deposit',
+                    description TEXT,
+                    comments TEXT,
+                    notes TEXT,
+                    currency TEXT DEFAULT 'KWD',
+                    include_in_analysis INTEGER DEFAULT 1,
+                    fx_rate_at_deposit DOUBLE PRECISION,
+                    is_deleted INTEGER DEFAULT 0,
+                    deleted_at INTEGER,
+                    deleted_by INTEGER,
+                    created_at INTEGER NOT NULL
+                )
+            """),
+            ("portfolio_cash", """
+                CREATE TABLE IF NOT EXISTS portfolio_cash (
+                    portfolio TEXT,
+                    user_id INTEGER,
+                    balance DOUBLE PRECISION,
+                    currency TEXT DEFAULT 'KWD',
+                    last_updated INTEGER,
+                    manual_override INTEGER DEFAULT 0,
+                    PRIMARY KEY (portfolio, user_id)
+                )
+            """),
+            ("stocks", """
+                CREATE TABLE IF NOT EXISTS stocks (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER DEFAULT 1,
+                    symbol TEXT NOT NULL,
+                    name TEXT,
+                    current_price DOUBLE PRECISION DEFAULT 0,
+                    portfolio TEXT DEFAULT 'KFH',
+                    currency TEXT DEFAULT 'KWD',
+                    tradingview_symbol TEXT,
+                    tradingview_exchange TEXT,
+                    last_updated INTEGER,
+                    price_source TEXT,
+                    created_at INTEGER,
+                    UNIQUE(symbol, user_id)
+                )
+            """),
+            ("transactions", """
+                CREATE TABLE IF NOT EXISTS transactions (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER,
+                    portfolio TEXT DEFAULT 'KFH',
+                    stock_symbol TEXT NOT NULL,
+                    txn_date TEXT NOT NULL,
+                    txn_type TEXT NOT NULL,
+                    purchase_cost DOUBLE PRECISION NOT NULL DEFAULT 0,
+                    sell_value DOUBLE PRECISION NOT NULL DEFAULT 0,
+                    shares DOUBLE PRECISION NOT NULL DEFAULT 0,
+                    bonus_shares DOUBLE PRECISION NOT NULL DEFAULT 0,
+                    cash_dividend DOUBLE PRECISION NOT NULL DEFAULT 0,
+                    reinvested_dividend DOUBLE PRECISION NOT NULL DEFAULT 0,
+                    price_override DOUBLE PRECISION,
+                    planned_cum_shares DOUBLE PRECISION,
+                    fees DOUBLE PRECISION DEFAULT 0,
+                    broker TEXT,
+                    reference TEXT,
+                    notes TEXT,
+                    category TEXT DEFAULT 'portfolio',
+                    security_id TEXT,
+                    source TEXT DEFAULT 'MANUAL',
+                    source_reference TEXT,
+                    is_deleted INTEGER DEFAULT 0,
+                    deleted_at INTEGER,
+                    deleted_by INTEGER,
+                    avg_cost_at_txn DOUBLE PRECISION,
+                    realized_pnl_at_txn DOUBLE PRECISION,
+                    cost_basis_at_txn DOUBLE PRECISION,
+                    shares_held_at_txn DOUBLE PRECISION,
+                    stock_master_id INTEGER,
+                    portfolio_id INTEGER,
+                    account_id INTEGER,
+                    created_at INTEGER NOT NULL
+                )
+            """),
+            ("trading_history", """
+                CREATE TABLE IF NOT EXISTS trading_history (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER,
+                    stock_symbol TEXT NOT NULL,
+                    txn_date TEXT NOT NULL,
+                    txn_type TEXT NOT NULL,
+                    purchase_cost DOUBLE PRECISION NOT NULL DEFAULT 0,
+                    sell_value DOUBLE PRECISION NOT NULL DEFAULT 0,
+                    shares DOUBLE PRECISION NOT NULL DEFAULT 0,
+                    cash_dividend DOUBLE PRECISION NOT NULL DEFAULT 0,
+                    bonus_shares DOUBLE PRECISION NOT NULL DEFAULT 0,
+                    notes TEXT,
+                    created_at INTEGER NOT NULL
+                )
+            """),
+            ("portfolio_snapshots", """
+                CREATE TABLE IF NOT EXISTS portfolio_snapshots (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER,
+                    snapshot_date TEXT NOT NULL,
+                    portfolio_value DOUBLE PRECISION DEFAULT 0,
+                    daily_movement DOUBLE PRECISION DEFAULT 0,
+                    beginning_difference DOUBLE PRECISION DEFAULT 0,
+                    deposit_cash DOUBLE PRECISION DEFAULT 0,
+                    accumulated_cash DOUBLE PRECISION DEFAULT 0,
+                    net_gain DOUBLE PRECISION DEFAULT 0,
+                    change_percent DOUBLE PRECISION DEFAULT 0,
+                    roi_percent DOUBLE PRECISION DEFAULT 0,
+                    twr_percent DOUBLE PRECISION,
+                    mwrr_percent DOUBLE PRECISION,
+                    created_at INTEGER
+                )
+            """),
+            ("cbk_rate_cache", """
+                CREATE TABLE IF NOT EXISTS cbk_rate_cache (
+                    id SERIAL PRIMARY KEY,
+                    rate DOUBLE PRECISION NOT NULL,
+                    fetched_date TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    created_at INTEGER DEFAULT EXTRACT(EPOCH FROM NOW())::INTEGER
+                )
+            """),
+            ("financial_audit_log", """
+                CREATE TABLE IF NOT EXISTS financial_audit_log (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    operation TEXT NOT NULL,
+                    entity_type TEXT,
+                    entity_id INTEGER,
+                    old_value DOUBLE PRECISION,
+                    new_value DOUBLE PRECISION,
+                    delta DOUBLE PRECISION,
+                    portfolio TEXT,
+                    currency TEXT,
+                    reason TEXT,
+                    details TEXT,
+                    created_at INTEGER NOT NULL
+                )
+            """),
+        ]
 
-        # ══════════════════════════════════════════════════════════════
-        # DOMAIN: Stock Analysis / Fundamental Analysis
-        # ══════════════════════════════════════════════════════════════
+        for label, sql in _core_tables:
+            _safe_execute(cur, sql, f"create_{label}")
 
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS analysis_stocks (
-                id SERIAL PRIMARY KEY,
-                user_id INTEGER NOT NULL,
-                symbol TEXT NOT NULL,
-                company_name TEXT NOT NULL,
-                exchange TEXT DEFAULT 'NYSE',
-                currency TEXT DEFAULT 'USD',
-                sector TEXT,
-                industry TEXT,
-                country TEXT,
-                isin TEXT,
-                cik TEXT,
-                description TEXT,
-                website TEXT,
-                created_at INTEGER NOT NULL,
-                updated_at INTEGER NOT NULL,
-                UNIQUE(user_id, symbol)
-            )
-        """)
+        # ── Analysis / Fundamental Analysis tables ───────────────
+        _analysis_tables = [
+            ("analysis_stocks", """
+                CREATE TABLE IF NOT EXISTS analysis_stocks (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    symbol TEXT NOT NULL,
+                    company_name TEXT NOT NULL,
+                    exchange TEXT DEFAULT 'NYSE',
+                    currency TEXT DEFAULT 'USD',
+                    sector TEXT,
+                    industry TEXT,
+                    country TEXT,
+                    isin TEXT,
+                    cik TEXT,
+                    description TEXT,
+                    website TEXT,
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL,
+                    UNIQUE(user_id, symbol)
+                )
+            """),
+            ("financial_statements", """
+                CREATE TABLE IF NOT EXISTS financial_statements (
+                    id SERIAL PRIMARY KEY,
+                    stock_id INTEGER NOT NULL REFERENCES analysis_stocks(id),
+                    statement_type TEXT NOT NULL,
+                    fiscal_year INTEGER NOT NULL,
+                    fiscal_quarter INTEGER,
+                    period_end_date TEXT NOT NULL,
+                    filing_date TEXT,
+                    source_file TEXT,
+                    extracted_by TEXT DEFAULT 'gemini',
+                    confidence_score DOUBLE PRECISION,
+                    verified_by_user BOOLEAN DEFAULT FALSE,
+                    notes TEXT,
+                    created_at INTEGER NOT NULL,
+                    UNIQUE(stock_id, statement_type, period_end_date)
+                )
+            """),
+            ("financial_line_items", """
+                CREATE TABLE IF NOT EXISTS financial_line_items (
+                    id SERIAL PRIMARY KEY,
+                    statement_id INTEGER NOT NULL REFERENCES financial_statements(id),
+                    line_item_code TEXT NOT NULL,
+                    line_item_name TEXT NOT NULL,
+                    amount DOUBLE PRECISION NOT NULL,
+                    currency TEXT DEFAULT 'USD',
+                    order_index INTEGER,
+                    parent_item_id INTEGER,
+                    is_total BOOLEAN DEFAULT FALSE,
+                    manually_edited BOOLEAN DEFAULT FALSE,
+                    edited_by_user_id INTEGER,
+                    edited_at INTEGER
+                )
+            """),
+            ("stock_metrics", """
+                CREATE TABLE IF NOT EXISTS stock_metrics (
+                    id SERIAL PRIMARY KEY,
+                    stock_id INTEGER NOT NULL REFERENCES analysis_stocks(id),
+                    fiscal_year INTEGER NOT NULL,
+                    fiscal_quarter INTEGER,
+                    period_end_date TEXT NOT NULL,
+                    metric_type TEXT NOT NULL,
+                    metric_name TEXT NOT NULL,
+                    metric_value DOUBLE PRECISION,
+                    created_at INTEGER NOT NULL,
+                    UNIQUE(stock_id, metric_name, period_end_date)
+                )
+            """),
+            ("valuation_models", """
+                CREATE TABLE IF NOT EXISTS valuation_models (
+                    id SERIAL PRIMARY KEY,
+                    stock_id INTEGER NOT NULL REFERENCES analysis_stocks(id),
+                    model_type TEXT NOT NULL,
+                    valuation_date TEXT NOT NULL,
+                    intrinsic_value DOUBLE PRECISION,
+                    parameters TEXT,
+                    assumptions TEXT,
+                    created_by_user_id INTEGER,
+                    created_at INTEGER NOT NULL
+                )
+            """),
+            ("stock_scores", """
+                CREATE TABLE IF NOT EXISTS stock_scores (
+                    id SERIAL PRIMARY KEY,
+                    stock_id INTEGER NOT NULL REFERENCES analysis_stocks(id),
+                    scoring_date TEXT NOT NULL,
+                    overall_score DOUBLE PRECISION,
+                    fundamental_score DOUBLE PRECISION,
+                    valuation_score DOUBLE PRECISION,
+                    growth_score DOUBLE PRECISION,
+                    quality_score DOUBLE PRECISION,
+                    details TEXT,
+                    analyst_notes TEXT,
+                    created_by_user_id INTEGER,
+                    created_at INTEGER NOT NULL
+                )
+            """),
+            ("analysis_audit_log", """
+                CREATE TABLE IF NOT EXISTS analysis_audit_log (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    operation TEXT NOT NULL,
+                    entity_type TEXT NOT NULL,
+                    entity_id INTEGER,
+                    old_value TEXT,
+                    new_value TEXT,
+                    reason TEXT,
+                    details TEXT,
+                    created_at INTEGER NOT NULL
+                )
+            """),
+        ]
 
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS financial_statements (
-                id SERIAL PRIMARY KEY,
-                stock_id INTEGER NOT NULL REFERENCES analysis_stocks(id),
-                statement_type TEXT NOT NULL,
-                fiscal_year INTEGER NOT NULL,
-                fiscal_quarter INTEGER,
-                period_end_date TEXT NOT NULL,
-                filing_date TEXT,
-                source_file TEXT,
-                extracted_by TEXT DEFAULT 'gemini',
-                confidence_score DOUBLE PRECISION,
-                verified_by_user BOOLEAN DEFAULT FALSE,
-                notes TEXT,
-                created_at INTEGER NOT NULL,
-                UNIQUE(stock_id, statement_type, period_end_date)
-            )
-        """)
+        for label, sql in _analysis_tables:
+            _safe_execute(cur, sql, f"create_{label}")
 
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS financial_line_items (
-                id SERIAL PRIMARY KEY,
-                statement_id INTEGER NOT NULL REFERENCES financial_statements(id),
-                line_item_code TEXT NOT NULL,
-                line_item_name TEXT NOT NULL,
-                amount DOUBLE PRECISION NOT NULL,
-                currency TEXT DEFAULT 'USD',
-                order_index INTEGER,
-                parent_item_id INTEGER,
-                is_total BOOLEAN DEFAULT FALSE,
-                manually_edited BOOLEAN DEFAULT FALSE,
-                edited_by_user_id INTEGER,
-                edited_at INTEGER
-            )
-        """)
+        # ── Extraction Pipeline (AI Vision) tables ───────────────
+        _extraction_tables = [
+            ("financial_uploads", """
+                CREATE TABLE IF NOT EXISTS financial_uploads (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    stock_id INTEGER NOT NULL REFERENCES analysis_stocks(id),
+                    uploaded_at INTEGER NOT NULL,
+                    pdf_path TEXT,
+                    pdf_type TEXT DEFAULT 'text',
+                    status TEXT DEFAULT 'processing',
+                    error_message TEXT
+                )
+            """),
+            ("financial_raw_extraction", """
+                CREATE TABLE IF NOT EXISTS financial_raw_extraction (
+                    id SERIAL PRIMARY KEY,
+                    upload_id INTEGER NOT NULL REFERENCES financial_uploads(id),
+                    statement_type TEXT,
+                    page_num INTEGER,
+                    method TEXT,
+                    table_id INTEGER,
+                    table_json TEXT,
+                    header_context TEXT,
+                    confidence_score DOUBLE PRECISION DEFAULT 0.0
+                )
+            """),
+            ("financial_normalized", """
+                CREATE TABLE IF NOT EXISTS financial_normalized (
+                    id SERIAL PRIMARY KEY,
+                    upload_id INTEGER NOT NULL REFERENCES financial_uploads(id),
+                    statement_type TEXT NOT NULL,
+                    period_end_date TEXT,
+                    currency TEXT DEFAULT 'USD',
+                    unit_scale INTEGER DEFAULT 1,
+                    line_item_key TEXT NOT NULL,
+                    label_raw TEXT,
+                    value DOUBLE PRECISION,
+                    source_page INTEGER,
+                    source_table_id INTEGER
+                )
+            """),
+            ("financial_validation", """
+                CREATE TABLE IF NOT EXISTS financial_validation (
+                    id SERIAL PRIMARY KEY,
+                    upload_id INTEGER NOT NULL REFERENCES financial_uploads(id),
+                    statement_type TEXT,
+                    rule_name TEXT NOT NULL,
+                    expected_value DOUBLE PRECISION,
+                    actual_value DOUBLE PRECISION,
+                    diff DOUBLE PRECISION,
+                    pass_fail TEXT DEFAULT 'unknown',
+                    notes TEXT
+                )
+            """),
+            ("financial_user_edits", """
+                CREATE TABLE IF NOT EXISTS financial_user_edits (
+                    id SERIAL PRIMARY KEY,
+                    upload_id INTEGER NOT NULL REFERENCES financial_uploads(id),
+                    statement_type TEXT,
+                    period TEXT,
+                    line_item_key TEXT NOT NULL,
+                    old_value DOUBLE PRECISION,
+                    new_value DOUBLE PRECISION,
+                    edited_at INTEGER NOT NULL,
+                    edited_by INTEGER
+                )
+            """),
+        ]
 
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS stock_metrics (
-                id SERIAL PRIMARY KEY,
-                stock_id INTEGER NOT NULL REFERENCES analysis_stocks(id),
-                fiscal_year INTEGER NOT NULL,
-                fiscal_quarter INTEGER,
-                period_end_date TEXT NOT NULL,
-                metric_type TEXT NOT NULL,
-                metric_name TEXT NOT NULL,
-                metric_value DOUBLE PRECISION,
-                created_at INTEGER NOT NULL,
-                UNIQUE(stock_id, metric_name, period_end_date)
-            )
-        """)
+        for label, sql in _extraction_tables:
+            _safe_execute(cur, sql, f"create_{label}")
 
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS valuation_models (
-                id SERIAL PRIMARY KEY,
-                stock_id INTEGER NOT NULL REFERENCES analysis_stocks(id),
-                model_type TEXT NOT NULL,
-                valuation_date TEXT NOT NULL,
-                intrinsic_value DOUBLE PRECISION,
-                parameters TEXT,
-                assumptions TEXT,
-                created_by_user_id INTEGER,
-                created_at INTEGER NOT NULL
-            )
-        """)
-
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS stock_scores (
-                id SERIAL PRIMARY KEY,
-                stock_id INTEGER NOT NULL REFERENCES analysis_stocks(id),
-                scoring_date TEXT NOT NULL,
-                overall_score DOUBLE PRECISION,
-                fundamental_score DOUBLE PRECISION,
-                valuation_score DOUBLE PRECISION,
-                growth_score DOUBLE PRECISION,
-                quality_score DOUBLE PRECISION,
-                details TEXT,
-                analyst_notes TEXT,
-                created_by_user_id INTEGER,
-                created_at INTEGER NOT NULL
-            )
-        """)
-
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS analysis_audit_log (
-                id SERIAL PRIMARY KEY,
-                user_id INTEGER NOT NULL,
-                operation TEXT NOT NULL,
-                entity_type TEXT NOT NULL,
-                entity_id INTEGER,
-                old_value TEXT,
-                new_value TEXT,
-                reason TEXT,
-                details TEXT,
-                created_at INTEGER NOT NULL
-            )
-        """)
-
-        # ══════════════════════════════════════════════════════════════
-        # DOMAIN: Extraction Pipeline (AI Vision)
-        # ══════════════════════════════════════════════════════════════
-
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS financial_uploads (
-                id SERIAL PRIMARY KEY,
-                user_id INTEGER NOT NULL,
-                stock_id INTEGER NOT NULL REFERENCES analysis_stocks(id),
-                uploaded_at INTEGER NOT NULL,
-                pdf_path TEXT,
-                pdf_type TEXT DEFAULT 'text',
-                status TEXT DEFAULT 'processing',
-                error_message TEXT
-            )
-        """)
-
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS financial_raw_extraction (
-                id SERIAL PRIMARY KEY,
-                upload_id INTEGER NOT NULL REFERENCES financial_uploads(id),
-                statement_type TEXT,
-                page_num INTEGER,
-                method TEXT,
-                table_id INTEGER,
-                table_json TEXT,
-                header_context TEXT,
-                confidence_score DOUBLE PRECISION DEFAULT 0.0
-            )
-        """)
-
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS financial_normalized (
-                id SERIAL PRIMARY KEY,
-                upload_id INTEGER NOT NULL REFERENCES financial_uploads(id),
-                statement_type TEXT NOT NULL,
-                period_end_date TEXT,
-                currency TEXT DEFAULT 'USD',
-                unit_scale INTEGER DEFAULT 1,
-                line_item_key TEXT NOT NULL,
-                label_raw TEXT,
-                value DOUBLE PRECISION,
-                source_page INTEGER,
-                source_table_id INTEGER
-            )
-        """)
-
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS financial_validation (
-                id SERIAL PRIMARY KEY,
-                upload_id INTEGER NOT NULL REFERENCES financial_uploads(id),
-                statement_type TEXT,
-                rule_name TEXT NOT NULL,
-                expected_value DOUBLE PRECISION,
-                actual_value DOUBLE PRECISION,
-                diff DOUBLE PRECISION,
-                pass_fail TEXT DEFAULT 'unknown',
-                notes TEXT
-            )
-        """)
-
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS financial_user_edits (
-                id SERIAL PRIMARY KEY,
-                upload_id INTEGER NOT NULL REFERENCES financial_uploads(id),
-                statement_type TEXT,
-                period TEXT,
-                line_item_key TEXT NOT NULL,
-                old_value DOUBLE PRECISION,
-                new_value DOUBLE PRECISION,
-                edited_at INTEGER NOT NULL,
-                edited_by INTEGER
-            )
-        """)
-
-        # ══════════════════════════════════════════════════════════════
-        # DOMAIN: Schema version tracking
-        # ══════════════════════════════════════════════════════════════
-
-        cur.execute("""
+        # ── Schema version tracking ──────────────────────────────
+        _safe_execute(cur, """
             CREATE TABLE IF NOT EXISTS schema_version (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 version INTEGER NOT NULL DEFAULT 1,
                 migrated_at INTEGER NOT NULL
             )
-        """)
+        """, "create_schema_version")
 
         # ══════════════════════════════════════════════════════════════
         # Indexes — Analysis & Extraction
@@ -1013,9 +1017,11 @@ def init_postgres_schema():
         ]
         for idx_sql in _pg_indexes:
             try:
+                cur.execute("SAVEPOINT sp_idx")
                 cur.execute(idx_sql)
+                cur.execute("RELEASE SAVEPOINT sp_idx")
             except Exception:
-                pass
+                cur.execute("ROLLBACK TO SAVEPOINT sp_idx")
 
         # ══════════════════════════════════════════════════════════════
         # Additive column migrations (ALTER TABLE … ADD COLUMN IF NOT EXISTS)
@@ -1045,22 +1051,31 @@ def init_postgres_schema():
         ]
         for tbl, col, coltype in _pg_additive_cols:
             try:
+                cur.execute("SAVEPOINT sp_col")
                 cur.execute(f"ALTER TABLE {tbl} ADD COLUMN IF NOT EXISTS {col} {coltype}")
+                cur.execute("RELEASE SAVEPOINT sp_col")
             except Exception:
-                pass
+                cur.execute("ROLLBACK TO SAVEPOINT sp_col")
 
         # Copy data from company_name to name if company_name exists
         try:
+            cur.execute("SAVEPOINT sp_copy")
             cur.execute("UPDATE stocks SET name = company_name WHERE name IS NULL AND company_name IS NOT NULL")
+            cur.execute("RELEASE SAVEPOINT sp_copy")
         except Exception:
-            pass
+            cur.execute("ROLLBACK TO SAVEPOINT sp_copy")
 
         # Record schema version
-        cur.execute("""
-            INSERT INTO schema_version (id, version, migrated_at)
-            VALUES (1, 1, EXTRACT(EPOCH FROM NOW())::INTEGER)
-            ON CONFLICT (id) DO UPDATE SET version = 1, migrated_at = EXTRACT(EPOCH FROM NOW())::INTEGER
-        """)
+        try:
+            cur.execute("SAVEPOINT sp_ver")
+            cur.execute("""
+                INSERT INTO schema_version (id, version, migrated_at)
+                VALUES (1, 1, EXTRACT(EPOCH FROM NOW())::INTEGER)
+                ON CONFLICT (id) DO UPDATE SET version = 1, migrated_at = EXTRACT(EPOCH FROM NOW())::INTEGER
+            """)
+            cur.execute("RELEASE SAVEPOINT sp_ver")
+        except Exception:
+            cur.execute("ROLLBACK TO SAVEPOINT sp_ver")
 
         conn.commit()
         print("✅ PostgreSQL schema initialized (core + analysis + extraction)")
