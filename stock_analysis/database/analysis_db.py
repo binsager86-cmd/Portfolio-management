@@ -20,6 +20,8 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__f
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
+from stock_analysis.config import normalize_line_item_code
+
 from db_layer import (
     get_conn,
     get_connection,
@@ -513,7 +515,9 @@ class AnalysisDatabase:
         params = [
             (
                 statement_id,
-                it.get('code') or it.get('name', 'UNKNOWN').upper().replace(' ', '_'),
+                normalize_line_item_code(
+                    it.get('code') or it.get('name', 'UNKNOWN').upper().replace(' ', '_')
+                ),
                 it.get('name', it.get('code', 'Unknown')),
                 _safe_amount(it),
                 it.get('currency', 'USD'),

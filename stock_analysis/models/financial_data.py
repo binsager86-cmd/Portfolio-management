@@ -18,7 +18,7 @@ import pandas as pd
 
 from stock_analysis.database.analysis_db import AnalysisDatabase
 from stock_analysis.models.financial_extractor import FinancialPDFExtractor
-from stock_analysis.config import STATEMENT_TYPES, FINANCIAL_LINE_ITEM_CODES
+from stock_analysis.config import STATEMENT_TYPES, FINANCIAL_LINE_ITEM_CODES, normalize_line_item_code
 
 # ── AI-type → legacy type mapping ────────────────────────────────────
 _AI_TYPE_TO_LEGACY = {
@@ -227,7 +227,7 @@ class FinancialDataManager:
                     if amount is None:
                         amount = 0.0
 
-                    code = key.upper()
+                    code = normalize_line_item_code(key.upper())
                     line_items.append({
                         "code": code,
                         "name": label,
@@ -524,6 +524,7 @@ class FinancialDataManager:
             # — Gemini may occasionally omit 'amount' or 'code').
             for item in extracted_data.get("line_items", []):
                 code = item.get("code") or item.get("name", "UNKNOWN").upper().replace(" ", "_")
+                code = normalize_line_item_code(code)
                 amount = item.get("amount") or item.get("value") or 0.0
                 if isinstance(amount, str):
                     try:
@@ -623,6 +624,11 @@ class FinancialDataManager:
         if not items:
             return pd.DataFrame()
         df = pd.DataFrame(items)
+        # Normalize variant codes to canonical names so multi-year
+        # tables align the same financial concept on a single row.
+        df["line_item_code"] = df["line_item_code"].map(
+            normalize_line_item_code
+        )
         df["display_name"] = df["line_item_code"].map(
             FINANCIAL_LINE_ITEM_CODES
         ).fillna(df["line_item_name"])
