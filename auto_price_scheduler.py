@@ -270,7 +270,8 @@ def fetch_price(symbol: str, currency: str = None) -> tuple:
             if not data.empty and 'Close' in data.columns:
                 close_series = data['Close'].dropna()
                 if not close_series.empty:
-                    price = float(close_series.iloc[-1])
+                    raw = close_series.iloc[-1]
+                    price = float(raw.iloc[0]) if hasattr(raw, 'iloc') else float(raw)
                     return price, ticker
         except Exception as e:
             logger.debug(f"Failed to fetch {ticker}: {e}")
@@ -287,7 +288,8 @@ def fetch_usd_kwd_rate() -> float:
     try:
         data = yf.download("USDKWD=X", period="5d", progress=False, threads=False)
         if not data.empty and 'Close' in data.columns:
-            return float(data['Close'].dropna().iloc[-1])
+            close_val = data['Close'].dropna().iloc[-1]
+            return float(close_val.iloc[0]) if hasattr(close_val, 'iloc') else float(close_val)
     except Exception as e:
         logger.warning(f"Failed to fetch USD/KWD rate: {e}")
     
@@ -389,6 +391,18 @@ def save_portfolio_snapshot(user_id: int, portfolio_value: float, usd_kwd_rate: 
 # MAIN JOB FUNCTION
 # =============================================================================
 
+def ensure_schema():
+    """Ensure all required DB tables exist (idempotent)."""
+    try:
+        _, _, _, is_postgres = get_db_functions()
+        if is_postgres():
+            from db_layer import init_postgres_schema
+            init_postgres_schema()
+            logger.info("✅ PostgreSQL schema verified")
+    except Exception as e:
+        logger.error(f"Schema init error: {e}")
+
+
 def run_price_update_job():
     """
     Main job: Fetch prices for all users and save portfolio snapshots.
@@ -396,6 +410,9 @@ def run_price_update_job():
     """
     kuwait_now = datetime.now(KUWAIT_TZ)
     today_str = kuwait_now.strftime("%Y-%m-%d")
+    
+    # Ensure DB schema exists (users table etc.) before any queries
+    ensure_schema()
     
     logger.info("=" * 60)
     logger.info("🚀 AUTO PRICE UPDATE JOB STARTED")
@@ -730,6 +747,7 @@ def run_integrity_check_job():
     logger.info(f"⏰ Started at: {datetime.now(KUWAIT_TZ).strftime('%H:%M:%S')} Kuwait Time")
     logger.info("=" * 60)
     
+    ensure_schema()
     users = get_all_users()
     
     if not users:
