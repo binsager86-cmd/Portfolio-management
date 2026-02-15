@@ -47,17 +47,23 @@ def ui_fundamental_analysis():
     # so the upload UIs pick it up automatically.
     if "gemini_api_key" not in st.session_state or not st.session_state.get("gemini_api_key"):
         try:
-            import sqlite3, os
-            db_path = os.path.join(
-                os.path.dirname(os.path.abspath(__file__)), "portfolio.db"
-            )
-            conn = sqlite3.connect(db_path)
-            cur = conn.cursor()
-            cur.execute("SELECT gemini_api_key FROM users WHERE id = ?", (user_id,))
-            row = cur.fetchone()
+            from db_layer import get_conn, convert_sql, convert_params, is_postgres
+            conn = get_conn()
+            sql = convert_sql("SELECT gemini_api_key FROM users WHERE id = ?")
+            if is_postgres():
+                from psycopg2.extras import RealDictCursor
+                cur = conn.cursor(cursor_factory=RealDictCursor)
+                cur.execute(sql, convert_params((user_id,)))
+                row = cur.fetchone()
+            else:
+                cur = conn.cursor()
+                cur.execute(sql, (user_id,))
+                row = cur.fetchone()
             conn.close()
-            if row and row[0]:
-                st.session_state["gemini_api_key"] = row[0]
+            if row:
+                val = row['gemini_api_key'] if isinstance(row, dict) else row[0]
+                if val:
+                    st.session_state["gemini_api_key"] = val
         except Exception:
             pass
 

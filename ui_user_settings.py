@@ -10,36 +10,58 @@ Uses the **new ``google.genai`` Client SDK** and ``models/gemini-2.5-flash``.
 
 import os
 import time
-import sqlite3
 from typing import Optional, Tuple
 
 import streamlit as st
 
+from db_layer import get_conn, convert_sql, convert_params, is_postgres
+
 
 # ── helpers ───────────────────────────────────────────────────────────
 
-def _portfolio_db_path() -> str:
-    return os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        "portfolio.db",
-    )
+def _db_query_one(sql: str, params: tuple):
+    """Run a SELECT and return one row (tuple or dict) or None."""
+    conn = get_conn()
+    try:
+        sql = convert_sql(sql)
+        params = convert_params(params)
+        if is_postgres():
+            from psycopg2.extras import RealDictCursor
+            cur = conn.cursor(cursor_factory=RealDictCursor)
+            cur.execute(sql, params)
+            return cur.fetchone()
+        else:
+            cur = conn.cursor()
+            cur.execute(sql, params)
+            return cur.fetchone()
+    finally:
+        conn.close()
+
+
+def _db_exec(sql: str, params: tuple):
+    """Run an INSERT/UPDATE/DELETE and commit."""
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute(convert_sql(sql), convert_params(params))
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def _get_user_key_status(user_id: int) -> Tuple[Optional[str], Optional[int], int]:
     """Return (encrypted_key, last_validated_ts, requests_today)."""
     try:
-        conn = sqlite3.connect(_portfolio_db_path())
-        cur = conn.cursor()
-        cur.execute(
+        row = _db_query_one(
             "SELECT gemini_api_key_encrypted, "
             "       gemini_api_key_last_validated, "
             "       gemini_requests_today "
             "FROM users WHERE id = ?",
             (user_id,),
         )
-        row = cur.fetchone()
-        conn.close()
         if row:
+            if isinstance(row, dict):
+                return row.get('gemini_api_key_encrypted'), row.get('gemini_api_key_last_validated'), row.get('gemini_requests_today') or 0
             return row[0], row[1], row[2] or 0
     except Exception:
         pass
@@ -47,29 +69,23 @@ def _get_user_key_status(user_id: int) -> Tuple[Optional[str], Optional[int], in
 
 
 def _save_encrypted_key(user_id: int, encrypted: str) -> None:
-    conn = sqlite3.connect(_portfolio_db_path())
-    conn.execute(
+    _db_exec(
         "UPDATE users "
         "SET gemini_api_key_encrypted = ?, "
         "    gemini_api_key_last_validated = ? "
         "WHERE id = ?",
         (encrypted, int(time.time()), user_id),
     )
-    conn.commit()
-    conn.close()
 
 
 def _remove_key(user_id: int) -> None:
-    conn = sqlite3.connect(_portfolio_db_path())
-    conn.execute(
+    _db_exec(
         "UPDATE users "
         "SET gemini_api_key_encrypted = NULL, "
         "    gemini_api_key_last_validated = NULL "
         "WHERE id = ?",
         (user_id,),
     )
-    conn.commit()
-    conn.close()
 
 
 def _verify_key(api_key: str) -> Tuple[bool, str]:
@@ -141,13 +157,13 @@ def ui_api_key_settings(user_id: int) -> None:
     # Also check legacy plaintext column
     has_plaintext = False
     try:
-        conn = sqlite3.connect(_portfolio_db_path())
-        cur = conn.cursor()
-        cur.execute("SELECT gemini_api_key FROM users WHERE id = ?", (user_id,))
-        row = cur.fetchone()
-        conn.close()
-        if row and row[0] and not row[0].startswith("your_"):
-            has_plaintext = True
+        row = _db_query_one(
+            "SELECT gemini_api_key FROM users WHERE id = ?", (user_id,)
+        )
+        if row:
+            val = row['gemini_api_key'] if isinstance(row, dict) else row[0]
+            if val and not str(val).startswith("your_"):
+                has_plaintext = True
     except Exception:
         pass
 
@@ -224,12 +240,9 @@ def ui_api_key_settings(user_id: int) -> None:
         _remove_key(user_id)
         # Also clear plaintext column
         try:
-            conn = sqlite3.connect(_portfolio_db_path())
-            conn.execute(
+            _db_exec(
                 "UPDATE users SET gemini_api_key = NULL WHERE id = ?", (user_id,)
             )
-            conn.commit()
-            conn.close()
         except Exception:
             pass
         st.session_state.pop("gemini_api_key", None)
@@ -257,13 +270,10 @@ def ui_api_key_settings(user_id: int) -> None:
                 else:
                     # Legacy plaintext fallback
                     try:
-                        conn = sqlite3.connect(_portfolio_db_path())
-                        conn.execute(
+                        _db_exec(
                             "UPDATE users SET gemini_api_key = ? WHERE id = ?",
                             (api_key, user_id),
                         )
-                        conn.commit()
-                        conn.close()
                     except Exception:
                         pass
 
@@ -281,16 +291,16 @@ def ui_api_key_settings(user_id: int) -> None:
         st.markdown("### 🔄 Migrate Plaintext Key to Encrypted Storage")
         if st.button("Encrypt existing key now", key="migrate_key"):
             try:
-                conn = sqlite3.connect(_portfolio_db_path())
-                cur = conn.cursor()
-                cur.execute("SELECT gemini_api_key FROM users WHERE id = ?", (user_id,))
-                row = cur.fetchone()
-                conn.close()
-                if row and row[0]:
-                    enc = encryptor.encrypt(row[0])
-                    _save_encrypted_key(user_id, enc)
-                    st.success("✅ Key migrated to encrypted storage!")
-                    time.sleep(1)
-                    st.rerun()
+                row = _db_query_one(
+                    "SELECT gemini_api_key FROM users WHERE id = ?", (user_id,)
+                )
+                if row:
+                    val = row['gemini_api_key'] if isinstance(row, dict) else row[0]
+                    if val:
+                        enc = encryptor.encrypt(val)
+                        _save_encrypted_key(user_id, enc)
+                        st.success("✅ Key migrated to encrypted storage!")
+                        time.sleep(1)
+                        st.rerun()
             except Exception as exc:
                 st.error(f"Migration failed: {exc}")
