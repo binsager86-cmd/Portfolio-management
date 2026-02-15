@@ -419,6 +419,10 @@ class AnalysisDatabase:
         avoid FOREIGN KEY constraint failures (REPLACE internally
         DELETEs the parent row, which violates FKs from
         financial_line_items).
+
+        Matches on ``(stock_id, statement_type, period_end_date)`` first;
+        falls back to ``(stock_id, statement_type, fiscal_year)`` so that
+        re-uploading the same year always overwrites.
         """
         now = int(time.time())
         existing = self.execute_query(
@@ -426,11 +430,18 @@ class AnalysisDatabase:
                WHERE stock_id = ? AND statement_type = ? AND period_end_date = ?""",
             (stock_id, kwargs['statement_type'], kwargs['period_end_date']),
         )
+        if not existing:
+            existing = self.execute_query(
+                """SELECT id FROM financial_statements
+                   WHERE stock_id = ? AND statement_type = ? AND fiscal_year = ?""",
+                (stock_id, kwargs['statement_type'], kwargs['fiscal_year']),
+            )
         if existing:
             stmt_id = existing[0]['id']
             self.execute_update(
                 """UPDATE financial_statements
                    SET fiscal_year = ?, fiscal_quarter = ?,
+                       period_end_date = ?,
                        filing_date = ?, source_file = ?,
                        extracted_by = ?, confidence_score = ?,
                        verified_by_user = ?, notes = ?, created_at = ?
@@ -438,6 +449,7 @@ class AnalysisDatabase:
                 (
                     kwargs['fiscal_year'],
                     kwargs.get('fiscal_quarter'),
+                    kwargs['period_end_date'],
                     kwargs.get('filing_date'),
                     kwargs.get('source_file'),
                     kwargs.get('extracted_by', 'gemini'),
@@ -486,12 +498,24 @@ class AnalysisDatabase:
         self, statement_id: int, items: List[Dict[str, Any]]
     ) -> int:
         """Insert many line items at once for a statement."""
+        def _safe_amount(it: Dict[str, Any]) -> float:
+            val = it.get('amount') or it.get('value') or 0.0
+            if isinstance(val, str):
+                try:
+                    return float(val.replace(",", ""))
+                except (ValueError, TypeError):
+                    return 0.0
+            try:
+                return float(val)
+            except (ValueError, TypeError):
+                return 0.0
+
         params = [
             (
                 statement_id,
                 it.get('code') or it.get('name', 'UNKNOWN').upper().replace(' ', '_'),
                 it.get('name', it.get('code', 'Unknown')),
-                it.get('amount', it.get('value', 0.0)),
+                _safe_amount(it),
                 it.get('currency', 'USD'),
                 it.get('order', idx),
                 it.get('parent_item_id'),

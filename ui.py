@@ -6990,18 +6990,14 @@ def init_db() -> None:
                 _ensure_normalized_schema()
                 return
         else:
-            # For SQLite, check sqlite_master
-            conn = get_conn()
-            cur = conn.cursor()
-            cur.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='users'")
-            if cur.fetchone():
-                conn.close()
-                _log_startup("SQLite DB already initialized - skipping full setup")
-                # Ensure securities tables exist (added later in development)
-                _ensure_securities_tables()
-                _ensure_normalized_schema()
-                return
-            conn.close()
+            # For SQLite, use production schema module for ALL init + migrations
+            from db_production_schema import ensure_production_schema
+            ensure_production_schema("portfolio.db")
+            _log_startup("SQLite production schema verified (all tables + migrations)")
+            # Legacy helpers for anything not yet in production schema
+            _ensure_securities_tables()
+            _ensure_normalized_schema()
+            return
     except Exception as e:
         logger.debug(f"DB init check note: {e}")
         # Continue with full initialization if check fails
@@ -7037,11 +7033,22 @@ def init_db() -> None:
         logger.info("✅ PostgreSQL schema ready")
         return
     
-    # SQLite initialization (original logic)
+    # SQLite initialization — use production schema module as the source of truth
+    try:
+        from db_production_schema import ensure_production_schema
+        ensure_production_schema("portfolio.db")
+        logger.info("✅ SQLite production schema initialised via db_production_schema")
+        _ensure_securities_tables()
+        _ensure_normalized_schema()
+        return
+    except Exception as e:
+        logger.warning(f"Production schema init failed, falling back to legacy: {e}")
+
+    # ── Legacy fallback (kept for safety) ──────────────────────────
     conn = get_conn()
     cur = conn.cursor()
     
-    logger.info("🔧 Initializing SQLite database...")
+    logger.info("🔧 Initializing SQLite database (legacy path)...")
 
     # ============================================
     # STEP 1: CREATE USERS TABLE FIRST (Priority #1)

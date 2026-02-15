@@ -1,0 +1,506 @@
+{
+  "upload_id": 4,
+  "cache_key": "93387857f60350f40cea52c63366ce58bcd3b4f176ec253b9a6a67f5ffaef58d_vision-v1.0",
+  "extractor_version": "vision-v1.0",
+  "status": "success",
+  "flags": [],
+  "statements": {
+    "balance_sheet": {
+      "statement_type": "balance_sheet",
+      "currency": "KWD",
+      "unit_scale": 1,
+      "periods": [
+        {
+          "label": "2019-12-31",
+          "col_name": "2019"
+        },
+        {
+          "label": "2018-12-31",
+          "col_name": "2018"
+        }
+      ],
+      "items": [
+        {
+          "label_raw": "Cash and bank balances",
+          "key": "cash_and_bank_balances",
+          "values": {
+            "2019-12-31": 35355264.0,
+            "2018-12-31": 26602059.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Trade and other receivables",
+          "key": "trade_and_other_receivables",
+          "values": {
+            "2019-12-31": 22425454.0,
+            "2018-12-31": 20994756.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Inventories",
+          "key": "inventories",
+          "values": {
+            "2019-12-31": 48024.0,
+            "2018-12-31": 52043.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Current assets subtotal",
+          "key": "current_assets_subtotal",
+          "values": {
+            "2019-12-31": 57828742.0,
+            "2018-12-31": 47648858.0
+          },
+          "is_total": true
+        },
+        {
+          "label_raw": "Right-of-use assets",
+          "key": "right_of_use_assets",
+          "values": {
+            "2019-12-31": 1049789.0,
+            "2018-12-31": null
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Property and equipment",
+          "key": "property_and_equipment",
+          "values": {
+            "2019-12-31": 51556641.0,
+            "2018-12-31": 54222104.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Intangible assets",
+          "key": "intangible_assets",
+          "values": {
+            "2019-12-31": 7281989.0,
+            "2018-12-31": 7335593.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Investment in associates",
+          "key": "investment_in_associates",
+          "values": {
+            "2019-12-31": 626073.0,
+            "2018-12-31": 707439.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Non-current assets subtotal",
+          "key": "non_current_assets_subtotal",
+          "values": {
+            "2019-12-31": 60514492.0,
+            "2018-12-31": 62265136.0
+          },
+          "is_total": true
+        },
+        {
+          "label_raw": "Total assets",
+          "key": "total_assets",
+          "values": {
+            "2019-12-31": 118343234.0,
+            "2018-12-31": 109913994.0
+          },
+          "is_total": true
+        },
+        {
+          "label_raw": "Trade and other payables",
+          "key": "trade_and_other_payables",
+          "values": {
+            "2019-12-31": 748898.0,
+            "2018-12-31": 1025981.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Accruals and other liabilities",
+          "key": "accruals_and_other_liabilities",
+          "values": {
+            "2019-12-31": 6494450.0,
+            "2018-12-31": 6402888.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Lease liabilities",
+          "key": "lease_liabilities",
+          "values": {
+            "2019-12-31": 156676.0,
+            "2018-12-31": null
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Deferred income",
+          "key": "deferred_income",
+          "values": {
+            "2019-12-31": 6443789.0,
+            "2018-12-31": 6244841.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Retentions payable",
+          "key": "retentions_payable",
+          "values": {
+            "2019-12-31": 466557.0,
+            "2018-12-31": 966509.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Current portion of long-term debts",
+          "key": "current_portion_of_long_term_debts",
+          "values": {
+            "2019-12-31": 7890000.0,
+            "2018-12-31": 7700000.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Current liabilities subtotal",
+          "key": "current_liabilities_subtotal",
+          "values": {
+            "2019-12-31": 22200370.0,
+            "2018-12-31": 22340219.0
+          },
+          "is_total": true
+        },
+        {
+          "label_raw": "Lease liabilities",
+          "key": "lease_liabilities_non_current",
+          "values": {
+            "2019-12-31": 881966.0,
+            "2018-12-31": null
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Long-term debts",
+          "key": "long_term_debts",
+          "values": {
+            "2019-12-31": 10879265.0,
+            "2018-12-31": 17208526.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Provision for staff indemnity",
+          "key": "provision_for_staff_indemnity",
+          "values": {
+            "2019-12-31": 3972194.0,
+            "2018-12-31": 3318334.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Non-current liabilities subtotal",
+          "key": "non_current_liabilities_subtotal",
+          "values": {
+            "2019-12-31": 15733425.0,
+            "2018-12-31": 20526860.0
+          },
+          "is_total": true
+        },
+        {
+          "label_raw": "Total liabilities",
+          "key": "total_liabilities",
+          "values": {
+            "2019-12-31": 37933795.0,
+            "2018-12-31": 42867079.0
+          },
+          "is_total": true
+        },
+        {
+          "label_raw": "Share capital",
+          "key": "share_capital",
+          "values": {
+            "2019-12-31": 12223680.0,
+            "2018-12-31": 12223680.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Share premium",
+          "key": "share_premium",
+          "values": {
+            "2019-12-31": 1512000.0,
+            "2018-12-31": 1512000.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Statutory reserve",
+          "key": "statutory_reserve",
+          "values": {
+            "2019-12-31": 9894240.0,
+            "2018-12-31": 6112840.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Voluntary reserve",
+          "key": "voluntary_reserve",
+          "values": {
+            "2019-12-31": 6112840.0,
+            "2018-12-31": 6112840.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Treasury shares",
+          "key": "treasury_shares",
+          "values": {
+            "2019-12-31": -288877.0,
+            "2018-12-31": -288877.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Treasury shares reserve",
+          "key": "treasury_shares_reserve",
+          "values": {
+            "2019-12-31": 564013.0,
+            "2018-12-31": 564013.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Retained earnings",
+          "key": "retained_earnings",
+          "values": {
+            "2019-12-31": 50299035.0,
+            "2018-12-31": 40713526.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Foreign currency translation reserve",
+          "key": "foreign_currency_translation_reserve",
+          "values": {
+            "2019-12-31": 92508.0,
+            "2018-12-31": 96893.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Total equity",
+          "key": "total_equity",
+          "values": {
+            "2019-12-31": 80409439.0,
+            "2018-12-31": 67046915.0
+          },
+          "is_total": true
+        },
+        {
+          "label_raw": "Total liabilities and equity",
+          "key": "total_liabilities_and_equity",
+          "values": {
+            "2019-12-31": 118343234.0,
+            "2018-12-31": 109913994.0
+          },
+          "is_total": true
+        }
+      ]
+    },
+    "income_statement": {
+      "statement_type": "income_statement",
+      "currency": "KWD",
+      "unit_scale": 1,
+      "periods": [
+        {
+          "label": "2019-12-31",
+          "col_name": "2019"
+        },
+        {
+          "label": "2018-12-31",
+          "col_name": "2018"
+        }
+      ],
+      "items": [
+        {
+          "label_raw": "Revenue",
+          "key": "revenue",
+          "values": {
+            "2019-12-31": 73294166.0,
+            "2018-12-31": 69250695.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Cost of operations",
+          "key": "cost_of_operations",
+          "values": {
+            "2019-12-31": -16575784.0,
+            "2018-12-31": -15717901.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Gross profit",
+          "key": "gross_profit",
+          "values": {
+            "2019-12-31": 56718382.0,
+            "2018-12-31": 53532794.0
+          },
+          "is_total": true
+        },
+        {
+          "label_raw": "General and administrative expenses",
+          "key": "general_and_administrative_expenses",
+          "values": {
+            "2019-12-31": -15032484.0,
+            "2018-12-31": -15732869.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Selling expenses",
+          "key": "selling_expenses",
+          "values": {
+            "2019-12-31": -2947526.0,
+            "2018-12-31": -3382070.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Finance charges",
+          "key": "finance_charges",
+          "values": {
+            "2019-12-31": -1290396.0,
+            "2018-12-31": -1513401.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Share of profit of associates",
+          "key": "share_of_profit_of_associates",
+          "values": {
+            "2019-12-31": 30804.0,
+            "2018-12-31": 44014.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Other income",
+          "key": "other_income",
+          "values": {
+            "2019-12-31": 335218.0,
+            "2018-12-31": 272452.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Profit before contribution to Kuwait Foundation for Advancement of Sciences (\"KFAS\"), National Labour Support Tax (\"NLST\"), Zakat and Directors' remuneration",
+          "key": "profit_before_contribution_to_kuwait_foundation_for_advancement_of_sciences_kfas_national_labour_support_tax_nlst_zakat_and_directors_remuneration",
+          "values": {
+            "2019-12-31": 37813998.0,
+            "2018-12-31": 33220920.0
+          },
+          "is_total": true
+        },
+        {
+          "label_raw": "Contribution to KFAS",
+          "key": "contribution_to_kfas",
+          "values": {
+            "2019-12-31": -383608.0,
+            "2018-12-31": -330199.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "NLST",
+          "key": "nlst",
+          "values": {
+            "2019-12-31": -965576.0,
+            "2018-12-31": -854510.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Zakat",
+          "key": "zakat",
+          "values": {
+            "2019-12-31": -391850.0,
+            "2018-12-31": -347347.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Directors' remuneration",
+          "key": "directors_remuneration",
+          "values": {
+            "2019-12-31": -200000.0,
+            "2018-12-31": -200000.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Profit for the year",
+          "key": "profit_for_the_year",
+          "values": {
+            "2019-12-31": 35872964.0,
+            "2018-12-31": 31488864.0
+          },
+          "is_total": true
+        },
+        {
+          "label_raw": "Basic and diluted earnings per share (fils)",
+          "key": "basic_and_diluted_earnings_per_share_fils",
+          "values": {
+            "2019-12-31": 295.0,
+            "2018-12-31": 259.0
+          },
+          "is_total": false
+        }
+      ]
+    }
+  },
+  "validations": [
+    {
+      "statement_type": "balance_sheet",
+      "rule_name": "assets_eq_liab_plus_equity",
+      "expected": 109913994.0,
+      "actual": 109913994.0,
+      "diff": 0.0,
+      "passed": true,
+      "note": "period=2018-12-31 diff=0 (0.00%)"
+    },
+    {
+      "statement_type": "balance_sheet",
+      "rule_name": "assets_eq_liab_plus_equity",
+      "expected": 118343234.0,
+      "actual": 118343234.0,
+      "diff": 0.0,
+      "passed": true,
+      "note": "period=2019-12-31 diff=0 (0.00%)"
+    }
+  ],
+  "page_types": {
+    "0": "balance_sheet",
+    "1": "income_statement",
+    "2": "unknown"
+  },
+  "page_hashes": {
+    "0": "b90e8acd1413d46b",
+    "1": "9c3f968aafcac6b5",
+    "2": "fa3afc1d3abec889"
+  },
+  "timings": {
+    "render": 2.13,
+    "classify": 59.25,
+    "extract_balance_sheet": 20.67,
+    "extract_income_statement": 16.0,
+    "validate": 0.0,
+    "persist": 0.71,
+    "total": 155.87
+  },
+  "_from_cache": false
+}
