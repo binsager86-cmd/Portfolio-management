@@ -99,24 +99,40 @@ def create_session_token(user_id: int, days: int = 7) -> Tuple[str, int]:
     conn = get_conn()
     cur = conn.cursor()
     try:
-        # Ensure table exists
+        # Ensure table exists (SQLite only — PG table created by init_postgres_schema)
         if not is_postgres():
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS user_sessions (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     user_id INTEGER NOT NULL,
-                    session_token TEXT NOT NULL UNIQUE,
+                    token TEXT NOT NULL UNIQUE,
                     expires_at INTEGER NOT NULL,
                     created_at INTEGER NOT NULL
                 )
             """)
+            # Migrate legacy column name if needed (session_token → token)
+            try:
+                cur.execute("SELECT session_token FROM user_sessions LIMIT 1")
+                # Old column exists — recreate table with correct schema
+                cur.execute("DROP TABLE user_sessions")
+                cur.execute("""
+                    CREATE TABLE user_sessions (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        user_id INTEGER NOT NULL,
+                        token TEXT NOT NULL UNIQUE,
+                        expires_at INTEGER NOT NULL,
+                        created_at INTEGER NOT NULL
+                    )
+                """)
+            except Exception:
+                pass  # Column doesn't exist — table has correct schema
         
         # Clean old sessions for this user
         db_execute(cur, "DELETE FROM user_sessions WHERE user_id = ?", (user_id,))
         
         # Insert new session
         db_execute(cur, """
-            INSERT INTO user_sessions (user_id, session_token, expires_at, created_at)
+            INSERT INTO user_sessions (user_id, token, expires_at, created_at)
             VALUES (?, ?, ?, ?)
         """, (user_id, token, expires_at, int(time.time())))
         
@@ -140,7 +156,7 @@ def get_user_from_token(token: str) -> Optional[Dict]:
             SELECT u.id, u.username, u.email, s.expires_at
             FROM users u
             JOIN user_sessions s ON u.id = s.user_id
-            WHERE s.session_token = ? AND s.expires_at > ?
+            WHERE s.token = ? AND s.expires_at > ?
         """, (token, int(time.time())))
         
         row = cur.fetchone()

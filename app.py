@@ -42,31 +42,24 @@ def main():
     # =============================
     from auth_app import get_cookie_manager, restore_session_from_cookie, login_page
     
-    cookie_manager = get_cookie_manager()
+    cookie_manager = None
+    try:
+        cookie_manager = get_cookie_manager()
+    except Exception:
+        pass  # Cookie manager is optional — login works without it
     
     # Only check cookies once per session
     if not st.session_state.get('_auth_checked'):
+        st.session_state._auth_checked = True  # Always mark checked to avoid loops
         if cookie_manager:
-            # Wait for cookies to load
             try:
                 all_cookies = cookie_manager.get_all()
-                cookies_loaded = all_cookies is not None
-            except:
-                cookies_loaded = False
-            
-            if cookies_loaded:
-                restored = restore_session_from_cookie(cookie_manager)
-                st.session_state._auth_checked = True
-                
-                if restored:
-                    # Session restored - load full app
-                    st.rerun()
-            else:
-                # Cookies not loaded yet - rerun to wait
-                st.session_state._auth_checked = True
-                st.rerun()
-        else:
-            st.session_state._auth_checked = True
+                if all_cookies is not None:
+                    restored = restore_session_from_cookie(cookie_manager)
+                    if restored:
+                        st.rerun()
+            except Exception:
+                pass  # Cookie restore failed — fall through to login page
     
     # =============================
     # STEP 3: Show login page (lightweight - no heavy imports)
