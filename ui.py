@@ -3029,11 +3029,21 @@ def get_db_connection_pool():
                 pass
             _connection_container["conn"] = None
     
-    # Create new connection and wrap it
-    new_conn = _db_get_conn()
-    wrapper = PersistentConnectionWrapper(new_conn)
-    _connection_container["conn"] = wrapper
-    return wrapper
+    # Create new connection and wrap it (with retry for transient failures)
+    import time as _time
+    last_err = None
+    for _attempt in range(3):
+        try:
+            new_conn = _db_get_conn()
+            wrapper = PersistentConnectionWrapper(new_conn)
+            _connection_container["conn"] = wrapper
+            return wrapper
+        except Exception as e:
+            last_err = e
+            if _attempt < 2:
+                _time.sleep(1)  # Brief pause before retry
+            _connection_container["conn"] = None
+    raise last_err  # All retries failed
 
 def get_cached_connection():
     """Wrapper to use the cached connection pool."""
@@ -23468,7 +23478,12 @@ def login_page(cookie_manager=None):
                 rate_limit_window = 900  # 15 minutes
                 max_otp_requests = 3
                 
-                conn = get_conn()
+                try:
+                    conn = get_conn()
+                except Exception as e:
+                    st.error("⚠️ Unable to connect to the database. Please try again in a moment.")
+                    logger.error(f"DB connection error in forgot_pass: {e}")
+                    return
                 cur = conn.cursor()
                 
                 # Check rate limit first
@@ -23526,7 +23541,12 @@ def login_page(cookie_manager=None):
                     target_email = st.session_state.get("reset_email")
                     now = int(time.time())
                     
-                    conn = get_conn()
+                    try:
+                        conn = get_conn()
+                    except Exception as e:
+                        st.error("⚠️ Unable to connect to the database. Please try again in a moment.")
+                        logger.error(f"DB connection error in verify_otp: {e}")
+                        return
                     cur = conn.cursor()
                     # Verify OTP
                     db_execute(cur, "SELECT otp FROM password_resets WHERE email=? AND expires_at > ?", (target_email, now))
@@ -23576,6 +23596,7 @@ def login_page(cookie_manager=None):
                 elif "@" not in reg_email or "." not in reg_email:
                     st.error("Invalid email format")
                 else:
+                    conn = None
                     try:
                         conn = get_conn()
                         cur = conn.cursor()
@@ -23594,9 +23615,11 @@ def login_page(cookie_manager=None):
                             st.session_state._register_success = True
                             st.rerun()
                     except Exception as e:
-                        st.error(f"Registration error: {e}")
+                        st.error(f"⚠️ Registration error: Unable to connect to the database. Please try again.")
+                        logger.error(f"Registration error: {e}")
                     finally:
-                        conn.close()
+                        if conn:
+                            conn.close()
 
     else:
         # standard login page (default)
@@ -23619,9 +23642,10 @@ def login_page(cookie_manager=None):
         if submitted:
             email_login = email_login_input.strip().lower()
 
-            conn = get_conn()
-            cur = conn.cursor()
+            conn = None
             try:
+                conn = get_conn()
+                cur = conn.cursor()
                 # Check BOTH email and username columns (case-insensitive)
                 db_execute(cur, "SELECT password_hash, username, id FROM users WHERE LOWER(email) = ? OR LOWER(username) = ?", (email_login, email_login))
                 row = cur.fetchone()
@@ -23680,9 +23704,11 @@ def login_page(cookie_manager=None):
                     st.error("❌ Invalid email or password. Please check your credentials or register a new account.")
 
             except Exception as e:
-                st.error(f"Login error: {e}")
+                st.error(f"⚠️ Login error: Unable to connect to the database. Please try again in a moment.")
+                logger.error(f"Login error: {e}")
             finally:
-                conn.close()
+                if conn:
+                    conn.close()
         
         col_act1, col_act2 = st.columns([1, 1])
         with col_act2:

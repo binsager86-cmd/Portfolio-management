@@ -385,9 +385,10 @@ def login_page(cookie_manager=None):
         if submitted:
             email_login = email_login_input.strip().lower()
             
-            conn = get_conn()
-            cur = conn.cursor()
+            conn = None
             try:
+                conn = get_conn()
+                cur = conn.cursor()
                 db_execute(cur, "SELECT password_hash, username, id FROM users WHERE LOWER(email) = ? OR LOWER(username) = ?", (email_login, email_login))
                 row = cur.fetchone()
                 
@@ -424,9 +425,11 @@ def login_page(cookie_manager=None):
                 else:
                     st.error("❌ Invalid email or password.")
             except Exception as e:
-                st.error(f"Login error: {e}")
+                st.error("⚠️ Unable to connect to the database. Please try again in a moment.")
+                logger.error(f"Login error: {e}")
             finally:
-                conn.close()
+                if conn:
+                    conn.close()
         
         col1, col2 = st.columns([1, 1])
         with col2:
