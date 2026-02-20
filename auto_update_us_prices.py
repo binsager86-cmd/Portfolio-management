@@ -42,10 +42,16 @@ def fetch_yahoo_close(symbol: str) -> float:
     """
     Fetch latest close price for a US stock from Yahoo via yfinance.
     We use 5d to reliably get the last close (handles weekends/holidays).
+    Handles yfinance 1.0 MultiIndex columns.
     """
     t = yf.Ticker(symbol)
     hist = t.history(period="5d", interval="1d")
     if hist is None or hist.empty:
+        return None
+    # Flatten MultiIndex columns (yfinance >= 1.0)
+    if hist.columns.nlevels > 1:
+        hist.columns = hist.columns.get_level_values(0)
+    if 'Close' not in hist.columns:
         return None
     last_close = float(hist["Close"].dropna().iloc[-1])
     return last_close

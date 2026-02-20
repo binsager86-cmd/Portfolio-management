@@ -753,7 +753,8 @@ def init_postgres_schema():
                     roi_percent DOUBLE PRECISION DEFAULT 0,
                     twr_percent DOUBLE PRECISION,
                     mwrr_percent DOUBLE PRECISION,
-                    created_at INTEGER
+                    created_at INTEGER,
+                    UNIQUE(snapshot_date, user_id)
                 )
             """),
             ("cbk_rate_cache", """
@@ -1064,6 +1065,18 @@ def init_postgres_schema():
             cur.execute("RELEASE SAVEPOINT sp_copy")
         except Exception:
             cur.execute("ROLLBACK TO SAVEPOINT sp_copy")
+
+        # Ensure UNIQUE constraint on portfolio_snapshots(snapshot_date, user_id)
+        # This prevents duplicate snapshots per user per day.
+        try:
+            cur.execute("SAVEPOINT sp_snap_uq")
+            cur.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_snapshot_date_user
+                ON portfolio_snapshots(snapshot_date, user_id)
+            """)
+            cur.execute("RELEASE SAVEPOINT sp_snap_uq")
+        except Exception:
+            cur.execute("ROLLBACK TO SAVEPOINT sp_snap_uq")
 
         # Record schema version
         try:

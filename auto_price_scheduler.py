@@ -225,10 +225,22 @@ def resolve_symbol_via_securities_master(symbol: str, currency: str = None) -> t
     return None, None
 
 
+def _flatten_yf_columns(data):
+    """Flatten MultiIndex columns returned by yfinance >= 0.2.31 / 1.0.
+    
+    yfinance 1.0 returns columns like ('Close', 'AAPL') instead of 'Close'.
+    This helper converts them back to flat column names.
+    """
+    if data.columns.nlevels > 1:
+        data.columns = data.columns.get_level_values(0)
+    return data
+
+
 def fetch_price(symbol: str, currency: str = None) -> tuple:
     """Fetch current price for a stock symbol.
     
     Now integrates with Securities Master for proper symbol resolution.
+    Handles yfinance 1.0 MultiIndex columns.
     
     Returns:
         (price, ticker_used) or (None, None) if failed
@@ -239,7 +251,7 @@ def fetch_price(symbol: str, currency: str = None) -> tuple:
     
     symbol_upper = symbol.upper().strip()
     
-    # ✅ NEW: Try Securities Master resolution first
+    # Try Securities Master resolution first
     sm_ticker, sm_exchange = resolve_symbol_via_securities_master(symbol, currency)
     
     # Build list of tickers to try
@@ -267,7 +279,11 @@ def fetch_price(symbol: str, currency: str = None) -> tuple:
     for ticker in tickers_to_try:
         try:
             data = yf.download(ticker, period="5d", progress=False, threads=False)
-            if not data.empty and 'Close' in data.columns:
+            if data.empty:
+                continue
+            # Flatten MultiIndex columns (yfinance >= 1.0)
+            data = _flatten_yf_columns(data)
+            if 'Close' in data.columns:
                 close_series = data['Close'].dropna()
                 if not close_series.empty:
                     raw = close_series.iloc[-1]
@@ -281,15 +297,21 @@ def fetch_price(symbol: str, currency: str = None) -> tuple:
 
 
 def fetch_usd_kwd_rate() -> float:
-    """Fetch current USD/KWD exchange rate."""
+    """Fetch current USD/KWD exchange rate.
+    
+    Handles yfinance 1.0 MultiIndex columns.
+    """
     if not YFINANCE_AVAILABLE or yf is None:
         return 0.307
     
     try:
         data = yf.download("USDKWD=X", period="5d", progress=False, threads=False)
-        if not data.empty and 'Close' in data.columns:
-            close_val = data['Close'].dropna().iloc[-1]
-            return float(close_val.iloc[0]) if hasattr(close_val, 'iloc') else float(close_val)
+        if not data.empty:
+            # Flatten MultiIndex columns (yfinance >= 1.0)
+            data = _flatten_yf_columns(data)
+            if 'Close' in data.columns:
+                close_val = data['Close'].dropna().iloc[-1]
+                return float(close_val.iloc[0]) if hasattr(close_val, 'iloc') else float(close_val)
     except Exception as e:
         logger.warning(f"Failed to fetch USD/KWD rate: {e}")
     

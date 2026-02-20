@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS analysis_stocks (
     cik TEXT,
     description TEXT,
     website TEXT,
+    outstanding_shares REAL,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
     UNIQUE(user_id, symbol)
