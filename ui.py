@@ -4063,6 +4063,10 @@ def fetch_price_yfinance(symbol: str, max_retries: int = 3, portfolio: str = Non
                     auto_adjust=False,
                 )
                 
+                # Flatten MultiIndex columns (yfinance >= 1.0)
+                if hist is not None and not hist.empty and hist.columns.nlevels > 1:
+                    hist.columns = hist.columns.get_level_values(0)
+                
                 if hist is not None and not hist.empty and 'Close' in hist.columns:
                     close_series = hist["Close"].dropna()
                     if not close_series.empty:
@@ -15928,8 +15932,10 @@ def ui_portfolio_analysis():
                                 try:
                                     # Extract data for this ticker from batch result
                                     if len(unique_yf_tickers) == 1:
-                                        # Single ticker: batch_data has simple structure
+                                        # Single ticker: flatten MultiIndex (yfinance >= 1.0)
                                         ticker_data = batch_data
+                                        if ticker_data.columns.nlevels > 1:
+                                            ticker_data.columns = ticker_data.columns.get_level_values(0)
                                     else:
                                         # Multiple tickers: access by ticker name
                                         if yf_tick in batch_data.columns.get_level_values(0):
@@ -26999,6 +27005,20 @@ def main():
         
         if sac_available:
             try:
+                # Map saved tab name → menu index so the menu stays on the
+                # correct page across Streamlit reruns (e.g. widget interactions
+                # inside Fundamental Analysis won't jump back to Overview).
+                _menu_label_order = [
+                    'Overview', 'Add Cash Deposit', 'Add Transactions',
+                    'Portfolio Analysis', 'Peer Analysis', 'Trading Section',
+                    'Portfolio Tracker', 'Dividends Tracker', 'Planner',
+                    'Backup & Restore', 'Securities Master', 'Data Integrity',
+                    'Personal Finance', 'Fundamental Analysis',
+                ]
+                _default_idx = 0
+                if saved_tab and saved_tab in _menu_label_order:
+                    _default_idx = _menu_label_order.index(saved_tab)
+
                 selected_tab = sac.menu([
                     sac.MenuItem('Overview', icon='house-fill'),
                     sac.MenuItem('Add Cash Deposit', icon='wallet-fill'),
@@ -27022,7 +27042,7 @@ def main():
                         sac.MenuItem('Change Password', icon='key'),
                         sac.MenuItem('Logout', icon='box-arrow-right'),
                     ]),
-                ], format_func='title', open_all=True)
+                ], index=_default_idx, format_func='title', open_all=True, key='main_nav_menu')
             except Exception as e:
                 logger.debug(f"SAC menu error: {e}")
                 sac_available = False  # Force fallback

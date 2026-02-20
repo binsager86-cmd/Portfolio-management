@@ -298,6 +298,15 @@ def _render_create_form(user_id: int) -> None:
         isin = c7.text_input("ISIN (optional)", placeholder="US0378331005")
         cik = c8.text_input("CIK (optional)", placeholder="0000320193")
 
+        outstanding_shares = st.number_input(
+            "Outstanding Shares",
+            min_value=0.0,
+            step=1000000.0,
+            format="%.0f",
+            value=0.0,
+            help="Total shares outstanding (used for Book Value, EPS, P/E calculations)",
+        )
+
         description = st.text_area("Description", height=80)
         website = st.text_input("Website", placeholder="https://www.apple.com")
 
@@ -316,6 +325,7 @@ def _render_create_form(user_id: int) -> None:
             "cik": cik or None,
             "description": description or None,
             "website": website or None,
+            "outstanding_shares": outstanding_shares if outstanding_shares else None,
         }
         ok, errors = validate_stock_profile(data)
         if not ok:
@@ -376,6 +386,17 @@ def _render_edit_form(user_id: int) -> None:
         sector = c4.selectbox("Sector", [""] + SECTOR_CHOICES, index=sector_idx)
 
         industry = st.text_input("Industry", value=stock.get("industry") or "")
+
+        outstanding_shares = st.number_input(
+            "Outstanding Shares",
+            min_value=0.0,
+            step=1000000.0,
+            format="%.0f",
+            value=float(stock.get("outstanding_shares") or 0),
+            help="Total shares outstanding (used for Book Value, EPS, P/E calculations)",
+            key="edit_outstanding_shares",
+        )
+
         description = st.text_area("Description", value=stock.get("description") or "")
         website = st.text_input("Website", value=stock.get("website") or "")
 
@@ -388,6 +409,7 @@ def _render_edit_form(user_id: int) -> None:
             "currency": currency,
             "sector": sector or None,
             "industry": industry or None,
+            "outstanding_shares": outstanding_shares if outstanding_shares else None,
             "description": description or None,
             "website": website or None,
         }

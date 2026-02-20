@@ -812,12 +812,13 @@ class FinancialDataManager:
         self.db.execute_update(
             """UPDATE financial_line_items
                SET amount = ?, line_item_name = ?,
-                   manually_edited = 1,
+                   manually_edited = ?,
                    edited_by_user_id = ?, edited_at = ?
                WHERE id = ?""",
             (
                 new_amount,
                 new_name if new_name else (old[0]["line_item_name"] if old else ""),
+                True,
                 user_id,
                 int(time.time()),
                 item_id,

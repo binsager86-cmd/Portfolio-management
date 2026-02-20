@@ -48,6 +48,7 @@ class AnalysisDatabase:
         # db_layer controls where the database actually is.
         self._initialized = False
         self._initialize_database()
+        self._run_migrations()
 
     # ── schema initialisation ──────────────────────────────────────────
 
@@ -95,6 +96,7 @@ class AnalysisDatabase:
                 cik TEXT,
                 description TEXT,
                 website TEXT,
+                outstanding_shares DOUBLE PRECISION,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL,
                 UNIQUE(user_id, symbol)
@@ -220,6 +222,31 @@ class AnalysisDatabase:
             except Exception:
                 pass  # index already exists
 
+    # ── additive migrations ────────────────────────────────────────────
+    def _run_migrations(self) -> None:
+        """Add columns that may be missing from older schemas."""
+        try:
+            with get_connection() as conn:
+                cur = conn.cursor()
+                if is_postgres():
+                    cur.execute(
+                        "ALTER TABLE analysis_stocks ADD COLUMN IF NOT EXISTS "
+                        "outstanding_shares DOUBLE PRECISION"
+                    )
+                else:
+                    # SQLite: check pragma first
+                    cols = [r[1] for r in cur.execute(
+                        "PRAGMA table_info(analysis_stocks)"
+                    ).fetchall()]
+                    if 'outstanding_shares' not in cols:
+                        cur.execute(
+                            "ALTER TABLE analysis_stocks "
+                            "ADD COLUMN outstanding_shares REAL"
+                        )
+                conn.commit()
+        except Exception:
+            pass  # column already exists or table not created yet
+
     # ── connection (delegates to db_layer) ─────────────────────────────
 
     @staticmethod
@@ -317,8 +344,9 @@ class AnalysisDatabase:
             """INSERT INTO analysis_stocks
                (user_id, symbol, company_name, exchange, currency,
                 sector, industry, country, isin, cik,
-                description, website, created_at, updated_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                description, website, outstanding_shares,
+                created_at, updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 user_id,
                 kwargs['symbol'].upper(),
@@ -332,6 +360,7 @@ class AnalysisDatabase:
                 kwargs.get('cik'),
                 kwargs.get('description'),
                 kwargs.get('website'),
+                kwargs.get('outstanding_shares'),
                 now,
                 now,
             ),
@@ -540,10 +569,10 @@ class AnalysisDatabase:
     ) -> None:
         self.execute_update(
             """UPDATE financial_line_items
-               SET amount = ?, manually_edited = 1,
+               SET amount = ?, manually_edited = ?,
                    edited_by_user_id = ?, edited_at = ?
                WHERE id = ?""",
-            (amount, user_id, int(time.time()), item_id),
+            (amount, True, user_id, int(time.time()), item_id),
         )
 
     def delete_line_items_for_statement(self, statement_id: int) -> None:
