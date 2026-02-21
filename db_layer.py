@@ -468,7 +468,12 @@ def convert_params(params: tuple) -> tuple:
 
 
 def query_df(sql: str, params: tuple = ()) -> pd.DataFrame:
-    """Execute a SELECT query and return a DataFrame."""
+    """Execute a SELECT query and return a DataFrame.
+    
+    Uses cursor-based approach for PostgreSQL to avoid the pandas 2.x
+    deprecation warning / silent failures with raw DBAPI2 connections.
+    Falls back to pd.read_sql_query for SQLite (which still works fine).
+    """
     import traceback
     
     sql = convert_sql(sql)
@@ -479,8 +484,19 @@ def query_df(sql: str, params: tuple = ()) -> pd.DataFrame:
     
     with get_connection() as conn:
         try:
-            df = pd.read_sql_query(sql, conn, params=params)
-            return df
+            if DB_TYPE == 'postgres':
+                # Use cursor-based fetch to avoid pandas 2.x psycopg2 warning
+                cur = conn.cursor()
+                cur.execute(sql, params)
+                rows = cur.fetchall()
+                if not rows:
+                    return pd.DataFrame()
+                col_names = [desc[0] for desc in cur.description]
+                return pd.DataFrame(rows, columns=col_names)
+            else:
+                # SQLite works fine with pd.read_sql_query
+                df = pd.read_sql_query(sql, conn, params=params)
+                return df
         except Exception as e:
             print("SQL ERROR:", repr(e))
             print("SQL WAS:\n", sql)
