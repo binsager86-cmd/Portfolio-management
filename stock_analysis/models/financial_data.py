@@ -182,6 +182,8 @@ class FinancialDataManager:
         Each item has: statement_type, fiscal_year, period_end_date,
         confidence_score, line_items=[{code, name, amount, is_total}].
         """
+        import re as _re
+
         legacy: List[Dict[str, Any]] = []
         statements = ai_result.get("statements", {})
         if not statements:
@@ -192,13 +194,132 @@ class FinancialDataManager:
             items = stmt_data.get("items", [])
             periods = stmt_data.get("periods", [])
 
-            # Resolve all period labels
+            # ── Equity statements have a matrix layout ──
+            # The AI returns equity *component* columns (Share Capital,
+            # Statutory Reserve, …) as "periods" and embeds the fiscal
+            # year in the item labels ("Balance as at 31 December 2016").
+            # Detect this by checking if any period label contains a
+            # 4-digit year; if none do, assume equity-matrix layout.
             all_labels = [
                 FinancialDataManager._resolve_period_label(p)
                 for p in periods
             ]
-            all_labels = [l for l in all_labels if l]  # drop None
+            all_labels = [l for l in all_labels if l]
 
+            period_has_year = any(
+                _re.search(r"\d{4}", lbl) for lbl in all_labels
+            )
+
+            # Auto-correct misclassified equity statements: if periods
+            # look like equity component columns (no year, and labels
+            # match typical equity components), treat as equity.
+            _EQUITY_HINTS = {
+                "share_capital", "share_premium", "statutory_reserve",
+                "voluntary_reserve", "general_reserve", "treasury_shares",
+                "retained_earnings", "total", "reserves",
+            }
+            if not period_has_year and all_labels:
+                col_names = {
+                    (p.get("col_name", "") if isinstance(p, dict) else "").lower()
+                    for p in periods
+                }
+                if col_names & _EQUITY_HINTS:
+                    legacy_type = "equity"
+
+            # Also check item keys — if equity-component keys make up
+            # the MAJORITY of items, reclassify.  Balance sheets also
+            # have a few equity lines so we require > 50 %.
+            if legacy_type != "equity" and items:
+                item_keys = {
+                    item.get("key", "").lower() for item in items
+                }
+                n_equity = len(item_keys & _EQUITY_HINTS)
+                if len(items) <= 12 and n_equity >= 3:
+                    legacy_type = "equity"
+                elif n_equity > len(items) * 0.5:
+                    legacy_type = "equity"
+
+            if legacy_type == "equity" and not period_has_year:
+                # ── EQUITY MATRIX CONVERSION ──
+                # Group items by fiscal year parsed from label_raw.
+                # For each year, emit one legacy dict whose line_items
+                # contain key=component_column, amount=value.
+                year_groups: Dict[int, List[Dict[str, Any]]] = {}
+                for item in items:
+                    label = item.get("label_raw", "")
+                    m = _re.search(r"(\d{4})", label)
+                    # If label has no year, attach to the most-recent year
+                    yr = int(m.group(1)) if m else None
+                    year_groups.setdefault(yr, []).append(item)
+
+                # If there are items with no year, merge them into every
+                # year bucket (e.g. "Transfer to reserves" without year)
+                orphans = year_groups.pop(None, [])
+
+                if not year_groups:
+                    # All items lack years — fall back to single bucket
+                    year_groups[None] = items  # type: ignore[assignment]
+
+                sorted_years = sorted(
+                    (y for y in year_groups if y is not None), reverse=True
+                )
+
+                # Apply period_mode
+                if period_mode == "latest":
+                    target_years = sorted_years[:1]
+                elif period_mode == "previous":
+                    target_years = sorted_years[1:2] if len(sorted_years) > 1 else sorted_years[:1]
+                else:
+                    target_years = sorted_years if sorted_years else [None]  # type: ignore[list-item]
+
+                for yr in target_years:
+                    fy = yr
+                    ped = f"{yr}-12-31" if yr else None
+                    group_items = year_groups.get(yr, []) + orphans
+
+                    line_items: List[Dict[str, Any]] = []
+                    for item in group_items:
+                        key = item.get("key", "UNKNOWN")
+                        label_raw = item.get("label_raw", key)
+                        values = item.get("values", {})
+                        is_total = item.get("is_total", False)
+
+                        # Each component column becomes a line-item if
+                        # there is a "total" column, we use that as the
+                        # primary amount; otherwise flatten each component.
+                        if "total" in values:
+                            amount = values["total"]
+                            code = normalize_line_item_code(key.upper())
+                            line_items.append({
+                                "code": code,
+                                "name": label_raw,
+                                "amount": float(amount) if amount is not None else 0.0,
+                                "is_total": is_total,
+                            })
+                        else:
+                            # No total column — emit each component as
+                            # a separate line item
+                            for comp_key, comp_val in values.items():
+                                comp_code = normalize_line_item_code(
+                                    f"{key}_{comp_key}".upper()
+                                )
+                                line_items.append({
+                                    "code": comp_code,
+                                    "name": f"{label_raw} – {comp_key}",
+                                    "amount": float(comp_val) if comp_val is not None else 0.0,
+                                    "is_total": is_total,
+                                })
+
+                    legacy.append({
+                        "statement_type": legacy_type,
+                        "fiscal_year": fy,
+                        "period_end_date": ped,
+                        "confidence_score": 0.85,
+                        "line_items": line_items,
+                    })
+                continue  # done with this statement type
+
+            # ── STANDARD (non-equity) CONVERSION ──
             # Decide which period(s) to emit
             if period_mode == "latest":
                 target_labels = all_labels[:1]
