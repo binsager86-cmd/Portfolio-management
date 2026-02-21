@@ -2440,6 +2440,37 @@ try:
 except ImportError:
     stx = None
 
+# ── Native cookie helpers (replace stx.CookieManager) ─────────────
+# Reads via st.context.cookies (HTTP headers — no component needed)
+# Writes via lightweight JS snippet (no component lifecycle issues)
+
+def _read_cookies() -> dict:
+    """Read browser cookies from st.context (available since Streamlit 1.37)."""
+    try:
+        return dict(st.context.cookies) if st.context.cookies else {}
+    except Exception:
+        return {}
+
+def _set_cookie(name: str, value: str, max_age_days: int = 30):
+    """Set a browser cookie via a tiny JS snippet (zero-height iframe)."""
+    import streamlit.components.v1 as components
+    max_age = max_age_days * 86400
+    js = (
+        f'<script>document.cookie="{name}={value}'
+        f"; max-age={max_age}; path=/; SameSite=Lax"
+        '";</script>'
+    )
+    components.html(js, height=0, width=0)
+
+def _delete_cookie(name: str):
+    """Delete a browser cookie via JS (set max-age=0)."""
+    import streamlit.components.v1 as components
+    js = (
+        f'<script>document.cookie="{name}='
+        '; max-age=0; path=/; SameSite=Lax";</script>'
+    )
+    components.html(js, height=0, width=0)
+
 try:
     import streamlit_antd_components as sac
 except ImportError:
@@ -6978,6 +7009,80 @@ def resolve_stock_symbol(user_input: str, user_id: int = None) -> dict:
         logger.warning(f"Error resolving symbol {user_input}: {e}")
     
     return result
+
+
+# ── Lightweight auth-table bootstrap (runs BEFORE login page) ──────
+_auth_tables_ensured = False
+
+def _ensure_auth_tables():
+    """Create ONLY the three auth tables if missing.
+
+    This is intentionally lightweight — it does NOT run the full
+    ``init_db()`` / ``init_postgres_schema()`` which take seconds.
+    It exists to solve the chicken-and-egg problem: the login page
+    needs the *users* / *user_sessions* / *password_resets* tables,
+    but the heavy DB init is deferred until AFTER authentication.
+    """
+    global _auth_tables_ensured
+    if _auth_tables_ensured:
+        return
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        if is_postgres():
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    id SERIAL PRIMARY KEY,
+                    email TEXT UNIQUE,
+                    username TEXT NOT NULL UNIQUE,
+                    password_hash TEXT NOT NULL,
+                    name TEXT,
+                    created_at INTEGER NOT NULL
+                )
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS password_resets (
+                    email TEXT NOT NULL, otp TEXT NOT NULL,
+                    expires_at INTEGER NOT NULL, created_at INTEGER NOT NULL
+                )
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS user_sessions (
+                    token TEXT PRIMARY KEY,
+                    user_id INTEGER NOT NULL REFERENCES users(id),
+                    expires_at INTEGER NOT NULL, created_at INTEGER NOT NULL
+                )
+            """)
+        else:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    email TEXT UNIQUE,
+                    username TEXT NOT NULL UNIQUE,
+                    password_hash TEXT NOT NULL,
+                    name TEXT,
+                    created_at INTEGER NOT NULL
+                )
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS password_resets (
+                    email TEXT NOT NULL, otp TEXT NOT NULL,
+                    expires_at INTEGER NOT NULL, created_at INTEGER NOT NULL
+                )
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS user_sessions (
+                    token TEXT PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    expires_at INTEGER NOT NULL, created_at INTEGER NOT NULL,
+                    FOREIGN KEY (user_id) REFERENCES users(id)
+                )
+            """)
+        conn.commit()
+        conn.close()
+        _auth_tables_ensured = True
+    except Exception as e:
+        logger.warning(f"Auth table bootstrap note: {e}")
 
 
 def init_db() -> None:
@@ -23450,7 +23555,7 @@ def send_otp_email(to_email: str, otp: str):
     else:
         st.success(f"OTP sent to {to_email}")
 
-def login_page(cookie_manager=None):
+def login_page():
     st.markdown("""
     <style>
     .main { align-items: center; justify-content: center; display: flex; }
@@ -23684,25 +23789,14 @@ def login_page(cookie_manager=None):
                             # If not checked: 7 days (persists through refreshes for a week)
                             session_days = 30 if remember_me else 7
                             
-                            if cookie_manager:
-                                try:
-                                    # Create a secure session token in DB
-                                    token, token_expires = create_session_token(user_id, days=session_days)
-                                    expires = datetime.now() + timedelta(days=session_days)
-                                    # Store token in cookie
-                                    cookie_manager.set("portfolio_session", token, expires_at=expires)
-                                    
-                                    # FIX: Slight delay to ensure browser saves cookie, then force reload
-                                    import time as time_module
-                                    with st.spinner("Logging in..."):
-                                        time_module.sleep(0.5)
-                                    st.rerun()
-                                except Exception as ce:
-                                    logger.error(f"Session Token Error: {ce}")
-                            else:
-                                st.rerun()
+                            try:
+                                # Create a secure session token in DB
+                                token, token_expires = create_session_token(user_id, days=session_days)
+                                # Set cookie via native JS (no stx component)
+                                _set_cookie("portfolio_session", token, max_age_days=session_days)
+                            except Exception as ce:
+                                logger.error(f"Session Token Error: {ce}")
                             
-                            # Fallback rerun if cookie_manager block didn't trigger
                             st.rerun()
                         else:
                             st.error("❌ Invalid email or password.")
@@ -26597,64 +26691,39 @@ def main():
         inject_google_analytics()
         st.session_state['ga_injected'] = True
     
-    # Initialize Cookie Manager FIRST (needed for session restore)
-    cookie_manager = None
-    cookies_data = None  # CRITICAL FIX: Single fetch variable
-    
-    if stx:
-        try:
-            cookie_manager = stx.CookieManager(key="portfolio_auth_v3")
-            # --- CRITICAL FIX: Fetch cookies ONCE here ---
-            cookies_data = cookie_manager.get_all()
-        except Exception as e:
-            logger.warning(f"Cookie manager init error: {e}")
+    # ─── Read browser cookies natively (no third-party component) ───
+    cookies_data = _read_cookies()
 
     # =============================
     # FAST SESSION CHECK (BEFORE DB INIT)
     # =============================
-    # If already authenticated (e.g., from app.py router), skip auth checks
     if st.session_state.get('logged_in') and st.session_state.get('user_id'):
         _log_startup("User already authenticated - skipping auth checks")
         pass  # Continue directly to main app
     else:
-        # Try to restore session from cookie
+        # Try to restore session from cookie (lightweight — no component)
         restored = False
-        cookies_loaded = False  # Track if cookies have actually loaded
-        
-        if cookie_manager:
+        session_token = cookies_data.get("portfolio_session")
+        if session_token:
             try:
-                # Use the already fetched cookies_data variable
-                if cookies_data is not None:
-                    cookies_loaded = True
-                    session_token = cookies_data.get("portfolio_session")
-                    if session_token:
-                        # NOTE: get_user_from_token requires DB - but it handles errors gracefully
-                        user_info = get_user_from_token(session_token)
-                        if user_info:
-                            st.session_state.logged_in = True
-                            st.session_state.user_id = user_info["id"]
-                            st.session_state.username = user_info["username"]
-                            restored = True
-                        else:
-                            # Token invalid - clean up silently
-                            try:
-                                cookie_manager.delete("portfolio_session")
-                            except:
-                                pass
+                _ensure_auth_tables()
+                user_info = get_user_from_token(session_token)
+                if user_info:
+                    st.session_state.logged_in = True
+                    st.session_state.user_id = user_info["id"]
+                    st.session_state.username = user_info["username"]
+                    st.session_state._auth_checked = True
+                    restored = True
+                else:
+                    _delete_cookie("portfolio_session")
             except Exception as e:
                 logger.debug(f"Session restore error: {e}")
         
-        # If cookies haven't loaded yet, rerun to let them load
-        # Only rerun if we haven't checked AND cookies aren't loaded yet
-        if not cookies_loaded and not st.session_state.get('_auth_checked'):
-            st.session_state._auth_checked = True
-            st.rerun()
-        
         # Still not logged in? Show login page and EXIT EARLY
-        # This is the key optimization - no DB init for guests!
         if not st.session_state.get('logged_in'):
             _log_startup("Showing login page (no DB init needed for guests)")
-            login_page(cookie_manager)
+            _ensure_auth_tables()
+            login_page()
             return  # ⬅️ EXIT EARLY - don't initialize DB for anonymous users
 
     # =============================
@@ -26786,11 +26855,8 @@ def main():
     
     def save_preference(key: str, value: str):
         """Save a user preference to cookies (30-day expiry)."""
-        if not cookie_manager:
-            return
         try:
-            expires = datetime.now() + timedelta(days=30)
-            cookie_manager.set(f"portfolio_{key}", str(value), expires_at=expires)
+            _set_cookie(f"portfolio_{key}", str(value), max_age_days=30)
         except Exception as e:
             logger.debug(f"Error saving preference {key}: {e}")
     
@@ -27155,11 +27221,10 @@ def main():
                 conn.close()
         except Exception as e:
             logger.error(f"Error during logout: {e}")
-        if cookie_manager:
-            try:
-                cookie_manager.delete("portfolio_session")
-            except:
-                pass
+        try:
+            _delete_cookie("portfolio_session")
+        except:
+            pass
         st.session_state.clear()
         st.rerun()
     
