@@ -657,6 +657,9 @@ def ui_upload_financial_statement() -> None:
             status_text.caption(msg)
 
         try:
+            # Persist fiscal_year so downstream review screens can access it
+            st.session_state["review_fiscal_year"] = int(fiscal_year)
+
             result = manager.upload_full_report(
                 stock_id=stock_id,
                 pdf_file=uploaded_file,
@@ -1323,18 +1326,14 @@ def _render_review_section(
         updated_items = edited_df.to_dict("records")
         extracted["line_items"] = updated_items
 
-        # ── Guard: ensure fiscal_year is not None ──
-        if not extracted.get("fiscal_year"):
-            # Try from the upload widget's session state
-            fy_widget = st.session_state.get("fiscal_year_upload")
-            if fy_widget:
-                extracted["fiscal_year"] = int(fy_widget)
-            # Try from period_end_date
-            elif extracted.get("period_end_date"):
-                import re as _re
-                _m = _re.search(r"(\d{4})", str(extracted["period_end_date"]))
-                if _m:
-                    extracted["fiscal_year"] = int(_m.group(1))
+        # ── Guard: resolve fiscal_year from multiple sources ──
+        _fy_resolved = (
+            extracted.get("fiscal_year")
+            or st.session_state.get("fiscal_year_upload")
+            or st.session_state.get("review_fiscal_year")
+        )
+        if _fy_resolved:
+            extracted["fiscal_year"] = int(_fy_resolved)
         if not extracted.get("period_end_date") and extracted.get("fiscal_year"):
             extracted["period_end_date"] = f"{extracted['fiscal_year']}-12-31"
 
@@ -1345,6 +1344,7 @@ def _render_review_section(
                 extracted,
                 source_file=st.session_state.get("extraction_source_file"),
                 user_id=user_id,
+                fiscal_year_override=int(_fy_resolved) if _fy_resolved else None,
             )
             st.success(
                 f"✅ Saved statement (id={stmt_id}) with "

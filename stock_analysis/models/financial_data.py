@@ -388,6 +388,7 @@ class FinancialDataManager:
                     extracted_data=stmt_data,
                     source_file=source_filename or "upload.pdf",
                     confidence_score=stmt_data.get("confidence_score", 0.85),
+                    fiscal_year_override=fiscal_year,
                 )
 
                 results.append({
@@ -439,6 +440,7 @@ class FinancialDataManager:
         extracted_data: Dict[str, Any],
         source_file: str,
         confidence_score: float,
+        fiscal_year_override: Optional[int] = None,
     ) -> int:
         """Persist statement header + line items. Returns statement_id.
 
@@ -461,6 +463,12 @@ class FinancialDataManager:
 
         # ── Guard: derive fiscal_year / period_end_date if missing ──
         import re as _re
+
+        # Explicit override takes top priority
+        if fiscal_year_override is not None:
+            extracted_data["fiscal_year"] = int(fiscal_year_override)
+            if not extracted_data.get("period_end_date"):
+                extracted_data["period_end_date"] = f"{fiscal_year_override}-12-31"
 
         fy = extracted_data.get("fiscal_year")
         ped = extracted_data.get("period_end_date")
@@ -602,6 +610,7 @@ class FinancialDataManager:
         extracted_data: Dict[str, Any],
         source_file: Optional[str] = None,
         user_id: int = 1,
+        fiscal_year_override: Optional[int] = None,
     ) -> int:
         """Persist Gemini-extracted data → financial_statements + line_items.
 
@@ -613,6 +622,7 @@ class FinancialDataManager:
             extracted_data=extracted_data,
             source_file=source_file or "manual",
             confidence_score=extracted_data.get("confidence_score", 0.9),
+            fiscal_year_override=fiscal_year_override,
         )
 
         self.db.log_audit(
