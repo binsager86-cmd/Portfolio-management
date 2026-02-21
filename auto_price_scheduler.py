@@ -101,16 +101,68 @@ def get_db_functions():
 
 
 def get_all_users() -> List[Dict]:
-    """Get all active users from the database."""
-    _, query_df, _, _ = get_db_functions()
+    """Get all active users from the database.
+    
+    Falls back to extracting distinct user_ids from stocks table
+    if the users table query returns empty (covers edge cases
+    where pd.read_sql_query with raw psycopg2 misbehaves).
+    """
+    _, query_df, _, is_postgres = get_db_functions()
+    
+    # --- Attempt 1: query users table via pandas ---
     try:
         df = query_df("SELECT id, username FROM users WHERE id > 0")
-        if df.empty:
-            return []
-        return df.to_dict('records')
+        if not df.empty:
+            users = df.to_dict('records')
+            logger.info(f"  Found {len(users)} user(s) from users table")
+            return users
+        logger.warning("  users table query returned 0 rows via pandas")
     except Exception as e:
-        logger.error(f"Error fetching users: {e}")
-        return []
+        logger.warning(f"  users table pandas query failed: {e}")
+    
+    # --- Attempt 2: query users table via raw cursor (bypasses pandas) ---
+    try:
+        from db_layer import get_conn
+        conn = get_conn()
+        try:
+            cur = conn.cursor()
+            if is_postgres():
+                cur.execute("SET search_path TO public")
+            cur.execute("SELECT id, username FROM users WHERE id > 0")
+            rows = cur.fetchall()
+            if rows:
+                # psycopg2 returns tuples; sqlite returns tuples
+                users = [{'id': r[0], 'username': r[1]} for r in rows]
+                logger.info(f"  Found {len(users)} user(s) from users table (cursor fallback)")
+                return users
+            logger.warning("  users table cursor query also returned 0 rows")
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning(f"  users table cursor fallback failed: {e}")
+    
+    # --- Attempt 3: derive user list from stocks table ---
+    try:
+        df = query_df("SELECT DISTINCT user_id AS id FROM stocks WHERE user_id IS NOT NULL")
+        if not df.empty:
+            users = [{'id': int(row['id']), 'username': f'user_{int(row["id"])}'} for _, row in df.iterrows()]
+            logger.info(f"  Derived {len(users)} user(s) from stocks table (fallback)")
+            return users
+    except Exception as e:
+        logger.warning(f"  stocks table fallback failed: {e}")
+    
+    # --- Attempt 4: derive user list from transactions table ---
+    try:
+        df = query_df("SELECT DISTINCT user_id AS id FROM transactions WHERE user_id IS NOT NULL")
+        if not df.empty:
+            users = [{'id': int(row['id']), 'username': f'user_{int(row["id"])}'} for _, row in df.iterrows()]
+            logger.info(f"  Derived {len(users)} user(s) from transactions table (fallback)")
+            return users
+    except Exception as e:
+        logger.warning(f"  transactions table fallback failed: {e}")
+    
+    logger.error("Could not find any users in any table")
+    return []
 
 
 def get_user_stocks(user_id: int) -> List[Dict]:
