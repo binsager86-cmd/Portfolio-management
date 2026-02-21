@@ -459,6 +459,34 @@ class FinancialDataManager:
                 "Please create a stock profile first."
             )
 
+        # ── Guard: derive fiscal_year / period_end_date if missing ──
+        import re as _re
+
+        fy = extracted_data.get("fiscal_year")
+        ped = extracted_data.get("period_end_date")
+
+        # Try to derive fiscal_year from period_end_date
+        if fy is None and ped:
+            m = _re.search(r"(\d{4})", str(ped))
+            if m:
+                fy = int(m.group(1))
+                extracted_data["fiscal_year"] = fy
+
+        # Try to derive period_end_date from fiscal_year
+        if ped is None and fy is not None:
+            ped = f"{fy}-12-31"
+            extracted_data["period_end_date"] = ped
+
+        # Last resort — prevent NOT NULL crash
+        if fy is None:
+            raise ValueError(
+                f"Cannot save {statement_type} statement: fiscal_year is "
+                "missing. Please set the Fiscal Year before uploading."
+            )
+        if ped is None:
+            ped = f"{fy}-12-31"
+            extracted_data["period_end_date"] = ped
+
         # Check if a statement already exists for this stock/type/period
         # Match by period_end_date first, fall back to fiscal_year so
         # re-uploading the same year always overwrites.
