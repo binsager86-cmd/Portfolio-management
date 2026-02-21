@@ -41,11 +41,13 @@ _STMT_OUTPUT_KEY = {
     "income": "income_statement",
     "balance": "balance_sheet",
     "cashflow": "cash_flow",
+    "equity": "equity_statement",
 }
 _STMT_LABEL = {
     "income": "Income Statement",
     "balance": "Balance Sheet",
     "cashflow": "Cash Flow Statement",
+    "equity": "Statement of Changes in Equity",
 }
 
 
@@ -85,11 +87,11 @@ class ExtractionPipeline:
     ) -> Dict[str, Any]:
         """Execute the full pipeline.
 
-        ``statement_types`` defaults to ``["income", "balance", "cashflow"]``.
+        ``statement_types`` defaults to ``["income", "balance", "cashflow", "equity"]``.
         Returns a UI-ready dict.
         """
         if statement_types is None:
-            statement_types = ["income", "balance", "cashflow"]
+            statement_types = ["income", "balance", "cashflow", "equity"]
 
         timings: Dict[str, float] = {}
         flags: List[str] = []

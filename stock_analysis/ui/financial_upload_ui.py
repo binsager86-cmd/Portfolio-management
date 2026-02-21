@@ -90,6 +90,23 @@ _DEFAULT_LINE_ITEMS: Dict[str, List[Dict[str, Any]]] = {
         {"code": "CASH_FROM_FINANCING", "name": "Cash from Financing Activities", "amount": 0.0, "is_total": True},
         {"code": "NET_CHANGE_CASH", "name": "Net Change in Cash", "amount": 0.0, "is_total": True},
     ],
+    "equity": [
+        {"code": "SHARE_CAPITAL", "name": "Share Capital", "amount": 0.0, "is_total": False},
+        {"code": "SHARE_PREMIUM", "name": "Share Premium", "amount": 0.0, "is_total": False},
+        {"code": "STATUTORY_RESERVE", "name": "Statutory Reserve", "amount": 0.0, "is_total": False},
+        {"code": "VOLUNTARY_RESERVE", "name": "Voluntary Reserve", "amount": 0.0, "is_total": False},
+        {"code": "GENERAL_RESERVE", "name": "General Reserve", "amount": 0.0, "is_total": False},
+        {"code": "TREASURY_SHARES_EQUITY", "name": "Treasury Shares", "amount": 0.0, "is_total": False},
+        {"code": "RETAINED_EARNINGS_EQUITY", "name": "Retained Earnings", "amount": 0.0, "is_total": False},
+        {"code": "FAIR_VALUE_RESERVE", "name": "Fair Value Reserve", "amount": 0.0, "is_total": False},
+        {"code": "FOREIGN_CURRENCY_TRANSLATION", "name": "Foreign Currency Translation Reserve", "amount": 0.0, "is_total": False},
+        {"code": "OTHER_COMPREHENSIVE_INCOME", "name": "Other Comprehensive Income", "amount": 0.0, "is_total": False},
+        {"code": "DIVIDENDS_DECLARED", "name": "Dividends Declared", "amount": 0.0, "is_total": False},
+        {"code": "TRANSFER_TO_RESERVES", "name": "Transfer to Reserves", "amount": 0.0, "is_total": False},
+        {"code": "NON_CONTROLLING_INTEREST", "name": "Non-Controlling Interest", "amount": 0.0, "is_total": False},
+        {"code": "CLOSING_EQUITY", "name": "Closing Equity", "amount": 0.0, "is_total": True},
+        {"code": "TOTAL_EQUITY_AND_NCI", "name": "Total Equity (incl. NCI)", "amount": 0.0, "is_total": True},
+    ],
 }
 
 
@@ -1378,7 +1395,7 @@ def _render_existing_tab(
         grouped.setdefault(s["statement_type"], []).append(s)
 
     # Canonical display order
-    type_order = ["income", "balance", "cashflow"]
+    type_order = ["income", "balance", "cashflow", "equity"]
     ordered_types = [t for t in type_order if t in grouped]
     # Append any unexpected types that don't appear in type_order
     ordered_types += [t for t in grouped if t not in type_order]

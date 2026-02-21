@@ -376,7 +376,7 @@ def show_trend_analysis(stock: dict, db: AnalysisDatabase) -> None:
 
     manager = FinancialDataManager(db)
     all_periods = []
-    for stype in ["income", "balance", "cashflow"]:
+    for stype in ["income", "balance", "cashflow", "equity"]:
         all_periods.extend(manager.available_periods(stock["id"], stype))
     unique_periods = sorted(set(all_periods))
     if unique_periods:

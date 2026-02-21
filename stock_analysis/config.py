@@ -111,6 +111,25 @@ FINANCIAL_LINE_ITEM_CODES: Dict[str, str] = {
     'BEGINNING_CASH':           'Beginning Cash',
     'ENDING_CASH':              'Ending Cash',
 
+    # ── Statement of Changes in Equity ──
+    'OPENING_EQUITY':               'Opening Equity',
+    'SHARE_CAPITAL':                'Share Capital',
+    'SHARE_PREMIUM':                'Share Premium',
+    'STATUTORY_RESERVE':            'Statutory Reserve',
+    'VOLUNTARY_RESERVE':            'Voluntary Reserve',
+    'GENERAL_RESERVE':              'General Reserve',
+    'TREASURY_SHARES_EQUITY':       'Treasury Shares',
+    'RETAINED_EARNINGS_EQUITY':     'Retained Earnings',
+    'FOREIGN_CURRENCY_TRANSLATION': 'Foreign Currency Translation Reserve',
+    'FAIR_VALUE_RESERVE':           'Fair Value Reserve',
+    'OTHER_COMPREHENSIVE_INCOME':   'Other Comprehensive Income',
+    'DIVIDENDS_DECLARED':           'Dividends Declared',
+    'BONUS_SHARES_ISSUED':          'Bonus Shares Issued',
+    'TRANSFER_TO_RESERVES':         'Transfer to Reserves',
+    'CLOSING_EQUITY':               'Closing Equity',
+    'NON_CONTROLLING_INTEREST':     'Non-Controlling Interest',
+    'TOTAL_EQUITY_AND_NCI':         'Total Equity (incl. NCI)',
+
     # ── Additional / Derived ──
     'EBITDA':       'EBITDA',
     'FCF':          'Free Cash Flow',
@@ -265,6 +284,7 @@ STATEMENT_TYPES: Dict[str, str] = {
     'income':   'Income Statement',
     'balance':  'Balance Sheet',
     'cashflow': 'Cash Flow Statement',
+    'equity':   'Statement of Changes in Equity',
 }
 
 # ─────────────────────────────────────────────

@@ -486,8 +486,8 @@ def _render_metrics_tab(
         outstanding_shares = new_shares
 
     # ── Collect all periods (years) sorted oldest → newest ────────
-    all_periods: Dict[str, Dict[str, Dict]] = {}  # year → {income, balance, cashflow}
-    for stmt_type in ("income", "balance", "cashflow"):
+    all_periods: Dict[str, Dict[str, Dict]] = {}  # year → {income, balance, cashflow, equity}
+    for stmt_type in ("income", "balance", "cashflow", "equity"):
         for period_key, data in financials.get(stmt_type, {}).items():
             yr = str(data.get("fiscal_year", period_key))
             all_periods.setdefault(yr, {})[stmt_type] = data["items"]
@@ -761,7 +761,7 @@ def _render_metrics_tab(
     with st.expander("🔍 Debug: Raw DB Codes per Year (for troubleshooting)"):
         for yr in years:
             st.markdown(f"**FY {yr}**")
-            for stype in ("income", "balance", "cashflow"):
+            for stype in ("income", "balance", "cashflow", "equity"):
                 data = all_periods[yr].get(stype, {})
                 if data:
                     codes_list = sorted(data.keys())

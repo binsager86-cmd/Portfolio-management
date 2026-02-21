@@ -24,3 +24,16 @@ workers:
     run_command: python auto_price_scheduler.py
     instance_size_slug: basic-xxs
     instance_count: 1
+
+jobs:
+  # Cron job: fetch prices + save snapshot (runs daily at 11:00 UTC = 14:00 Kuwait)
+  - name: daily-price-update
+    environment_slug: python
+    github:
+      branch: main
+      deploy_on_push: true
+    build_command: pip install -r requirements.txt
+    run_command: python cron_update.py
+    instance_size_slug: basic-xxs
+    instance_count: 1
+    kind: PRE_DEPLOY
