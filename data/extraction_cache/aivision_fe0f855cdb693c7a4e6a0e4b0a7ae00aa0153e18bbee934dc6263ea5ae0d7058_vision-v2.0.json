@@ -1,0 +1,945 @@
+{
+  "upload_id": 10,
+  "cache_key": "fe0f855cdb693c7a4e6a0e4b0a7ae00aa0153e18bbee934dc6263ea5ae0d7058_vision-v2.0",
+  "extractor_version": "vision-v2.0",
+  "status": "success",
+  "flags": [],
+  "statements": {
+    "balance_sheet": {
+      "statement_type": "balance_sheet",
+      "currency": "KWD",
+      "unit_scale": 1,
+      "periods": [
+        {
+          "label": "2021-12-31",
+          "col_name": "2021"
+        },
+        {
+          "label": "2020-12-31",
+          "col_name": "2020"
+        }
+      ],
+      "items": [
+        {
+          "label_raw": "ASSETS",
+          "key": "assets",
+          "values": {},
+          "is_total": false
+        },
+        {
+          "label_raw": "Current assets",
+          "key": "current_assets",
+          "values": {},
+          "is_total": false
+        },
+        {
+          "label_raw": "Cash and bank balances",
+          "key": "cash_and_bank_balances",
+          "values": {
+            "2021-12-31": 84632720.0,
+            "2020-12-31": 73889264.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Trade and other receivables",
+          "key": "trade_and_other_receivables",
+          "values": {
+            "2021-12-31": 21647878.0,
+            "2020-12-31": 28473994.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Inventories",
+          "key": "inventories",
+          "values": {
+            "2021-12-31": 5119.0,
+            "2020-12-31": 5390.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Investment in associates",
+          "key": "investment_in_associates",
+          "values": {
+            "2021-12-31": 539747.0,
+            "2020-12-31": 547825.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Total current assets",
+          "key": "total_current_assets",
+          "values": {
+            "2021-12-31": 106825464.0,
+            "2020-12-31": 102916473.0
+          },
+          "is_total": true
+        },
+        {
+          "label_raw": "Non-current assets",
+          "key": "non_current_assets",
+          "values": {},
+          "is_total": false
+        },
+        {
+          "label_raw": "Right-of-use assets",
+          "key": "right_of_use_assets",
+          "values": {
+            "2021-12-31": 820147.0,
+            "2020-12-31": 934968.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Property and equipment",
+          "key": "property_and_equipment",
+          "values": {
+            "2021-12-31": 43985962.0,
+            "2020-12-31": 47542507.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Intangible assets",
+          "key": "intangible_assets",
+          "values": {
+            "2021-12-31": 6942766.0,
+            "2020-12-31": 6930207.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Total non-current assets",
+          "key": "total_non_current_assets",
+          "values": {
+            "2021-12-31": 51748875.0,
+            "2020-12-31": 55407682.0
+          },
+          "is_total": true
+        },
+        {
+          "label_raw": "Total Assets",
+          "key": "total_assets",
+          "values": {
+            "2021-12-31": 158572339.0,
+            "2020-12-31": 158324155.0
+          },
+          "is_total": true
+        },
+        {
+          "label_raw": "LIABILITIES AND EQUITY",
+          "key": "liabilities_and_equity",
+          "values": {},
+          "is_total": false
+        },
+        {
+          "label_raw": "Current liabilities",
+          "key": "current_liabilities",
+          "values": {},
+          "is_total": false
+        },
+        {
+          "label_raw": "Trade and other payables",
+          "key": "trade_and_other_payables",
+          "values": {
+            "2021-12-31": 738921.0,
+            "2020-12-31": 552794.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Accruals and other liabilities",
+          "key": "accruals_and_other_liabilities",
+          "values": {
+            "2021-12-31": 5910424.0,
+            "2020-12-31": 4705033.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Lease liabilities",
+          "key": "lease_liabilities",
+          "values": {
+            "2021-12-31": 207339.0,
+            "2020-12-31": 213348.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Deferred income",
+          "key": "deferred_income",
+          "values": {
+            "2021-12-31": 9369142.0,
+            "2020-12-31": 18486850.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Retentions payable",
+          "key": "retentions_payable",
+          "values": {
+            "2021-12-31": 282076.0,
+            "2020-12-31": 260182.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Current portion of long-term debts",
+          "key": "current_portion_of_long_term_debts",
+          "values": {
+            "2021-12-31": 2400000.0,
+            "2020-12-31": 6157542.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Total current liabilities",
+          "key": "total_current_liabilities",
+          "values": {
+            "2021-12-31": 18907895.0,
+            "2020-12-31": 30432756.0
+          },
+          "is_total": true
+        },
+        {
+          "label_raw": "Non-current liabilities",
+          "key": "non_current_liabilities",
+          "values": {},
+          "is_total": false
+        },
+        {
+          "label_raw": "Lease liabilities",
+          "key": "lease_liabilities_non_current",
+          "values": {
+            "2021-12-31": 636933.0,
+            "2020-12-31": 730951.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Long-term debts",
+          "key": "long_term_debts",
+          "values": {
+            "2021-12-31": 2321723.0,
+            "2020-12-31": 4721723.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Provision for staff indemnity",
+          "key": "provision_for_staff_indemnity",
+          "values": {
+            "2021-12-31": 4875317.0,
+            "2020-12-31": 4516525.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Total non-current liabilities",
+          "key": "total_non_current_liabilities",
+          "values": {
+            "2021-12-31": 7833973.0,
+            "2020-12-31": 9969199.0
+          },
+          "is_total": true
+        },
+        {
+          "label_raw": "Total liabilities",
+          "key": "total_liabilities",
+          "values": {
+            "2021-12-31": 26741868.0,
+            "2020-12-31": 40401955.0
+          },
+          "is_total": true
+        },
+        {
+          "label_raw": "Equity",
+          "key": "equity",
+          "values": {},
+          "is_total": false
+        },
+        {
+          "label_raw": "Share capital",
+          "key": "share_capital",
+          "values": {
+            "2021-12-31": 12223680.0,
+            "2020-12-31": 12223680.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Share premium",
+          "key": "share_premium",
+          "values": {
+            "2021-12-31": 1512000.0,
+            "2020-12-31": 1512000.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Statutory reserve",
+          "key": "statutory_reserve",
+          "values": {
+            "2021-12-31": 9894240.0,
+            "2020-12-31": 9894240.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Voluntary reserve",
+          "key": "voluntary_reserve",
+          "values": {
+            "2021-12-31": 6112840.0,
+            "2020-12-31": 6112840.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Treasury shares",
+          "key": "treasury_shares",
+          "values": {
+            "2021-12-31": -288871.0,
+            "2020-12-31": -284071.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Treasury shares reserve",
+          "key": "treasury_shares_reserve",
+          "values": {
+            "2021-12-31": 584013.0,
+            "2020-12-31": 564013.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Retained earnings",
+          "key": "retained_earnings",
+          "values": {
+            "2021-12-31": 101109919.0,
+            "2020-12-31": 87798044.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Foreign currency translation reserve",
+          "key": "foreign_currency_translation_reserve",
+          "values": {
+            "2021-12-31": 102656.0,
+            "2020-12-31": 106260.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Total equity",
+          "key": "total_equity",
+          "values": {
+            "2021-12-31": 131830471.0,
+            "2020-12-31": 117922200.0
+          },
+          "is_total": true
+        },
+        {
+          "label_raw": "Total liabilities and equity",
+          "key": "total_liabilities_and_equity",
+          "values": {
+            "2021-12-31": 158572339.0,
+            "2020-12-31": 158324155.0
+          },
+          "is_total": true
+        }
+      ]
+    },
+    "income_statement": {
+      "statement_type": "income_statement",
+      "currency": "KWD",
+      "unit_scale": 1,
+      "periods": [
+        {
+          "label": "2021-12-31",
+          "col_name": "2021"
+        },
+        {
+          "label": "2020-12-31",
+          "col_name": "2020"
+        }
+      ],
+      "items": [
+        {
+          "label_raw": "Revenue",
+          "key": "revenue",
+          "values": {
+            "2021-12-31": 95879141.0,
+            "2020-12-31": 68526304.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Cost of operations",
+          "key": "cost_of_operations",
+          "values": {
+            "2021-12-31": -14602599.0,
+            "2020-12-31": -14672312.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Gross profit",
+          "key": "gross_profit",
+          "values": {
+            "2021-12-31": 81276542.0,
+            "2020-12-31": 53853992.0
+          },
+          "is_total": true
+        },
+        {
+          "label_raw": "General and administrative expenses",
+          "key": "general_and_administrative_expenses",
+          "values": {
+            "2021-12-31": -14178244.0,
+            "2020-12-31": -13801015.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Selling expenses",
+          "key": "selling_expenses",
+          "values": {
+            "2021-12-31": -2191095.0,
+            "2020-12-31": -2058912.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Finance charges",
+          "key": "finance_charges",
+          "values": {
+            "2021-12-31": -276773.0,
+            "2020-12-31": -337493.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Share of loss of associates",
+          "key": "share_of_loss_of_associates",
+          "values": {
+            "2021-12-31": -9755.0,
+            "2020-12-31": -82130.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Other income",
+          "key": "other_income",
+          "values": {
+            "2021-12-31": 1142486.0,
+            "2020-12-31": 1751125.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Profit before contribution to Kuwait Foundation for Advancement of Sciences (\"KFAS\"), National Labour Support Tax (\"NLST\"), Zakat and Directors' remuneration",
+          "key": "profit_before_contribution_to_kuwait_foundation_for_advancement_of_sciences_kfas_national_labour_support_tax_nlst_zakat_and_directors_remuneration",
+          "values": {
+            "2021-12-31": 65763161.0,
+            "2020-12-31": 39325567.0
+          },
+          "is_total": true
+        },
+        {
+          "label_raw": "Contribution to KFAS",
+          "key": "contribution_to_kfas",
+          "values": {
+            "2021-12-31": -663457.0,
+            "2020-12-31": -409448.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "NLST",
+          "key": "nlst",
+          "values": {
+            "2021-12-31": -1655358.0,
+            "2020-12-31": -1000182.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Zakat",
+          "key": "zakat",
+          "values": {
+            "2021-12-31": -670730.0,
+            "2020-12-31": -416928.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Directors' remuneration",
+          "key": "directors_remuneration",
+          "values": {
+            "2021-12-31": -200000.0,
+            "2020-12-31": null
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Profit for the year",
+          "key": "profit_for_the_year",
+          "values": {
+            "2021-12-31": 62573616.0,
+            "2020-12-31": 37499009.0
+          },
+          "is_total": true
+        },
+        {
+          "label_raw": "Basic and diluted earnings per share (fils)",
+          "key": "basic_and_diluted_earnings_per_share_fils",
+          "values": {
+            "2021-12-31": 514.0,
+            "2020-12-31": 308.0
+          },
+          "is_total": false
+        }
+      ]
+    },
+    "cash_flow": {
+      "statement_type": "cash_flow",
+      "currency": "KWD",
+      "unit_scale": 1,
+      "periods": [
+        {
+          "label": "2021-12-31",
+          "col_name": "2021"
+        },
+        {
+          "label": "2020-12-31",
+          "col_name": "2020"
+        }
+      ],
+      "items": [
+        {
+          "label_raw": "OPERATING ACTIVITIES",
+          "key": "operating_activities",
+          "values": {},
+          "is_total": false
+        },
+        {
+          "label_raw": "Profit before contribution to KFAS, NLST, Zakat and Directors' remuneration",
+          "key": "profit_before_contribution_to_kfas_nlst_zakat_and_directors_remuneration",
+          "values": {
+            "2021-12-31": 65763161.0,
+            "2020-12-31": 39325567.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Adjustments for:",
+          "key": "adjustments_for",
+          "values": {},
+          "is_total": false
+        },
+        {
+          "label_raw": "Depreciation and amortisation",
+          "key": "depreciation_and_amortisation",
+          "values": {
+            "2021-12-31": 4093876.0,
+            "2020-12-31": 4292182.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Provision for staff indemnity",
+          "key": "provision_for_staff_indemnity",
+          "values": {
+            "2021-12-31": 1078620.0,
+            "2020-12-31": 881240.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Expected credit loss on financial assets",
+          "key": "expected_credit_loss_on_financial_assets",
+          "values": {
+            "2021-12-31": 79811.0,
+            "2020-12-31": 138483.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "(Profit) / loss on disposal of property and equipment",
+          "key": "profit_loss_on_disposal_of_property_and_equipment",
+          "values": {
+            "2021-12-31": -4490.0,
+            "2020-12-31": 5520.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Property and equipment and intangible assets written off",
+          "key": "property_and_equipment_and_intangible_assets_written_off",
+          "values": {
+            "2021-12-31": 86152.0,
+            "2020-12-31": 297466.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Finance charges",
+          "key": "finance_charges",
+          "values": {
+            "2021-12-31": 276773.0,
+            "2020-12-31": 337493.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Share of loss of associates",
+          "key": "share_of_loss_of_associates",
+          "values": {
+            "2021-12-31": 9755.0,
+            "2020-12-31": 82130.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Interest income",
+          "key": "interest_income",
+          "values": {
+            "2021-12-31": -965025.0,
+            "2020-12-31": -1121865.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Discount on lease payments",
+          "key": "discount_on_lease_payments",
+          "values": {
+            "2021-12-31": -65282.0,
+            "2020-12-31": null
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Operating cash flows before working capital changes",
+          "key": "operating_cash_flows_before_working_capital_changes",
+          "values": {
+            "2021-12-31": 70348951.0,
+            "2020-12-31": 44238016.0
+          },
+          "is_total": true
+        },
+        {
+          "label_raw": "Changes in:",
+          "key": "changes_in",
+          "values": {},
+          "is_total": false
+        },
+        {
+          "label_raw": "Trade and other receivables",
+          "key": "trade_and_other_receivables",
+          "values": {
+            "2021-12-31": -6829130.0,
+            "2020-12-31": -6190025.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Inventories",
+          "key": "inventories",
+          "values": {
+            "2021-12-31": 271.0,
+            "2020-12-31": 45551.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Trade and other payables",
+          "key": "trade_and_other_payables",
+          "values": {
+            "2021-12-31": 186127.0,
+            "2020-12-31": -196104.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Accruals and other liabilities",
+          "key": "accruals_and_other_liabilities",
+          "values": {
+            "2021-12-31": -78888.0,
+            "2020-12-31": -1123417.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Deferred income",
+          "key": "deferred_income",
+          "values": {
+            "2021-12-31": -9117708.0,
+            "2020-12-31": 12644061.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Retentions payable",
+          "key": "retentions_payable",
+          "values": {
+            "2021-12-31": 21894.0,
+            "2020-12-31": -206375.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Payment of staff indemnity",
+          "key": "payment_of_staff_indemnity",
+          "values": {
+            "2021-12-31": -714675.0,
+            "2020-12-31": -337780.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Payment of KFAS",
+          "key": "payment_of_kfas",
+          "values": {
+            "2021-12-31": -404448.0,
+            "2020-12-31": -363608.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Payment of NLST",
+          "key": "payment_of_nlst",
+          "values": {
+            "2021-12-31": -1000182.0,
+            "2020-12-31": -250676.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Payment of Zakat",
+          "key": "payment_of_zakat",
+          "values": {
+            "2021-12-31": -416928.0,
+            "2020-12-31": -391850.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Directors' remuneration paid",
+          "key": "directors_remuneration_paid",
+          "values": {
+            "2021-12-31": -200000.0,
+            "2020-12-31": null
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Net cash generated from operating activities",
+          "key": "net_cash_generated_from_operating_activities",
+          "values": {
+            "2021-12-31": 65544448.0,
+            "2020-12-31": 46531884.0
+          },
+          "is_total": true
+        },
+        {
+          "label_raw": "INVESTING ACTIVITIES",
+          "key": "investing_activities",
+          "values": {},
+          "is_total": false
+        },
+        {
+          "label_raw": "Purchase of property and equipment",
+          "key": "purchase_of_property_and_equipment",
+          "values": {
+            "2021-12-31": -429969.0,
+            "2020-12-31": -355545.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Payments for intangible assets",
+          "key": "payments_for_intangible_assets",
+          "values": {
+            "2021-12-31": -91564.0,
+            "2020-12-31": -44062.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Proceeds from disposal of property and equipment",
+          "key": "proceeds_from_disposal_of_property_and_equipment",
+          "values": {
+            "2021-12-31": 3767.0,
+            "2020-12-31": 1995.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Margin deposits and restricted deposits",
+          "key": "margin_deposits_and_restricted_deposits",
+          "values": {
+            "2021-12-31": -63005.0,
+            "2020-12-31": -468236.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Investment in term deposits",
+          "key": "investment_in_term_deposits",
+          "values": {
+            "2021-12-31": -16500000.0,
+            "2020-12-31": -46500000.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Interest received",
+          "key": "interest_received",
+          "values": {
+            "2021-12-31": 882632.0,
+            "2020-12-31": 1121865.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Net cash used in investing activities",
+          "key": "net_cash_used_in_investing_activities",
+          "values": {
+            "2021-12-31": -16197143.0,
+            "2020-12-31": -46244173.0
+          },
+          "is_total": true
+        },
+        {
+          "label_raw": "FINANCING ACTIVITIES",
+          "key": "financing_activities",
+          "values": {},
+          "is_total": false
+        },
+        {
+          "label_raw": "Repayment to bank",
+          "key": "repayment_to_bank",
+          "values": {
+            "2021-12-31": -6157542.0,
+            "2020-12-31": -7890000.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Finance charges paid",
+          "key": "finance_charges_paid",
+          "values": {
+            "2021-12-31": -241409.0,
+            "2020-12-31": -156676.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Repayment of lease liabilities",
+          "key": "repayment_of_lease_liabilities",
+          "values": {
+            "2021-12-31": -91594.0,
+            "2020-12-31": -156676.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Dividend paid",
+          "key": "dividend_paid",
+          "values": {
+            "2021-12-31": -48576180.0,
+            "2020-12-31": -574.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Net cash used in financing activities",
+          "key": "net_cash_used_in_financing_activities",
+          "values": {
+            "2021-12-31": -55066525.0,
+            "2020-12-31": -8729438.0
+          },
+          "is_total": true
+        },
+        {
+          "label_raw": "Net decrease in cash and cash equivalents",
+          "key": "net_decrease_in_cash_and_cash_equivalents",
+          "values": {
+            "2021-12-31": -5819144.0,
+            "2020-12-31": -8441727.0
+          },
+          "is_total": true
+        },
+        {
+          "label_raw": "Effects of exchange rate changes on cash and cash equivalents",
+          "key": "effects_of_exchange_rate_changes_on_cash_and_cash_equivalents",
+          "values": {
+            "2021-12-31": -4429.0,
+            "2020-12-31": 7391.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Cash and cash equivalents at beginning of the year",
+          "key": "cash_and_cash_equivalents_at_beginning_of_the_year",
+          "values": {
+            "2021-12-31": 16849530.0,
+            "2020-12-31": 25283956.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Cash and cash equivalents at end of the year",
+          "key": "cash_and_cash_equivalents_at_end_of_the_year",
+          "values": {
+            "2021-12-31": 11029957.0,
+            "2020-12-31": 16849530.0
+          },
+          "is_total": true
+        }
+      ]
+    }
+  },
+  "validations": [
+    {
+      "statement_type": "balance_sheet",
+      "rule_name": "assets_eq_liab_plus_equity",
+      "expected": 158572339.0,
+      "actual": 158572339.0,
+      "diff": 0.0,
+      "passed": true,
+      "note": "period=2021-12-31 diff=0 (0.00%)"
+    },
+    {
+      "statement_type": "balance_sheet",
+      "rule_name": "assets_eq_liab_plus_equity",
+      "expected": 158324155.0,
+      "actual": 158324155.0,
+      "diff": 0.0,
+      "passed": true,
+      "note": "period=2020-12-31 diff=0 (0.00%)"
+    }
+  ],
+  "page_types": {
+    "0": "balance_sheet",
+    "1": "income_statement",
+    "2": "cash_flow"
+  },
+  "page_hashes": {
+    "0": "9aff64241be52460",
+    "1": "74d74554a5eb91a2",
+    "2": "757d3b60c296850d"
+  },
+  "timings": {
+    "render": 1.76,
+    "batch_extract": 60.93,
+    "fallback_extract": 0.0,
+    "validate": 0.0,
+    "persist": 1.49,
+    "total": 67.39
+  },
+  "_from_cache": false
+}

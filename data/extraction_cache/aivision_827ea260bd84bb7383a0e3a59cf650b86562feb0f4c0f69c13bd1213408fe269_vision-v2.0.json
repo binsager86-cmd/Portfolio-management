@@ -1,0 +1,395 @@
+{
+  "upload_id": 11,
+  "cache_key": "827ea260bd84bb7383a0e3a59cf650b86562feb0f4c0f69c13bd1213408fe269_vision-v2.0",
+  "extractor_version": "vision-v2.0",
+  "status": "success",
+  "flags": [],
+  "statements": {
+    "equity_statement": {
+      "statement_type": "equity_statement",
+      "currency": null,
+      "unit_scale": 1,
+      "periods": [
+        {
+          "label": "Year ended 2014",
+          "col_name": "2014"
+        },
+        {
+          "label": "Year ended 2015",
+          "col_name": "2015"
+        }
+      ],
+      "items": [
+        {
+          "label_raw": "Balance as at 31 December 2013",
+          "key": "balance_as_at_31_december_2013",
+          "values": {
+            "2014": 27271025.0,
+            "2015": null
+          },
+          "is_total": true
+        },
+        {
+          "label_raw": "Total comprehensive income for the year",
+          "key": "total_comprehensive_income_for_the_year",
+          "values": {
+            "2014": 8314475.0,
+            "2015": 17587443.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Transfer to reserves",
+          "key": "transfer_to_reserves",
+          "values": {
+            "2014": null,
+            "2015": null
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Dividend – 2013 (Note 30)",
+          "key": "dividend_2013_note_30",
+          "values": {
+            "2014": -3985337.0,
+            "2015": null
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Sale of treasury shares",
+          "key": "sale_of_treasury_shares",
+          "values": {
+            "2014": 96677.0,
+            "2015": null
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Purchase of treasury shares",
+          "key": "purchase_of_treasury_shares",
+          "values": {
+            "2014": -107290.0,
+            "2015": null
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Issue of bonus shares (Note 30)",
+          "key": "issue_of_bonus_shares_note_30",
+          "values": {
+            "2014": null,
+            "2015": null
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Balance as at 31 December 2014",
+          "key": "balance_as_at_31_december_2014",
+          "values": {
+            "2014": 31589550.0,
+            "2015": 31589550.0
+          },
+          "is_total": true
+        },
+        {
+          "label_raw": "Dividend – 2014 (Note 30)",
+          "key": "dividend_2014_note_30",
+          "values": {
+            "2014": null,
+            "2015": -10965369.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Balance as at 31 December 2015",
+          "key": "balance_as_at_31_december_2015",
+          "values": {
+            "2014": null,
+            "2015": 38211624.0
+          },
+          "is_total": true
+        }
+      ]
+    },
+    "income_statement": {
+      "statement_type": "statement_of_changes_in_equity",
+      "currency": "KWD",
+      "unit_scale": 1,
+      "periods": [
+        {
+          "label": "2013-12-31",
+          "col_name": "2013"
+        },
+        {
+          "label": "2014-12-31",
+          "col_name": "2014"
+        },
+        {
+          "label": "2015-12-31",
+          "col_name": "2015"
+        }
+      ],
+      "items": [
+        {
+          "label_raw": "Share capital",
+          "key": "share_capital",
+          "values": {
+            "2013-12-31": 11424000.0,
+            "2014-12-31": 12223680.0,
+            "2015-12-31": 12223680.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Share premium",
+          "key": "share_premium",
+          "values": {
+            "2013-12-31": 1512000.0,
+            "2014-12-31": 1512000.0,
+            "2015-12-31": 1512000.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Statutory reserve",
+          "key": "statutory_reserve",
+          "values": {
+            "2013-12-31": 2183780.0,
+            "2014-12-31": 3063230.0,
+            "2015-12-31": 4908463.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Voluntary reserve",
+          "key": "voluntary_reserve",
+          "values": {
+            "2013-12-31": 879450.0,
+            "2014-12-31": 3063230.0,
+            "2015-12-31": 4908463.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Treasury shares",
+          "key": "treasury_shares",
+          "values": {
+            "2013-12-31": -37753.0,
+            "2014-12-31": -116725.0,
+            "2015-12-31": -116725.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Gain on sale of treasury shares",
+          "key": "gain_on_sale_of_treasury_shares",
+          "values": {
+            "2013-12-31": 495654.0,
+            "2014-12-31": 564013.0,
+            "2015-12-31": 564013.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Retained earnings",
+          "key": "retained_earnings",
+          "values": {
+            "2013-12-31": 9517781.0,
+            "2014-12-31": 11236037.0,
+            "2015-12-31": 14095507.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Foreign currency translation reserve",
+          "key": "foreign_currency_translation_reserve",
+          "values": {
+            "2013-12-31": -8217.0,
+            "2014-12-31": 44085.0,
+            "2015-12-31": 116223.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Total",
+          "key": "total",
+          "values": {
+            "2013-12-31": 27271025.0,
+            "2014-12-31": 31589550.0,
+            "2015-12-31": 38211624.0
+          },
+          "is_total": true
+        }
+      ]
+    },
+    "balance_sheet": {
+      "statement_type": "statement_of_changes_in_equity",
+      "currency": "KWD",
+      "unit_scale": 1,
+      "periods": [
+        {
+          "label": "2013-12-31",
+          "col_name": "2013"
+        },
+        {
+          "label": "2014-12-31",
+          "col_name": "2014"
+        },
+        {
+          "label": "2015-12-31",
+          "col_name": "2015"
+        }
+      ],
+      "items": [
+        {
+          "label_raw": "Share capital",
+          "key": "share_capital",
+          "values": {
+            "2013-12-31": 11424000.0,
+            "2014-12-31": 12223680.0,
+            "2015-12-31": 12223680.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Share premium",
+          "key": "share_premium",
+          "values": {
+            "2013-12-31": 1512000.0,
+            "2014-12-31": 1512000.0,
+            "2015-12-31": 1512000.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Statutory reserve",
+          "key": "statutory_reserve",
+          "values": {
+            "2013-12-31": 2183780.0,
+            "2014-12-31": 3063230.0,
+            "2015-12-31": 4908463.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Voluntary reserve",
+          "key": "voluntary_reserve",
+          "values": {
+            "2013-12-31": 879450.0,
+            "2014-12-31": 1845233.0,
+            "2015-12-31": 4908463.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Treasury shares",
+          "key": "treasury_shares",
+          "values": {
+            "2013-12-31": -37753.0,
+            "2014-12-31": -116725.0,
+            "2015-12-31": -116725.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Gain on sale of treasury shares",
+          "key": "gain_on_sale_of_treasury_shares",
+          "values": {
+            "2013-12-31": 495654.0,
+            "2014-12-31": 564013.0,
+            "2015-12-31": 564013.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Retained earnings",
+          "key": "retained_earnings",
+          "values": {
+            "2013-12-31": 9517781.0,
+            "2014-12-31": 11236037.0,
+            "2015-12-31": 14095507.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Foreign currency translation reserve",
+          "key": "foreign_currency_translation_reserve",
+          "values": {
+            "2013-12-31": -8217.0,
+            "2014-12-31": 44085.0,
+            "2015-12-31": 116223.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Total",
+          "key": "total_equity",
+          "values": {
+            "2013-12-31": 27271025.0,
+            "2014-12-31": 31589550.0,
+            "2015-12-31": 38211624.0
+          },
+          "is_total": true
+        }
+      ]
+    },
+    "cash_flow": {
+      "statement_type": "changes_in_equity",
+      "currency": "KWD",
+      "unit_scale": 1,
+      "periods": [
+        {
+          "label": "2014-12-31",
+          "col_name": "2014"
+        },
+        {
+          "label": "2015-12-31",
+          "col_name": "2015"
+        }
+      ],
+      "items": [
+        {
+          "label_raw": "Share capital",
+          "key": "share_capital",
+          "values": {
+            "2014-12-31": 12223680.0,
+            "2015-12-31": 12223680.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Share premium",
+          "key": "share_premium",
+          "values": {
+            "2014-12-31": 1512000.0,
+            "2015-12-31": 1512000.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Statutory reserve",
+          "key": "statutory_reserve",
+          "values": {},
+          "is_total": false
+        }
+      ]
+    }
+  },
+  "validations": [],
+  "page_types": {
+    "0": "equity_statement"
+  },
+  "page_hashes": {
+    "0": "cc138f745529e32a"
+  },
+  "timings": {
+    "render": 0.26,
+    "batch_extract": 29.74,
+    "fallback_extract": 35.29,
+    "validate": 0.0,
+    "persist": 0.33,
+    "total": 66.84
+  },
+  "_from_cache": false
+}
