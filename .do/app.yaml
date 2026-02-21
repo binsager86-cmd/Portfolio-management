@@ -26,7 +26,7 @@ workers:
     instance_count: 1
 
 jobs:
-  # Cron job: fetch prices + save snapshot (runs daily at 11:00 UTC = 14:00 Kuwait)
+  # Cron job: fetch prices + save snapshot (runs daily at 14:00 Kuwait = 11:00 UTC)
   - name: daily-price-update
     environment_slug: python
     github:
@@ -36,4 +36,3 @@ jobs:
     run_command: python cron_update.py
     instance_size_slug: basic-xxs
     instance_count: 1
-    kind: PRE_DEPLOY
