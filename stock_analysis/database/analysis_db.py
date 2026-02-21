@@ -164,8 +164,8 @@ class AnalysisDatabase:
                 model_type TEXT NOT NULL,
                 valuation_date TEXT NOT NULL,
                 intrinsic_value DOUBLE PRECISION,
-                parameters TEXT,
-                assumptions TEXT,
+                parameters JSONB,
+                assumptions JSONB,
                 created_by_user_id INTEGER,
                 created_at INTEGER NOT NULL,
                 FOREIGN KEY (stock_id) REFERENCES analysis_stocks(id)
@@ -182,7 +182,7 @@ class AnalysisDatabase:
                 valuation_score DOUBLE PRECISION,
                 growth_score DOUBLE PRECISION,
                 quality_score DOUBLE PRECISION,
-                details TEXT,
+                details JSONB,
                 analyst_notes TEXT,
                 created_by_user_id INTEGER,
                 created_at INTEGER NOT NULL,
@@ -233,6 +233,19 @@ class AnalysisDatabase:
                         "ALTER TABLE analysis_stocks ADD COLUMN IF NOT EXISTS "
                         "outstanding_shares DOUBLE PRECISION"
                     )
+                    # Upgrade TEXT → JSONB for richer JSON queries (idempotent)
+                    for tbl, col in [
+                        ("valuation_models", "parameters"),
+                        ("valuation_models", "assumptions"),
+                        ("stock_scores", "details"),
+                    ]:
+                        try:
+                            cur.execute(
+                                f"ALTER TABLE {tbl} ALTER COLUMN {col} "
+                                f"TYPE JSONB USING {col}::jsonb"
+                            )
+                        except Exception:
+                            pass  # already JSONB or table doesn't exist yet
                 else:
                     # SQLite: check pragma first
                     cols = [r[1] for r in cur.execute(
