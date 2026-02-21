@@ -24,6 +24,19 @@ from stock_analysis.utils.helpers import (
 )
 from stock_analysis.config import STATEMENT_TYPES, METRIC_CATEGORIES, FINANCIAL_LINE_ITEM_CODES
 
+# Currency display signs by ISO code
+_CURRENCY_SIGNS = {
+    "KWD": "KD", "USD": "$", "EUR": "\u20ac", "GBP": "\u00a3",
+    "SAR": "SAR", "AED": "AED", "BHD": "BD", "OMR": "OMR", "QAR": "QAR",
+}
+
+def _ccy(stock: Optional[Dict]) -> str:
+    """Return display currency sign for a stock dict."""
+    if not stock:
+        return "$"
+    code = (stock.get("currency") or "USD").upper()
+    return _CURRENCY_SIGNS.get(code, code + " ")
+
 
 def _get_db() -> AnalysisDatabase:
     if "analysis_db" not in st.session_state:
@@ -466,6 +479,7 @@ def _render_metrics_tab(
 
     stock = db.get_stock_by_id(stock_id)
     symbol = stock.get("symbol", "") if stock else ""
+    ccy = _ccy(stock)
     outstanding_shares = float(stock.get("outstanding_shares") or 0) if stock else 0
 
     # ── Outstanding shares editor (quick inline) ──────────────────
@@ -519,7 +533,7 @@ def _render_metrics_tab(
         with st.spinner(f"Fetching price for {symbol}…"):
             price = _fetch_current_price(symbol)
         if price:
-            st.caption(f"📈 Current price for **{symbol}**: **{price:,.3f}**  _(source: Yahoo Finance)_")
+            st.caption(f"📈 Current price for **{symbol}**: **{ccy}{price:,.3f}**  _(source: Yahoo Finance)_")
         else:
             st.caption(f"⚠️ Could not fetch price for **{symbol}** — valuation ratios needing price will show '—'.")
 
@@ -610,9 +624,9 @@ def _render_metrics_tab(
         "Notes": [
             "TTM from 4 quarters" if len(quarterly_nis) >= 4 else "Annual (no quarterly data)",
             f"FY {latest_year}",
-            f"Price: {price:,.3f}" if price else "Price unavailable",
+            f"Price: {ccy}{price:,.3f}" if price else "Price unavailable",
             f"Equity: {_fmt_amt(total_equity_latest)}, Shares: {_fmt_amt(outstanding_shares)}",
-            f"Price: {price:,.3f}" if price else "Price unavailable",
+            f"Price: {ccy}{price:,.3f}" if price else "Price unavailable",
         ],
     }
     st.dataframe(pd.DataFrame(val_data), use_container_width=True, hide_index=True)

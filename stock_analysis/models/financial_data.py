@@ -365,6 +365,106 @@ class FinancialDataManager:
                     "line_items": line_items,
                 })
 
+        # ── Post-process: re-attribute equity dividends ──────────
+        # In equity statements, dividends declared for year Y appear
+        # in the year Y+1 statement.  E.g. "Dividend – 2016" shows up
+        # in the 2017 equity movement.  Move such items to fy=Y so
+        # downstream analytics (DDM, etc.) see the dividend under the
+        # correct year.
+        _DIV_RE = _re.compile(
+            r"dividend.*?(\d{4})", _re.IGNORECASE
+        )
+        equity_entries = [e for e in legacy if e["statement_type"] == "equity"]
+        if equity_entries:
+            # Collect all fiscal years present in the equity set
+            all_eq_years = {
+                e["fiscal_year"] for e in equity_entries if e["fiscal_year"]
+            }
+            # For each equity entry, check dividend items
+            extra_entries: List[Dict[str, Any]] = []
+            for entry in equity_entries:
+                keep_items: List[Dict[str, Any]] = []
+                moved: Dict[int, List[Dict[str, Any]]] = {}
+                for li in entry.get("line_items", []):
+                    m = _DIV_RE.search(li.get("name", ""))
+                    if m:
+                        div_year = int(m.group(1))
+                        if div_year != entry.get("fiscal_year"):
+                            moved.setdefault(div_year, []).append(li)
+                            continue
+                    keep_items.append(li)
+                entry["line_items"] = keep_items
+                # Create / merge entries for re-attributed dividends
+                for yr, div_items in moved.items():
+                    # Try to find existing equity entry for this year
+                    target = next(
+                        (e for e in equity_entries
+                         if e["fiscal_year"] == yr),
+                        None,
+                    )
+                    if target is not None:
+                        # Avoid adding duplicates
+                        tgt_set = {
+                            (li["code"], li.get("amount", 0))
+                            for li in target["line_items"]
+                        }
+                        for di in div_items:
+                            if (di["code"], di.get("amount", 0)) not in tgt_set:
+                                target["line_items"].append(di)
+                                tgt_set.add((di["code"], di.get("amount", 0)))
+                    else:
+                        extra_entries.append({
+                            "statement_type": "equity",
+                            "fiscal_year": yr,
+                            "period_end_date": f"{yr}-12-31",
+                            "confidence_score": 0.85,
+                            "line_items": div_items,
+                        })
+            legacy.extend(extra_entries)
+
+        # ── Deduplicate: merge equity entries with same fiscal_year ──
+        # Multiple misclassified pages can produce duplicate year-buckets.
+        seen_eq: Dict[Optional[int], Dict[str, Any]] = {}
+        deduped: List[Dict[str, Any]] = []
+        for entry in legacy:
+            if entry["statement_type"] == "equity":
+                fy_key = entry.get("fiscal_year")
+                if fy_key in seen_eq:
+                    # Merge line_items, deduplicate by (code, amount)
+                    existing = seen_eq[fy_key]
+                    existing_set = {
+                        (li["code"], li.get("amount", 0))
+                        for li in existing["line_items"]
+                    }
+                    for li in entry["line_items"]:
+                        if (li["code"], li.get("amount", 0)) not in existing_set:
+                            existing["line_items"].append(li)
+                            existing_set.add((li["code"], li.get("amount", 0)))
+                else:
+                    seen_eq[fy_key] = entry
+                    deduped.append(entry)
+            else:
+                deduped.append(entry)
+        legacy = deduped
+
+        # ── Equity: keep only dividend items ─────────────────────
+        # Other equity components (share capital, reserves, etc.) are
+        # already captured in the balance sheet.  Only dividends are
+        # unique to the equity statement.
+        _DIV_FILTER = _re.compile(r"dividend", _re.IGNORECASE)
+        filtered: List[Dict[str, Any]] = []
+        for entry in legacy:
+            if entry["statement_type"] == "equity":
+                entry["line_items"] = [
+                    li for li in entry["line_items"]
+                    if _DIV_FILTER.search(li.get("name", ""))
+                    or _DIV_FILTER.search(li.get("code", ""))
+                ]
+                if not entry["line_items"]:
+                    continue  # drop empty equity entries
+            filtered.append(entry)
+        legacy = filtered
+
         return legacy
 
     def upload_full_report(
@@ -481,11 +581,17 @@ class FinancialDataManager:
                         pct,
                     )
 
-                # Override fiscal year if caller specified
-                if fiscal_year is not None:
+                # Override fiscal year if caller specified — but only as
+                # a FALLBACK.  Equity statements (and multi-period
+                # extractions) already carry the correct year parsed
+                # from row/period labels; overriding would collapse
+                # separate years into one.
+                if fiscal_year is not None and stmt_data.get("fiscal_year") is None:
                     stmt_data["fiscal_year"] = fiscal_year
-                    if not stmt_data.get("period_end_date"):
-                        stmt_data["period_end_date"] = f"{fiscal_year}-12-31"
+                if not stmt_data.get("period_end_date"):
+                    fy = stmt_data.get("fiscal_year") or fiscal_year
+                    if fy:
+                        stmt_data["period_end_date"] = f"{fy}-12-31"
 
                 # Build validation dict from AI validations
                 ai_vals = [
@@ -585,11 +691,14 @@ class FinancialDataManager:
         # ── Guard: derive fiscal_year / period_end_date if missing ──
         import re as _re
 
-        # Explicit override takes top priority
-        if fiscal_year_override is not None:
+        # Explicit override — only as fallback when fiscal_year is missing.
+        # Equity statements already carry the correct year from label parsing;
+        # blindly overriding would collapse multiple years into one.
+        if fiscal_year_override is not None and not extracted_data.get("fiscal_year"):
             extracted_data["fiscal_year"] = int(fiscal_year_override)
-            if not extracted_data.get("period_end_date"):
-                extracted_data["period_end_date"] = f"{fiscal_year_override}-12-31"
+        if fiscal_year_override is not None and not extracted_data.get("period_end_date"):
+            fy_for_ped = extracted_data.get("fiscal_year") or fiscal_year_override
+            extracted_data["period_end_date"] = f"{fy_for_ped}-12-31"
 
         fy = extracted_data.get("fiscal_year")
         ped = extracted_data.get("period_end_date")
@@ -676,7 +785,32 @@ class FinancialDataManager:
                 )
 
             # Remove prior line items (safe now — statement row still exists)
-            self.db.delete_line_items_for_statement(statement_id)
+            # For EQUITY statements with only dividend items, APPEND
+            # instead of replacing — other equity components come from
+            # earlier uploads and must be preserved.
+            import re as _re2
+            _is_div_only = (
+                statement_type == "equity"
+                and extracted_data.get("line_items")
+                and all(
+                    _re2.search(r"dividend", li.get("name", ""), _re2.IGNORECASE)
+                    or _re2.search(r"dividend", li.get("code", ""), _re2.IGNORECASE)
+                    for li in extracted_data["line_items"]
+                )
+            )
+
+            if _is_div_only and existing:
+                # Append mode: remove only old dividend line items, keep
+                # all non-dividend items intact.
+                self.db.execute_update(
+                    """DELETE FROM financial_line_items
+                       WHERE statement_id = ?
+                         AND (LOWER(line_item_name) LIKE '%dividend%'
+                              OR LOWER(line_item_code) LIKE '%dividend%')""",
+                    (statement_id,),
+                )
+            else:
+                self.db.delete_line_items_for_statement(statement_id)
 
             # Insert line items (use .get() to guard against missing keys
             # — Gemini may occasionally omit 'amount' or 'code').

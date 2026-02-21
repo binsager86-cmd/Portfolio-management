@@ -30,6 +30,22 @@ def _get_mgr() -> StockProfileManager:
     return StockProfileManager(_get_db())
 
 
+# Exchange → default currency mapping
+_EXCHANGE_CURRENCY = {
+    "KSE": "KWD", "BHB": "BHD", "ADX": "AED", "DFM": "AED",
+    "TADAWUL": "SAR", "LSE": "GBP", "TSE": "JPY",
+    "NYSE": "USD", "NASDAQ": "USD",
+}
+
+def _currency_index_for_exchange(exchange: str) -> int:
+    """Return CURRENCY_CHOICES index matching exchange, default 0 (USD)."""
+    ccy = _EXCHANGE_CURRENCY.get(exchange, "USD")
+    try:
+        return CURRENCY_CHOICES.index(ccy)
+    except ValueError:
+        return 0
+
+
 # ── public API  ────────────────────────────────────────────────────────
 # render_stock_creation_page()  — embeddable in the tab-based layout
 # ui_stock_analysis_create()    — standalone two-column page for sidebar nav
@@ -286,7 +302,8 @@ def _render_create_form(user_id: int) -> None:
 
         c3, c4 = st.columns(2)
         exchange = c3.selectbox("Exchange", EXCHANGE_CHOICES, index=0)
-        currency = c4.selectbox("Currency", CURRENCY_CHOICES, index=0)
+        currency = c4.selectbox("Currency", CURRENCY_CHOICES,
+                                index=_currency_index_for_exchange(exchange))
 
         c5, c6 = st.columns(2)
         sector = c5.selectbox("Sector", [""] + SECTOR_CHOICES, index=0)

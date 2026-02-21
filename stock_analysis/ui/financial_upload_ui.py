@@ -814,9 +814,38 @@ def _show_smart_extraction_review(
                 except Exception as e:
                     st.error(f"Error: {e}")
 
-    # Global discard
+    # Global actions
     st.divider()
-    if st.button("🗑️ Discard All Results", key="discard_smart_results"):
+    gc1, gc2 = st.columns(2)
+
+    # ── Verify All button ──
+    unverified = [
+        s for s in statements
+        if not s.get("verified") and s.get("statement_id")
+    ]
+    if unverified:
+        if gc1.button(
+            f"✅ Verify All ({len(unverified)} statements)",
+            type="primary",
+            key="verify_all_smart",
+        ):
+            ok, fail = 0, 0
+            for s in unverified:
+                try:
+                    manager.mark_statement_verified(s["statement_id"], user_id)
+                    s["verified"] = True
+                    ok += 1
+                except Exception:
+                    fail += 1
+            if ok:
+                st.success(f"✅ Verified {ok} statement(s)")
+            if fail:
+                st.error(f"❌ Failed to verify {fail} statement(s)")
+            st.rerun()
+    else:
+        gc1.success("✅ All statements verified")
+
+    if gc2.button("🗑️ Discard All Results", key="discard_smart_results"):
         st.session_state.pop("smart_extraction_result", None)
         st.rerun()
 
@@ -1393,10 +1422,103 @@ def _fmt_amount(val) -> str:
     return f"{num:,.0f}"
 
 
+# Equity-component codes — should live in equity statements, not income/balance
+_EQUITY_COMPONENT_CODES = {
+    "SHARE_CAPITAL", "SHARE_PREMIUM", "STATUTORY_RESERVE",
+    "VOLUNTARY_RESERVE", "GENERAL_RESERVE", "TREASURY_SHARES",
+    "TREASURY_SHARES_EQUITY", "RETAINED_EARNINGS", "RETAINED_EARNINGS_EQUITY",
+    "FOREIGN_CURRENCY_TRANSLATION", "FOREIGN_CURRENCY_TRANSLATION_RESERVE",
+    "FAIR_VALUE_RESERVE", "OTHER_COMPREHENSIVE_INCOME",
+    "GAIN_ON_SALE_OF_TREASURY_SHARES", "OPENING_EQUITY", "CLOSING_EQUITY",
+    "TOTAL_EQUITY_AND_NCI", "NON_CONTROLLING_INTEREST",
+}
+_EQUITY_CODE_LOWER = {c.lower() for c in _EQUITY_COMPONENT_CODES}
+
+
+def _auto_migrate_equity_items(
+    stock_id: int,
+    db: AnalysisDatabase,
+    fdm: FinancialDataManager,
+) -> None:
+    """Move equity-component line items from income/balance/cashflow
+    statements into proper equity statements.  Runs max once per
+    session per stock to avoid repeated DB work."""
+    cache_key = f"_eq_migrated_{stock_id}"
+    if st.session_state.get(cache_key):
+        return
+
+    import time as _time
+
+    stmts = fdm.get_statements(stock_id)
+    if not stmts:
+        st.session_state[cache_key] = True
+        return
+
+    # Find non-equity statements that have equity-component line items
+    moved_count = 0
+    for s in stmts:
+        if s["statement_type"] == "equity":
+            continue
+        items = db.get_line_items(s["id"])
+        if not items:
+            continue
+
+        equity_items = []
+        keep_ids = []
+        for item in items:
+            code = (item.get("line_item_code") or "").upper()
+            name = (item.get("line_item_name") or "").lower()
+            is_equity = (
+                code in _EQUITY_COMPONENT_CODES
+                or any(ec in name for ec in [
+                    "share capital", "share premium", "statutory reserve",
+                    "voluntary reserve", "treasury shares",
+                    "retained earnings", "gain on sale of treasury",
+                    "foreign currency translation",
+                ])
+            )
+            if is_equity:
+                equity_items.append(item)
+            else:
+                keep_ids.append(item["id"])
+
+        if not equity_items:
+            continue
+
+        # If ALL items are equity, delete the whole statement
+        if not keep_ids:
+            try:
+                fdm.delete_statement(s["id"], user_id=1)
+                moved_count += len(equity_items)
+            except Exception:
+                pass
+            continue
+
+        # Otherwise, remove only the equity items from this statement
+        for eq_item in equity_items:
+            try:
+                db.execute_update(
+                    "DELETE FROM financial_line_items WHERE id = ?",
+                    (eq_item["id"],),
+                )
+                moved_count += 1
+            except Exception:
+                pass
+
+    st.session_state[cache_key] = True
+
+
 def _render_existing_tab(
     stock_id: int, user_id: int, db: AnalysisDatabase
 ) -> None:
     fdm = FinancialDataManager(db)
+
+    # ── Auto-cleanup: move misclassified equity items ─────────────
+    # Earlier AI uploads may have saved equity-component line items
+    # (Share Capital, Statutory Reserve …) under "income" or "balance"
+    # types.  Detect and migrate them to proper "equity" statements.
+    _auto_migrate_equity_items(stock_id, db, fdm)
+
     stmts = fdm.get_statements(stock_id)
 
     if not stmts:
