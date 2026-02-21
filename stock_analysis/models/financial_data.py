@@ -25,6 +25,7 @@ _AI_TYPE_TO_LEGACY = {
     "income_statement": "income",
     "balance_sheet": "balance",
     "cash_flow": "cashflow",
+    "equity_statement": "equity",
 }
 
 
@@ -281,7 +282,7 @@ class FinancialDataManager:
                     },
                     ...
                 ],
-                "detected_types": ["income", "balance", "cashflow"],
+                "detected_types": ["income", "balance", "cashflow", "equity"],
                 "ai_result": { … raw AI vision output … },
             }
         """

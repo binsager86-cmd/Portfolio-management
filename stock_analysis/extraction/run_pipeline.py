@@ -33,8 +33,8 @@ def main() -> None:
     parser.add_argument(
         "--statements",
         nargs="+",
-        default=["income", "balance", "cashflow"],
-        help="Statement types to extract (default: all three)",
+        default=["income", "balance", "cashflow", "equity"],
+        help="Statement types to extract (default: all four)",
     )
     parser.add_argument(
         "--verbose", "-v", action="store_true", help="Enable DEBUG logging",

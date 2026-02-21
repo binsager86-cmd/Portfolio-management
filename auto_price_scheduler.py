@@ -147,15 +147,19 @@ def get_user_stocks(user_id: int) -> List[Dict]:
 
 
 def update_stock_price(stock_id: int, price: float, user_id: int) -> bool:
-    """Update stock price in database."""
+    """Update stock price and last_updated timestamp in database."""
     _, _, exec_sql, is_postgres = get_db_functions()
     try:
         placeholder = '%s' if is_postgres() else '?'
-        exec_sql(f"UPDATE stocks SET current_price = {placeholder} WHERE id = {placeholder} AND user_id = {placeholder}", 
-                 (price, stock_id, user_id))
+        exec_sql(
+            f"UPDATE stocks SET current_price = {placeholder}, last_updated = {placeholder} WHERE id = {placeholder} AND user_id = {placeholder}",
+            (price, int(time.time()), stock_id, user_id),
+        )
         return True
     except Exception as e:
         logger.error(f"Error updating price for stock {stock_id}: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
         return False
 
 
@@ -278,21 +282,30 @@ def fetch_price(symbol: str, currency: str = None) -> tuple:
     
     for ticker in tickers_to_try:
         try:
+            logger.info(f"    Trying yf.download('{ticker}') ...")
             data = yf.download(ticker, period="5d", progress=False, threads=False)
-            if data.empty:
+            if data is None or data.empty:
+                logger.info(f"    yf.download('{ticker}') returned empty data")
                 continue
             # Flatten MultiIndex columns (yfinance >= 1.0)
             data = _flatten_yf_columns(data)
+            logger.info(f"    Columns after flatten: {list(data.columns)}")
             if 'Close' in data.columns:
                 close_series = data['Close'].dropna()
                 if not close_series.empty:
                     raw = close_series.iloc[-1]
                     price = float(raw.iloc[0]) if hasattr(raw, 'iloc') else float(raw)
+                    logger.info(f"    Got price {price} from {ticker}")
                     return price, ticker
+                else:
+                    logger.warning(f"    'Close' column is empty for {ticker}")
+            else:
+                logger.warning(f"    'Close' not in columns for {ticker}: {list(data.columns)}")
         except Exception as e:
-            logger.debug(f"Failed to fetch {ticker}: {e}")
+            logger.warning(f"    Failed to fetch {ticker}: {e}")
             continue
     
+    logger.warning(f"  All tickers failed for {symbol_upper}: {tickers_to_try}")
     return None, None
 
 
@@ -302,19 +315,28 @@ def fetch_usd_kwd_rate() -> float:
     Handles yfinance 1.0 MultiIndex columns.
     """
     if not YFINANCE_AVAILABLE or yf is None:
+        logger.warning("yfinance not available — using fallback USD/KWD rate 0.307")
         return 0.307
     
     try:
+        logger.info("Fetching USD/KWD rate from yfinance ...")
         data = yf.download("USDKWD=X", period="5d", progress=False, threads=False)
-        if not data.empty:
+        if data is not None and not data.empty:
             # Flatten MultiIndex columns (yfinance >= 1.0)
             data = _flatten_yf_columns(data)
             if 'Close' in data.columns:
                 close_val = data['Close'].dropna().iloc[-1]
-                return float(close_val.iloc[0]) if hasattr(close_val, 'iloc') else float(close_val)
+                rate = float(close_val.iloc[0]) if hasattr(close_val, 'iloc') else float(close_val)
+                logger.info(f"USD/KWD rate fetched: {rate}")
+                return rate
+            else:
+                logger.warning(f"USD/KWD: 'Close' not in columns: {list(data.columns)}")
+        else:
+            logger.warning("USD/KWD: yf.download returned empty data")
     except Exception as e:
         logger.warning(f"Failed to fetch USD/KWD rate: {e}")
     
+    logger.warning("Using fallback USD/KWD rate 0.307")
     return 0.307  # Fallback rate
 
 
@@ -323,12 +345,19 @@ def fetch_usd_kwd_rate() -> float:
 # =============================================================================
 
 def save_portfolio_snapshot(user_id: int, portfolio_value: float, usd_kwd_rate: float) -> bool:
-    """Save daily portfolio snapshot for a user."""
+    """Save daily portfolio snapshot for a user.
+    
+    Uses atomic UPSERT (INSERT … ON CONFLICT UPDATE) on PostgreSQL so the
+    snapshot is written in a single statement, eliminating race conditions
+    between the worker and the cron job.
+    """
     _, query_df, exec_sql, is_postgres = get_db_functions()
     
     try:
         today_str = date.today().isoformat()
         placeholder = '%s' if is_postgres() else '?'
+        
+        logger.info(f"  Saving snapshot for user_id={user_id}, date={today_str}, value={portfolio_value:,.3f}")
         
         # Get previous snapshot
         prev_snap = query_df(
@@ -372,40 +401,94 @@ def save_portfolio_snapshot(user_id: int, portfolio_value: float, usd_kwd_rate: 
         roi_percent = (net_gain / total_deposits * 100) if total_deposits > 0 else 0.0
         change_percent = ((portfolio_value - prev_value) / prev_value * 100) if prev_value > 0 else 0.0
         
-        # Check if snapshot exists for today
-        existing = query_df(
-            f"SELECT id FROM portfolio_snapshots WHERE snapshot_date = {placeholder} AND user_id = {placeholder}",
-            (today_str, user_id)
-        )
+        now_ts = int(time.time())
         
-        if not existing.empty:
-            # Update existing
-            exec_sql(f"""
-                UPDATE portfolio_snapshots
-                SET portfolio_value = {placeholder}, daily_movement = {placeholder}, beginning_difference = {placeholder},
-                    accumulated_cash = {placeholder}, net_gain = {placeholder}, change_percent = {placeholder}, roi_percent = {placeholder}, created_at = {placeholder}
-                WHERE snapshot_date = {placeholder} AND user_id = {placeholder}
-            """, (float(portfolio_value), float(daily_movement), float(beginning_diff),
-                  float(accumulated_cash), float(net_gain), float(change_percent), float(roi_percent),
-                  int(time.time()), today_str, user_id))
-            logger.info(f"  📊 Updated snapshot for {today_str}")
+        if is_postgres():
+            # ── PostgreSQL: atomic UPSERT ──────────────────────────────
+            try:
+                exec_sql("""
+                    INSERT INTO portfolio_snapshots
+                        (user_id, snapshot_date, portfolio_value, daily_movement,
+                         beginning_difference, deposit_cash, accumulated_cash,
+                         net_gain, change_percent, roi_percent, created_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (snapshot_date, user_id) DO UPDATE SET
+                        portfolio_value      = EXCLUDED.portfolio_value,
+                        daily_movement       = EXCLUDED.daily_movement,
+                        beginning_difference = EXCLUDED.beginning_difference,
+                        accumulated_cash     = EXCLUDED.accumulated_cash,
+                        net_gain             = EXCLUDED.net_gain,
+                        change_percent       = EXCLUDED.change_percent,
+                        roi_percent          = EXCLUDED.roi_percent,
+                        created_at           = EXCLUDED.created_at
+                """, (user_id, today_str, float(portfolio_value), float(daily_movement),
+                      float(beginning_diff), 0.0, float(accumulated_cash),
+                      float(net_gain), float(change_percent), float(roi_percent), now_ts))
+            except Exception as upsert_err:
+                # Fallback if UNIQUE constraint doesn't exist yet
+                logger.warning(f"  UPSERT failed ({upsert_err}), falling back to check-then-insert")
+                existing = query_df(
+                    "SELECT id FROM portfolio_snapshots WHERE snapshot_date = %s AND user_id = %s",
+                    (today_str, user_id)
+                )
+                if not existing.empty:
+                    exec_sql("""
+                        UPDATE portfolio_snapshots
+                        SET portfolio_value = %s, daily_movement = %s,
+                            beginning_difference = %s, accumulated_cash = %s,
+                            net_gain = %s, change_percent = %s,
+                            roi_percent = %s, created_at = %s
+                        WHERE snapshot_date = %s AND user_id = %s
+                    """, (float(portfolio_value), float(daily_movement), float(beginning_diff),
+                          float(accumulated_cash), float(net_gain), float(change_percent),
+                          float(roi_percent), now_ts, today_str, user_id))
+                else:
+                    exec_sql("""
+                        INSERT INTO portfolio_snapshots
+                        (user_id, snapshot_date, portfolio_value, daily_movement,
+                         beginning_difference, deposit_cash, accumulated_cash,
+                         net_gain, change_percent, roi_percent, created_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """, (user_id, today_str, float(portfolio_value), float(daily_movement),
+                          float(beginning_diff), 0.0, float(accumulated_cash),
+                          float(net_gain), float(change_percent), float(roi_percent), now_ts))
         else:
-            # Insert new
-            exec_sql(f"""
-                INSERT INTO portfolio_snapshots 
-                (user_id, snapshot_date, portfolio_value, daily_movement, beginning_difference, 
-                 deposit_cash, accumulated_cash, net_gain, change_percent, roi_percent, created_at)
-                VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, 
-                        {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder})
-            """, (user_id, today_str, float(portfolio_value), float(daily_movement), float(beginning_diff),
-                  0.0, float(accumulated_cash), float(net_gain), float(change_percent), float(roi_percent),
-                  int(time.time())))
-            logger.info(f"  📊 Saved new snapshot for {today_str}")
+            # ── SQLite: check-then-upsert (single-process safe) ───────
+            existing = query_df(
+                f"SELECT id FROM portfolio_snapshots WHERE snapshot_date = {placeholder} AND user_id = {placeholder}",
+                (today_str, user_id)
+            )
+            if not existing.empty:
+                exec_sql(f"""
+                    UPDATE portfolio_snapshots
+                    SET portfolio_value = {placeholder}, daily_movement = {placeholder},
+                        beginning_difference = {placeholder}, accumulated_cash = {placeholder},
+                        net_gain = {placeholder}, change_percent = {placeholder},
+                        roi_percent = {placeholder}, created_at = {placeholder}
+                    WHERE snapshot_date = {placeholder} AND user_id = {placeholder}
+                """, (float(portfolio_value), float(daily_movement), float(beginning_diff),
+                      float(accumulated_cash), float(net_gain), float(change_percent),
+                      float(roi_percent), now_ts, today_str, user_id))
+            else:
+                exec_sql(f"""
+                    INSERT INTO portfolio_snapshots
+                    (user_id, snapshot_date, portfolio_value, daily_movement,
+                     beginning_difference, deposit_cash, accumulated_cash,
+                     net_gain, change_percent, roi_percent, created_at)
+                    VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder},
+                            {placeholder}, {placeholder}, {placeholder},
+                            {placeholder}, {placeholder}, {placeholder}, {placeholder})
+                """, (user_id, today_str, float(portfolio_value), float(daily_movement),
+                      float(beginning_diff), 0.0, float(accumulated_cash),
+                      float(net_gain), float(change_percent), float(roi_percent), now_ts))
         
+        logger.info(f"  📊 Snapshot saved for {today_str} (value={portfolio_value:,.3f} KWD)")
         return True
         
     except Exception as e:
         logger.error(f"Error saving snapshot for user {user_id}: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
         return False
 
 
@@ -440,6 +523,18 @@ def run_price_update_job():
     logger.info("🚀 AUTO PRICE UPDATE JOB STARTED")
     logger.info(f"📅 Date: {today_str}")
     logger.info(f"🕐 Kuwait Time: {kuwait_now.strftime('%H:%M:%S')}")
+    logger.info(f"📦 yfinance available: {YFINANCE_AVAILABLE}")
+    if YFINANCE_AVAILABLE:
+        try:
+            logger.info(f"📦 yfinance version: {yf.__version__}")
+        except Exception:
+            pass
+    # Log DB type so we can verify PostgreSQL is being used
+    try:
+        _, _, _, _is_pg = get_db_functions()
+        logger.info(f"🗄️ Database type: {'PostgreSQL' if _is_pg() else 'SQLite'}")
+    except Exception as e:
+        logger.error(f"DB function check failed: {e}")
     logger.info("=" * 60)
     
     # Get USD/KWD rate

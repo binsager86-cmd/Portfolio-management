@@ -121,6 +121,14 @@ class FinancialPDFExtractor:
             "cash used in investing",
             "statement of cash flows",
         ],
+        "equity": [
+            "changes in equity", "statement of changes in equity",
+            "shareholders equity", "stockholders equity",
+            "share capital", "statutory reserve", "voluntary reserve",
+            "retained earnings", "other comprehensive income",
+            "non-controlling interest", "treasury shares",
+            "consolidated statement of changes in equity",
+        ],
     }
 
     # ── PDF text extraction ────────────────────────────────────────────

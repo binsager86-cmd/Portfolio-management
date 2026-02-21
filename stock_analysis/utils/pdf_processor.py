@@ -101,6 +101,11 @@ class PDFProcessor:
                 "cash flow", "statement of cash flows",
                 "consolidated statements of cash flows",
             ],
+            "equity": [
+                "changes in equity", "statement of changes in equity",
+                "consolidated statement of changes in equity",
+                "changes in shareholders equity",
+            ],
         }
         result: Dict[str, List[int]] = {k: [] for k in keywords}
 

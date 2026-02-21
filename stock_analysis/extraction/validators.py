@@ -57,6 +57,9 @@ def validate_all(
     for period in _iter_periods(stmts.get("cash_flow")):
         results.extend(_validate_cashflow(period, tolerance_pct))
 
+    # Equity Statement — no generic validation rules needed;
+    # the statement structure varies by company.
+
     return results
 
 

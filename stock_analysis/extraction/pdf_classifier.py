@@ -47,6 +47,15 @@ _STATEMENT_KEYWORDS: Dict[str, List[str]] = {
         # Arabic
         "قائمة التدفقات النقدية", "بيان التدفقات النقدية",
     ],
+    "equity": [
+        "statement of changes in equity",
+        "changes in equity", "changes in shareholders equity",
+        "consolidated statement of changes in equity",
+        "condensed consolidated statement of changes in equity",
+        "statement of changes in owners equity",
+        # Arabic
+        "قائمة التغيرات في حقوق الملكية", "بيان التغيرات في حقوق المساهمين",
+    ],
 }
 
 # Financial-content markers (boost score if found alongside keywords)
@@ -97,6 +106,7 @@ class StatementPages:
     income: List[int] = field(default_factory=list)     # 0-based page nums
     balance: List[int] = field(default_factory=list)
     cashflow: List[int] = field(default_factory=list)
+    equity: List[int] = field(default_factory=list)
     scores: Dict[str, List[Tuple[int, float]]] = field(default_factory=dict)
 
 
@@ -175,7 +185,7 @@ def find_statement_pages(
     result = StatementPages()
     result.scores = {}
 
-    for stmt_type in ("income", "balance", "cashflow"):
+    for stmt_type in ("income", "balance", "cashflow", "equity"):
         scored = [
             (p.page_num, p.statement_scores.get(stmt_type, 0.0))
             for p in pages

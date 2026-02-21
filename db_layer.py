@@ -1067,7 +1067,21 @@ def init_postgres_schema():
             cur.execute("ROLLBACK TO SAVEPOINT sp_copy")
 
         # Ensure UNIQUE constraint on portfolio_snapshots(snapshot_date, user_id)
-        # This prevents duplicate snapshots per user per day.
+        # First remove any duplicates (keep the row with the highest id)
+        try:
+            cur.execute("SAVEPOINT sp_snap_dedup")
+            cur.execute("""
+                DELETE FROM portfolio_snapshots a
+                USING portfolio_snapshots b
+                WHERE a.snapshot_date = b.snapshot_date
+                  AND a.user_id IS NOT DISTINCT FROM b.user_id
+                  AND a.id < b.id
+            """)
+            cur.execute("RELEASE SAVEPOINT sp_snap_dedup")
+        except Exception:
+            cur.execute("ROLLBACK TO SAVEPOINT sp_snap_dedup")
+
+        # Now create the unique index (safe after dedup)
         try:
             cur.execute("SAVEPOINT sp_snap_uq")
             cur.execute("""
@@ -1075,8 +1089,9 @@ def init_postgres_schema():
                 ON portfolio_snapshots(snapshot_date, user_id)
             """)
             cur.execute("RELEASE SAVEPOINT sp_snap_uq")
-        except Exception:
+        except Exception as e:
             cur.execute("ROLLBACK TO SAVEPOINT sp_snap_uq")
+            print(f"  ⚠️ Could not create snapshot unique index: {str(e)[:80]}")
 
         # Record schema version
         try:

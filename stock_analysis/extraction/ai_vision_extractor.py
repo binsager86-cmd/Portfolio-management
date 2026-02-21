@@ -101,7 +101,7 @@ def _get_json_repair():
 EXTRACTOR_VERSION = "vision-v2.0"
 _RENDER_DPI = 250          # Lowered from 350 — 50% smaller, still plenty for tables
 _CACHE_TTL_SECONDS = 86_400  # 24 h
-_VALID_STMT_TYPES = {"balance_sheet", "income_statement", "cash_flow"}
+_VALID_STMT_TYPES = {"balance_sheet", "income_statement", "cash_flow", "equity_statement"}
 _MAX_PARALLEL_WORKERS = 3  # ThreadPoolExecutor for parallel API calls
 
 # ─────────────────────────────────────────────────────────────────────
@@ -246,6 +246,7 @@ _KEY_MAPS = {
     "balance_sheet": _BALANCE_SHEET_MAP,
     "income_statement": _INCOME_STATEMENT_MAP,
     "cash_flow": _CASH_FLOW_MAP,
+    "equity_statement": {},  # AI outputs canonical keys directly; no label map needed
 }
 
 
@@ -271,6 +272,11 @@ Common names for each type (English AND Arabic):
   "Consolidated Statement of Cash Flows", "Cash Flows",
   Arabic: "بيان التدفقات النقدية", "قائمة التدفقات النقدية",
   "التدفقات النقدية الموحدة"
+- equity_statement: "Statement of Changes in Equity",
+  "Consolidated Statement of Changes in Equity",
+  "Changes in Shareholders Equity", "Changes in Owners Equity",
+  Arabic: "قائمة التغيرات في حقوق الملكية",
+  "بيان التغيرات في حقوق المساهمين"
 
 IMPORTANT CLASSIFICATION HINTS:
 - If the page mentions "Operating Activities", "Investing Activities",
@@ -283,11 +289,15 @@ IMPORTANT CLASSIFICATION HINTS:
   statement it continues.
 - When in doubt between cash_flow and unknown, prefer cash_flow if the
   page contains monetary amounts in a tabular format with activity sections.
+- If the page has columns for reserves (Statutory, Voluntary, General),
+  retained earnings movement, or non-controlling interest across multiple
+  equity components → it is equity_statement.
 
 Return ONLY one of these exact strings (no quotes, no extra text):
 balance_sheet
 income_statement
 cash_flow
+equity_statement
 unknown
 """
 
@@ -301,6 +311,7 @@ TASK — do BOTH classification AND extraction in a single pass:
    - balance_sheet (Statement of Financial Position / الميزانية العمومية)
    - income_statement (Profit or Loss / قائمة الدخل)
    - cash_flow (Cash Flows / التدفقات النقدية)
+   - equity_statement (Changes in Equity / التغيرات في حقوق الملكية)
    Pages that belong to the SAME statement type should be merged.
 2) Extract ALL line items with both year columns for each statement.
 3) Detect currency and unit scale (e.g. KD, KD'000, USD millions).
@@ -313,6 +324,9 @@ CLASSIFICATION HINTS:
   (or Arabic: "أنشطة تشغيلية", "أنشطة استثمارية", "أنشطة تمويلية") → cash_flow
 - "Total Assets", "Total Equity", "Liabilities" → balance_sheet
 - "Revenue", "Net Income", "Earnings per share" → income_statement
+- If the page has multiple equity component columns (Share Capital,
+  Statutory Reserve, Retained Earnings, etc.) with opening/closing
+  balances → equity_statement
 
 OUTPUT THIS EXACT JSON — an ARRAY of statement objects:
 [
@@ -342,6 +356,11 @@ OUTPUT THIS EXACT JSON — an ARRAY of statement objects:
   {{
     "statement_type": "cash_flow",
     "source_pages": [3],
+    ...
+  }},
+  {{
+    "statement_type": "equity_statement",
+    "source_pages": [4],
     ...
   }}
 ]
@@ -704,6 +723,7 @@ def _extract_page(
         "balance_sheet": "Balance Sheet / Statement of Financial Position",
         "income_statement": "Income Statement / Statement of Profit or Loss",
         "cash_flow": "Cash Flow Statement",
+        "equity_statement": "Statement of Changes in Equity",
     }
     prompt = _EXTRACT_PROMPT_TEMPLATE.format(
         stmt_hint=hint_labels.get(stmt_type, stmt_type),
@@ -745,6 +765,7 @@ def _extract_multi_page(
         "balance_sheet": "Balance Sheet / Statement of Financial Position",
         "income_statement": "Income Statement / Statement of Profit or Loss",
         "cash_flow": "Cash Flow Statement",
+        "equity_statement": "Statement of Changes in Equity",
     }
     prompt = _EXTRACT_PROMPT_TEMPLATE.format(
         stmt_hint=hint_labels.get(stmt_type, stmt_type),
@@ -843,6 +864,8 @@ def _batch_extract_all(
                 stmt_type = "income_statement"
             elif "cash" in st_lower:
                 stmt_type = "cash_flow"
+            elif "equity" in st_lower or "changes" in st_lower:
+                stmt_type = "equity_statement"
             else:
                 continue  # Skip truly unrecognized
 
@@ -1175,7 +1198,7 @@ def _persist(
     """Store everything via the storage module."""
     # Raw AI outputs
     for stmt_type, raw_json_str in raw_outputs.items():
-        page_num = {"balance_sheet": 0, "income_statement": 1, "cash_flow": 2}.get(stmt_type, -1)
+        page_num = {"balance_sheet": 0, "income_statement": 1, "cash_flow": 2, "equity_statement": 3}.get(stmt_type, -1)
         storage.save_raw_extraction(
             upload_id=upload_id,
             statement_type=stmt_type,

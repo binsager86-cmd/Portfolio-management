@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS analysis_stocks (
 CREATE TABLE IF NOT EXISTS financial_statements (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     stock_id INTEGER NOT NULL,
-    statement_type TEXT NOT NULL,          -- 'income', 'balance', 'cashflow'
+    statement_type TEXT NOT NULL,          -- 'income', 'balance', 'cashflow', 'equity'
     fiscal_year INTEGER NOT NULL,
     fiscal_quarter INTEGER,               -- NULL = annual
     period_end_date TEXT NOT NULL,         -- ISO 'YYYY-MM-DD'
