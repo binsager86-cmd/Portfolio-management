@@ -1,0 +1,448 @@
+{
+  "upload_id": 23,
+  "cache_key": "7189d1e893cdf862fa36085ed4d84b10fd8219076d2317384a15930cc21d94c4_vision-v2.1",
+  "extractor_version": "vision-v2.1",
+  "status": "success",
+  "flags": [],
+  "statements": {
+    "income_statement": {
+      "statement_type": "income_statement",
+      "currency": "KWD",
+      "unit_scale": 1,
+      "periods": [
+        {
+          "label": "2017-12-31",
+          "col_name": "2017"
+        },
+        {
+          "label": "2016-12-31",
+          "col_name": "2016"
+        }
+      ],
+      "items": [
+        {
+          "label_raw": "Revenue",
+          "key": "revenue",
+          "values": {
+            "2017-12-31": 17072342.0,
+            "2016-12-31": 16158870.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Real estate rental income",
+          "key": "real_estate_rental_income",
+          "values": {
+            "2017-12-31": 17072342.0,
+            "2016-12-31": 16158870.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Real estate operating expenses",
+          "key": "real_estate_operating_expenses",
+          "values": {
+            "2017-12-31": -7455080.0,
+            "2016-12-31": -7505882.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Net rental income",
+          "key": "net_rental_income",
+          "values": {
+            "2017-12-31": 9617262.0,
+            "2016-12-31": 8551988.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Loss/(gain) on sale of investment properties",
+          "key": "loss_gain_on_sale_of_investment_properties",
+          "values": {
+            "2017-12-31": -120736.0,
+            "2016-12-31": -155799.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Change in fair value of investment properties",
+          "key": "change_in_fair_value_of_investment_properties",
+          "values": {},
+          "is_total": false
+        }
+      ]
+    },
+    "cash_flow": {
+      "statement_type": "cash_flow",
+      "currency": "KWD",
+      "unit_scale": 1,
+      "periods": [
+        {
+          "label": "2017-12-31",
+          "col_name": "2017"
+        },
+        {
+          "label": "2016-12-31",
+          "col_name": "2016"
+        }
+      ],
+      "items": [
+        {
+          "label_raw": "Profit for the year",
+          "key": "profit_for_the_year",
+          "values": {
+            "2017-12-31": 2222946.0,
+            "2016-12-31": 4818099.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Depreciation",
+          "key": "depreciation",
+          "values": {
+            "2017-12-31": 320837.0,
+            "2016-12-31": 41147.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Gain on bargain purchase of subsidiary",
+          "key": "gain_on_bargain_purchase_of_subsidiary",
+          "values": {
+            "2017-12-31": null,
+            "2016-12-31": -663087.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Finance costs",
+          "key": "finance_costs",
+          "values": {
+            "2017-12-31": 4989573.0,
+            "2016-12-31": 4178227.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Loss/(gain) on sale of investment properties",
+          "key": "loss_gain_on_sale_of_investment_properties",
+          "values": {
+            "2017-12-31": 20076.0,
+            "2016-12-31": -155799.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Change in fair value of investment properties",
+          "key": "change_in_fair_value_of_investment_properties",
+          "values": {
+            "2017-12-31": -474560.0,
+            "2016-12-31": -3881973.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Provision for properties held for trading",
+          "key": "provision_for_properties_held_for_trading",
+          "values": {
+            "2017-12-31": 542090.0,
+            "2016-12-31": null
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Share of results of associates",
+          "key": "share_of_results_of_associates",
+          "values": {
+            "2017-12-31": -208329.0,
+            "2016-12-31": -80124.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Gain on bargain purchase of associate",
+          "key": "gain_on_bargain_purchase_of_associate",
+          "values": {
+            "2017-12-31": -75530.0,
+            "2016-12-31": null
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Gain on sale of available for sale investments",
+          "key": "gain_on_sale_of_available_for_sale_investments",
+          "values": {
+            "2017-12-31": -92495.0,
+            "2016-12-31": -161795.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Impairment of available for sale investments",
+          "key": "impairment_of_available_for_sale_investments",
+          "values": {
+            "2017-12-31": 2179287.0,
+            "2016-12-31": 4868607.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Gain on sale of investments at fair value through profit or loss",
+          "key": "gain_on_sale_of_investments_at_fair_value_through_profit_or_loss",
+          "values": {
+            "2017-12-31": -3865.0,
+            "2016-12-31": null
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Change in fair value of investments at fair value through profit or loss",
+          "key": "change_in_fair_value_of_investments_at_fair_value_through_profit_or_loss",
+          "values": {
+            "2017-12-31": 11955.0,
+            "2016-12-31": 33309.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Provision for doubtful debts",
+          "key": "provision_for_doubtful_debts",
+          "values": {
+            "2017-12-31": 442787.0,
+            "2016-12-31": 185369.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Dividend income",
+          "key": "dividend_income",
+          "values": {
+            "2017-12-31": -357983.0,
+            "2016-12-31": -436134.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Compensation by an associate for uncollected rental income",
+          "key": "compensation_by_an_associate_for_uncollected_rental_income",
+          "values": {
+            "2017-12-31": null,
+            "2016-12-31": -598476.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Loss on sale of associate",
+          "key": "loss_on_sale_of_associate",
+          "values": {
+            "2017-12-31": 813104.0,
+            "2016-12-31": null
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Gain on liquidation of subsidiary",
+          "key": "gain_on_liquidation_of_subsidiary",
+          "values": {
+            "2017-12-31": null,
+            "2016-12-31": -51053.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Provision for employees' end of service benefits",
+          "key": "provision_for_employees_end_of_service_benefits",
+          "values": {
+            "2017-12-31": 144753.0,
+            "2016-12-31": 186163.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Total adjustments",
+          "key": "total_adjustments",
+          "values": {
+            "2017-12-31": 10474646.0,
+            "2016-12-31": 8282480.0
+          },
+          "is_total": true
+        },
+        {
+          "label_raw": "Due from related parties",
+          "key": "due_from_related_parties",
+          "values": {
+            "2017-12-31": 380000.0,
+            "2016-12-31": 4736997.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Accounts receivable and other assets",
+          "key": "accounts_receivable_and_other_assets",
+          "values": {
+            "2017-12-31": 745982.0,
+            "2016-12-31": -97612.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Accounts payable and other liabilities",
+          "key": "accounts_payable_and_other_liabilities",
+          "values": {
+            "2017-12-31": -2052458.0,
+            "2016-12-31": 119504.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Due to related parties",
+          "key": "due_to_related_parties",
+          "values": {
+            "2017-12-31": -3137428.0,
+            "2016-12-31": 819802.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Lease contracts commitments paid",
+          "key": "lease_contracts_commitments_paid",
+          "values": {
+            "2017-12-31": -2066291.0,
+            "2016-12-31": -2066291.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Employees' end of service benefits paid",
+          "key": "employees_end_of_service_benefits_paid",
+          "values": {
+            "2017-12-31": -566698.0,
+            "2016-12-31": -71763.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Net cash from operating activities",
+          "key": "net_cash_from_operating_activities",
+          "values": {
+            "2017-12-31": 3777753.0,
+            "2016-12-31": 1723117.0
+          },
+          "is_total": true
+        },
+        {
+          "label_raw": "Purchase of property and equipment",
+          "key": "purchase_of_property_and_equipment",
+          "values": {
+            "2017-12-31": -643974.0,
+            "2016-12-31": -1089336.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Proceeds from sale of property and equipment",
+          "key": "proceeds_from_sale_of_property_and_equipment",
+          "values": {
+            "2017-12-31": null,
+            "2016-12-31": 9602.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Additions to capital work in progress",
+          "key": "additions_to_capital_work_in_progress",
+          "values": {
+            "2017-12-31": -393726.0,
+            "2016-12-31": -1182820.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Purchase of investment properties",
+          "key": "purchase_of_investment_properties",
+          "values": {
+            "2017-12-31": null,
+            "2016-12-31": -6089.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Proceeds from sale of investment properties",
+          "key": "proceeds_from_sale_of_investment_properties",
+          "values": {
+            "2017-12-31": 1152243.0,
+            "2016-12-31": 1086595.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Proceed from sale of investment at fair value through profit or loss",
+          "key": "proceed_from_sale_of_investment_at_fair_value_through_profit_or_loss",
+          "values": {
+            "2017-12-31": 9138.0,
+            "2016-12-31": null
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Acquisition of associate",
+          "key": "acquisition_of_associate",
+          "values": {
+            "2017-12-31": -10000.0,
+            "2016-12-31": null
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Additions of properties held for trading",
+          "key": "additions_of_properties_held_for_trading",
+          "values": {
+            "2017-12-31": -14266.0,
+            "2016-12-31": null
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Dividend received from associates",
+          "key": "dividend_received_from_associates",
+          "values": {
+            "2017-12-31": 103392.0,
+            "2016-12-31": 115479.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Net consideration paid on acquisition of subsidiaries",
+          "key": "net_consideration_paid_on_acquisition_of_subsidiaries",
+          "values": {},
+          "is_total": false
+        }
+      ]
+    }
+  },
+  "validations": [],
+  "page_types": {
+    "0": "income_statement",
+    "1": "unknown",
+    "2": "unknown",
+    "3": "cash_flow",
+    "4": "unknown"
+  },
+  "page_hashes": {
+    "0": "25c2304a8bc3ba14",
+    "1": "e9ec3e1ff1751944",
+    "2": "11f15d12192ba695",
+    "3": "86b0dcdf37845bee",
+    "4": "4a19dc336fc99b2c"
+  },
+  "timings": {
+    "render": 0.98,
+    "batch_extract": 66.71,
+    "fallback_extract": 84.83,
+    "validate": 0.0,
+    "persist": 0.3,
+    "total": 153.93
+  },
+  "_from_cache": false
+}

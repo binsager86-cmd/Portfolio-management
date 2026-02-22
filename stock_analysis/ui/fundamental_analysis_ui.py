@@ -23,6 +23,11 @@ from stock_analysis.utils.helpers import (
     fiscal_year_label,
 )
 from stock_analysis.config import STATEMENT_TYPES, METRIC_CATEGORIES, FINANCIAL_LINE_ITEM_CODES
+from stock_analysis.ui.financial_upload_ui import (
+    _render_data_organizer,
+    _render_editable_statement_table,
+    _fmt_amount,
+)
 
 # Currency display signs by ISO code
 _CURRENCY_SIGNS = {
@@ -270,7 +275,7 @@ def render_fundamental_analysis_page(user_id: int = 1) -> None:
     ])
 
     with tab_stmts:
-        _render_statements_tab(stock_id, db)
+        _render_statements_tab(stock_id, user_id, db)
     with tab_compare:
         _render_comparison_tab(stock_id, db)
     with tab_metrics:
@@ -298,7 +303,7 @@ def _fmt_amt(val) -> str:
 
 # ── statements tab ────────────────────────────────────────────────────
 
-def _render_statements_tab(stock_id: int, db: AnalysisDatabase) -> None:
+def _render_statements_tab(stock_id: int, user_id: int, db: AnalysisDatabase) -> None:
     fdm = FinancialDataManager(db)
 
     stmt_type = st.selectbox(
@@ -313,107 +318,14 @@ def _render_statements_tab(stock_id: int, db: AnalysisDatabase) -> None:
         st.info(f"No {STATEMENT_TYPES[stmt_type]} data. Upload a PDF first.")
         return
 
-    type_label = STATEMENT_TYPES.get(stmt_type, stmt_type)
-
-    # Sort periods oldest → newest (left → right)
-    stmts.sort(key=lambda s: s.get("period_end_date", ""))
-    years = [str(s["fiscal_year"]) for s in stmts]
-
-    # ── collect line items across all years ────────────────────────
-    items_by_year: Dict[str, pd.DataFrame] = {}
-    all_codes_ordered: List[str] = []
-    code_to_display: Dict[str, str] = {}
-    code_is_total: Dict[str, bool] = {}
-
-    for s in stmts:
-        yr = str(s["fiscal_year"])
-        df = fdm.get_line_items_df(s["id"])
-        items_by_year[yr] = df
-        if not df.empty:
-            for _, row in df.iterrows():
-                code = row.get("line_item_code") or row.get("line_item_name", "")
-                if code and code not in code_to_display:
-                    all_codes_ordered.append(code)
-                    code_to_display[code] = (
-                        row.get("display_name")
-                        or FINANCIAL_LINE_ITEM_CODES.get(code, code)
-                    )
-                    code_is_total[code] = bool(row.get("is_total"))
-
-    if not all_codes_ordered:
-        st.info(f"No line items for {type_label}.")
-        return
-
-    # ── build display table ───────────────────────────────────────
-    table_data: List[Dict[str, Any]] = []
-    for code in all_codes_ordered:
-        row_dict: Dict[str, Any] = {
-            "Line Item": code_to_display.get(code, code),
-        }
-        for yr in years:
-            df = items_by_year.get(yr, pd.DataFrame())
-            if df.empty:
-                row_dict[yr] = "—"
-            else:
-                mask = pd.Series(False, index=df.index)
-                if "line_item_code" in df.columns:
-                    mask = mask | (df["line_item_code"] == code)
-                if "line_item_name" in df.columns:
-                    mask = mask | (df["line_item_name"] == code)
-                match = df[mask]
-                if not match.empty:
-                    row_dict[yr] = _fmt_amt(match.iloc[0]["amount"])
-                else:
-                    row_dict[yr] = "—"
-        table_data.append(row_dict)
-
-    display_df = pd.DataFrame(table_data)
-
-    # ── title ─────────────────────────────────────────────────────
-    period_range = (
-        f"year ended {stmts[-1].get('period_end_date', years[-1])}"
-        if stmts else ""
-    )
-    st.markdown(
-        f"### {type_label} "
-        f"<span style='font-size:0.75em;color:gray;'>— {period_range}</span>",
-        unsafe_allow_html=True,
+    # Editable statement table (view + edit mode)
+    _render_editable_statement_table(
+        stmt_type, stmts, fdm, user_id, key_prefix="fa_stmt",
     )
 
-    # ── style: bold total rows, right-align numbers ───────────────
-    def _style_rows(row_series):
-        label = row_series.get("Line Item", "")
-        code_match = [
-            c for c, d in code_to_display.items() if d == label
-        ]
-        is_total = (
-            code_is_total.get(code_match[0], False) if code_match else False
-        )
-        n = len(row_series)
-        if is_total:
-            return ["font-weight:bold; border-top:1px solid #888;"] * n
-        return [""] * n
-
-    styled = (
-        display_df.style
-        .apply(_style_rows, axis=1)
-        .set_properties(
-            subset=years,
-            **{"text-align": "right"},
-        )
-        .set_properties(
-            subset=["Line Item"],
-            **{"text-align": "left", "min-width": "220px"},
-        )
-        .hide(axis="index")
-    )
-
-    st.dataframe(
-        styled,
-        use_container_width=True,
-        hide_index=True,
-        height=min(40 + len(all_codes_ordered) * 35, 800),
-    )
+    # ── Data Organizer — AI normalization ──────────────────────────
+    all_stmts = fdm.get_statements(stock_id)  # all types for organizer
+    _render_data_organizer(stock_id, user_id, db, fdm, all_stmts, key_prefix="fa")
 
 
 # ── multi-period comparison ───────────────────────────────────────────

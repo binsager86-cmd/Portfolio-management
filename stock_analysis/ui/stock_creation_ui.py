@@ -385,14 +385,16 @@ def _render_edit_form(user_id: int) -> None:
 
     with st.form("edit_stock_form"):
         c1, c2 = st.columns(2)
-        company = c1.text_input("Company Name", value=stock["company_name"])
-        exchange = c2.selectbox(
+        symbol = c1.text_input("Stock Symbol", value=stock["symbol"]).strip().upper()
+        company = c2.text_input("Company Name", value=stock["company_name"])
+        c3, c4 = st.columns(2)
+        exchange = c3.selectbox(
             "Exchange",
             EXCHANGE_CHOICES,
             index=EXCHANGE_CHOICES.index(stock.get("exchange", "NYSE")),
         )
-        c3, c4 = st.columns(2)
-        currency = c3.selectbox(
+        c5, c6 = st.columns(2)
+        currency = c5.selectbox(
             "Currency",
             CURRENCY_CHOICES,
             index=CURRENCY_CHOICES.index(stock.get("currency", "USD")),
@@ -400,7 +402,7 @@ def _render_edit_form(user_id: int) -> None:
         sector_idx = 0
         if stock.get("sector") in SECTOR_CHOICES:
             sector_idx = SECTOR_CHOICES.index(stock["sector"]) + 1
-        sector = c4.selectbox("Sector", [""] + SECTOR_CHOICES, index=sector_idx)
+        sector = c6.selectbox("Sector", [""] + SECTOR_CHOICES, index=sector_idx)
 
         industry = st.text_input("Industry", value=stock.get("industry") or "")
 
@@ -421,6 +423,7 @@ def _render_edit_form(user_id: int) -> None:
 
     if submitted:
         updates = {
+            "symbol": symbol,
             "company_name": company,
             "exchange": exchange,
             "currency": currency,
