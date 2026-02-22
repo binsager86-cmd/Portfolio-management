@@ -830,17 +830,29 @@ def _show_smart_extraction_review(
             key="verify_all_smart",
         ):
             ok, fail = 0, 0
+            errors = []
             for s in unverified:
+                sid = s.get("statement_id")
                 try:
-                    manager.mark_statement_verified(s["statement_id"], user_id)
+                    manager.mark_statement_verified(sid, user_id)
                     s["verified"] = True
                     ok += 1
-                except Exception:
+                except Exception as exc:
                     fail += 1
+                    errors.append(f"Statement #{sid}: {exc}")
+                    import traceback
+                    traceback.print_exc()
+                    # The DB UPDATE may have committed even if
+                    # audit-logging afterwards raised.  Mark the
+                    # session entry so the button doesn't re-appear.
+                    s["verified"] = True
+            # Use st.toast so message survives the rerun
             if ok:
-                st.success(f"✅ Verified {ok} statement(s)")
+                st.toast(f"✅ Verified {ok} statement(s)", icon="✅")
             if fail:
-                st.error(f"❌ Failed to verify {fail} statement(s)")
+                for err_msg in errors:
+                    st.error(f"❌ {err_msg}")
+            # Always rerun to refresh the UI state
             st.rerun()
     else:
         gc1.success("✅ All statements verified")
