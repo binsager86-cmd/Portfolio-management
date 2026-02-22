@@ -1594,6 +1594,9 @@ def _call_gemini_for_normalization(
 ) -> dict:
     """Send the normalization prompt to Gemini and return parsed JSON."""
     import json as _json
+    import logging
+
+    logger = logging.getLogger(__name__)
 
     from stock_analysis.extraction.ai_vision_extractor import (
         _get_genai,
@@ -1608,15 +1611,94 @@ def _call_gemini_for_normalization(
     prompt = _NORMALIZATION_PROMPT.format(input_json=input_json)
 
     raw_text = _call_gemini(client, [prompt], max_tokens=16384, temperature=0.1)
+    logger.info("Normalization raw response (first 500 chars): %s", raw_text[:500])
+
     parsed = _repair_json(raw_text)
 
+    # If repair returned a list, wrap it
+    if isinstance(parsed, list):
+        # AI may have returned just the clean_statements array
+        parsed = {"clean_statements": _list_to_clean_statements(parsed), "mapping": []}
+
     if not isinstance(parsed, dict):
-        raise ValueError(f"AI returned unexpected format: {type(parsed)}")
+        raise ValueError(
+            f"AI returned unexpected format: {type(parsed).__name__}. "
+            f"First 300 chars: {str(parsed)[:300]}"
+        )
+
+    # Normalize variant key names the AI might use
+    _key_aliases = {
+        "clean_statements": ["clean_statements", "statements", "normalized_statements",
+                             "normalized", "clean", "result", "data", "output"],
+        "mapping": ["mapping", "mappings", "name_mapping", "mapping_table",
+                     "name_mappings"],
+    }
+    for canonical, aliases in _key_aliases.items():
+        if canonical not in parsed:
+            for alias in aliases:
+                if alias in parsed:
+                    parsed[canonical] = parsed.pop(alias)
+                    break
+
+    # If still no clean_statements, try to reconstruct from response
+    if "clean_statements" not in parsed:
+        # Check if the parsed dict IS the clean_statements (keys are statement types)
+        stmt_type_keys = {"income", "balance", "cashflow", "equity",
+                          "income_statement", "balance_sheet", "cash_flow",
+                          "equity_statement"}
+        found_types = set(parsed.keys()) & stmt_type_keys
+        if found_types:
+            # The AI returned the statements dict directly at top level
+            clean = {}
+            for k, v in list(parsed.items()):
+                if k in stmt_type_keys:
+                    clean[k] = v if isinstance(v, list) else [v]
+            parsed = {"clean_statements": clean, "mapping": parsed.get("mapping", [])}
 
     if "clean_statements" not in parsed:
-        raise ValueError("AI response missing 'clean_statements' key")
+        # Log the full response for debugging
+        logger.error("Normalization response keys: %s", list(parsed.keys()))
+        logger.error("Full response: %s", _json.dumps(parsed, default=str)[:2000])
+        raise ValueError(
+            f"AI response missing 'clean_statements' key. "
+            f"Got keys: {list(parsed.keys())}. "
+            f"Check app logs for full response."
+        )
 
+    # Normalize statement type keys (income_statement → income, etc.)
+    _type_map = {
+        "income_statement": "income",
+        "balance_sheet": "balance",
+        "cash_flow": "cashflow",
+        "equity_statement": "equity",
+    }
+    clean = parsed["clean_statements"]
+    if isinstance(clean, dict):
+        for old_key, new_key in _type_map.items():
+            if old_key in clean and new_key not in clean:
+                clean[new_key] = clean.pop(old_key)
+    parsed["clean_statements"] = clean
+
+    parsed.setdefault("mapping", [])
     return parsed
+
+
+def _list_to_clean_statements(items: list) -> dict:
+    """Convert a flat list of statement objects into the grouped dict."""
+    result: dict = {}
+    _type_map = {
+        "income_statement": "income",
+        "balance_sheet": "balance",
+        "cash_flow": "cashflow",
+        "equity_statement": "equity",
+    }
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        stype = item.get("statement_type", "unknown")
+        stype = _type_map.get(stype, stype)
+        result.setdefault(stype, []).append(item)
+    return result
 
 
 def _render_data_organizer(
@@ -1625,8 +1707,11 @@ def _render_data_organizer(
     db: AnalysisDatabase,
     fdm: FinancialDataManager,
     stmts: list,
+    *,
+    key_prefix: str = "org",
 ) -> None:
     """Render the Data Organizer section with AI normalization."""
+    _kp = f"{key_prefix}_{stock_id}"  # unique prefix for all widget keys
 
     st.markdown("---")
     st.subheader("🗂️ Data Organizer")
@@ -1635,7 +1720,7 @@ def _render_data_organizer(
         "names, logical ordering, and clean cross-year presentation."
     )
 
-    api_key = _resolve_gemini_key(input_key="gemini_key_organizer")
+    api_key = _resolve_gemini_key(input_key=f"gemini_key_organizer_{_kp}")
 
     # ── Backup status ─────────────────────────────────────────────
     has_backup = f"organizer_backup_{stock_id}" in st.session_state
@@ -1650,7 +1735,7 @@ def _render_data_organizer(
             type="primary",
             use_container_width=True,
             help="Send all statements to AI for normalization",
-            key="btn_data_organizer",
+            key=f"btn_data_organizer_{_kp}",
         ):
             if not api_key:
                 st.error("🔑 Gemini API key required. Enter it above.")
@@ -1683,7 +1768,7 @@ def _render_data_organizer(
                 "↩️ Restore Original Data",
                 use_container_width=True,
                 help="Revert to the data before normalization",
-                key="btn_restore_organizer",
+                key=f"btn_restore_organizer_{_kp}",
             ):
                 backup_json = st.session_state[f"organizer_backup_{stock_id}"]
                 try:
@@ -1765,7 +1850,7 @@ def _render_data_organizer(
                 "💾 Save Normalized Data",
                 type="primary",
                 use_container_width=True,
-                key="btn_save_normalized",
+                key=f"btn_save_normalized_{_kp}",
             ):
                 try:
                     n_written = fdm.apply_normalization_result(
@@ -1783,11 +1868,237 @@ def _render_data_organizer(
             if st.button(
                 "🗑️ Discard Normalization",
                 use_container_width=True,
-                key="btn_discard_normalized",
+                key=f"btn_discard_normalized_{_kp}",
             ):
                 st.session_state.pop(f"organizer_result_{stock_id}", None)
                 st.toast("Normalization discarded.", icon="🗑️")
                 st.rerun()
+
+
+# ══════════════════════════════════════════════════════════════════════
+# EDITABLE STATEMENT TABLE — inline editing with save
+# ══════════════════════════════════════════════════════════════════════
+
+def _render_editable_statement_table(
+    stype: str,
+    type_stmts: List[Dict[str, Any]],
+    fdm: "FinancialDataManager",
+    user_id: int,
+    *,
+    key_prefix: str = "ed",
+) -> None:
+    """Render a financial statement table with inline editing support.
+
+    In *view mode* (default) displays a styled read-only table.
+    In *edit mode* (toggled by checkbox) displays ``st.data_editor``
+    with raw numeric values — double-click any cell to change it.
+    Click **💾 Save Changes** to persist edits to the database.
+    """
+    type_label = STATEMENT_TYPES.get(stype, stype)
+
+    # Sort periods oldest → newest (left → right)
+    type_stmts.sort(key=lambda s: s.get("period_end_date", ""))
+    years = [str(s["fiscal_year"]) for s in type_stmts]
+
+    # ── collect line items across all years ────────────────────────
+    items_by_year: Dict[str, pd.DataFrame] = {}
+    all_codes_ordered: List[str] = []
+    code_to_display: Dict[str, str] = {}
+    code_is_total: Dict[str, bool] = {}
+
+    for s in type_stmts:
+        yr = str(s["fiscal_year"])
+        df = fdm.get_line_items_df(s["id"])
+        items_by_year[yr] = df
+        if not df.empty:
+            for _, row in df.iterrows():
+                code = row.get("line_item_code") or row.get("line_item_name", "")
+                if code and code not in code_to_display:
+                    all_codes_ordered.append(code)
+                    code_to_display[code] = (
+                        row.get("display_name")
+                        or FINANCIAL_LINE_ITEM_CODES.get(code, code)
+                    )
+                    code_is_total[code] = bool(row.get("is_total"))
+
+    if not all_codes_ordered:
+        st.info(f"No line items for {type_label}.")
+        return
+
+    # ── build raw-value table + id mapping ────────────────────────
+    raw_table: List[Dict[str, Any]] = []      # row dicts with numeric values
+    id_map: Dict[int, Dict[str, int]] = {}    # row_idx → {year → line_item_id}
+    orig_vals: Dict[int, Dict[str, float]] = {}  # row_idx → {year → amount}
+
+    for row_idx, code in enumerate(all_codes_ordered):
+        row_dict: Dict[str, Any] = {
+            "Line Item": code_to_display.get(code, code),
+        }
+        id_map[row_idx] = {}
+        orig_vals[row_idx] = {}
+
+        for yr in years:
+            df = items_by_year.get(yr, pd.DataFrame())
+            if df.empty:
+                row_dict[yr] = None
+                continue
+            mask = pd.Series(False, index=df.index)
+            if "line_item_code" in df.columns:
+                mask = mask | (df["line_item_code"] == code)
+            if "line_item_name" in df.columns:
+                mask = mask | (df["line_item_name"] == code)
+            match = df[mask]
+            if not match.empty:
+                amt = match.iloc[0]["amount"]
+                row_dict[yr] = float(amt) if amt is not None else None
+                if "id" in match.columns:
+                    id_map[row_idx][yr] = int(match.iloc[0]["id"])
+                orig_vals[row_idx][yr] = float(amt) if amt is not None else None
+            else:
+                row_dict[yr] = None
+        raw_table.append(row_dict)
+
+    raw_df = pd.DataFrame(raw_table)
+
+    # ── title ─────────────────────────────────────────────────────
+    period_range = (
+        f"year ended {type_stmts[-1].get('period_end_date', years[-1])}"
+        if type_stmts else ""
+    )
+    st.markdown(
+        f"### {type_label} "
+        f"<span style='font-size:0.75em;color:gray;'>— {period_range}</span>",
+        unsafe_allow_html=True,
+    )
+
+    # ── edit mode toggle ──────────────────────────────────────────
+    edit_mode = st.checkbox(
+        "✏️ Edit Mode — double-click a cell to change it",
+        key=f"{key_prefix}_edit_{stype}",
+    )
+
+    tbl_height = min(40 + len(all_codes_ordered) * 35, 800)
+
+    if edit_mode:
+        # ------ EDITABLE data_editor -----------------------------
+        col_config = {
+            "Line Item": st.column_config.TextColumn(
+                "Line Item", disabled=True, width="large",
+            ),
+        }
+        for yr in years:
+            col_config[yr] = st.column_config.NumberColumn(
+                yr, format="%.3f",
+            )
+
+        edited_df = st.data_editor(
+            raw_df,
+            column_config=col_config,
+            use_container_width=True,
+            hide_index=True,
+            height=tbl_height,
+            key=f"{key_prefix}_editor_{stype}",
+            num_rows="fixed",
+        )
+
+        # Save button
+        if st.button(
+            "💾 Save Changes",
+            key=f"{key_prefix}_save_{stype}",
+            type="primary",
+        ):
+            changes = 0
+            errors: List[str] = []
+            for row_idx in range(len(edited_df)):
+                for yr in years:
+                    new_val = edited_df.at[row_idx, yr]
+                    old_val = orig_vals.get(row_idx, {}).get(yr)
+                    item_id = id_map.get(row_idx, {}).get(yr)
+
+                    if item_id is None:
+                        continue  # no DB row for this cell
+
+                    # Skip unchanged cells
+                    if new_val is None and old_val is None:
+                        continue
+                    if (
+                        new_val is not None
+                        and old_val is not None
+                        and abs(float(new_val) - float(old_val)) < 0.001
+                    ):
+                        continue
+
+                    try:
+                        fdm.update_line_item(
+                            item_id,
+                            user_id,
+                            float(new_val) if new_val is not None else 0.0,
+                        )
+                        changes += 1
+                    except Exception as exc:
+                        code = all_codes_ordered[row_idx] if row_idx < len(all_codes_ordered) else "?"
+                        errors.append(f"{code} / {yr}: {exc}")
+
+            if changes:
+                st.success(f"✅ Saved {changes} change(s).")
+            elif not errors:
+                st.info("No changes detected.")
+            for err in errors:
+                st.error(err)
+            if changes:
+                import time as _t
+                _t.sleep(0.5)
+                st.rerun()
+    else:
+        # ------ READ-ONLY styled table ---------------------------
+        view_data: List[Dict[str, Any]] = []
+        for row_idx, code in enumerate(all_codes_ordered):
+            row_dict: Dict[str, Any] = {
+                "Line Item": code_to_display.get(code, code),
+            }
+            for yr in years:
+                val = orig_vals.get(row_idx, {}).get(yr)
+                if val is not None:
+                    row_dict[yr] = _fmt_amount(val)
+                else:
+                    row_dict[yr] = "—"
+            view_data.append(row_dict)
+
+        view_df = pd.DataFrame(view_data)
+
+        def _style_rows(row_series):
+            label = row_series.get("Line Item", "")
+            code_match = [
+                c for c, d in code_to_display.items() if d == label
+            ]
+            is_total = (
+                code_is_total.get(code_match[0], False) if code_match else False
+            )
+            n = len(row_series)
+            if is_total:
+                return ["font-weight:bold; border-top:1px solid #888;"] * n
+            return [""] * n
+
+        styled = (
+            view_df.style
+            .apply(_style_rows, axis=1)
+            .set_properties(
+                subset=years,
+                **{"text-align": "right"},
+            )
+            .set_properties(
+                subset=["Line Item"],
+                **{"text-align": "left", "min-width": "220px"},
+            )
+            .hide(axis="index")
+        )
+
+        st.dataframe(
+            styled,
+            use_container_width=True,
+            hide_index=True,
+            height=tbl_height,
+        )
 
 
 def _render_existing_tab(
@@ -1821,110 +2132,10 @@ def _render_existing_tab(
 
     for stype in ordered_types:
         type_stmts = grouped[stype]
-        type_label = STATEMENT_TYPES.get(stype, stype)
 
-        # Sort periods oldest → newest (left → right)
-        type_stmts.sort(key=lambda s: s.get("period_end_date", ""))
-        years = [str(s["fiscal_year"]) for s in type_stmts]
-
-        # ── build combined table: line items × years ──────────────
-        # Collect line items from each statement, preserving order
-        items_by_year: Dict[str, pd.DataFrame] = {}
-        all_codes_ordered: List[str] = []
-        code_to_display: Dict[str, str] = {}
-        code_is_total: Dict[str, bool] = {}
-
-        for s in type_stmts:
-            yr = str(s["fiscal_year"])
-            df = fdm.get_line_items_df(s["id"])
-            items_by_year[yr] = df
-            if not df.empty:
-                for _, row in df.iterrows():
-                    code = row.get("line_item_code") or row.get("line_item_name", "")
-                    if code and code not in code_to_display:
-                        all_codes_ordered.append(code)
-                        code_to_display[code] = (
-                            row.get("display_name")
-                            or FINANCIAL_LINE_ITEM_CODES.get(code, code)
-                        )
-                        code_is_total[code] = bool(row.get("is_total"))
-
-        if not all_codes_ordered:
-            st.info(f"No line items for {type_label}.")
-            continue
-
-        # Build display DataFrame
-        table_data: List[Dict[str, Any]] = []
-        for code in all_codes_ordered:
-            row_dict: Dict[str, Any] = {
-                "Line Item": code_to_display.get(code, code),
-            }
-            for yr in years:
-                df = items_by_year.get(yr, pd.DataFrame())
-                if df.empty:
-                    row_dict[yr] = "—"
-                else:
-                    mask = pd.Series(False, index=df.index)
-                    if "line_item_code" in df.columns:
-                        mask = mask | (df["line_item_code"] == code)
-                    if "line_item_name" in df.columns:
-                        mask = mask | (df["line_item_name"] == code)
-                    match = df[mask]
-                    if not match.empty:
-                        row_dict[yr] = _fmt_amount(match.iloc[0]["amount"])
-                    else:
-                        row_dict[yr] = "—"
-            table_data.append(row_dict)
-
-        display_df = pd.DataFrame(table_data)
-
-        # ── Title + period range ──────────────────────────────────
-        period_range = (
-            f"year ended {type_stmts[-1].get('period_end_date', years[-1])}"
-            if type_stmts
-            else ""
-        )
-        st.markdown(
-            f"### {type_label} "
-            f"<span style='font-size:0.75em;color:gray;'>— {period_range}</span>",
-            unsafe_allow_html=True,
-        )
-
-        # ── Style: bold total rows, right-align numbers ───────────
-        def _style_rows(row_series):
-            """Return list of CSS styles per cell for the row."""
-            label = row_series.get("Line Item", "")
-            # Check if this line item is a total row
-            code_match = [
-                c for c, d in code_to_display.items() if d == label
-            ]
-            is_total = (
-                code_is_total.get(code_match[0], False) if code_match else False
-            )
-            n = len(row_series)
-            if is_total:
-                return ["font-weight:bold; border-top:1px solid #888;"] * n
-            return [""] * n
-
-        styled = (
-            display_df.style
-            .apply(_style_rows, axis=1)
-            .set_properties(
-                subset=years,
-                **{"text-align": "right"},
-            )
-            .set_properties(
-                subset=["Line Item"],
-                **{"text-align": "left", "min-width": "220px"},
-            )
-            .hide(axis="index")
-        )
-
-        st.dataframe(
-            styled,
-            use_container_width=True,
-            hide_index=True,
-            height=min(40 + len(all_codes_ordered) * 35, 800),
+        # Editable statement table (view + edit mode)
+        _render_editable_statement_table(
+            stype, type_stmts, fdm, user_id, key_prefix=f"ex_{stype}",
         )
 
         # ── Action buttons per year (verify / delete) ─────────────
@@ -1968,4 +2179,4 @@ def _render_existing_tab(
     # ══════════════════════════════════════════════════════════════════
     # DATA ORGANIZER — AI-driven normalization
     # ══════════════════════════════════════════════════════════════════
-    _render_data_organizer(stock_id, user_id, db, fdm, stmts)
+    _render_data_organizer(stock_id, user_id, db, fdm, stmts, key_prefix="up")

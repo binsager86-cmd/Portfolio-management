@@ -1,0 +1,760 @@
+{
+  "upload_id": 22,
+  "cache_key": "613a55e3565da82cbb333e2dd4eb7a84ae0e35b7eb5e328bc1f052e10d9c1bb5_vision-v2.0",
+  "extractor_version": "vision-v2.0",
+  "status": "success",
+  "flags": [],
+  "statements": {
+    "income_statement": {
+      "statement_type": "income_statement",
+      "currency": "KD",
+      "unit_scale": 1,
+      "periods": [
+        {
+          "label": "2019-12-31",
+          "col_name": "2019-12-31"
+        },
+        {
+          "label": "2018-12-31",
+          "col_name": "2018-12-31"
+        }
+      ],
+      "items": [
+        {
+          "label_raw": "Net real estate rental income",
+          "key": "net_real_estate_rental_income",
+          "values": {
+            "2019-12-31": 23736949.0,
+            "2018-12-31": 17483393.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Real estate operating expenses",
+          "key": "real_estate_operating_expenses",
+          "values": {
+            "2019-12-31": -3020742.0,
+            "2018-12-31": -7288660.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Net rental income",
+          "key": "net_rental_income",
+          "values": {
+            "2019-12-31": 20716207.0,
+            "2018-12-31": 10194733.0
+          },
+          "is_total": true
+        },
+        {
+          "label_raw": "Change in fair value of investment properties",
+          "key": "change_in_fair_value_of_investment_properties",
+          "values": {
+            "2019-12-31": -8478007.0,
+            "2018-12-31": 347770.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Loss on sale of trading properties",
+          "key": "loss_on_sale_of_trading_properties",
+          "values": {
+            "2019-12-31": null,
+            "2018-12-31": -246355.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Share of results of associates",
+          "key": "share_of_results_of_associates",
+          "values": {
+            "2019-12-31": 673785.0,
+            "2018-12-31": -120088.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Change in fair value of financial assets at fair value through profit or loss",
+          "key": "change_in_fair_value_of_financial_assets_at_fair_value_through_profit_or_loss",
+          "values": {
+            "2019-12-31": -509731.0,
+            "2018-12-31": 1847377.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Dividend income",
+          "key": "dividend_income",
+          "values": {
+            "2019-12-31": 3579018.0,
+            "2018-12-31": 3721013.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Foreign exchange loss",
+          "key": "foreign_exchange_loss",
+          "values": {
+            "2019-12-31": -25685.0,
+            "2018-12-31": -47013.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Gain on disposal of loan no longer required",
+          "key": "gain_on_disposal_of_loan_no_longer_required",
+          "values": {
+            "2019-12-31": null,
+            "2018-12-31": 903744.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Gain on bargain purchase of a subsidiary",
+          "key": "gain_on_bargain_purchase_of_a_subsidiary",
+          "values": {
+            "2019-12-31": 3579018.0,
+            "2018-12-31": null
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Other income",
+          "key": "other_income",
+          "values": {
+            "2019-12-31": 823819.0,
+            "2018-12-31": 844846.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Total Income",
+          "key": "total_income",
+          "values": {
+            "2019-12-31": 19206413.0,
+            "2018-12-31": 14611550.0
+          },
+          "is_total": true
+        },
+        {
+          "label_raw": "General and administrative expenses",
+          "key": "general_and_administrative_expenses",
+          "values": {
+            "2019-12-31": -1904782.0,
+            "2018-12-31": -1437717.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Finance costs",
+          "key": "finance_costs",
+          "values": {
+            "2019-12-31": -6071661.0,
+            "2018-12-31": -5946267.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Provision for doubtful debts",
+          "key": "provision_for_doubtful_debts",
+          "values": {
+            "2019-12-31": -800000.0,
+            "2018-12-31": -904133.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Provision for tax claims of foreign subsidiary",
+          "key": "provision_for_tax_claims_of_foreign_subsidiary",
+          "values": {
+            "2019-12-31": -600000.0,
+            "2018-12-31": null
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Provision for trading properties",
+          "key": "provision_for_trading_properties",
+          "values": {
+            "2019-12-31": -233000.0,
+            "2018-12-31": null
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Total Expenses and other charges",
+          "key": "total_expenses_and_other_charges",
+          "values": {
+            "2019-12-31": -11616068.0,
+            "2018-12-31": -7438117.0
+          },
+          "is_total": true
+        },
+        {
+          "label_raw": "Profit for the year before contribution to Kuwait Foundation for the Advancement of Sciences (KFAS), National Labour Support Tax (NLST), Zakat and Board of Directors' remuneration",
+          "key": "profit_for_the_year_before_contribution_to_kfas_nlst_zakat_and_board_of_directors_remuneration",
+          "values": {
+            "2019-12-31": 7590117.0,
+            "2018-12-31": 7073433.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Provision for KFAS",
+          "key": "provision_for_kfas",
+          "values": {
+            "2019-12-31": -333196.0,
+            "2018-12-31": -311800.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Provision for NLST",
+          "key": "provision_for_nlst",
+          "values": {
+            "2019-12-31": -191720.0,
+            "2018-12-31": -179065.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Provision for Zakat",
+          "key": "provision_for_zakat",
+          "values": {
+            "2019-12-31": -98806.0,
+            "2018-12-31": -77718.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Board of Directors' remuneration",
+          "key": "board_of_directors_remuneration",
+          "values": {
+            "2019-12-31": -40000.0,
+            "2018-12-31": -40000.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Profit for the year",
+          "key": "profit_for_the_year",
+          "values": {
+            "2019-12-31": 7220331.0,
+            "2018-12-31": 6747450.0
+          },
+          "is_total": true
+        },
+        {
+          "label_raw": "Owners of the Parent Company",
+          "key": "owners_of_the_parent_company",
+          "values": {
+            "2019-12-31": 7045605.0,
+            "2018-12-31": 6747450.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Non-controlling interests",
+          "key": "non_controlling_interests",
+          "values": {
+            "2019-12-31": 174726.0,
+            "2018-12-31": null
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Profit for the year",
+          "key": "profit_for_the_year_2",
+          "values": {
+            "2019-12-31": 7220331.0,
+            "2018-12-31": 6747450.0
+          },
+          "is_total": true
+        },
+        {
+          "label_raw": "Basic and diluted earnings per share attributable to Owners of the Parent Company (Fils)",
+          "key": "basic_and_diluted_earnings_per_share_attributable_to_owners_of_the_parent_company_fils",
+          "values": {
+            "2019-12-31": 8.25,
+            "2018-12-31": 7.54
+          },
+          "is_total": false
+        }
+      ]
+    },
+    "balance_sheet": {
+      "statement_type": "balance_sheet",
+      "currency": "KD",
+      "unit_scale": 1,
+      "periods": [
+        {
+          "label": "2019-12-31",
+          "col_name": "2019-12-31"
+        },
+        {
+          "label": "2018-12-31",
+          "col_name": "2018-12-31"
+        }
+      ],
+      "items": [
+        {
+          "label_raw": "Investment properties",
+          "key": "investment_properties",
+          "values": {
+            "2019-12-31": 597386.0,
+            "2018-12-31": 1086775.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Investment properties under development",
+          "key": "investment_properties_under_development",
+          "values": {
+            "2019-12-31": 223995226.0,
+            "2018-12-31": 174739425.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Property and equipment",
+          "key": "property_and_equipment",
+          "values": {
+            "2019-12-31": 7450000.0,
+            "2018-12-31": null
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Capital work in progress",
+          "key": "capital_work_in_progress",
+          "values": {
+            "2019-12-31": 119126.0,
+            "2018-12-31": 221864.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Financial assets at fair value through other comprehensive income",
+          "key": "financial_assets_at_fair_value_through_other_comprehensive_income",
+          "values": {
+            "2019-12-31": 27170000.0,
+            "2018-12-31": 31000000.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Investment in associates",
+          "key": "investment_in_associates",
+          "values": {
+            "2019-12-31": 7967907.0,
+            "2018-12-31": 5919095.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Due from related parties",
+          "key": "due_from_related_parties",
+          "values": {
+            "2019-12-31": 359069.0,
+            "2018-12-31": null
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Total non-current assets",
+          "key": "total_non_current_assets",
+          "values": {
+            "2019-12-31": 267658714.0,
+            "2018-12-31": 214831045.0
+          },
+          "is_total": true
+        },
+        {
+          "label_raw": "Trading properties",
+          "key": "trading_properties",
+          "values": {
+            "2019-12-31": 8.0
+          },
+          "is_total": false
+        }
+      ]
+    },
+    "cash_flow": {
+      "statement_type": "cash_flow",
+      "currency": "KWD",
+      "unit_scale": 1,
+      "periods": [
+        {
+          "label": "2019-12-31",
+          "col_name": "2019"
+        },
+        {
+          "label": "2018-12-31",
+          "col_name": "2018"
+        }
+      ],
+      "items": [
+        {
+          "label_raw": "Profit for the year",
+          "key": "profit_for_the_year",
+          "values": {
+            "2019-12-31": 7220331.0,
+            "2018-12-31": 6747450.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Depreciation",
+          "key": "depreciation",
+          "values": {
+            "2019-12-31": 51829.0,
+            "2018-12-31": 351842.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Finance costs",
+          "key": "finance_costs",
+          "values": {
+            "2019-12-31": 8071661.0,
+            "2018-12-31": 5396267.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Change in fair value of investment properties",
+          "key": "change_in_fair_value_of_investment_properties",
+          "values": {
+            "2019-12-31": 6284697.0,
+            "2018-12-31": -347770.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Provision for trading properties",
+          "key": "provision_for_trading_properties",
+          "values": {
+            "2019-12-31": 633623.0,
+            "2018-12-31": null
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Loss on sale of trading properties",
+          "key": "loss_on_sale_of_trading_properties",
+          "values": {
+            "2019-12-31": null,
+            "2018-12-31": 246395.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Share of results of associates",
+          "key": "share_of_results_of_associates",
+          "values": {
+            "2019-12-31": -573788.0,
+            "2018-12-31": -304148.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Gain on bargain purchase of subsidiary",
+          "key": "gain_on_bargain_purchase_of_subsidiary",
+          "values": {
+            "2019-12-31": -3579018.0,
+            "2018-12-31": null
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Change in fair value of financial assets at fair value through profit or loss",
+          "key": "change_in_fair_value_of_financial_assets_at_fair_value_through_profit_or_loss",
+          "values": {
+            "2019-12-31": 509731.0,
+            "2018-12-31": -1847377.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Provision for doubtful debts",
+          "key": "provision_for_doubtful_debts",
+          "values": {
+            "2019-12-31": 400000.0,
+            "2018-12-31": 604133.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Provision for tax claims of foreign subsidiary",
+          "key": "provision_for_tax_claims_of_foreign_subsidiary",
+          "values": {
+            "2019-12-31": 606000.0,
+            "2018-12-31": null
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Dividend income",
+          "key": "dividend_income",
+          "values": {
+            "2019-12-31": -334465.0,
+            "2018-12-31": -372370.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Reversal of provision no longer required",
+          "key": "reversal_of_provision_no_longer_required",
+          "values": {
+            "2019-12-31": null,
+            "2018-12-31": -903744.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Provision for employees' end of service benefits",
+          "key": "provision_for_employees_end_of_service_benefits",
+          "values": {
+            "2019-12-31": 85306.0,
+            "2018-12-31": 182450.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Subtotal (implied sum of adjustments)",
+          "key": "subtotal_implied_sum_of_adjustments",
+          "values": {
+            "2019-12-31": 19375907.0,
+            "2018-12-31": 9753128.0
+          },
+          "is_total": true
+        },
+        {
+          "label_raw": "Due from related parties",
+          "key": "due_from_related_parties",
+          "values": {
+            "2019-12-31": -4934139.0,
+            "2018-12-31": -715204.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Accounts receivable and other assets",
+          "key": "accounts_receivable_and_other_assets",
+          "values": {
+            "2019-12-31": 827436.0,
+            "2018-12-31": -767916.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Advance payments for purchase of investments",
+          "key": "advance_payments_for_purchase_of_investments",
+          "values": {
+            "2019-12-31": 2689862.0,
+            "2018-12-31": -14037524.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Accounts payable and other liabilities",
+          "key": "accounts_payable_and_other_liabilities",
+          "values": {
+            "2019-12-31": -329147.0,
+            "2018-12-31": -11114.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Due to related parties",
+          "key": "due_to_related_parties",
+          "values": {
+            "2019-12-31": 314257.0,
+            "2018-12-31": -10995.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Lease contracts liability",
+          "key": "lease_contracts_liability",
+          "values": {
+            "2019-12-31": null,
+            "2018-12-31": -2066292.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Employees' end of service benefits paid",
+          "key": "employees_end_of_service_benefits_paid",
+          "values": {
+            "2019-12-31": -74535.0,
+            "2018-12-31": -105850.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Net cash from/(used in) operating activities",
+          "key": "net_cash_from_used_in_operating_activities",
+          "values": {
+            "2019-12-31": 17869641.0,
+            "2018-12-31": -7961767.0
+          },
+          "is_total": true
+        },
+        {
+          "label_raw": "Purchase of property and equipment",
+          "key": "purchase_of_property_and_equipment",
+          "values": {
+            "2019-12-31": -27506.0,
+            "2018-12-31": -189805.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Additions to capital work in progress",
+          "key": "additions_to_capital_work_in_progress",
+          "values": {
+            "2019-12-31": -3293910.0,
+            "2018-12-31": 235306.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Additions to properties under development",
+          "key": "additions_to_properties_under_development",
+          "values": {
+            "2019-12-31": -7450699.0,
+            "2018-12-31": null
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Purchase of investment properties",
+          "key": "purchase_of_investment_properties",
+          "values": {
+            "2019-12-31": -2740795.0,
+            "2018-12-31": -10113489.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Purchase of financial assets at fair value through profit or loss",
+          "key": "purchase_of_financial_assets_at_fair_value_through_profit_or_loss",
+          "values": {
+            "2019-12-31": -1437416.0,
+            "2018-12-31": -450446.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Purchase of financial assets at fair value through other comprehensive income",
+          "key": "purchase_of_financial_assets_at_fair_value_through_other_comprehensive_income",
+          "values": {
+            "2019-12-31": -4532126.0,
+            "2018-12-31": -5617147.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Proceeds from sale of financial assets at fair value through other comprehensive income",
+          "key": "proceeds_from_sale_of_financial_assets_at_fair_value_through_other_comprehensive_income",
+          "values": {
+            "2019-12-31": 720549.0,
+            "2018-12-31": 910985.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Dividend received from associates",
+          "key": "dividend_received_from_associates",
+          "values": {
+            "2019-12-31": 125181.0,
+            "2018-12-31": 471165.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Investments in associates",
+          "key": "investments_in_associates",
+          "values": {
+            "2019-12-31": -1543967.0,
+            "2018-12-31": -734926.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Restricted bank balances",
+          "key": "restricted_bank_balances",
+          "values": {
+            "2019-12-31": -151086.0,
+            "2018-12-31": 98538.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Increase in term deposits",
+          "key": "increase_in_term_deposits",
+          "values": {
+            "2019-12-31": -1170189.0,
+            "2018-12-31": -174418.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Dividend income received",
+          "key": "dividend_income_received",
+          "values": {
+            "2019-12-31": 334465.0,
+            "2018-12-31": 372370.0
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Bank balances arising on acquisition of a subsidiary",
+          "key": "bank_balances_arising_on_acquisition_of_a_subsidiary",
+          "values": {
+            "2019-12-31": 3046106.0,
+            "2018-12-31": null
+          },
+          "is_total": false
+        },
+        {
+          "label_raw": "Net cash used in investing activities",
+          "key": "net_cash_used_in_investing_activities",
+          "values": {
+            "2019-12-31": -18121393.0,
+            "2018-12-31": -15191869.0
+          },
+          "is_total": true
+        }
+      ]
+    }
+  },
+  "validations": [],
+  "page_types": {
+    "0": "income_statement",
+    "1": "balance_sheet",
+    "2": "unknown",
+    "3": "unknown",
+    "4": "cash_flow",
+    "5": "unknown"
+  },
+  "page_hashes": {
+    "0": "43ffe4556f08e1b7",
+    "1": "41b7647f69b7f679",
+    "2": "ffdd403226ea9947",
+    "3": "940e0bef0c0c443f",
+    "4": "4934d4e9f6187c32",
+    "5": "7e50db96fbba0af4"
+  },
+  "timings": {
+    "render": 0.99,
+    "batch_extract": 65.07,
+    "fallback_extract": 30.61,
+    "validate": 0.0,
+    "persist": 0.56,
+    "total": 98.17
+  },
+  "_from_cache": false
+}

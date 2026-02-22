@@ -1,10 +1,10 @@
 {
-  "upload_id": 9,
+  "upload_id": 14,
   "cache_key": "6c586da87e7b6025e2f038a46ec9921416918dd6c4c809ae64aef35828ccd4c1_vision-v2.0",
   "extractor_version": "vision-v2.0",
   "status": "needs_review",
   "flags": [
-    "validation_needs_review"
+    "extraction_failed_equity_statement"
   ],
   "statements": {
     "balance_sheet": {
@@ -104,7 +104,7 @@
           "is_total": true
         },
         {
-          "label_raw": "Total Assets",
+          "label_raw": "Total assets",
           "key": "total_assets",
           "values": {
             "2016-12-31": 85650304.0,
@@ -152,8 +152,8 @@
           "label_raw": "Deferred income",
           "key": "deferred_income",
           "values": {
-            "2016-12-31": 5081711.0,
-            "2015-12-31": 5208072.0
+            "2016-12-31": 5001711.0,
+            "2015-12-31": 5289072.0
           },
           "is_total": false
         },
@@ -179,8 +179,8 @@
           "label_raw": "Total Current liabilities",
           "key": "total_current_liabilities",
           "values": {
-            "2016-12-31": 21170930.0,
-            "2015-12-31": 21790925.0
+            "2016-12-31": 21790930.0,
+            "2015-12-31": 21791525.0
           },
           "is_total": true
         },
@@ -215,8 +215,8 @@
           "label_raw": "Total liabilities",
           "key": "total_liabilities",
           "values": {
-            "2016-12-31": 37399243.0,
-            "2015-12-31": 31940973.0
+            "2016-12-31": 37393980.0,
+            "2015-12-31": 31946973.0
           },
           "is_total": true
         },
@@ -242,8 +242,8 @@
           "label_raw": "Statutory reserve",
           "key": "statutory_reserve",
           "values": {
-            "2016-12-31": 4111840.0,
-            "2015-12-31": 3908463.0
+            "2016-12-31": 6111840.0,
+            "2015-12-31": 4908463.0
           },
           "is_total": false
         },
@@ -260,7 +260,7 @@
           "label_raw": "Treasury shares",
           "key": "treasury_shares",
           "values": {
-            "2016-12-31": -288877.0,
+            "2016-12-31": -288977.0,
             "2015-12-31": -113725.0
           },
           "is_total": false
@@ -279,7 +279,7 @@
           "key": "retained_earnings",
           "values": {
             "2016-12-31": 21903526.0,
-            "2015-12-31": 14093907.0
+            "2015-12-31": 14093997.0
           },
           "is_total": false
         },
@@ -293,10 +293,10 @@
           "is_total": false
         },
         {
-          "label_raw": "Total equity",
+          "label_raw": "Total Equity",
           "key": "total_equity",
           "values": {
-            "2016-12-31": 46251074.0,
+            "2016-12-31": 48251374.0,
             "2015-12-31": 38211624.0
           },
           "is_total": true
@@ -401,7 +401,7 @@
         },
         {
           "label_raw": "Profit before contribution to Kuwait Foundation for Advancement of Sciences (\"KFAS\"), National Labour Support Tax (\"NLST\"), Zakat and Directors' remuneration",
-          "key": "profit_before_contribution_to_kuwait_foundation_for_advancement_of_sciences_kfas_national_labour_support_tax_nlst_zakat_and_directors_remuneration",
+          "key": "profit_before_contribution_to_kfas_nlst_zakat_and_directors_remuneration",
           "values": {
             "2016-12-31": 25539257.0,
             "2015-12-31": 18452330.0
@@ -511,7 +511,7 @@
           "key": "allowance_for_doubtful_debts",
           "values": {
             "2016-12-31": 209348.0,
-            "2015-12-31": 125985.0
+            "2015-12-31": 125983.0
           },
           "is_total": false
         },
@@ -555,7 +555,7 @@
           "label_raw": "Increase in trade and other receivables",
           "key": "increase_in_trade_and_other_receivables",
           "values": {
-            "2016-12-31": -2521555.0,
+            "2016-12-31": -2321555.0,
             "2015-12-31": -3796127.0
           },
           "is_total": false
@@ -600,10 +600,19 @@
           "label_raw": "Increase in retentions payable",
           "key": "increase_in_retentions_payable",
           "values": {
-            "2016-12-31": 64867.0,
-            "2015-12-31": 255483.0
+            "2016-12-31": 66567.0,
+            "2015-12-31": 253043.0
           },
           "is_total": false
+        },
+        {
+          "label_raw": "Net cash from operating activities before changes in working capital",
+          "key": "net_cash_from_operating_activities_before_changes_in_working_capital",
+          "values": {
+            "2016-12-31": 28667998.0,
+            "2015-12-31": 20137641.0
+          },
+          "is_total": true
         },
         {
           "label_raw": "Payment of staff indemnity",
@@ -628,7 +637,7 @@
           "key": "payment_of_nlst",
           "values": {
             "2016-12-31": -474020.0,
-            "2015-12-31": -250880.0
+            "2015-12-31": -250889.0
           },
           "is_total": false
         },
@@ -699,7 +708,7 @@
           "label_raw": "Net cash used in investing activities",
           "key": "net_cash_used_in_investing_activities",
           "values": {
-            "2016-12-31": -12121610.0,
+            "2016-12-31": -12120610.0,
             "2015-12-31": -11541335.0
           },
           "is_total": true
@@ -754,7 +763,7 @@
           "key": "net_cash_used_in_financing_activities",
           "values": {
             "2016-12-31": -12919702.0,
-            "2015-12-31": -4107568.0
+            "2015-12-31": -3707568.0
           },
           "is_total": true
         },
@@ -772,7 +781,7 @@
           "key": "effects_of_exchange_rate_changes_on_cash_and_cash_equivalents",
           "values": {
             "2016-12-31": -7832.0,
-            "2015-12-31": 45246.0
+            "2015-12-31": 45256.0
           },
           "is_total": false
         },
@@ -801,20 +810,20 @@
     {
       "statement_type": "balance_sheet",
       "rule_name": "assets_eq_liab_plus_equity",
-      "expected": 83650317.0,
+      "expected": 85645354.0,
       "actual": 85650304.0,
-      "diff": 1999987.0,
-      "passed": false,
-      "note": "period=2016-12-31 diff=1,999,987 (2.34%)"
+      "diff": 4950.0,
+      "passed": true,
+      "note": "period=2016-12-31 diff=4,950 (0.01%)"
     },
     {
       "statement_type": "balance_sheet",
       "rule_name": "assets_eq_liab_plus_equity",
-      "expected": 70152597.0,
+      "expected": 70158597.0,
       "actual": 70152595.0,
-      "diff": 2.0,
+      "diff": 6002.0,
       "passed": true,
-      "note": "period=2015-12-31 diff=2 (0.00%)"
+      "note": "period=2015-12-31 diff=6,002 (0.01%)"
     }
   ],
   "page_types": {
@@ -828,12 +837,12 @@
     "2": "eeafbd430bd6ddb8"
   },
   "timings": {
-    "render": 0.67,
-    "batch_extract": 44.35,
-    "fallback_extract": 0.0,
+    "render": 0.6,
+    "batch_extract": 47.45,
+    "fallback_extract": 32.98,
     "validate": 0.0,
-    "persist": 1.17,
-    "total": 47.23
+    "persist": 1.2,
+    "total": 83.26
   },
   "_from_cache": false
 }
