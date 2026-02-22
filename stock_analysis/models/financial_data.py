@@ -1148,10 +1148,15 @@ class FinancialDataManager:
             "UPDATE financial_statements SET verified_by_user = 1 WHERE id = ?",
             (statement_id,),
         )
-        self.db.log_audit(
-            user_id, "UPDATE", "statement", statement_id,
-            new_value="verified_by_user=True",
-        )
+        # Audit logging is non-critical — do not let it block
+        # the verification from succeeding.
+        try:
+            self.db.log_audit(
+                user_id, "UPDATE", "statement", statement_id,
+                new_value="verified_by_user=True",
+            )
+        except Exception:
+            pass  # audit is best-effort
 
     # ──────────────────────────────────────────────────────────────────
     # Delete
