@@ -98,7 +98,7 @@ def _get_json_repair():
 # Constants
 # ─────────────────────────────────────────────────────────────────────
 
-EXTRACTOR_VERSION = "vision-v2.0"
+EXTRACTOR_VERSION = "vision-v2.1"
 _RENDER_DPI = 250          # Lowered from 350 — 50% smaller, still plenty for tables
 _CACHE_TTL_SECONDS = 86_400  # 24 h
 _VALID_STMT_TYPES = {"balance_sheet", "income_statement", "cash_flow", "equity_statement"}
@@ -376,6 +376,17 @@ RULES:
 - If TWO pages belong to the same statement (e.g. cash flow spans 2 pages),
   merge them into ONE entry with source_pages=[2,3].
 - Return ONLY the JSON array. No markdown fences, no explanation.
+
+CRITICAL — COMPLETENESS & PRECISION:
+- You MUST extract EVERY SINGLE line item visible in the statement — do NOT
+  skip, summarize, or omit any row, even if it looks like a sub-item or note.
+- Count the number of rows in the source image and verify your output has
+  the SAME number of items (excluding blank separator rows).
+- Copy every number EXACTLY as printed — do not round, estimate, or approximate.
+- Double-check each extracted number against the source image before returning.
+- If a line item appears with a zero value, include it with value 0 — do NOT omit it.
+- Include ALL subtotals, totals, and grand totals as separate items with is_total=true.
+- For statements spanning multiple pages, ensure NO line items are lost at page breaks.
 """
 
 _EXTRACT_PROMPT_TEMPLATE = """\
@@ -420,6 +431,16 @@ RULES:
 - period labels should be ISO dates if year is visible, otherwise "col_1"/"col_2".
 - is_total=true for subtotals and totals.
 - Return ONLY the JSON object. No extra text.
+
+CRITICAL — COMPLETENESS & PRECISION:
+- You MUST extract EVERY SINGLE line item visible in the statement — do NOT
+  skip, summarize, or omit any row, even if it looks like a sub-item or note.
+- Count the number of rows in the source image and verify your output has
+  the SAME number of items (excluding blank separator rows).
+- Copy every number EXACTLY as printed — do not round, estimate, or approximate.
+- Double-check each extracted number against the source image before returning.
+- If a line item appears with a zero value, include it with value 0 — do NOT omit it.
+- Include ALL subtotals, totals, and grand totals as separate items with is_total=true.
 """
 
 
