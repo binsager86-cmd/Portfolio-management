@@ -1190,6 +1190,158 @@ class FinancialDataManager:
         return [r["period_end_date"] for r in rows]
 
     # ──────────────────────────────────────────────────────────────────
+    # Data Organizer — AI-driven normalization
+    # ──────────────────────────────────────────────────────────────────
+
+    def backup_line_items(self, stock_id: int, user_id: int = 1) -> str:
+        """Snapshot every line item for *stock_id* into a JSON blob
+        stored in ``st.session_state`` so it can be restored later.
+        Returns a summary string.
+        """
+        stmts = self.get_statements(stock_id)
+        backup: Dict[int, List[Dict[str, Any]]] = {}
+        total_items = 0
+        for s in stmts:
+            items = self.db.get_line_items(s["id"])
+            backup[s["id"]] = [dict(i) for i in items]
+            total_items += len(items)
+        return json.dumps(backup), total_items
+
+    def restore_line_items_from_backup(
+        self, stock_id: int, backup_json: str, user_id: int = 1
+    ) -> int:
+        """Replace current line items with the ones in *backup_json*.
+        Returns number of items restored.
+        """
+        backup: Dict[str, List[Dict[str, Any]]] = json.loads(backup_json)
+        restored = 0
+        for stmt_id_str, items in backup.items():
+            stmt_id = int(stmt_id_str)
+            # Wipe current items
+            self.db.delete_line_items_for_statement(stmt_id)
+            # Re-insert from backup
+            for it in items:
+                self.db.execute_update(
+                    """INSERT INTO financial_line_items
+                       (statement_id, line_item_code, line_item_name,
+                        amount, currency, order_index, parent_item_id,
+                        is_total, manually_edited, edited_by_user_id, edited_at)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                    (
+                        stmt_id,
+                        it.get("line_item_code", "UNKNOWN"),
+                        it.get("line_item_name", "Unknown"),
+                        it.get("amount", 0.0),
+                        it.get("currency", "USD"),
+                        it.get("order_index", 0),
+                        it.get("parent_item_id"),
+                        it.get("is_total", False),
+                        it.get("manually_edited", False),
+                        it.get("edited_by_user_id"),
+                        it.get("edited_at"),
+                    ),
+                )
+                restored += 1
+        try:
+            self.db.log_audit(
+                user_id, "RESTORE", "line_items", stock_id,
+                new_value=f"restored {restored} items from backup",
+            )
+        except Exception:
+            pass
+        return restored
+
+    def build_normalization_payload(self, stock_id: int) -> Dict[str, Any]:
+        """Build a JSON-serializable dict of all statements + line items
+        for the normalization prompt."""
+        stmts = self.get_statements(stock_id)
+        payload: Dict[str, List[Dict[str, Any]]] = {}
+        for s in stmts:
+            stype = s["statement_type"]
+            fy = s.get("fiscal_year", "unknown")
+            items = self.db.get_line_items(s["id"])
+            entry = {
+                "statement_id": s["id"],
+                "fiscal_year": fy,
+                "period_end_date": s.get("period_end_date", ""),
+                "line_items": [
+                    {
+                        "code": it["line_item_code"],
+                        "name": it["line_item_name"],
+                        "amount": it["amount"],
+                        "is_total": it["is_total"],
+                        "order": it["order_index"],
+                    }
+                    for it in items
+                ],
+            }
+            payload.setdefault(stype, []).append(entry)
+        return payload
+
+    def apply_normalization_result(
+        self,
+        stock_id: int,
+        normalized: Dict[str, Any],
+        user_id: int = 1,
+    ) -> int:
+        """Apply normalised line items returned by AI back into the DB.
+
+        *normalized* is the ``clean_statements`` dict from the AI:
+        ``{ "income": [ { "statement_id": …, "line_items": [...] } ], … }``
+
+        Returns number of items written.
+        """
+        written = 0
+        for stype, periods in normalized.items():
+            for period_data in periods:
+                stmt_id = period_data.get("statement_id")
+                if not stmt_id:
+                    continue
+                items = period_data.get("line_items", [])
+                # Wipe old items and insert normalised ones
+                self.db.delete_line_items_for_statement(stmt_id)
+                for idx, it in enumerate(items, 1):
+                    code = it.get("code") or it.get("key", "UNKNOWN")
+                    name = it.get("name") or it.get("label", code)
+                    amount = it.get("amount", 0.0)
+                    if amount is None:
+                        amount = 0.0
+                    if isinstance(amount, str):
+                        try:
+                            amount = float(amount.replace(",", ""))
+                        except (ValueError, TypeError):
+                            amount = 0.0
+                    self.db.execute_update(
+                        """INSERT INTO financial_line_items
+                           (statement_id, line_item_code, line_item_name,
+                            amount, currency, order_index, parent_item_id,
+                            is_total, manually_edited, edited_by_user_id, edited_at)
+                           VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                        (
+                            stmt_id,
+                            normalize_line_item_code(code),
+                            name,
+                            float(amount),
+                            it.get("currency", "USD"),
+                            it.get("order", idx),
+                            None,
+                            it.get("is_total", False),
+                            True,       # mark as edited
+                            user_id,
+                            int(time.time()),
+                        ),
+                    )
+                    written += 1
+        try:
+            self.db.log_audit(
+                user_id, "NORMALIZE", "line_items", stock_id,
+                new_value=f"AI normalised {written} items",
+            )
+        except Exception:
+            pass
+        return written
+
+    # ──────────────────────────────────────────────────────────────────
     # Audit helper
     # ──────────────────────────────────────────────────────────────────
     def _log_audit(

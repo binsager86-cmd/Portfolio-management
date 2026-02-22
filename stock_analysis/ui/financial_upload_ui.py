@@ -1520,6 +1520,276 @@ def _auto_migrate_equity_items(
     st.session_state[cache_key] = True
 
 
+# ─────────────────────────────────────────────────────────────────────
+# DATA ORGANIZER — AI-driven normalization of financial statements
+# ─────────────────────────────────────────────────────────────────────
+
+_NORMALIZATION_PROMPT = """\
+You are a financial-statement normalization engine.
+I will provide raw multi-year financial statements that may have inconsistent
+line names, missing items, merged/split categories, or auditor-added lines.
+
+Your task is to:
+1. Detect the correct financial category of every line and map it to a
+   standardized name (IFRS/GAAP style).
+2. Normalize naming across all years so the same item always uses the
+   same label.
+3. Rebuild the statements into a clean, comparable structure with
+   consistent rows and years as columns.
+4. Handle new/deleted/reclassified items by aligning them to the closest
+   standard category and flagging one-off or ambiguous items.
+5. Preserve EVERY number exactly as-is — do NOT round, estimate, or drop
+   any value.  If a line item is missing in one year, set its amount to 0.
+6. Keep all subtotals and totals as separate rows with is_total=true.
+
+INPUT DATA (JSON):
+{input_json}
+
+PRODUCE THIS EXACT JSON OUTPUT (no markdown, no explanation):
+{{
+  "mapping": [
+    {{
+      "raw_name": "original line item name from input",
+      "standardized_code": "UPPER_SNAKE_CASE code",
+      "standardized_name": "Clean Display Name",
+      "category": "one of: revenue, expense, asset, liability, equity, cashflow_operating, cashflow_investing, cashflow_financing, other",
+      "is_total": false
+    }}
+  ],
+  "clean_statements": {{
+    "income": [
+      {{
+        "statement_id": 42,
+        "fiscal_year": 2024,
+        "line_items": [
+          {{
+            "code": "REVENUE",
+            "name": "Total Revenue",
+            "amount": 12345678,
+            "is_total": false,
+            "order": 1
+          }}
+        ]
+      }}
+    ],
+    "balance": [ ... ],
+    "cashflow": [ ... ],
+    "equity": [ ... ]
+  }}
+}}
+
+RULES:
+- clean_statements must have the SAME statement_id values as the input.
+- Every line item from the input must appear in the output — never drop rows.
+- Amounts must be copied EXACTLY — no rounding or modification.
+- Use UPPER_SNAKE_CASE for standardized_code.
+- Order items logically within each statement (revenue first, then COGS,
+  gross profit, etc. for income; current assets first for balance sheet, etc.)
+- Return ONLY the JSON object. No extra text, no markdown fences.
+"""
+
+
+def _call_gemini_for_normalization(
+    api_key: str, payload: dict
+) -> dict:
+    """Send the normalization prompt to Gemini and return parsed JSON."""
+    import json as _json
+
+    from stock_analysis.extraction.ai_vision_extractor import (
+        _get_genai,
+        _call_gemini,
+        _repair_json,
+    )
+
+    genai = _get_genai()
+    client = genai.Client(api_key=api_key)
+
+    input_json = _json.dumps(payload, indent=2, default=str)
+    prompt = _NORMALIZATION_PROMPT.format(input_json=input_json)
+
+    raw_text = _call_gemini(client, [prompt], max_tokens=16384, temperature=0.1)
+    parsed = _repair_json(raw_text)
+
+    if not isinstance(parsed, dict):
+        raise ValueError(f"AI returned unexpected format: {type(parsed)}")
+
+    if "clean_statements" not in parsed:
+        raise ValueError("AI response missing 'clean_statements' key")
+
+    return parsed
+
+
+def _render_data_organizer(
+    stock_id: int,
+    user_id: int,
+    db: AnalysisDatabase,
+    fdm: FinancialDataManager,
+    stmts: list,
+) -> None:
+    """Render the Data Organizer section with AI normalization."""
+
+    st.markdown("---")
+    st.subheader("🗂️ Data Organizer")
+    st.caption(
+        "Use AI to normalize all financial statements — consistent line-item "
+        "names, logical ordering, and clean cross-year presentation."
+    )
+
+    api_key = _resolve_gemini_key(input_key="gemini_key_organizer")
+
+    # ── Backup status ─────────────────────────────────────────────
+    has_backup = f"organizer_backup_{stock_id}" in st.session_state
+    has_result = f"organizer_result_{stock_id}" in st.session_state
+
+    col_org, col_restore = st.columns([2, 1])
+
+    # ── Run Data Organizer button ─────────────────────────────────
+    with col_org:
+        if st.button(
+            "🗂️ Data Organizer",
+            type="primary",
+            use_container_width=True,
+            help="Send all statements to AI for normalization",
+            key="btn_data_organizer",
+        ):
+            if not api_key:
+                st.error("🔑 Gemini API key required. Enter it above.")
+            elif not stmts:
+                st.warning("No statements to organize.")
+            else:
+                # 1. Backup current data
+                backup_json, n_items = fdm.backup_line_items(stock_id, user_id)
+                st.session_state[f"organizer_backup_{stock_id}"] = backup_json
+
+                # 2. Build payload
+                payload = fdm.build_normalization_payload(stock_id)
+
+                # 3. Call AI
+                with st.spinner("🧠 AI is normalizing your financial statements…"):
+                    try:
+                        result = _call_gemini_for_normalization(api_key, payload)
+                        st.session_state[f"organizer_result_{stock_id}"] = result
+                        st.toast("✅ Normalization complete! Review below.", icon="✅")
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(f"❌ Normalization failed: {exc}")
+                        import traceback
+                        traceback.print_exc()
+
+    # ── Restore original data button ──────────────────────────────
+    with col_restore:
+        if has_backup:
+            if st.button(
+                "↩️ Restore Original Data",
+                use_container_width=True,
+                help="Revert to the data before normalization",
+                key="btn_restore_organizer",
+            ):
+                backup_json = st.session_state[f"organizer_backup_{stock_id}"]
+                try:
+                    n_restored = fdm.restore_line_items_from_backup(
+                        stock_id, backup_json, user_id
+                    )
+                    st.session_state.pop(f"organizer_result_{stock_id}", None)
+                    st.session_state.pop(f"organizer_backup_{stock_id}", None)
+                    st.toast(
+                        f"↩️ Restored {n_restored} original line items.",
+                        icon="↩️",
+                    )
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"❌ Restore failed: {exc}")
+        else:
+            st.info("No backup available yet. Run the organizer first.")
+
+    # ── Show normalization result for review ──────────────────────
+    if has_result:
+        result = st.session_state[f"organizer_result_{stock_id}"]
+        mapping = result.get("mapping", [])
+        clean = result.get("clean_statements", {})
+
+        # --- Mapping table ---
+        if mapping:
+            with st.expander("📋 Name Mapping (raw → standardized)", expanded=False):
+                map_df = pd.DataFrame(mapping)
+                display_cols = [c for c in ["raw_name", "standardized_name", "category", "is_total"] if c in map_df.columns]
+                if display_cols:
+                    st.dataframe(map_df[display_cols], use_container_width=True, hide_index=True)
+
+        # --- Preview normalized statements ---
+        type_order = ["income", "balance", "cashflow", "equity"]
+        for stype in type_order:
+            periods = clean.get(stype, [])
+            if not periods:
+                continue
+            type_label = STATEMENT_TYPES.get(stype, stype)
+            periods.sort(key=lambda p: p.get("fiscal_year", 0))
+            years = [str(p.get("fiscal_year", "?")) for p in periods]
+
+            all_codes = []
+            code_names = {}
+            code_totals = {}
+            items_by_year = {}
+            for p in periods:
+                yr = str(p.get("fiscal_year", "?"))
+                yr_items = {}
+                for it in p.get("line_items", []):
+                    code = it.get("code", "UNKNOWN")
+                    if code not in code_names:
+                        all_codes.append(code)
+                        code_names[code] = it.get("name", code)
+                        code_totals[code] = it.get("is_total", False)
+                    yr_items[code] = it.get("amount", 0)
+                items_by_year[yr] = yr_items
+
+            if not all_codes:
+                continue
+
+            st.markdown(f"#### {type_label} (Normalized Preview)")
+            rows = []
+            for code in all_codes:
+                row = {"Line Item": code_names.get(code, code)}
+                for yr in years:
+                    val = items_by_year.get(yr, {}).get(code)
+                    row[yr] = _fmt_amount(val) if val is not None else "—"
+                rows.append(row)
+            preview_df = pd.DataFrame(rows)
+            st.dataframe(preview_df, use_container_width=True, hide_index=True,
+                         height=min(40 + len(all_codes) * 35, 600))
+
+        # --- Save / Discard buttons ---
+        st.markdown("---")
+        sc1, sc2 = st.columns(2)
+        with sc1:
+            if st.button(
+                "💾 Save Normalized Data",
+                type="primary",
+                use_container_width=True,
+                key="btn_save_normalized",
+            ):
+                try:
+                    n_written = fdm.apply_normalization_result(
+                        stock_id, clean, user_id
+                    )
+                    st.session_state.pop(f"organizer_result_{stock_id}", None)
+                    st.toast(
+                        f"💾 Saved {n_written} normalized line items.",
+                        icon="💾",
+                    )
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"❌ Save failed: {exc}")
+        with sc2:
+            if st.button(
+                "🗑️ Discard Normalization",
+                use_container_width=True,
+                key="btn_discard_normalized",
+            ):
+                st.session_state.pop(f"organizer_result_{stock_id}", None)
+                st.toast("Normalization discarded.", icon="🗑️")
+                st.rerun()
+
+
 def _render_existing_tab(
     stock_id: int, user_id: int, db: AnalysisDatabase
 ) -> None:
@@ -1694,3 +1964,8 @@ def _render_existing_tab(
                         st.rerun()
 
         st.divider()
+
+    # ══════════════════════════════════════════════════════════════════
+    # DATA ORGANIZER — AI-driven normalization
+    # ══════════════════════════════════════════════════════════════════
+    _render_data_organizer(stock_id, user_id, db, fdm, stmts)
