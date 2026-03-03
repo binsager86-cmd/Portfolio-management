@@ -5,7 +5,7 @@
  * users and mobile tap ergonomics.
  */
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   View,
   StyleSheet,
@@ -28,7 +28,7 @@ import { useResponsive } from "@/hooks/useResponsive";
 
 export default function LoginScreen() {
   const router = useRouter();
-  const { login, loading, error } = useAuthStore();
+  const { login, loading, error, clearError } = useAuthStore();
   const { colors, toggle, mode } = useThemeStore();
   const { isDesktop } = useResponsive();
 
@@ -37,6 +37,11 @@ export default function LoginScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [touched, setTouched] = useState({ username: false, password: false });
   const [loginError, setLoginError] = useState<string | null>(null);
+
+  // Clear store error when component unmounts
+  useEffect(() => {
+    return () => clearError();
+  }, []);
 
   const usernameEmpty = touched.username && !username.trim();
   const passwordEmpty = touched.password && !password.trim();
