@@ -31,7 +31,7 @@ import { useResponsive } from "@/hooks/useResponsive";
 
 export default function RegisterScreen() {
   const router = useRouter();
-  const { register, loading, error } = useAuthStore();
+  const { register, loading, error, clearError } = useAuthStore();
   const { colors, toggle, mode } = useThemeStore();
   const { isDesktop } = useResponsive();
 
@@ -43,13 +43,19 @@ export default function RegisterScreen() {
   const [localError, setLocalError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const [countdown, setCountdown] = useState(3);
+  const [submitting, setSubmitting] = useState(false);
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
   const usernameValid = username.trim().length >= 3;
   const passwordValid = password.length >= 6;
   const passwordsMatch = password === confirmPassword;
   const canSubmit =
-    usernameValid && passwordValid && passwordsMatch && !loading;
+    usernameValid && passwordValid && passwordsMatch && !loading && !submitting;
+
+  // Clear store error when component unmounts
+  useEffect(() => {
+    return () => clearError();
+  }, []);
 
   // Countdown after successful registration → redirect to login
   useEffect(() => {
@@ -73,6 +79,7 @@ export default function RegisterScreen() {
   }, [success]);
 
   const handleRegister = async () => {
+    if (submitting) return; // prevent double-submit
     setLocalError(null);
 
     if (!usernameValid) {
@@ -88,13 +95,18 @@ export default function RegisterScreen() {
       return;
     }
 
-    const ok = await register(
-      username.trim(),
-      password,
-      name.trim() || undefined
-    );
-    if (ok) {
-      setSuccess(true);
+    setSubmitting(true);
+    try {
+      const ok = await register(
+        username.trim(),
+        password,
+        name.trim() || undefined
+      );
+      if (ok) {
+        setSuccess(true);
+      }
+    } finally {
+      setSubmitting(false);
     }
   };
 

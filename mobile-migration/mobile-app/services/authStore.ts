@@ -40,6 +40,8 @@ interface AuthState {
   register: (username: string, password: string, name?: string) => Promise<boolean>;
   /** Clear tokens and user data. */
   logout: () => Promise<void>;
+  /** Clear the error state. */
+  clearError: () => void;
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
@@ -50,6 +52,8 @@ export const useAuthStore = create<AuthState>((set) => ({
   username: null,
   name: null,
   loading: true,   // start true — wait for hydration before navigating
+
+  clearError: () => set({ error: null }),
   error: null,
 
   hydrate: async () => {
@@ -95,10 +99,26 @@ export const useAuthStore = create<AuthState>((set) => ({
       });
       return true;
     } catch (err: any) {
-      const msg =
-        err?.response?.data?.detail ??
-        err?.message ??
-        "Login failed";
+      let msg = "Login failed";
+      const status = err?.response?.status;
+      const detail = err?.response?.data?.detail;
+
+      if (detail && typeof detail === "string") {
+        msg = detail;
+      } else if (status === 401) {
+        msg = "Invalid username or password";
+      } else if (status === 400) {
+        msg = detail || "Account is temporarily locked. Please try again later.";
+      } else if (status === 429) {
+        msg = "Too many login attempts. Please wait a minute and try again.";
+      } else if (err?.code === "ECONNABORTED" || err?.message?.includes("timeout")) {
+        msg = "Request timed out. Please check your connection and try again.";
+      } else if (err?.message === "Network Error" || !err?.response) {
+        msg = "Cannot reach the server. Please check your internet connection.";
+      } else if (err?.message) {
+        msg = err.message;
+      }
+
       set({ loading: false, error: msg });
       return false;
     }
@@ -117,10 +137,27 @@ export const useAuthStore = create<AuthState>((set) => ({
       });
       return true;
     } catch (err: any) {
-      const msg =
-        err?.response?.data?.detail ??
-        err?.message ??
-        "Registration failed";
+      let msg = "Registration failed";
+      const status = err?.response?.status;
+      const detail = err?.response?.data?.detail;
+
+      if (detail && typeof detail === "string") {
+        msg = detail;
+      } else if (Array.isArray(detail)) {
+        // Pydantic validation errors
+        msg = detail.map((e: any) => e.msg || e.message || JSON.stringify(e)).join(", ");
+      } else if (status === 409) {
+        msg = "This username is already taken. Please choose a different one.";
+      } else if (status === 429) {
+        msg = "Too many attempts. Please wait a minute and try again.";
+      } else if (err?.code === "ECONNABORTED" || err?.message?.includes("timeout")) {
+        msg = "Request timed out. Please check your connection and try again.";
+      } else if (err?.message === "Network Error" || !err?.response) {
+        msg = "Cannot reach the server. Please check your internet connection.";
+      } else if (err?.message) {
+        msg = err.message;
+      }
+
       set({ loading: false, error: msg });
       return false;
     }
