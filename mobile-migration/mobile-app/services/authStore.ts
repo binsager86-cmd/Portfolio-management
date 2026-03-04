@@ -1,8 +1,11 @@
 /**
  * Auth store (Zustand) — manages JWT access + refresh tokens.
  *
- * Works on Web (localStorage) and Native (expo-secure-store)
- * thanks to the tokenStorage abstraction.
+ * Features:
+ *   - Auto-login after registration (stores tokens immediately)
+ *   - Google Sign-In support via backend token exchange
+ *   - Structured error handling via authErrors.ts
+ *   - Works on Web (localStorage) and Native (expo-secure-store)
  */
 
 import { create } from "zustand";
@@ -14,7 +17,18 @@ import {
   setRefreshToken,
   removeRefreshToken,
 } from "@/services/tokenStorage";
-import { login as apiLogin, register as apiRegister, LoginResponse } from "@/services/api";
+import {
+  login as apiLogin,
+  register as apiRegister,
+  LoginResponse,
+} from "@/services/api";
+import {
+  mapAuthError,
+  logAuthError,
+  type AuthError,
+} from "@/services/authErrors";
+
+// ── State shape ─────────────────────────────────────────────────────
 
 interface AuthState {
   /** JWT access token (null = not logged in). */
@@ -27,22 +41,58 @@ interface AuthState {
   userId: number | null;
   username: string | null;
   name: string | null;
-  /** True while login/logout is in progress. */
+  /** True while any auth operation is in progress. */
   loading: boolean;
-  /** Last error message (null = no error). */
+  /** User-facing error message (null = no error). */
   error: string | null;
+  /** Structured error for analytics/Sentry (null = no error). */
+  lastAuthError: AuthError | null;
 
   /** Hydrate tokens from storage on app start. */
   hydrate: () => Promise<void>;
   /** Login with username + password. */
   login: (username: string, password: string) => Promise<boolean>;
-  /** Register a new user account. */
+  /** Register and auto-login (backend returns tokens). */
   register: (username: string, password: string, name?: string) => Promise<boolean>;
+  /** Sign in via Google ID token (backend validates + creates/finds user). */
+  googleSignIn: (idToken: string) => Promise<boolean>;
   /** Clear tokens and user data. */
   logout: () => Promise<void>;
   /** Clear the error state. */
   clearError: () => void;
 }
+
+// ── Helpers ─────────────────────────────────────────────────────────
+
+/** Persist tokens and set user state from a LoginResponse. */
+async function persistAndSetSession(
+  res: LoginResponse,
+  set: (partial: Partial<AuthState>) => void,
+) {
+  // DATA INTEGRITY: ensure required fields exist before persisting
+  if (!res.access_token) {
+    throw new Error("Server returned an empty access token.");
+  }
+
+  await setToken(res.access_token);
+  if (res.refresh_token) {
+    await setRefreshToken(res.refresh_token);
+  }
+
+  set({
+    token: res.access_token,
+    refreshToken: res.refresh_token ?? null,
+    expiresIn: res.expires_in ?? null,
+    userId: res.user_id ?? null,
+    username: res.username ?? null,
+    name: res.name ?? null,
+    loading: false,
+    error: null,
+    lastAuthError: null,
+  });
+}
+
+// ── Store ───────────────────────────────────────────────────────────
 
 export const useAuthStore = create<AuthState>((set) => ({
   token: null,
@@ -51,10 +101,13 @@ export const useAuthStore = create<AuthState>((set) => ({
   userId: null,
   username: null,
   name: null,
-  loading: true,   // start true — wait for hydration before navigating
-
-  clearError: () => set({ error: null }),
+  loading: true, // start true — wait for hydration before navigating
   error: null,
+  lastAuthError: null,
+
+  clearError: () => set({ error: null, lastAuthError: null }),
+
+  // ── Hydrate ─────────────────────────────────────────────────────
 
   hydrate: async () => {
     set({ loading: true });
@@ -74,97 +127,75 @@ export const useAuthStore = create<AuthState>((set) => ({
     }
   },
 
+  // ── Login ───────────────────────────────────────────────────────
+
   login: async (username: string, password: string) => {
-    set({ loading: true, error: null });
+    set({ loading: true, error: null, lastAuthError: null });
     try {
       const res: LoginResponse = await apiLogin(username, password);
-
-      // Store access token
-      await setToken(res.access_token);
-
-      // Store refresh token if provided
-      if (res.refresh_token) {
-        await setRefreshToken(res.refresh_token);
-      }
-
-      set({
-        token: res.access_token,
-        refreshToken: res.refresh_token ?? null,
-        expiresIn: res.expires_in,
-        userId: res.user_id,
-        username: res.username,
-        name: res.name ?? null,
-        loading: false,
-        error: null,
-      });
+      await persistAndSetSession(res, set);
       return true;
-    } catch (err: any) {
-      let msg = "Login failed";
-      const status = err?.response?.status;
-      const detail = err?.response?.data?.detail;
-
-      if (detail && typeof detail === "string") {
-        msg = detail;
-      } else if (status === 401) {
-        msg = "Invalid username or password";
-      } else if (status === 400) {
-        msg = detail || "Account is temporarily locked. Please try again later.";
-      } else if (status === 429) {
-        msg = "Too many login attempts. Please wait a minute and try again.";
-      } else if (err?.code === "ECONNABORTED" || err?.message?.includes("timeout")) {
-        msg = "Request timed out. Please check your connection and try again.";
-      } else if (err?.message === "Network Error" || !err?.response) {
-        msg = "Cannot reach the server. Please check your internet connection.";
-      } else if (err?.message) {
-        msg = err.message;
-      }
-
-      set({ loading: false, error: msg });
+    } catch (err: unknown) {
+      const mapped = mapAuthError(err, "login");
+      logAuthError(mapped, "login");
+      set({ loading: false, error: mapped.message, lastAuthError: mapped });
       return false;
     }
   },
+
+  // ── Register (auto-login) ──────────────────────────────────────
 
   register: async (username: string, password: string, name?: string) => {
-    set({ loading: true, error: null });
+    set({ loading: true, error: null, lastAuthError: null });
     try {
-      // Register the user — backend returns tokens but we don't auto-login.
-      // Instead, we show a success message and redirect to login.
-      await apiRegister(username, password, name);
+      const res: LoginResponse = await apiRegister(username, password, name);
 
-      set({
-        loading: false,
-        error: null,
-      });
-      return true;
-    } catch (err: any) {
-      let msg = "Registration failed";
-      const status = err?.response?.status;
-      const detail = err?.response?.data?.detail;
-
-      if (detail && typeof detail === "string") {
-        msg = detail;
-      } else if (Array.isArray(detail)) {
-        // Pydantic validation errors
-        msg = detail.map((e: any) => e.msg || e.message || JSON.stringify(e)).join(", ");
-      } else if (status === 409) {
-        msg = "This username is already taken. Please choose a different one.";
-      } else if (status === 429) {
-        msg = "Too many attempts. Please wait a minute and try again.";
-      } else if (err?.code === "ECONNABORTED" || err?.message?.includes("timeout")) {
-        msg = "Request timed out. Please check your connection and try again.";
-      } else if (err?.message === "Network Error" || !err?.response) {
-        msg = "Cannot reach the server. Please check your internet connection.";
-      } else if (err?.message) {
-        msg = err.message;
+      // DATA INTEGRITY: backend /register already returns a TokenResponse
+      // identical to /login, so we can auto-login immediately.
+      if (!res.access_token) {
+        throw new Error(
+          "Registration succeeded but the server did not return an access token. Please log in manually.",
+        );
       }
 
-      set({ loading: false, error: msg });
+      await persistAndSetSession(res, set);
+      return true;
+    } catch (err: unknown) {
+      const mapped = mapAuthError(err, "register");
+      logAuthError(mapped, "register");
+      set({ loading: false, error: mapped.message, lastAuthError: mapped });
       return false;
     }
   },
 
+  // ── Google Sign-In ─────────────────────────────────────────────
+
+  googleSignIn: async (idToken: string) => {
+    set({ loading: true, error: null, lastAuthError: null });
+    try {
+      // Dynamic import to avoid bundling Google auth code when unused
+      const { googleSignIn: apiGoogleSignIn } = await import(
+        "@/services/api"
+      );
+      const res: LoginResponse = await apiGoogleSignIn(idToken);
+      await persistAndSetSession(res, set);
+      return true;
+    } catch (err: unknown) {
+      const mapped = mapAuthError(err, "google");
+      logAuthError(mapped, "googleSignIn");
+      set({ loading: false, error: mapped.message, lastAuthError: mapped });
+      return false;
+    }
+  },
+
+  // ── Logout ─────────────────────────────────────────────────────
+
   logout: async () => {
-    await Promise.all([removeToken(), removeRefreshToken()]);
+    try {
+      await Promise.all([removeToken(), removeRefreshToken()]);
+    } catch {
+      // Best-effort — clear state even if storage fails
+    }
     set({
       token: null,
       refreshToken: null,
@@ -173,6 +204,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       username: null,
       name: null,
       error: null,
+      lastAuthError: null,
     });
   },
 }));

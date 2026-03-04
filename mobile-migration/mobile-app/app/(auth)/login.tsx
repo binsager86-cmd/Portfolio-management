@@ -1,11 +1,11 @@
 /**
- * Login Screen — React Native Paper, responsive for Web + Mobile.
+ * Login Screen — react-hook-form + Zod, Google Sign-In, themed Paper UI.
  *
- * Uses themed Paper components with large touch targets for web mouse
- * users and mobile tap ergonomics.
+ * Form validation is handled by Zod schemas (lib/validationSchemas.ts).
+ * Error messages are structured via authErrors.ts for Sentry/Flipper.
  */
 
-import React, { useState, useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import {
   View,
   StyleSheet,
@@ -20,53 +20,88 @@ import {
   Card,
   HelperText,
   IconButton,
+  Divider,
 } from "react-native-paper";
 import { useRouter } from "expo-router";
+import { useForm, Controller } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+
 import { useAuthStore } from "@/services/authStore";
 import { useThemeStore } from "@/services/themeStore";
 import { useResponsive } from "@/hooks/useResponsive";
+import { loginSchema, type LoginFormData } from "@/lib/validationSchemas";
 
 export default function LoginScreen() {
   const router = useRouter();
-  const { login, loading, error, clearError } = useAuthStore();
+  const { login, googleSignIn, loading, error, clearError } = useAuthStore();
   const { colors, toggle, mode } = useThemeStore();
   const { isDesktop } = useResponsive();
 
-  const [username, setUsername] = useState(__DEV__ ? "sager alsager" : "");
-  const [password, setPassword] = useState(__DEV__ ? "Admin123!" : "");
   const [showPassword, setShowPassword] = useState(false);
-  const [touched, setTouched] = useState({ username: false, password: false });
-  const [loginError, setLoginError] = useState<string | null>(null);
+  const [googleLoading, setGoogleLoading] = useState(false);
 
-  // Clear store error when component unmounts
+  // react-hook-form + Zod
+  const {
+    control,
+    handleSubmit,
+    formState: { errors, isValid },
+  } = useForm<LoginFormData>({
+    resolver: zodResolver(loginSchema),
+    defaultValues: {
+      username: __DEV__ ? "sager alsager" : "",
+      password: __DEV__ ? "Admin123!" : "",
+    },
+    mode: "onBlur",
+  });
+
+  // Clear store error on unmount
   useEffect(() => {
     return () => clearError();
   }, []);
 
-  const usernameEmpty = touched.username && !username.trim();
-  const passwordEmpty = touched.password && !password.trim();
+  // ── Handlers ──────────────────────────────────────────────────────
 
-  const handleLogin = async () => {
-    setTouched({ username: true, password: true });
-    setLoginError(null);
-
-    if (!username.trim()) {
-      setLoginError("Please enter your username");
-      return;
-    }
-    if (!password.trim()) {
-      setLoginError("Please enter your password");
-      return;
-    }
-
-    const ok = await login(username.trim(), password);
+  const onSubmit = async (data: LoginFormData) => {
+    const ok = await login(data.username.trim(), data.password);
     if (ok) {
       router.replace("/(tabs)");
-    } else {
-      // Show a more helpful error based on the error from the store
-      setLoginError(null); // let store error display
     }
   };
+
+  const handleGoogleSignIn = async () => {
+    try {
+      setGoogleLoading(true);
+      // Dynamic import so we don't crash when package isn't installed
+      const { GoogleSignin } = await import(
+        "@react-native-google-signin/google-signin"
+      );
+      await GoogleSignin.hasPlayServices();
+      const userInfo = await GoogleSignin.signIn();
+      const idToken = userInfo.data?.idToken;
+      if (!idToken) throw new Error("Google Sign-In did not return an ID token");
+      const ok = await googleSignIn(idToken);
+      if (ok) router.replace("/(tabs)");
+    } catch (err: any) {
+      // If user cancelled, do nothing
+      if (err?.code === "SIGN_IN_CANCELLED") return;
+      console.warn("[Google Sign-In]", err);
+    } finally {
+      setGoogleLoading(false);
+    }
+  };
+
+  // ── Shared input theme ────────────────────────────────────────────
+
+  const inputTheme = {
+    colors: {
+      surfaceVariant: colors.bgInput,
+      onSurfaceVariant: colors.textSecondary,
+      placeholder: colors.textMuted,
+      error: colors.danger,
+    },
+  };
+
+  // ── Render ────────────────────────────────────────────────────────
 
   return (
     <KeyboardAvoidingView
@@ -93,7 +128,7 @@ export default function LoginScreen() {
 
         {/* Logo / Title */}
         <View style={styles.header}>
-          <Text style={[styles.icon]}>📊</Text>
+          <Text style={styles.icon}>📊</Text>
           <Text style={[styles.title, { color: colors.textPrimary }]}>
             Portfolio Tracker
           </Text>
@@ -115,107 +150,128 @@ export default function LoginScreen() {
           mode="outlined"
         >
           <Card.Content>
-            {(loginError || error) ? (
+            {/* Server / store error banner */}
+            {error ? (
               <View
                 style={[
                   styles.errorBox,
                   { backgroundColor: colors.danger + "15" },
                 ]}
               >
-                <Text style={{ color: colors.danger, textAlign: "center", fontWeight: "600", fontSize: 14 }}>
-                  {loginError || error}
+                <Text
+                  style={{
+                    color: colors.danger,
+                    textAlign: "center",
+                    fontWeight: "600",
+                    fontSize: 14,
+                  }}
+                >
+                  {error}
                 </Text>
-                {!loginError && error?.toLowerCase().includes("invalid") ? (
-                  <Text style={{ color: colors.danger, textAlign: "center", fontSize: 12, marginTop: 4, opacity: 0.8 }}>
+                {error.toLowerCase().includes("invalid") ? (
+                  <Text
+                    style={{
+                      color: colors.danger,
+                      textAlign: "center",
+                      fontSize: 12,
+                      marginTop: 4,
+                      opacity: 0.8,
+                    }}
+                  >
                     Please check your username and password and try again
                   </Text>
                 ) : null}
               </View>
             ) : null}
 
-            <TextInput
-              label="Username"
-              value={username}
-              onChangeText={(t) => {
-                setUsername(t);
-                setLoginError(null);
-              }}
-              onBlur={() => setTouched((p) => ({ ...p, username: true }))}
-              autoCapitalize="none"
-              autoCorrect={false}
-              disabled={loading}
-              left={<TextInput.Icon icon="account" />}
-              mode="outlined"
-              style={styles.input}
-              contentStyle={styles.inputContent}
-              outlineColor={usernameEmpty ? colors.danger : colors.borderColor}
-              activeOutlineColor={colors.accentPrimary}
-              textColor={colors.textPrimary}
-              error={usernameEmpty}
-              theme={{
-                colors: {
-                  surfaceVariant: colors.bgInput,
-                  onSurfaceVariant: colors.textSecondary,
-                  placeholder: colors.textMuted,
-                  error: colors.danger,
-                },
-              }}
+            {/* Username */}
+            <Controller
+              control={control}
+              name="username"
+              render={({ field: { onChange, onBlur, value } }) => (
+                <TextInput
+                  label="Username"
+                  value={value}
+                  onChangeText={(t) => {
+                    onChange(t);
+                    if (error) clearError();
+                  }}
+                  onBlur={onBlur}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  disabled={loading}
+                  left={<TextInput.Icon icon="account" />}
+                  mode="outlined"
+                  style={styles.input}
+                  contentStyle={styles.inputContent}
+                  outlineColor={
+                    errors.username ? colors.danger : colors.borderColor
+                  }
+                  activeOutlineColor={colors.accentPrimary}
+                  textColor={colors.textPrimary}
+                  error={!!errors.username}
+                  theme={inputTheme}
+                />
+              )}
             />
             <HelperText
               type="error"
-              visible={usernameEmpty}
+              visible={!!errors.username}
               style={{ color: colors.danger }}
             >
-              Username is required
+              {errors.username?.message}
             </HelperText>
 
-            <TextInput
-              label="Password"
-              value={password}
-              onChangeText={(t) => {
-                setPassword(t);
-                setLoginError(null);
-              }}
-              onBlur={() => setTouched((p) => ({ ...p, password: true }))}
-              secureTextEntry={!showPassword}
-              disabled={loading}
-              left={<TextInput.Icon icon="lock" />}
-              right={
-                <TextInput.Icon
-                  icon={showPassword ? "eye-off" : "eye"}
-                  onPress={() => setShowPassword(!showPassword)}
+            {/* Password */}
+            <Controller
+              control={control}
+              name="password"
+              render={({ field: { onChange, onBlur, value } }) => (
+                <TextInput
+                  label="Password"
+                  value={value}
+                  onChangeText={(t) => {
+                    onChange(t);
+                    if (error) clearError();
+                  }}
+                  onBlur={onBlur}
+                  secureTextEntry={!showPassword}
+                  disabled={loading}
+                  left={<TextInput.Icon icon="lock" />}
+                  right={
+                    <TextInput.Icon
+                      icon={showPassword ? "eye-off" : "eye"}
+                      onPress={() => setShowPassword(!showPassword)}
+                    />
+                  }
+                  mode="outlined"
+                  style={styles.input}
+                  contentStyle={styles.inputContent}
+                  outlineColor={
+                    errors.password ? colors.danger : colors.borderColor
+                  }
+                  activeOutlineColor={colors.accentPrimary}
+                  textColor={colors.textPrimary}
+                  error={!!errors.password}
+                  onSubmitEditing={handleSubmit(onSubmit)}
+                  theme={inputTheme}
                 />
-              }
-              mode="outlined"
-              style={styles.input}
-              contentStyle={styles.inputContent}
-              outlineColor={passwordEmpty ? colors.danger : colors.borderColor}
-              activeOutlineColor={colors.accentPrimary}
-              textColor={colors.textPrimary}
-              error={passwordEmpty}
-              onSubmitEditing={handleLogin}
-              theme={{
-                colors: {
-                  surfaceVariant: colors.bgInput,
-                  onSurfaceVariant: colors.textSecondary,
-                  placeholder: colors.textMuted,
-                  error: colors.danger,
-                },
-              }}
+              )}
             />
             <HelperText
-              type={passwordEmpty ? "error" : "info"}
-              visible={passwordEmpty || !touched.password}
-              style={{ color: passwordEmpty ? colors.danger : colors.textMuted }}
+              type="error"
+              visible={!!errors.password}
+              style={{ color: colors.danger }}
             >
-              {passwordEmpty ? "Password is required" : ""}
+              {errors.password?.message}
             </HelperText>
 
+            {/* Sign In button */}
             <Button
               mode="contained"
-              onPress={handleLogin}
+              onPress={handleSubmit(onSubmit)}
               loading={loading}
-              disabled={loading || !username.trim() || !password.trim()}
+              disabled={loading || googleLoading}
               style={styles.button}
               contentStyle={styles.buttonContent}
               labelStyle={styles.buttonLabel}
@@ -225,12 +281,39 @@ export default function LoginScreen() {
               Sign In
             </Button>
 
+            {/* Divider */}
+            <View style={styles.dividerRow}>
+              <Divider style={[styles.dividerLine, { backgroundColor: colors.borderColor }]} />
+              <Text style={[styles.dividerText, { color: colors.textMuted }]}>
+                or
+              </Text>
+              <Divider style={[styles.dividerLine, { backgroundColor: colors.borderColor }]} />
+            </View>
+
+            {/* Google Sign-In */}
+            <Button
+              mode="outlined"
+              onPress={handleGoogleSignIn}
+              loading={googleLoading}
+              disabled={loading || googleLoading}
+              icon="google"
+              style={[styles.googleButton, { borderColor: colors.borderColor }]}
+              contentStyle={styles.buttonContent}
+              labelStyle={[styles.googleLabel, { color: colors.textPrimary }]}
+            >
+              Continue with Google
+            </Button>
+
+            {/* Register link */}
             <Button
               mode="text"
               onPress={() => router.push("/(auth)/register")}
               disabled={loading}
               style={styles.registerButton}
-              labelStyle={[styles.registerLabel, { color: colors.accentPrimary }]}
+              labelStyle={[
+                styles.registerLabel,
+                { color: colors.accentPrimary },
+              ]}
             >
               Register as New User
             </Button>
@@ -285,6 +368,15 @@ const styles = StyleSheet.create({
   button: { marginTop: 12, borderRadius: 10 },
   buttonContent: { paddingVertical: 8 },
   buttonLabel: { fontSize: 16, fontWeight: "700", letterSpacing: 0.5 },
+  dividerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginVertical: 16,
+  },
+  dividerLine: { flex: 1, height: 1 },
+  dividerText: { marginHorizontal: 12, fontSize: 13 },
+  googleButton: { borderRadius: 10, borderWidth: 1 },
+  googleLabel: { fontSize: 15, fontWeight: "600" },
   registerButton: { marginTop: 8 },
   registerLabel: { fontSize: 14, fontWeight: "600" },
   footer: { marginTop: 32, fontSize: 13 },

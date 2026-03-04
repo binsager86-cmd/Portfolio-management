@@ -1675,6 +1675,14 @@ export async function register(
   return data;
 }
 
+/** Exchange a Google ID token for a JWT session. */
+export async function googleSignIn(idToken: string): Promise<LoginResponse> {
+  const { data } = await api.post<LoginResponse>("/api/v1/auth/google", {
+    id_token: idToken,
+  });
+  return data;
+}
+
 /** Change password. */
 export async function changePassword(
   currentPassword: string,
