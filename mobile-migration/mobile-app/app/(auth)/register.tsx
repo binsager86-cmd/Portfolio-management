@@ -1,13 +1,12 @@
 /**
- * Register Screen — create a new user account.
+ * Register Screen — react-hook-form + Zod, auto-login, Google Sign-In.
  *
- * Fields: username (min 3), password (min 6), optional display name.
- * Maps to POST /api/v1/auth/register → { username, password, name }.
- * On success the backend returns a TokenResponse and the user is
- * auto-logged-in (same shape as login).
+ * On successful registration the backend returns a TokenResponse (same
+ * shape as login). The auth store now persists tokens immediately so
+ * the user is auto-logged-in — no redirect-to-login needed.
  */
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useEffect, useState } from "react";
 import {
   View,
   StyleSheet,
@@ -15,7 +14,6 @@ import {
   Platform,
   ScrollView,
   Text,
-  Animated,
 } from "react-native";
 import {
   TextInput,
@@ -23,94 +21,94 @@ import {
   Card,
   HelperText,
   IconButton,
+  Divider,
 } from "react-native-paper";
 import { useRouter } from "expo-router";
+import { useForm, Controller } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+
 import { useAuthStore } from "@/services/authStore";
 import { useThemeStore } from "@/services/themeStore";
 import { useResponsive } from "@/hooks/useResponsive";
+import { registerSchema, type RegisterFormData } from "@/lib/validationSchemas";
 
 export default function RegisterScreen() {
   const router = useRouter();
-  const { register, loading, error, clearError } = useAuthStore();
+  const { register, googleSignIn, loading, error, clearError } = useAuthStore();
   const { colors, toggle, mode } = useThemeStore();
   const { isDesktop } = useResponsive();
 
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [name, setName] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [localError, setLocalError] = useState<string | null>(null);
-  const [success, setSuccess] = useState(false);
-  const [countdown, setCountdown] = useState(3);
-  const [submitting, setSubmitting] = useState(false);
-  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const [googleLoading, setGoogleLoading] = useState(false);
 
-  const usernameValid = username.trim().length >= 3;
-  const passwordValid = password.length >= 6;
-  const passwordsMatch = password === confirmPassword;
-  const canSubmit =
-    usernameValid && passwordValid && passwordsMatch && !loading && !submitting;
+  // react-hook-form + Zod
+  const {
+    control,
+    handleSubmit,
+    formState: { errors },
+  } = useForm<RegisterFormData>({
+    resolver: zodResolver(registerSchema),
+    defaultValues: {
+      username: "",
+      displayName: "",
+      password: "",
+      confirmPassword: "",
+    },
+    mode: "onBlur",
+  });
 
-  // Clear store error when component unmounts
+  // Clear store error on unmount
   useEffect(() => {
     return () => clearError();
   }, []);
 
-  // Countdown after successful registration → redirect to login
-  useEffect(() => {
-    if (!success) return;
-    Animated.timing(fadeAnim, {
-      toValue: 1,
-      duration: 400,
-      useNativeDriver: true,
-    }).start();
-    const timer = setInterval(() => {
-      setCountdown((c) => {
-        if (c <= 1) {
-          clearInterval(timer);
-          router.replace("/(auth)/login");
-          return 0;
-        }
-        return c - 1;
-      });
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [success]);
+  // ── Handlers ──────────────────────────────────────────────────────
 
-  const handleRegister = async () => {
-    if (submitting) return; // prevent double-submit
-    setLocalError(null);
-
-    if (!usernameValid) {
-      setLocalError("Username must be at least 3 characters");
-      return;
-    }
-    if (!passwordValid) {
-      setLocalError("Password must be at least 6 characters");
-      return;
-    }
-    if (!passwordsMatch) {
-      setLocalError("Passwords do not match");
-      return;
-    }
-
-    setSubmitting(true);
-    try {
-      const ok = await register(
-        username.trim(),
-        password,
-        name.trim() || undefined
-      );
-      if (ok) {
-        setSuccess(true);
-      }
-    } finally {
-      setSubmitting(false);
+  const onSubmit = async (data: RegisterFormData) => {
+    const ok = await register(
+      data.username.trim(),
+      data.password,
+      data.displayName?.trim() || undefined,
+    );
+    if (ok) {
+      // Auto-login: authStore already persisted tokens, _layout auth guard
+      // will redirect to /(tabs) automatically.
+      router.replace("/(tabs)");
     }
   };
 
-  const displayError = localError || error;
+  const handleGoogleSignIn = async () => {
+    try {
+      setGoogleLoading(true);
+      const { GoogleSignin } = await import(
+        "@react-native-google-signin/google-signin"
+      );
+      await GoogleSignin.hasPlayServices();
+      const userInfo = await GoogleSignin.signIn();
+      const idToken = userInfo.data?.idToken;
+      if (!idToken) throw new Error("Google Sign-In did not return an ID token");
+      const ok = await googleSignIn(idToken);
+      if (ok) router.replace("/(tabs)");
+    } catch (err: any) {
+      if (err?.code === "SIGN_IN_CANCELLED") return;
+      console.warn("[Google Sign-In]", err);
+    } finally {
+      setGoogleLoading(false);
+    }
+  };
+
+  // ── Shared input theme ────────────────────────────────────────────
+
+  const inputTheme = {
+    colors: {
+      surfaceVariant: colors.bgInput,
+      onSurfaceVariant: colors.textSecondary,
+      placeholder: colors.textMuted,
+      error: colors.danger,
+    },
+  };
+
+  // ── Render ────────────────────────────────────────────────────────
 
   return (
     <KeyboardAvoidingView
@@ -137,82 +135,16 @@ export default function RegisterScreen() {
 
         {/* Logo / Title */}
         <View style={styles.header}>
-          <Text style={[styles.icon]}>{success ? "" : "\uD83D\uDCCA"}</Text>
+          <Text style={styles.icon}>📊</Text>
           <Text style={[styles.title, { color: colors.textPrimary }]}>
-            {success ? "" : "Create Account"}
+            Create Account
           </Text>
           <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
-            {success ? "" : "Register a new portfolio account"}
+            Register a new portfolio account
           </Text>
         </View>
 
-        {/* Success State */}
-        {success ? (
-          <Animated.View style={{ opacity: fadeAnim, width: "100%", maxWidth: 440, alignItems: "center" }}>
-            <Card
-              style={[
-                styles.card,
-                {
-                  backgroundColor: colors.bgCard,
-                  borderColor: colors.success || "#22c55e",
-                  borderWidth: 2,
-                },
-                isDesktop && styles.cardDesktop,
-              ]}
-              mode="outlined"
-            >
-              <Card.Content style={{ alignItems: "center", paddingVertical: 32 }}>
-                <View style={{
-                  width: 72,
-                  height: 72,
-                  borderRadius: 36,
-                  backgroundColor: (colors.success || "#22c55e") + "20",
-                  justifyContent: "center",
-                  alignItems: "center",
-                  marginBottom: 20,
-                }}>
-                  <Text style={{ fontSize: 36 }}>\u2713</Text>
-                </View>
-                <Text style={{
-                  fontSize: 22,
-                  fontWeight: "700",
-                  color: colors.textPrimary,
-                  marginBottom: 8,
-                }}>
-                  Account Created!
-                </Text>
-                <Text style={{
-                  fontSize: 15,
-                  color: colors.textSecondary,
-                  textAlign: "center",
-                  marginBottom: 4,
-                }}>
-                  Your account has been successfully created.
-                </Text>
-                <Text style={{
-                  fontSize: 14,
-                  color: colors.textMuted,
-                  textAlign: "center",
-                  marginBottom: 20,
-                }}>
-                  Redirecting to login in {countdown}s...
-                </Text>
-                <Button
-                  mode="contained"
-                  onPress={() => router.replace("/(auth)/login")}
-                  style={styles.button}
-                  contentStyle={styles.buttonContent}
-                  labelStyle={styles.buttonLabel}
-                  buttonColor={colors.accentPrimary}
-                  textColor="#ffffff"
-                >
-                  Go to Login Now
-                </Button>
-              </Card.Content>
-            </Card>
-          </Animated.View>
-        ) : (
-        /* Card — Registration Form */
+        {/* Card — Registration Form */}
         <Card
           style={[
             styles.card,
@@ -225,7 +157,8 @@ export default function RegisterScreen() {
           mode="outlined"
         >
           <Card.Content>
-            {displayError ? (
+            {/* Server error banner */}
+            {error ? (
               <View
                 style={[
                   styles.errorBox,
@@ -233,167 +166,160 @@ export default function RegisterScreen() {
                 ]}
               >
                 <Text style={{ color: colors.danger, textAlign: "center" }}>
-                  {displayError}
+                  {error}
                 </Text>
               </View>
             ) : null}
 
-            <TextInput
-              label="Username"
-              value={username}
-              onChangeText={(t) => {
-                setUsername(t);
-                setLocalError(null);
-              }}
-              autoCapitalize="none"
-              autoCorrect={false}
-              disabled={loading}
-              left={<TextInput.Icon icon="account" />}
-              mode="outlined"
-              style={styles.input}
-              contentStyle={styles.inputContent}
-              outlineColor={colors.borderColor}
-              activeOutlineColor={colors.accentPrimary}
-              textColor={colors.textPrimary}
-              theme={{
-                colors: {
-                  surfaceVariant: colors.bgInput,
-                  onSurfaceVariant: colors.textSecondary,
-                  placeholder: colors.textMuted,
-                },
-              }}
-            />
-            <HelperText
-              type={username.length > 0 && !usernameValid ? "error" : "info"}
-              visible={username.length > 0}
-              style={{
-                color:
-                  username.length > 0 && !usernameValid
-                    ? colors.danger
-                    : colors.textMuted,
-              }}
-            >
-              {username.length > 0 && !usernameValid
-                ? "Minimum 3 characters"
-                : ""}
-            </HelperText>
-
-            <TextInput
-              label="Display Name (optional)"
-              value={name}
-              onChangeText={setName}
-              autoCapitalize="words"
-              disabled={loading}
-              left={<TextInput.Icon icon="badge-account" />}
-              mode="outlined"
-              style={styles.input}
-              contentStyle={styles.inputContent}
-              outlineColor={colors.borderColor}
-              activeOutlineColor={colors.accentPrimary}
-              textColor={colors.textPrimary}
-              theme={{
-                colors: {
-                  surfaceVariant: colors.bgInput,
-                  onSurfaceVariant: colors.textSecondary,
-                  placeholder: colors.textMuted,
-                },
-              }}
-            />
-
-            <TextInput
-              label="Password"
-              value={password}
-              onChangeText={(t) => {
-                setPassword(t);
-                setLocalError(null);
-              }}
-              secureTextEntry={!showPassword}
-              disabled={loading}
-              left={<TextInput.Icon icon="lock" />}
-              right={
-                <TextInput.Icon
-                  icon={showPassword ? "eye-off" : "eye"}
-                  onPress={() => setShowPassword(!showPassword)}
+            {/* Username */}
+            <Controller
+              control={control}
+              name="username"
+              render={({ field: { onChange, onBlur, value } }) => (
+                <TextInput
+                  label="Username"
+                  value={value}
+                  onChangeText={(t) => {
+                    onChange(t);
+                    if (error) clearError();
+                  }}
+                  onBlur={onBlur}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  disabled={loading}
+                  left={<TextInput.Icon icon="account" />}
+                  mode="outlined"
+                  style={styles.input}
+                  contentStyle={styles.inputContent}
+                  outlineColor={
+                    errors.username ? colors.danger : colors.borderColor
+                  }
+                  activeOutlineColor={colors.accentPrimary}
+                  textColor={colors.textPrimary}
+                  error={!!errors.username}
+                  theme={inputTheme}
                 />
-              }
-              mode="outlined"
-              style={styles.input}
-              contentStyle={styles.inputContent}
-              outlineColor={colors.borderColor}
-              activeOutlineColor={colors.accentPrimary}
-              textColor={colors.textPrimary}
-              theme={{
-                colors: {
-                  surfaceVariant: colors.bgInput,
-                  onSurfaceVariant: colors.textSecondary,
-                  placeholder: colors.textMuted,
-                },
-              }}
+              )}
             />
             <HelperText
-              type={password.length > 0 && !passwordValid ? "error" : "info"}
-              visible={password.length > 0}
-              style={{
-                color:
-                  password.length > 0 && !passwordValid
-                    ? colors.danger
-                    : colors.textMuted,
-              }}
+              type="error"
+              visible={!!errors.username}
+              style={{ color: colors.danger }}
             >
-              {password.length > 0 && !passwordValid
-                ? "Minimum 6 characters"
-                : ""}
+              {errors.username?.message}
             </HelperText>
 
-            <TextInput
-              label="Confirm Password"
-              value={confirmPassword}
-              onChangeText={(t) => {
-                setConfirmPassword(t);
-                setLocalError(null);
-              }}
-              secureTextEntry={!showPassword}
-              disabled={loading}
-              left={<TextInput.Icon icon="lock-check" />}
-              mode="outlined"
-              style={styles.input}
-              contentStyle={styles.inputContent}
-              outlineColor={colors.borderColor}
-              activeOutlineColor={colors.accentPrimary}
-              textColor={colors.textPrimary}
-              onSubmitEditing={handleRegister}
-              theme={{
-                colors: {
-                  surfaceVariant: colors.bgInput,
-                  onSurfaceVariant: colors.textSecondary,
-                  placeholder: colors.textMuted,
-                },
-              }}
+            {/* Display Name */}
+            <Controller
+              control={control}
+              name="displayName"
+              render={({ field: { onChange, onBlur, value } }) => (
+                <TextInput
+                  label="Display Name (optional)"
+                  value={value}
+                  onChangeText={onChange}
+                  onBlur={onBlur}
+                  autoCapitalize="words"
+                  disabled={loading}
+                  left={<TextInput.Icon icon="badge-account" />}
+                  mode="outlined"
+                  style={styles.input}
+                  contentStyle={styles.inputContent}
+                  outlineColor={colors.borderColor}
+                  activeOutlineColor={colors.accentPrimary}
+                  textColor={colors.textPrimary}
+                  theme={inputTheme}
+                />
+              )}
+            />
+
+            {/* Password */}
+            <Controller
+              control={control}
+              name="password"
+              render={({ field: { onChange, onBlur, value } }) => (
+                <TextInput
+                  label="Password"
+                  value={value}
+                  onChangeText={(t) => {
+                    onChange(t);
+                    if (error) clearError();
+                  }}
+                  onBlur={onBlur}
+                  secureTextEntry={!showPassword}
+                  disabled={loading}
+                  left={<TextInput.Icon icon="lock" />}
+                  right={
+                    <TextInput.Icon
+                      icon={showPassword ? "eye-off" : "eye"}
+                      onPress={() => setShowPassword(!showPassword)}
+                    />
+                  }
+                  mode="outlined"
+                  style={styles.input}
+                  contentStyle={styles.inputContent}
+                  outlineColor={
+                    errors.password ? colors.danger : colors.borderColor
+                  }
+                  activeOutlineColor={colors.accentPrimary}
+                  textColor={colors.textPrimary}
+                  error={!!errors.password}
+                  theme={inputTheme}
+                />
+              )}
             />
             <HelperText
-              type={
-                confirmPassword.length > 0 && !passwordsMatch
-                  ? "error"
-                  : "info"
-              }
-              visible={confirmPassword.length > 0}
-              style={{
-                color:
-                  confirmPassword.length > 0 && !passwordsMatch
-                    ? colors.danger
-                    : colors.textMuted,
-              }}
+              type="error"
+              visible={!!errors.password}
+              style={{ color: colors.danger }}
             >
-              {confirmPassword.length > 0 && !passwordsMatch
-                ? "Passwords do not match"
-                : ""}
+              {errors.password?.message}
             </HelperText>
 
+            {/* Confirm Password */}
+            <Controller
+              control={control}
+              name="confirmPassword"
+              render={({ field: { onChange, onBlur, value } }) => (
+                <TextInput
+                  label="Confirm Password"
+                  value={value}
+                  onChangeText={(t) => {
+                    onChange(t);
+                    if (error) clearError();
+                  }}
+                  onBlur={onBlur}
+                  secureTextEntry={!showPassword}
+                  disabled={loading}
+                  left={<TextInput.Icon icon="lock-check" />}
+                  mode="outlined"
+                  style={styles.input}
+                  contentStyle={styles.inputContent}
+                  outlineColor={
+                    errors.confirmPassword ? colors.danger : colors.borderColor
+                  }
+                  activeOutlineColor={colors.accentPrimary}
+                  textColor={colors.textPrimary}
+                  error={!!errors.confirmPassword}
+                  onSubmitEditing={handleSubmit(onSubmit)}
+                  theme={inputTheme}
+                />
+              )}
+            />
+            <HelperText
+              type="error"
+              visible={!!errors.confirmPassword}
+              style={{ color: colors.danger }}
+            >
+              {errors.confirmPassword?.message}
+            </HelperText>
+
+            {/* Create Account button */}
             <Button
               mode="contained"
-              onPress={handleRegister}
+              onPress={handleSubmit(onSubmit)}
               loading={loading}
-              disabled={!canSubmit}
+              disabled={loading || googleLoading}
               style={styles.button}
               contentStyle={styles.buttonContent}
               labelStyle={styles.buttonLabel}
@@ -403,6 +329,30 @@ export default function RegisterScreen() {
               Create Account
             </Button>
 
+            {/* Divider */}
+            <View style={styles.dividerRow}>
+              <Divider style={[styles.dividerLine, { backgroundColor: colors.borderColor }]} />
+              <Text style={[styles.dividerText, { color: colors.textMuted }]}>
+                or
+              </Text>
+              <Divider style={[styles.dividerLine, { backgroundColor: colors.borderColor }]} />
+            </View>
+
+            {/* Google Sign-In */}
+            <Button
+              mode="outlined"
+              onPress={handleGoogleSignIn}
+              loading={googleLoading}
+              disabled={loading || googleLoading}
+              icon="google"
+              style={[styles.googleButton, { borderColor: colors.borderColor }]}
+              contentStyle={styles.buttonContent}
+              labelStyle={[styles.googleLabel, { color: colors.textPrimary }]}
+            >
+              Continue with Google
+            </Button>
+
+            {/* Back to Login */}
             <Button
               mode="text"
               onPress={() => router.back()}
@@ -414,7 +364,6 @@ export default function RegisterScreen() {
             </Button>
           </Card.Content>
         </Card>
-        )}
 
         <Text style={[styles.footer, { color: colors.textMuted }]}>
           Portfolio Mobile — Phase 3
@@ -464,6 +413,15 @@ const styles = StyleSheet.create({
   button: { marginTop: 12, borderRadius: 10 },
   buttonContent: { paddingVertical: 8 },
   buttonLabel: { fontSize: 16, fontWeight: "700", letterSpacing: 0.5 },
+  dividerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginVertical: 16,
+  },
+  dividerLine: { flex: 1, height: 1 },
+  dividerText: { marginHorizontal: 12, fontSize: 13 },
+  googleButton: { borderRadius: 10, borderWidth: 1 },
+  googleLabel: { fontSize: 15, fontWeight: "600" },
   backButton: { marginTop: 8 },
   backLabel: { fontSize: 14, fontWeight: "600" },
   footer: { marginTop: 32, fontSize: 13 },
