@@ -22,35 +22,36 @@ import {
   Platform,
   TextInput as RNTextInput,
   Alert,
+  Modal,
+  ActivityIndicator,
 } from "react-native";
-import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
+import { useQueryClient, useMutation } from "@tanstack/react-query";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import {
-  getHoldings,
+  useHoldings,
+  useCashBalances,
+  useDepositTotals,
+  useAllStocksForMerge,
+} from "@/hooks/queries";
+import {
   Holding,
   HoldingsResponse,
-  getCashBalances,
   setCashOverride,
   clearCashOverride,
   PortfolioCashBalance,
-  getDeposits,
   exportHoldingsExcel,
+  mergeStocks,
 } from "@/services/api";
 import { useThemeStore } from "@/services/themeStore";
 import { useResponsive } from "@/hooks/useResponsive";
-import { LoadingScreen } from "@/components/ui/LoadingScreen";
-import { ErrorScreen } from "@/components/ui/ErrorScreen";
+import { todayISO } from "@/lib/dateUtils";
+import { DataScreen } from "@/components/screens";
 import { AllocationDonut, AllocationSlice } from "@/components/charts/AllocationDonut";
 import type { ThemePalette } from "@/constants/theme";
-
-// ── Formatting helpers ──────────────────────────────────────────────
-
-function fmtNum(n: number, decimals = 2): string {
-  return n.toLocaleString(undefined, {
-    minimumFractionDigits: decimals,
-    maximumFractionDigits: decimals,
-  });
-}
+import { fmtNum } from "@/lib/currency";
+import { showErrorAlert } from "@/lib/errorHandling";
+import { FilterChip } from "@/components/ui/FilterChip";
+import { KpiCard } from "@/components/portfolio/KpiWidgets";
 
 // ── Column types & definitions ──────────────────────────────────────
 
@@ -429,10 +430,12 @@ function HoldingRow({
   holding,
   colors,
   isEven,
+  onCompanyPress,
 }: {
   holding: Holding;
   colors: ThemePalette;
   isEven: boolean;
+  onCompanyPress?: (holding: Holding) => void;
 }) {
   const rowBg = isEven ? "transparent" : colors.bgCardHover + "30";
   return (
@@ -442,10 +445,260 @@ function HoldingRow({
         { backgroundColor: rowBg, borderBottomColor: colors.borderColor },
       ]}
     >
-      {TABLE_COLUMNS.map((col) => (
-        <DataCell key={col.key} col={col} holding={holding} colors={colors} />
-      ))}
+      {TABLE_COLUMNS.map((col) =>
+        col.key === "company" && onCompanyPress ? (
+          <Pressable
+            key={col.key}
+            onPress={() => onCompanyPress(holding)}
+            style={({ pressed }) => [
+              ts.dataCell,
+              { width: col.width, opacity: pressed ? 0.6 : 1 },
+            ]}
+          >
+            <Text
+              style={[
+                ts.cellText,
+                {
+                  color: colors.accentPrimary,
+                  fontWeight: "700",
+                  textAlign: col.align,
+                  textDecorationLine: "underline",
+                },
+              ]}
+              numberOfLines={1}
+            >
+              {holding.company}
+            </Text>
+          </Pressable>
+        ) : (
+          <DataCell key={col.key} col={col} holding={holding} colors={colors} />
+        )
+      )}
     </View>
+  );
+}
+
+// ── Stock Merge / Edit Modal ────────────────────────────────────────
+
+function StockMergeModal({
+  holding,
+  colors,
+  onClose,
+  onMerged,
+}: {
+  holding: Holding;
+  colors: ThemePalette;
+  onClose: () => void;
+  onMerged: () => void;
+}) {
+  const [mergeTargetId, setMergeTargetId] = useState<number | null>(null);
+  const [searchText, setSearchText] = useState("");
+
+  // Fetch all stocks to find the current stock's ID and list merge targets
+  const stocksQ = useAllStocksForMerge();
+
+  const allStocks = stocksQ.data?.stocks ?? [];
+
+  // Find the current holding's stock record
+  const currentStock = allStocks.find(
+    (s) => s.symbol.trim().toUpperCase() === holding.symbol.trim().toUpperCase()
+  );
+
+  // Filter: all OTHER stocks (possible merge sources to absorb into this one)
+  const mergeCandidates = useMemo(() => {
+    const list = allStocks.filter(
+      (s) => s.symbol.trim().toUpperCase() !== holding.symbol.trim().toUpperCase()
+    );
+    if (!searchText.trim()) return list;
+    const q = searchText.toLowerCase();
+    return list.filter(
+      (s) =>
+        s.symbol.toLowerCase().includes(q) ||
+        (s.name ?? "").toLowerCase().includes(q)
+    );
+  }, [allStocks, holding.symbol, searchText]);
+
+  const mergeMutation = useMutation({
+    mutationFn: () => {
+      if (!mergeTargetId || !currentStock) throw new Error("Missing stock IDs");
+      // mergeTargetId is the SOURCE (stock being absorbed)
+      // currentStock.id is the TARGET (stock being kept)
+      return mergeStocks(mergeTargetId, currentStock.id);
+    },
+    onSuccess: (result) => {
+      Alert.alert(
+        "Stocks Merged",
+        `${result.source_symbol} merged into ${result.target_symbol}\n${result.transactions_moved} transactions moved.`
+      );
+      onMerged();
+      onClose();
+    },
+    onError: (err: any) => {
+      showErrorAlert("Merge Failed", err);
+    },
+  });
+
+  const handleMerge = () => {
+    if (!mergeTargetId || !currentStock) return;
+    const sourceStock = allStocks.find((s) => s.id === mergeTargetId);
+    const sourceName = sourceStock ? `${sourceStock.symbol} (${sourceStock.name})` : "the selected stock";
+
+    if (Platform.OS === "web") {
+      if (window.confirm(`Merge ${sourceName} into ${holding.company}?\n\nAll transactions will be moved to ${holding.symbol}. This cannot be undone.`)) {
+        mergeMutation.mutate();
+      }
+    } else {
+      Alert.alert(
+        "Confirm Merge",
+        `Merge ${sourceName} into ${holding.company}?\n\nAll transactions will be moved to ${holding.symbol}. This cannot be undone.`,
+        [
+          { text: "Cancel", style: "cancel" },
+          { text: "Merge", style: "destructive", onPress: () => mergeMutation.mutate() },
+        ]
+      );
+    }
+  };
+
+  return (
+    <Modal transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable style={mergeStyles.overlay} onPress={onClose}>
+        <Pressable
+          style={[
+            mergeStyles.box,
+            { backgroundColor: colors.bgCard, borderColor: colors.borderColor },
+          ]}
+          onPress={() => {}}
+        >
+          {/* Title */}
+          <View style={mergeStyles.titleRow}>
+            <Text style={[mergeStyles.title, { color: colors.textPrimary }]}>
+              {holding.company}
+            </Text>
+            <Pressable onPress={onClose} hitSlop={12} style={{ padding: 6 }}>
+              <FontAwesome name="times" size={16} color={colors.textMuted} />
+            </Pressable>
+          </View>
+
+          {/* Stock info */}
+          <View style={[mergeStyles.infoCard, { backgroundColor: colors.bgPrimary, borderColor: colors.borderColor }]}>
+            <View style={mergeStyles.infoRow}>
+              <Text style={[mergeStyles.infoLabel, { color: colors.textMuted }]}>Symbol</Text>
+              <Text style={[mergeStyles.infoValue, { color: colors.textPrimary }]}>{holding.symbol}</Text>
+            </View>
+            <View style={mergeStyles.infoRow}>
+              <Text style={[mergeStyles.infoLabel, { color: colors.textMuted }]}>Quantity</Text>
+              <Text style={[mergeStyles.infoValue, { color: colors.textPrimary }]}>{fmtNum(holding.shares_qty, 0)}</Text>
+            </View>
+            <View style={mergeStyles.infoRow}>
+              <Text style={[mergeStyles.infoLabel, { color: colors.textMuted }]}>Market Price</Text>
+              <Text style={[mergeStyles.infoValue, { color: colors.textPrimary }]}>{fmtNum(holding.market_price, 3)}</Text>
+            </View>
+            <View style={mergeStyles.infoRow}>
+              <Text style={[mergeStyles.infoLabel, { color: colors.textMuted }]}>Currency</Text>
+              <Text style={[mergeStyles.infoValue, { color: colors.textPrimary }]}>{holding.currency}</Text>
+            </View>
+          </View>
+
+          {/* Merge section */}
+          <Text style={[mergeStyles.sectionLabel, { color: colors.textPrimary }]}>
+            Merge Another Stock Into This One
+          </Text>
+          <Text style={[mergeStyles.sectionHint, { color: colors.textMuted }]}>
+            Select a stock to absorb. Its transactions will be moved to {holding.symbol}, then the selected stock will be deleted.
+          </Text>
+
+          <ScrollView style={{ maxHeight: 280 }} showsVerticalScrollIndicator keyboardShouldPersistTaps="handled">
+            {/* Search filter */}
+            <RNTextInput
+              style={[
+                mergeStyles.searchInput,
+                {
+                  color: colors.textPrimary,
+                  borderColor: colors.borderColor,
+                  backgroundColor: colors.bgPrimary,
+                },
+              ]}
+              placeholder="Search stocks..."
+              placeholderTextColor={colors.textMuted}
+              value={searchText}
+              onChangeText={setSearchText}
+            />
+
+            {stocksQ.isLoading ? (
+              <ActivityIndicator style={{ padding: 20 }} color={colors.accentPrimary} />
+            ) : mergeCandidates.length === 0 ? (
+              <Text style={[mergeStyles.emptyText, { color: colors.textMuted }]}>
+                No other stocks found
+              </Text>
+            ) : (
+              mergeCandidates.map((stock) => {
+                const selected = mergeTargetId === stock.id;
+                return (
+                  <Pressable
+                    key={stock.id}
+                    onPress={() => setMergeTargetId(selected ? null : stock.id)}
+                    style={[
+                      mergeStyles.stockItem,
+                      {
+                        backgroundColor: selected
+                          ? colors.accentPrimary + "20"
+                          : "transparent",
+                        borderColor: selected
+                          ? colors.accentPrimary
+                          : colors.borderColor,
+                      },
+                    ]}
+                  >
+                    <View style={{ flex: 1 }}>
+                      <Text style={[mergeStyles.stockSymbol, { color: selected ? colors.accentPrimary : colors.textPrimary }]}>
+                        {stock.symbol}
+                      </Text>
+                      <Text style={[mergeStyles.stockName, { color: colors.textMuted }]}>
+                        {stock.name} • {stock.portfolio} • {stock.currency}
+                      </Text>
+                    </View>
+                    {selected && (
+                      <FontAwesome name="check-circle" size={18} color={colors.accentPrimary} />
+                    )}
+                  </Pressable>
+                );
+              })
+            )}
+          </ScrollView>
+
+          {/* Action buttons */}
+          <View style={mergeStyles.btnRow}>
+            <Pressable
+              onPress={onClose}
+              style={[mergeStyles.btn, { backgroundColor: colors.bgPrimary, borderColor: colors.borderColor, borderWidth: 1 }]}
+            >
+              <Text style={[mergeStyles.btnText, { color: colors.textSecondary }]}>Cancel</Text>
+            </Pressable>
+            <Pressable
+              onPress={handleMerge}
+              disabled={!mergeTargetId || mergeMutation.isPending}
+              style={[
+                mergeStyles.btn,
+                {
+                  backgroundColor: mergeTargetId
+                    ? colors.danger
+                    : colors.bgInput,
+                  opacity: mergeTargetId ? 1 : 0.5,
+                },
+              ]}
+            >
+              {mergeMutation.isPending ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Text style={[mergeStyles.btnText, { color: "#fff", fontWeight: "700" }]}>
+                  Merge Selected
+                </Text>
+              )}
+            </Pressable>
+          </View>
+        </Pressable>
+      </Pressable>
+    </Modal>
   );
 }
 
@@ -459,6 +712,7 @@ export default function HoldingsScreen() {
   const [filter, setFilter] = useState<string | undefined>(undefined);
   const [sortCol, setSortCol] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<SortDir>("asc");
+  const [selectedHolding, setSelectedHolding] = useState<Holding | null>(null);
 
   const {
     data: resp,
@@ -467,19 +721,13 @@ export default function HoldingsScreen() {
     error,
     refetch,
     isRefetching,
-  } = useQuery<HoldingsResponse>({
-    queryKey: ["holdings", filter],
-    queryFn: () => getHoldings(filter),
-  });
+  } = useHoldings(filter);
 
   // Cash balances query
   const {
     data: cashData,
     refetch: refetchCash,
-  } = useQuery<Record<string, PortfolioCashBalance>>({
-    queryKey: ["cash-balances"],
-    queryFn: () => getCashBalances(),
-  });
+  } = useCashBalances();
 
   const onSort = useCallback(
     (key: string) => {
@@ -520,18 +768,7 @@ export default function HoldingsScreen() {
   }, [resp?.holdings]);
 
   // Deposit totals per portfolio for Cash Management
-  const { data: kfhDeposits } = useQuery({
-    queryKey: ["deposits-total", "KFH"],
-    queryFn: () => getDeposits({ portfolio: "KFH", page_size: 9999 }),
-  });
-  const { data: bbynDeposits } = useQuery({
-    queryKey: ["deposits-total", "BBYN"],
-    queryFn: () => getDeposits({ portfolio: "BBYN", page_size: 9999 }),
-  });
-  const { data: usaDeposits } = useQuery({
-    queryKey: ["deposits-total", "USA"],
-    queryFn: () => getDeposits({ portfolio: "USA", page_size: 9999 }),
-  });
+  const { kfh: { data: kfhDeposits }, bbyn: { data: bbynDeposits }, usa: { data: usaDeposits } } = useDepositTotals();
 
   // Compute total deposited per portfolio
   const depositTotals = useMemo(() => {
@@ -551,81 +788,40 @@ export default function HoldingsScreen() {
   const portfolios = [undefined, "KFH", "BBYN", "USA"];
   const filterLabels = ["All", "KFH", "BBYN", "USA"];
 
-  if (isLoading) return <LoadingScreen message="Loading holdings…" />;
-  if (isError)
-    return (
-      <ErrorScreen
-        message={(error as any)?.message ?? "Failed to load holdings"}
-        onRetry={() => refetch()}
-      />
-    );
-
   return (
+    <DataScreen
+      loading={isLoading}
+      error={isError ? ((error as any)?.message ?? "Failed to load holdings") : null}
+      onRetry={() => refetch()}
+      loadingMessage="Loading holdings…"
+      bare
+    >
     <View style={[s.container, { backgroundColor: colors.bgPrimary }]}>
       {/* ── Portfolio filter tabs + Export ─────────────────────────── */}
       <View style={s.filterRow}>
-        {portfolios.map((p, i) => {
-          const active = filter === p;
-          return (
-            <Pressable
-              key={filterLabels[i]}
-              onPress={() => setFilter(p)}
-              style={[
-                s.filterBtn,
-                {
-                  backgroundColor: active
-                    ? colors.accentPrimary
-                    : colors.bgCard,
-                  borderColor: active
-                    ? colors.accentPrimary
-                    : colors.borderColor,
-                },
-              ]}
-            >
-              <Text
-                style={[
-                  s.filterText,
-                  {
-                    color: active ? "#fff" : colors.textSecondary,
-                    fontWeight: active ? "700" : "500",
-                  },
-                ]}
-              >
-                {filterLabels[i]}
-              </Text>
-            </Pressable>
-          );
-        })}
-
+        {portfolios.map((p, i) => (
+          <FilterChip
+            key={filterLabels[i]}
+            label={filterLabels[i]}
+            active={filter === p}
+            onPress={() => setFilter(p)}
+            colors={colors}
+          />
+        ))}
       </View>
 
       {/* ── Summary KPI Cards ────────────────────────────────────── */}
       {resp && (
         <View style={[s.kpiCardRow, { borderBottomColor: colors.borderColor }]}>
-          <View style={[s.kpiCard, { backgroundColor: colors.bgCard, borderColor: colors.borderColor }]}>
-            <Text style={[s.kpiCardLabel, { color: colors.textMuted }]}>Holdings</Text>
-            <Text style={[s.kpiCardValue, { color: colors.accentPrimary }]}>{String(resp.count)}</Text>
-          </View>
-          <View style={[s.kpiCard, { backgroundColor: colors.bgCard, borderColor: colors.borderColor }]}>
-            <Text style={[s.kpiCardLabel, { color: colors.textMuted }]}>Market Value</Text>
-            <Text style={[s.kpiCardValue, { color: colors.textPrimary }]}>{fmtNum(resp.totals.total_market_value_kwd)} KWD</Text>
-          </View>
-          <View style={[s.kpiCard, { backgroundColor: colors.bgCard, borderColor: colors.borderColor }]}>
-            <Text style={[s.kpiCardLabel, { color: colors.textMuted }]}>Total Cost</Text>
-            <Text style={[s.kpiCardValue, { color: colors.textPrimary }]}>{fmtNum(resp.totals.total_cost_kwd)} KWD</Text>
-          </View>
-          <View style={[s.kpiCard, { backgroundColor: colors.bgCard, borderColor: colors.borderColor }]}>
-            <Text style={[s.kpiCardLabel, { color: colors.textMuted }]}>Unrealized P/L</Text>
-            <Text style={[s.kpiCardValue, {
-              color: resp.totals.total_unrealized_pnl_kwd > 0
-                ? colors.success
-                : resp.totals.total_unrealized_pnl_kwd < 0
-                  ? colors.danger
-                  : colors.textMuted,
-            }]}>
-              {resp.totals.total_unrealized_pnl_kwd >= 0 ? "+" : ""}{fmtNum(resp.totals.total_unrealized_pnl_kwd)} KWD
-            </Text>
-          </View>
+          <KpiCard label="Holdings" value={String(resp.count)} color={colors.accentPrimary} colors={colors} />
+          <KpiCard label="Market Value" value={`${fmtNum(resp.totals.total_market_value_kwd)} KWD`} colors={colors} />
+          <KpiCard label="Total Cost" value={`${fmtNum(resp.totals.total_cost_kwd)} KWD`} colors={colors} />
+          <KpiCard
+            label="Unrealized P/L"
+            value={`${resp.totals.total_unrealized_pnl_kwd >= 0 ? "+" : ""}${fmtNum(resp.totals.total_unrealized_pnl_kwd)} KWD`}
+            color={resp.totals.total_unrealized_pnl_kwd > 0 ? colors.success : resp.totals.total_unrealized_pnl_kwd < 0 ? colors.danger : colors.textMuted}
+            colors={colors}
+          />
         </View>
       )}
 
@@ -653,21 +849,10 @@ export default function HoldingsScreen() {
 
         {/* ── Holdings section header + Export ──────────────── */}
         <View
-          style={{
-            flexDirection: "row",
-            alignItems: "center",
-            justifyContent: "space-between",
-            marginHorizontal: spacing.pagePx,
-            marginTop: 16,
-            marginBottom: 6,
-          }}
+          style={[s.holdingsHeaderRow, { marginHorizontal: spacing.pagePx }]}
         >
           <Text
-            style={{
-              fontSize: 18,
-              fontWeight: "700",
-              color: colors.textPrimary,
-            }}
+            style={[s.holdingsTitle, { color: colors.textPrimary }]}
           >
             <FontAwesome name="briefcase" size={16} color={colors.accentPrimary} />
             {"  "}Holdings
@@ -684,29 +869,19 @@ export default function HoldingsScreen() {
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement("a");
                 a.href = url;
-                a.download = `holdings_${new Date().toISOString().slice(0, 10)}.xlsx`;
+                a.download = `holdings_${todayISO()}.xlsx`;
                 document.body.appendChild(a);
                 a.click();
                 document.body.removeChild(a);
                 URL.revokeObjectURL(url);
               } catch (e: any) {
-                Alert.alert("Export Failed", e?.message ?? "Unknown error");
+                showErrorAlert("Export Failed", e);
               }
             }}
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              backgroundColor: "#1a3a2a",
-              borderColor: "#10b981",
-              borderWidth: 1.5,
-              paddingHorizontal: 16,
-              paddingVertical: 8,
-              borderRadius: 8,
-              minHeight: 36,
-            }}
+            style={s.holdingsExportBtn}
           >
             <FontAwesome name="download" size={14} color="#10b981" style={{ marginRight: 8 }} />
-            <Text style={{ color: "#10b981", fontSize: 13, fontWeight: "700" }}>
+            <Text style={s.holdingsExportText}>
               Export Excel
             </Text>
           </TouchableOpacity>
@@ -759,6 +934,7 @@ export default function HoldingsScreen() {
                   holding={h}
                   colors={colors}
                   isEven={idx % 2 === 0}
+                  onCompanyPress={(holding) => setSelectedHolding(holding)}
                 />
               ))}
 
@@ -825,7 +1001,22 @@ export default function HoldingsScreen() {
         )}
 
       </ScrollView>
+
+      {/* Stock Merge / Edit Modal */}
+      {selectedHolding && (
+        <StockMergeModal
+          holding={selectedHolding}
+          colors={colors}
+          onClose={() => setSelectedHolding(null)}
+          onMerged={() => {
+            queryClient.invalidateQueries({ queryKey: ["holdings"] });
+            queryClient.invalidateQueries({ queryKey: ["overview"] });
+            queryClient.invalidateQueries({ queryKey: ["all-stocks-for-merge"] });
+          }}
+        />
+      )}
     </View>
+    </DataScreen>
   );
 }
 
@@ -866,11 +1057,7 @@ function CashBalancesSection({
       setEditingPf(null);
       setEditValue("");
     },
-    onError: (err: any) => {
-      const msg = err?.response?.data?.detail ?? err?.message ?? "Failed to save";
-      if (Platform.OS === "web") window.alert(`Error: ${msg}`);
-      else Alert.alert("Error", msg);
-    },
+    onError: (err) => showErrorAlert("Error", err, "Failed to save"),
   });
 
   const clearMutation = useMutation({
@@ -1106,31 +1293,116 @@ function CashBalancesSection({
   );
 }
 
-// ── KPI chip helper ─────────────────────────────────────────────────
+// ── Table styles ────────────────────────────────────────────────────
 
-function KpiChip({
-  label,
-  value,
-  valueColor,
-  colors,
-}: {
-  label: string;
-  value: string;
-  valueColor?: string;
-  colors: ThemePalette;
-}) {
-  return (
-    <View style={s.kpiChip}>
-      <Text style={[s.kpiLabel, { color: colors.textMuted }]}>{label}</Text>
-      <Text
-        style={[s.kpiValue, { color: valueColor ?? colors.textPrimary }]}
-        numberOfLines={1}
-      >
-        {value}
-      </Text>
-    </View>
-  );
-}
+// ── Merge modal styles ──────────────────────────────────────────────
+
+const mergeStyles = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.55)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  box: {
+    width: "92%",
+    maxWidth: 480,
+    borderRadius: 18,
+    borderWidth: 1,
+    padding: 22,
+    maxHeight: "88%",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.15,
+    shadowRadius: 24,
+    elevation: 10,
+  },
+  titleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 14,
+  },
+  title: {
+    fontSize: 18,
+    fontWeight: "800",
+  },
+  infoCard: {
+    borderRadius: 10,
+    borderWidth: 1,
+    padding: 12,
+    marginBottom: 16,
+  },
+  infoRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingVertical: 4,
+  },
+  infoLabel: {
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  infoValue: {
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  sectionLabel: {
+    fontSize: 14,
+    fontWeight: "700",
+    marginBottom: 4,
+  },
+  sectionHint: {
+    fontSize: 11,
+    marginBottom: 10,
+    lineHeight: 16,
+  },
+  searchInput: {
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontSize: 13,
+    marginBottom: 8,
+  },
+  emptyText: {
+    textAlign: "center",
+    padding: 20,
+    fontSize: 13,
+  },
+  stockItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    marginBottom: 4,
+  },
+  stockSymbol: {
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  stockName: {
+    fontSize: 11,
+    marginTop: 1,
+  },
+  btnRow: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 14,
+  },
+  btn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  btnText: {
+    fontSize: 14,
+    fontWeight: "600",
+  },
+});
 
 // ── Table styles ────────────────────────────────────────────────────
 
@@ -1195,13 +1467,6 @@ const s = StyleSheet.create({
     paddingBottom: 8,
     gap: 8,
   },
-  filterBtn: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-    borderWidth: 1,
-  },
-  filterText: { fontSize: 14 },
   exportBtn: {
     flexDirection: "row" as const,
     alignItems: "center" as const,
@@ -1238,24 +1503,34 @@ const s = StyleSheet.create({
     gap: 10,
     borderBottomWidth: 1,
   },
-  kpiCard: {
-    flex: 1,
-    minWidth: 130,
-    borderRadius: 10,
-    borderWidth: 1,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
+
+  /* Holdings section header */
+  holdingsHeaderRow: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    justifyContent: "space-between" as const,
+    marginTop: 16,
+    marginBottom: 6,
   },
-  kpiCardLabel: {
-    fontSize: 11,
-    fontWeight: "500",
-    textTransform: "uppercase" as const,
-    letterSpacing: 0.4,
-    marginBottom: 4,
+  holdingsTitle: {
+    fontSize: 18,
+    fontWeight: "700" as const,
   },
-  kpiCardValue: {
-    fontSize: 15,
-    fontWeight: "700",
+  holdingsExportBtn: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    backgroundColor: "#1a3a2a",
+    borderColor: "#10b981",
+    borderWidth: 1.5,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+    minHeight: 36,
+  },
+  holdingsExportText: {
+    color: "#10b981",
+    fontSize: 13,
+    fontWeight: "700" as const,
   },
 });
 

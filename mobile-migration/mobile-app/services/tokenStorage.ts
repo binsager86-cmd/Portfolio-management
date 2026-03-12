@@ -1,10 +1,8 @@
 /**
  * Token storage abstraction.
  *
- * Web  → localStorage (no expo-secure-store on web)
- * Native → expo-secure-store (encrypted on-device)
- *
- * Stores both access token and refresh token.
+ * Web    → localStorage (expo-secure-store has no web implementation)
+ * Native → expo-secure-store (encrypted on-device keychain/keystore)
  */
 
 import { Platform } from "react-native";
@@ -12,87 +10,56 @@ import { Platform } from "react-native";
 const TOKEN_KEY = "auth_token";
 const REFRESH_TOKEN_KEY = "refresh_token";
 
-// ── Web helpers ─────────────────────────────────────────────────────
+// ── Platform-adaptive helpers ───────────────────────────────────────
 
-async function getTokenWeb(): Promise<string | null> {
-  try {
-    return localStorage.getItem(TOKEN_KEY);
-  } catch {
-    return null;
+async function getItem(key: string): Promise<string | null> {
+  if (Platform.OS === "web") {
+    return localStorage.getItem(key);
   }
+  const SecureStore = await import("expo-secure-store");
+  return SecureStore.getItemAsync(key);
 }
 
-async function setTokenWeb(token: string): Promise<void> {
-  try {
-    localStorage.setItem(TOKEN_KEY, token);
-  } catch {}
-}
-
-async function removeTokenWeb(): Promise<void> {
-  try {
-    localStorage.removeItem(TOKEN_KEY);
-  } catch {}
-}
-
-async function getRefreshTokenWeb(): Promise<string | null> {
-  try {
-    return localStorage.getItem(REFRESH_TOKEN_KEY);
-  } catch {
-    return null;
+async function setItem(key: string, value: string): Promise<void> {
+  if (Platform.OS === "web") {
+    localStorage.setItem(key, value);
+    return;
   }
-}
-
-async function setRefreshTokenWeb(token: string): Promise<void> {
-  try {
-    localStorage.setItem(REFRESH_TOKEN_KEY, token);
-  } catch {}
-}
-
-async function removeRefreshTokenWeb(): Promise<void> {
-  try {
-    localStorage.removeItem(REFRESH_TOKEN_KEY);
-  } catch {}
-}
-
-// ── Native helpers ──────────────────────────────────────────────────
-
-async function getTokenNative(): Promise<string | null> {
   const SecureStore = await import("expo-secure-store");
-  return SecureStore.getItemAsync(TOKEN_KEY);
+  await SecureStore.setItemAsync(key, value);
 }
 
-async function setTokenNative(token: string): Promise<void> {
+async function removeItem(key: string): Promise<void> {
+  if (Platform.OS === "web") {
+    localStorage.removeItem(key);
+    return;
+  }
   const SecureStore = await import("expo-secure-store");
-  await SecureStore.setItemAsync(TOKEN_KEY, token);
+  await SecureStore.deleteItemAsync(key);
 }
 
-async function removeTokenNative(): Promise<void> {
-  const SecureStore = await import("expo-secure-store");
-  await SecureStore.deleteItemAsync(TOKEN_KEY);
+// ── Public API ──────────────────────────────────────────────────────
+
+export async function getToken(): Promise<string | null> {
+  return getItem(TOKEN_KEY);
 }
 
-async function getRefreshTokenNative(): Promise<string | null> {
-  const SecureStore = await import("expo-secure-store");
-  return SecureStore.getItemAsync(REFRESH_TOKEN_KEY);
+export async function setToken(token: string): Promise<void> {
+  await setItem(TOKEN_KEY, token);
 }
 
-async function setRefreshTokenNative(token: string): Promise<void> {
-  const SecureStore = await import("expo-secure-store");
-  await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, token);
+export async function removeToken(): Promise<void> {
+  await removeItem(TOKEN_KEY);
 }
 
-async function removeRefreshTokenNative(): Promise<void> {
-  const SecureStore = await import("expo-secure-store");
-  await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY);
+export async function getRefreshToken(): Promise<string | null> {
+  return getItem(REFRESH_TOKEN_KEY);
 }
 
-// ── Public API (auto-selects platform) ──────────────────────────────
+export async function setRefreshToken(token: string): Promise<void> {
+  await setItem(REFRESH_TOKEN_KEY, token);
+}
 
-const isWeb = Platform.OS === "web";
-
-export const getToken         = isWeb ? getTokenWeb         : getTokenNative;
-export const setToken         = isWeb ? setTokenWeb         : setTokenNative;
-export const removeToken      = isWeb ? removeTokenWeb      : removeTokenNative;
-export const getRefreshToken  = isWeb ? getRefreshTokenWeb  : getRefreshTokenNative;
-export const setRefreshToken  = isWeb ? setRefreshTokenWeb  : setRefreshTokenNative;
-export const removeRefreshToken = isWeb ? removeRefreshTokenWeb : removeRefreshTokenNative;
+export async function removeRefreshToken(): Promise<void> {
+  await removeItem(REFRESH_TOKEN_KEY);
+}

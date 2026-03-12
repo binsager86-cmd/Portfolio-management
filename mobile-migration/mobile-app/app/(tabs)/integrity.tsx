@@ -20,16 +20,9 @@ import FontAwesome from "@expo/vector-icons/FontAwesome";
 import { integrityCheck, checkCashIntegrity } from "@/services/api";
 import { useThemeStore } from "@/services/themeStore";
 import { useResponsive } from "@/hooks/useResponsive";
+import { useScreenStyles } from "@/hooks/useScreenStyles";
 import type { ThemePalette } from "@/constants/theme";
-
-// ── Helpers ─────────────────────────────────────────────────────────
-
-function fmtNum(n: number, decimals = 3): string {
-  return n.toLocaleString(undefined, {
-    minimumFractionDigits: decimals,
-    maximumFractionDigits: decimals,
-  });
-}
+import { fmtNum } from "@/lib/currency";
 
 function StatusBadge({ status, colors }: { status: boolean | null; colors: ThemePalette }) {
   if (status === true)
@@ -162,8 +155,8 @@ function SnapshotSection({ portfolio, data, colors }: { portfolio: string; data:
           <DetailLine label="Latest Date" value={data.latest_date ?? "—"} colors={colors} />
           <DetailLine label="Days Since" value={data.days_since_snapshot ?? "—"} colors={colors} />
           <DetailLine label="Fresh?" value={data.is_fresh ? "Yes" : "No"} valueColor={data.is_fresh ? colors.success : "#f59e0b"} colors={colors} />
-          <DetailLine label="Snapshot Value" value={fmtNum(data.snapshot_value ?? 0)} colors={colors} />
-          <DetailLine label="Live Value" value={fmtNum(data.live_value ?? 0)} colors={colors} />
+          <DetailLine label="Snapshot Value" value={fmtNum(data.snapshot_value ?? 0, 3)} colors={colors} />
+          <DetailLine label="Live Value" value={fmtNum(data.live_value ?? 0, 3)} colors={colors} />
           <DetailLine label="Drift" value={`${(data.drift_pct ?? 0).toFixed(2)}%`} valueColor={(data.drift_pct ?? 0) > 5 ? colors.danger : colors.success} colors={colors} />
         </>
       )}
@@ -233,6 +226,7 @@ type IntegrityTab = "cash" | "positions" | "overview";
 
 export default function IntegrityScreen() {
   const { colors } = useThemeStore();
+  const ss = useScreenStyles();
   const { isDesktop } = useResponsive();
   const [results, setResults] = useState<any>(null);
   const [cashResults, setCashResults] = useState<Record<string, any>>({});
@@ -256,10 +250,10 @@ export default function IntegrityScreen() {
 
   return (
     <ScrollView
-      style={[s.container, { backgroundColor: colors.bgPrimary }]}
-      contentContainerStyle={[s.content, isDesktop && { maxWidth: 800, alignSelf: "center", width: "100%" }]}
+      style={ss.container}
+      contentContainerStyle={[ss.content, isDesktop && { maxWidth: 800, alignSelf: "center", width: "100%" }]}
     >
-      <Text style={[s.title, { color: colors.textPrimary }]}>Data Integrity</Text>
+      <Text style={[ss.title, { marginBottom: 4 }]}>Data Integrity</Text>
       <Text style={[s.desc, { color: colors.textSecondary }]}>
         Run automated checks to detect data inconsistencies, missing records, and calculation errors.
       </Text>
@@ -412,9 +406,6 @@ export default function IntegrityScreen() {
 }
 
 const s = StyleSheet.create({
-  container: { flex: 1 },
-  content: { padding: 16 },
-  title: { fontSize: 24, fontWeight: "700", marginBottom: 4 },
   desc: { fontSize: 14, marginBottom: 16 },
   sectionTitle: { fontSize: 18, fontWeight: "700", marginTop: 20, marginBottom: 10 },
 

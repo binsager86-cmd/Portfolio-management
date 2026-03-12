@@ -25,16 +25,16 @@ import {
   FlatList,
 } from "react-native";
 import { useRouter } from "expo-router";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
+import { useStockList, useStocks } from "@/hooks/queries";
 import {
-  getStockList,
   createStock,
   fetchStockPrice,
   StockListEntry,
-  getStocks,
 } from "@/services/api";
 import { useThemeStore } from "@/services/themeStore";
+import { showErrorAlert } from "@/lib/errorHandling";
 import { useResponsive } from "@/hooks/useResponsive";
 
 // ── Constants ───────────────────────────────────────────────────────
@@ -69,20 +69,11 @@ export default function AddStockScreen() {
 
   // ── Fetch reference stock list ──────────────────────────────────
   const marketKey = market === "Kuwait Market" ? "kuwait" : "us";
-  const { data: stockListData, isLoading: listLoading } = useQuery({
-    queryKey: ["stock-list", marketKey],
-    queryFn: () => getStockList({ market: marketKey }),
-    staleTime: Infinity, // static data
-    gcTime: 24 * 60 * 60_000, // keep in memory 24h
-  });
+  const { data: stockListData, isLoading: listLoading } = useStockList(marketKey);
   const allStocks = stockListData?.stocks ?? [];
 
   // ── Load user's existing stocks (for duplicate check) ───────────
-  const { data: existingData } = useQuery({
-    queryKey: ["stocks"],
-    queryFn: () => getStocks(),
-    staleTime: 60_000,
-  });
+  const { data: existingData } = useStocks();
   const existingSymbols = useMemo(() => {
     const set = new Set<string>();
     (existingData?.stocks ?? []).forEach((s) => set.add(s.symbol.trim().toUpperCase()));
@@ -182,12 +173,7 @@ export default function AddStockScreen() {
       }
     },
     onError: (err: Error) => {
-      const msg = err.message || "Failed to add stock";
-      if (Platform.OS === "web") {
-        alert(msg);
-      } else {
-        Alert.alert("Error", msg);
-      }
+      showErrorAlert("Error", err, "Failed to add stock");
     },
   });
 

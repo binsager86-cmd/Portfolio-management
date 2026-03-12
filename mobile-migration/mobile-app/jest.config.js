@@ -2,11 +2,12 @@
 module.exports = {
   preset: "jest-expo",
   transformIgnorePatterns: [
-    "node_modules/(?!((jest-)?react-native|@react-native(-community)?)|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|@sentry/react-native|native-base|react-native-svg|react-native-chart-kit|react-native-reanimated|react-native-screens|react-native-safe-area-context|react-native-paper|@tanstack/react-query|zustand|zod|@hookform/resolvers|react-hook-form|axios)",
+    "node_modules/(?!((jest-)?react-native|@react-native(-community)?)|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|@sentry/react-native|native-base|react-native-svg|react-native-reanimated|react-native-screens|react-native-safe-area-context|react-native-paper|@tanstack/react-query|zustand|zod|@hookform/resolvers|react-hook-form|axios)",
   ],
   setupFiles: ["<rootDir>/jest.setup.js"],
   moduleNameMapper: {
     "^@/(.*)$": "<rootDir>/$1",
+    "^@react-native-async-storage/async-storage$": "<rootDir>/__mocks__/@react-native-async-storage/async-storage.js",
   },
   testMatch: [
     "**/__tests__/**/*.(test|spec).(ts|tsx|js|jsx)",

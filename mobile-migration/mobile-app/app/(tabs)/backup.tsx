@@ -18,16 +18,22 @@ import { useMutation } from "@tanstack/react-query";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 
 import { exportBackup, importBackup } from "@/services/api";
+import { showErrorAlert, extractErrorMessage } from "@/lib/errorHandling";
 import { useThemeStore } from "@/services/themeStore";
 import { useResponsive } from "@/hooks/useResponsive";
+import { useScreenStyles } from "@/hooks/useScreenStyles";
+import { todayISO } from "@/lib/dateUtils";
 import type { ThemePalette } from "@/constants/theme";
 
 const IMPORT_MODES = ["merge", "replace"] as const;
 
 export default function BackupRestoreScreen() {
   const { colors } = useThemeStore();
+  const ss = useScreenStyles();
   const { isDesktop } = useResponsive();
-  const [importResult, setImportResult] = useState<string | null>(null);
+  const isDark = colors.mode === "dark";
+  const [importResult, setImportResult] = useState<any | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
   const [importMode, setImportMode] = useState<"merge" | "replace">("merge");
   const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
   const [pendingFile, setPendingFile] = useState<FormData | null>(null);
@@ -39,7 +45,7 @@ export default function BackupRestoreScreen() {
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = `portfolio_backup_${new Date().toISOString().slice(0, 10)}.xlsx`;
+        a.download = `portfolio_backup_${todayISO()}.xlsx`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
@@ -48,104 +54,26 @@ export default function BackupRestoreScreen() {
         Alert.alert("Export", "Backup file downloaded successfully");
       }
     },
-    onError: (err: any) => {
-      const msg = err?.message ?? "Export failed";
-      if (Platform.OS === "web") window.alert(msg);
-      else Alert.alert("Error", msg);
-    },
+    onError: (err) => showErrorAlert("Error", err, "Export failed"),
   });
 
   const importMutation = useMutation({
     mutationFn: (fd: FormData) => importBackup(fd, importMode),
     onSuccess: (result) => {
-      const lines: string[] = [];
-      // Per-sheet breakdown
-      const sheets = result?.sheets;
-      if (sheets) {
-        if (sheets.stocks) {
-          const s = sheets.stocks;
-          lines.push(`Stocks: ${s.new ?? 0} new, ${s.updated ?? 0} updated${s.skipped ? `, ${s.skipped} skipped` : ""}`);
-        }
-        if (sheets.transactions) {
-          const t = sheets.transactions;
-          lines.push(`Transactions: ${t.imported ?? 0} imported${t.skipped ? `, ${t.skipped} skipped` : ""}`);
-        }
-        if (sheets.cash_deposits) {
-          const c = sheets.cash_deposits;
-          lines.push(`Cash Deposits: ${c.imported ?? 0} imported${c.skipped ? `, ${c.skipped} skipped` : ""}`);
-        }
-        if (sheets.portfolio_snapshots) {
-          const p = sheets.portfolio_snapshots;
-          lines.push(`Snapshots: ${p.imported ?? 0} imported${p.skipped ? `, ${p.skipped} skipped` : ""}`);
-        }
-      }
-      // Summary line
-      lines.push(
-        [
-          `Total: ${result?.imported ?? 0}`,
-          result?.skipped ? `Skipped: ${result.skipped}` : null,
-          result?.errors?.length ? `Errors: ${result.errors.length}` : null,
-          `Mode: ${result?.mode ?? importMode}`,
-        ].filter(Boolean).join(" | ")
-      );
-      // Show per-row errors if any
-      if (result?.errors?.length) {
-        lines.push("");
-        lines.push("--- Row Errors (first 20) ---");
-        result.errors.slice(0, 20).forEach((e: any, i: number) => {
-          const sheet = e.sheet ? `[${e.sheet}] ` : "";
-          lines.push(`  ${i + 1}. ${sheet}Row ${e.row ?? "?"}: ${e.error ?? JSON.stringify(e)}`);
-        });
-        if (result.errors.length > 20) {
-          lines.push(`  ... and ${result.errors.length - 20} more`);
-        }
-      }
-      setImportResult(lines.join("\n"));
+      setImportError(null);
+      setImportResult(result);
       setPendingFile(null);
       setSelectedFileName(null);
     },
     onError: (err: any) => {
-      // Build detailed debug info
-      const lines: string[] = ["--- IMPORT ERROR DEBUG ---"];
-
-      // HTTP status
-      const status = err?.response?.status;
-      if (status) lines.push(`HTTP Status: ${status}`);
-
-      // Request URL
-      const url = err?.config?.url || err?.request?.responseURL;
-      if (url) lines.push(`URL: ${url}`);
-
-      // FastAPI validation errors (422)
-      const detail = err?.response?.data?.detail;
-      if (Array.isArray(detail)) {
-        lines.push(`Validation Errors (${detail.length}):`);
-        detail.forEach((d: any, i: number) => {
-          const loc = d.loc?.join(".") ?? "unknown";
-          lines.push(`  ${i + 1}. [${loc}] ${d.msg} (type: ${d.type ?? "-"})`);
-          if (d.input !== undefined) lines.push(`     input: ${JSON.stringify(d.input).slice(0, 100)}`);
-        });
-      } else if (typeof detail === "string") {
-        lines.push(`Detail: ${detail}`);
-      }
-
-      // Server error code
-      const errorCode = err?.response?.data?.error_code;
-      if (errorCode) lines.push(`Error Code: ${errorCode}`);
-
-      // Full response body (truncated)
-      if (err?.response?.data) {
-        const raw = JSON.stringify(err.response.data).slice(0, 300);
-        lines.push(`Raw Response: ${raw}`);
-      }
-
-      // Network error
+      setImportResult(null);
+      let msg: string;
       if (!err?.response) {
-        lines.push(`Network Error: ${err?.message ?? "No response from server"}`);
-        lines.push(`Hint: Is the backend running? Check http://localhost:8004/health`);
+        msg = "Cannot reach server. Please check your connection.";
+      } else {
+        msg = extractErrorMessage(err, "Import failed.");
       }
-
-      setImportResult(lines.join("\n"));
+      setImportError(msg);
     },
   });
 
@@ -177,10 +105,10 @@ export default function BackupRestoreScreen() {
 
   return (
     <ScrollView
-      style={[s.container, { backgroundColor: colors.bgPrimary }]}
-      contentContainerStyle={[s.content, isDesktop && { maxWidth: 700, alignSelf: "center", width: "100%" }]}
+      style={ss.container}
+      contentContainerStyle={[ss.content, isDesktop && { maxWidth: 700, alignSelf: "center", width: "100%" }]}
     >
-      <Text style={[s.title, { color: colors.textPrimary }]}>Backup & Restore</Text>
+      <Text style={[ss.title, { marginBottom: 4 }]}>Backup & Restore</Text>
       <Text style={[s.desc, { color: colors.textSecondary }]}>
         Export your portfolio data as an Excel file, or import transactions from a backup.
       </Text>
@@ -300,31 +228,20 @@ export default function BackupRestoreScreen() {
         </Pressable>
       </View>
 
-      {/* Import Result */}
+      {/* Import Result — Success Summary */}
       {importResult && (
-        <View style={[s.resultBox, {
-          backgroundColor: importResult.startsWith("---") ? "#1a0000" : colors.bgCard,
-          borderColor: importResult.startsWith("---") ? colors.danger : colors.borderColor,
-        }]}>
-          <Text style={[s.resultTitle, {
-            color: importResult.startsWith("---") ? colors.danger : colors.textPrimary,
-          }]}>
-            {importResult.startsWith("---") ? "Import Error (Debug)" : "Import Result"}
-          </Text>
-          <Text
-            style={[
-              s.resultText,
-              {
-                color: importResult.startsWith("---") ? "#ff9999" : colors.textSecondary,
-                fontFamily: importResult.startsWith("---") ? (Platform.OS === "web" ? "monospace" : "Courier") : undefined,
-                fontSize: importResult.startsWith("---") ? 12 : 14,
-              },
-            ]}
-            selectable
-          >
-            {importResult}
-          </Text>
-          <Pressable onPress={() => setImportResult(null)} style={{ marginTop: 8 }}>
+        <ImportSuccessCard result={importResult} colors={colors} onDismiss={() => setImportResult(null)} />
+      )}
+
+      {/* Import Error */}
+      {importError && (
+        <View style={[s.resultBox, { backgroundColor: isDark ? "rgba(239,68,68,0.08)" : "rgba(239,68,68,0.05)", borderColor: colors.danger }]}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8 }}>
+            <FontAwesome name="exclamation-circle" size={18} color={colors.danger} />
+            <Text style={[s.resultTitle, { color: colors.danger }]}>Import Failed</Text>
+          </View>
+          <Text style={{ color: colors.textSecondary, fontSize: 14, lineHeight: 20 }}>{importError}</Text>
+          <Pressable onPress={() => setImportError(null)} style={{ marginTop: 12 }}>
             <Text style={{ color: colors.accentPrimary, fontSize: 13, fontWeight: "600" }}>Dismiss</Text>
           </Pressable>
         </View>
@@ -335,10 +252,147 @@ export default function BackupRestoreScreen() {
   );
 }
 
+// ── Import Success Card component ───────────────────────────────────
+
+function ImportSuccessCard({
+  result,
+  colors,
+  onDismiss,
+}: {
+  result: any;
+  colors: ThemePalette;
+  onDismiss: () => void;
+}) {
+  const isDark = colors.mode === "dark";
+  const sheets = result?.sheets;
+  const totalImported = result?.imported ?? 0;
+  const totalSkipped = result?.skipped ?? 0;
+  const errorCount = result?.errors?.length ?? 0;
+  const hasErrors = errorCount > 0;
+
+  const sheetRows: { icon: string; label: string; detail: string }[] = [];
+  if (sheets?.stocks) {
+    const sr = sheets.stocks;
+    const parts = [`${sr.new ?? 0} new`, `${sr.updated ?? 0} updated`];
+    if (sr.skipped) parts.push(`${sr.skipped} skipped`);
+    sheetRows.push({ icon: "line-chart", label: "Stocks", detail: parts.join(", ") });
+  }
+  if (sheets?.transactions) {
+    const t = sheets.transactions;
+    const parts = [`${t.imported ?? 0} imported`];
+    if (t.skipped) parts.push(`${t.skipped} skipped`);
+    sheetRows.push({ icon: "exchange", label: "Transactions", detail: parts.join(", ") });
+  }
+  if (sheets?.cash_deposits) {
+    const c = sheets.cash_deposits;
+    const parts = [`${c.imported ?? 0} imported`];
+    if (c.skipped) parts.push(`${c.skipped} skipped`);
+    sheetRows.push({ icon: "money", label: "Cash Deposits", detail: parts.join(", ") });
+  }
+  if (sheets?.portfolio_snapshots) {
+    const p = sheets.portfolio_snapshots;
+    const parts = [`${p.imported ?? 0} imported`];
+    if (p.skipped) parts.push(`${p.skipped} skipped`);
+    sheetRows.push({ icon: "camera", label: "Snapshots", detail: parts.join(", ") });
+  }
+
+  return (
+    <View
+      style={[
+        s.resultBox,
+        {
+          backgroundColor: isDark ? "rgba(16,185,129,0.08)" : "rgba(16,185,129,0.05)",
+          borderColor: isDark ? "rgba(16,185,129,0.3)" : "rgba(16,185,129,0.2)",
+        },
+      ]}
+    >
+      {/* Header */}
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 14 }}>
+        <FontAwesome name="check-circle" size={22} color={isDark ? "#10b981" : "#047857"} />
+        <Text style={{ fontSize: 17, fontWeight: "700", color: colors.textPrimary }}>
+          Import Complete
+        </Text>
+      </View>
+
+      {/* Summary counters */}
+      <View style={{ flexDirection: "row", gap: 16, marginBottom: 14, flexWrap: "wrap" }}>
+        <View style={{ alignItems: "center" }}>
+          <Text style={{ fontSize: 22, fontWeight: "800", color: isDark ? "#10b981" : "#047857" }}>
+            {totalImported}
+          </Text>
+          <Text style={{ fontSize: 11, color: colors.textMuted, fontWeight: "500" }}>Imported</Text>
+        </View>
+        {totalSkipped > 0 && (
+          <View style={{ alignItems: "center" }}>
+            <Text style={{ fontSize: 22, fontWeight: "800", color: colors.warning }}>
+              {totalSkipped}
+            </Text>
+            <Text style={{ fontSize: 11, color: colors.textMuted, fontWeight: "500" }}>Skipped</Text>
+          </View>
+        )}
+        {hasErrors && (
+          <View style={{ alignItems: "center" }}>
+            <Text style={{ fontSize: 22, fontWeight: "800", color: colors.danger }}>
+              {errorCount}
+            </Text>
+            <Text style={{ fontSize: 11, color: colors.textMuted, fontWeight: "500" }}>Errors</Text>
+          </View>
+        )}
+      </View>
+
+      {/* Per-sheet breakdown */}
+      {sheetRows.length > 0 && (
+        <View style={{ gap: 8, marginBottom: hasErrors ? 14 : 0 }}>
+          {sheetRows.map((row) => (
+            <View
+              key={row.label}
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 10,
+                paddingVertical: 6,
+                paddingHorizontal: 10,
+                backgroundColor: isDark ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.02)",
+                borderRadius: 8,
+              }}
+            >
+              <FontAwesome name={row.icon as any} size={14} color={colors.textMuted} />
+              <Text style={{ fontSize: 14, fontWeight: "600", color: colors.textPrimary, minWidth: 110 }}>
+                {row.label}
+              </Text>
+              <Text style={{ fontSize: 13, color: colors.textSecondary, flex: 1 }}>{row.detail}</Text>
+            </View>
+          ))}
+        </View>
+      )}
+
+      {/* Row errors */}
+      {hasErrors && (
+        <View style={{ borderTopWidth: StyleSheet.hairlineWidth, borderColor: colors.borderColor, paddingTop: 10 }}>
+          <Text style={{ fontSize: 13, fontWeight: "600", color: colors.danger, marginBottom: 6 }}>
+            Row Errors ({errorCount})
+          </Text>
+          {result.errors.slice(0, 10).map((e: any, i: number) => (
+            <Text key={i} style={{ fontSize: 12, color: colors.textSecondary, marginBottom: 2, lineHeight: 18 }}>
+              {e.sheet ? `${e.sheet} · ` : ""}Row {e.row ?? "?"}: {e.error ?? JSON.stringify(e)}
+            </Text>
+          ))}
+          {errorCount > 10 && (
+            <Text style={{ fontSize: 12, color: colors.textMuted, fontStyle: "italic" }}>
+              ... and {errorCount - 10} more
+            </Text>
+          )}
+        </View>
+      )}
+
+      <Pressable onPress={onDismiss} style={{ marginTop: 12 }}>
+        <Text style={{ color: colors.accentPrimary, fontSize: 13, fontWeight: "600" }}>Dismiss</Text>
+      </Pressable>
+    </View>
+  );
+}
+
 const s = StyleSheet.create({
-  container: { flex: 1 },
-  content: { padding: 16 },
-  title: { fontSize: 24, fontWeight: "700", marginBottom: 4 },
   desc: { fontSize: 14, marginBottom: 20 },
   section: {
     padding: 24,
@@ -365,7 +419,6 @@ const s = StyleSheet.create({
     borderWidth: 1,
   },
   resultTitle: { fontSize: 15, fontWeight: "700", marginBottom: 8 },
-  resultText: { fontSize: 12, fontFamily: Platform.select({ web: "monospace", default: undefined }) },
   fieldLabel: {
     fontSize: 13,
     fontWeight: "600",

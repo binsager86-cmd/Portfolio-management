@@ -5,7 +5,7 @@
  * Error messages are structured via authErrors.ts for Sentry/Flipper.
  */
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import {
   View,
   StyleSheet,
@@ -13,6 +13,8 @@ import {
   Platform,
   ScrollView,
   Text,
+  Animated,
+  Pressable,
 } from "react-native";
 import {
   TextInput,
@@ -30,25 +32,33 @@ import { useAuthStore } from "@/services/authStore";
 import { useThemeStore } from "@/services/themeStore";
 import { useResponsive } from "@/hooks/useResponsive";
 import { loginSchema, type LoginFormData } from "@/lib/validationSchemas";
+import { useGoogleSignIn } from "@/hooks/useGoogleSignIn";
 
 export default function LoginScreen() {
   const router = useRouter();
-  const { login, googleSignIn, loading, error, clearError } = useAuthStore();
+  const { login, googleSignIn, isLoading, error, clearError } = useAuthStore();
   const { colors, toggle, mode } = useThemeStore();
   const { isDesktop } = useResponsive();
 
   const [showPassword, setShowPassword] = useState(false);
-  const [googleLoading, setGoogleLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+
+  // Animated shake + fade for error banner
+  const errorOpacity = useRef(new Animated.Value(0)).current;
+  const errorShake = useRef(new Animated.Value(0)).current;
+
+  // Google Sign-In hook (handles popup + redirect flows on web, native on mobile)
+  const { signIn: googlePrompt, isLoading: googleLoading } = useGoogleSignIn();
 
   // react-hook-form + Zod
   const {
     control,
     handleSubmit,
-    formState: { errors, isValid },
+    formState: { errors },
   } = useForm<LoginFormData>({
     resolver: zodResolver(loginSchema),
     defaultValues: {
-      username: __DEV__ ? "sager alsager" : "",
+      email: __DEV__ ? "sager alsager" : "",
       password: __DEV__ ? "Admin123!" : "",
     },
     mode: "onBlur",
@@ -59,34 +69,78 @@ export default function LoginScreen() {
     return () => clearError();
   }, []);
 
+  // Animate error banner in when error changes
+  useEffect(() => {
+    if (error) {
+      errorOpacity.setValue(0);
+      errorShake.setValue(0);
+      Animated.parallel([
+        Animated.timing(errorOpacity, {
+          toValue: 1,
+          duration: 300,
+          useNativeDriver: true,
+        }),
+        Animated.sequence([
+          Animated.timing(errorShake, { toValue: 10, duration: 60, useNativeDriver: true }),
+          Animated.timing(errorShake, { toValue: -10, duration: 60, useNativeDriver: true }),
+          Animated.timing(errorShake, { toValue: 8, duration: 60, useNativeDriver: true }),
+          Animated.timing(errorShake, { toValue: -8, duration: 60, useNativeDriver: true }),
+          Animated.timing(errorShake, { toValue: 0, duration: 60, useNativeDriver: true }),
+        ]),
+      ]).start();
+    } else {
+      errorOpacity.setValue(0);
+    }
+  }, [error]);
+
   // ── Handlers ──────────────────────────────────────────────────────
 
-  const onSubmit = async (data: LoginFormData) => {
-    const ok = await login(data.username.trim(), data.password);
-    if (ok) {
-      router.replace("/(tabs)");
+  const onSubmit = useCallback(async (data: LoginFormData) => {
+    if (submitting) return;           // prevent double-tap
+    setSubmitting(true);
+    try {
+      const ok = await login(data.email.trim(), data.password);
+      if (ok) {
+        router.replace("/(tabs)");
+      }
+    } finally {
+      setSubmitting(false);
     }
-  };
+  }, [submitting, login, router]);
+
+  // Wrap react-hook-form submit to prevent native <form> reload on web
+  const safeSubmit = useCallback(
+    (e?: any) => {
+      if (e?.preventDefault) e.preventDefault();
+      handleSubmit(onSubmit)(e);
+    },
+    [handleSubmit, onSubmit],
+  );
 
   const handleGoogleSignIn = async () => {
     try {
-      setGoogleLoading(true);
-      // Dynamic import so we don't crash when package isn't installed
-      const { GoogleSignin } = await import(
-        "@react-native-google-signin/google-signin"
-      );
-      await GoogleSignin.hasPlayServices();
-      const userInfo = await GoogleSignin.signIn();
-      const idToken = userInfo.data?.idToken;
-      if (!idToken) throw new Error("Google Sign-In did not return an ID token");
-      const ok = await googleSignIn(idToken);
-      if (ok) router.replace("/(tabs)");
+      console.log("[Login] Starting Google Sign-In…");
+      // On web this redirects the page to Google (never returns).
+      // On native this returns a result with the token.
+      const result = await googlePrompt();
+
+      // ─ Native path (web never reaches here — page navigates away) ─
+      if (result.success) {
+        if (__DEV__) console.log("[Login] Got token, sending to backend…");
+        const ok = await googleSignIn(result.token);
+        if (ok) {
+          router.replace("/(tabs)");
+        }
+      } else if (!result.cancelled) {
+        useAuthStore.setState({
+          error: result.error || "Google Sign-In failed. Please try again.",
+        });
+      }
     } catch (err: any) {
-      // If user cancelled, do nothing
-      if (err?.code === "SIGN_IN_CANCELLED") return;
-      console.warn("[Google Sign-In]", err);
-    } finally {
-      setGoogleLoading(false);
+      console.error("[Login] Google Sign-In error:", err);
+      useAuthStore.setState({
+        error: err?.message || "Google Sign-In failed unexpectedly.",
+      });
     }
   };
 
@@ -118,7 +172,7 @@ export default function LoginScreen() {
         {/* Theme toggle */}
         <View style={styles.themeToggleRow}>
           <IconButton
-            icon={mode === "dark" ? "weather-sunny" : "weather-night"}
+            icon={mode === "dark" ? "lightbulb-on-outline" : "weather-night"}
             iconColor={colors.textSecondary}
             size={24}
             onPress={toggle}
@@ -152,45 +206,59 @@ export default function LoginScreen() {
           <Card.Content>
             {/* Server / store error banner */}
             {error ? (
-              <View
+              <Animated.View
                 style={[
-                  styles.errorBox,
-                  { backgroundColor: colors.danger + "15" },
+                  styles.errorBanner,
+                  {
+                    backgroundColor: colors.danger + "12",
+                    borderColor: colors.danger + "40",
+                    opacity: errorOpacity,
+                    transform: [{ translateX: errorShake }],
+                  },
                 ]}
               >
-                <Text
-                  style={{
-                    color: colors.danger,
-                    textAlign: "center",
-                    fontWeight: "600",
-                    fontSize: 14,
-                  }}
-                >
-                  {error}
-                </Text>
-                {error.toLowerCase().includes("invalid") ? (
-                  <Text
-                    style={{
-                      color: colors.danger,
-                      textAlign: "center",
-                      fontSize: 12,
-                      marginTop: 4,
-                      opacity: 0.8,
-                    }}
+                <View style={styles.errorIconRow}>
+                  <Text style={styles.errorIcon}>⚠</Text>
+                  <View style={styles.errorTextCol}>
+                    <Text
+                      style={[
+                        styles.errorTitle,
+                        { color: colors.danger },
+                      ]}
+                    >
+                      {error}
+                    </Text>
+                    {error.toLowerCase().includes("invalid") ||
+                    error.toLowerCase().includes("incorrect") ? (
+                      <Text
+                        style={[
+                          styles.errorHint,
+                          { color: colors.danger },
+                        ]}
+                      >
+                        Double-check your email and password, then try again.
+                      </Text>
+                    ) : null}
+                  </View>
+                  <Pressable
+                    onPress={clearError}
+                    hitSlop={12}
+                    style={styles.errorDismiss}
+                    accessibilityLabel="Dismiss error"
                   >
-                    Please check your username and password and try again
-                  </Text>
-                ) : null}
-              </View>
+                    <Text style={{ color: colors.danger, fontSize: 18 }}>✕</Text>
+                  </Pressable>
+                </View>
+              </Animated.View>
             ) : null}
 
-            {/* Username */}
+            {/* Email */}
             <Controller
               control={control}
-              name="username"
+              name="email"
               render={({ field: { onChange, onBlur, value } }) => (
                 <TextInput
-                  label="Username"
+                  label="Email"
                   value={value}
                   onChangeText={(t) => {
                     onChange(t);
@@ -199,27 +267,28 @@ export default function LoginScreen() {
                   onBlur={onBlur}
                   autoCapitalize="none"
                   autoCorrect={false}
-                  disabled={loading}
-                  left={<TextInput.Icon icon="account" />}
+                  keyboardType="email-address"
+                  disabled={isLoading}
+                  left={<TextInput.Icon icon="email" />}
                   mode="outlined"
                   style={styles.input}
                   contentStyle={styles.inputContent}
                   outlineColor={
-                    errors.username ? colors.danger : colors.borderColor
+                    errors.email ? colors.danger : colors.borderColor
                   }
                   activeOutlineColor={colors.accentPrimary}
                   textColor={colors.textPrimary}
-                  error={!!errors.username}
+                  error={!!errors.email}
                   theme={inputTheme}
                 />
               )}
             />
             <HelperText
               type="error"
-              visible={!!errors.username}
+              visible={!!errors.email}
               style={{ color: colors.danger }}
             >
-              {errors.username?.message}
+              {errors.email?.message}
             </HelperText>
 
             {/* Password */}
@@ -236,7 +305,7 @@ export default function LoginScreen() {
                   }}
                   onBlur={onBlur}
                   secureTextEntry={!showPassword}
-                  disabled={loading}
+                  disabled={isLoading}
                   left={<TextInput.Icon icon="lock" />}
                   right={
                     <TextInput.Icon
@@ -253,7 +322,7 @@ export default function LoginScreen() {
                   activeOutlineColor={colors.accentPrimary}
                   textColor={colors.textPrimary}
                   error={!!errors.password}
-                  onSubmitEditing={handleSubmit(onSubmit)}
+                  onSubmitEditing={safeSubmit}
                   theme={inputTheme}
                 />
               )}
@@ -269,9 +338,9 @@ export default function LoginScreen() {
             {/* Sign In button */}
             <Button
               mode="contained"
-              onPress={handleSubmit(onSubmit)}
-              loading={loading}
-              disabled={loading || googleLoading}
+              onPress={safeSubmit}
+              loading={isLoading || submitting}
+              disabled={isLoading || submitting || googleLoading}
               style={styles.button}
               contentStyle={styles.buttonContent}
               labelStyle={styles.buttonLabel}
@@ -295,7 +364,7 @@ export default function LoginScreen() {
               mode="outlined"
               onPress={handleGoogleSignIn}
               loading={googleLoading}
-              disabled={loading || googleLoading}
+              disabled={isLoading || googleLoading}
               icon="google"
               style={[styles.googleButton, { borderColor: colors.borderColor }]}
               contentStyle={styles.buttonContent}
@@ -308,7 +377,7 @@ export default function LoginScreen() {
             <Button
               mode="text"
               onPress={() => router.push("/(auth)/register")}
-              disabled={loading}
+              disabled={isLoading}
               style={styles.registerButton}
               labelStyle={[
                 styles.registerLabel,
@@ -355,7 +424,39 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   cardDesktop: { maxWidth: 480 },
-  errorBox: { borderRadius: 8, padding: 12, marginBottom: 12 },
+  errorBanner: {
+    borderRadius: 10,
+    borderWidth: 1,
+    padding: 14,
+    marginBottom: 16,
+  },
+  errorIconRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+  },
+  errorIcon: {
+    fontSize: 20,
+    marginRight: 10,
+    marginTop: 1,
+  },
+  errorTextCol: {
+    flex: 1,
+  },
+  errorTitle: {
+    fontWeight: "600",
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  errorHint: {
+    fontSize: 13,
+    marginTop: 4,
+    opacity: 0.8,
+    lineHeight: 18,
+  },
+  errorDismiss: {
+    marginLeft: 8,
+    padding: 2,
+  },
   input: {
     marginBottom: 12,
     fontSize: 16,

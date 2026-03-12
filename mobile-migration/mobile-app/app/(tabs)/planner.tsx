@@ -20,6 +20,7 @@ import FontAwesome from "@expo/vector-icons/FontAwesome";
 
 import { useThemeStore } from "@/services/themeStore";
 import { useResponsive } from "@/hooks/useResponsive";
+import { useScreenStyles } from "@/hooks/useScreenStyles";
 import { formatCurrency } from "@/lib/currency";
 import type { ThemePalette } from "@/constants/theme";
 
@@ -76,6 +77,7 @@ function buildProjection(
 
 export default function PlannerScreen() {
   const { colors } = useThemeStore();
+  const ss = useScreenStyles();
   const { isDesktop } = useResponsive();
 
   const [mode, setMode] = useState<CalcMode>("fv");
@@ -213,10 +215,10 @@ export default function PlannerScreen() {
 
   return (
     <ScrollView
-      style={[s.container, { backgroundColor: colors.bgPrimary }]}
-      contentContainerStyle={[s.content, isDesktop && { maxWidth: 700, alignSelf: "center", width: "100%" }]}
+      style={ss.container}
+      contentContainerStyle={[ss.content, isDesktop && { maxWidth: 700, alignSelf: "center", width: "100%" }]}
     >
-      <Text style={[s.title, { color: colors.textPrimary }]}>Financial Planner</Text>
+      <Text style={[ss.title, { marginBottom: 12 }]}>Financial Planner</Text>
 
       {/* Mode Tabs */}
       <View style={s.modeRow}>
@@ -615,9 +617,6 @@ function MetricBadge({ icon, label, value, sub, colors, accent }: {
 }
 
 const s = StyleSheet.create({
-  container: { flex: 1 },
-  content: { padding: 16 },
-  title: { fontSize: 24, fontWeight: "700", marginBottom: 12 },
   sectionTitle: { fontSize: 18, fontWeight: "700", marginTop: 20, marginBottom: 10 },
   modeRow: {
     flexDirection: "row",

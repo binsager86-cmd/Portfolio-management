@@ -18,31 +18,28 @@ import {
   Pressable,
   Alert,
   Platform,
-  KeyboardAvoidingView,
   ActivityIndicator,
-  FlatList,
 } from "react-native";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { Controller, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import * as DocumentPicker from "expo-document-picker";
+import { useTransaction, useStocks, useStockList } from "@/hooks/queries";
 import {
   TransactionCreate,
-  TransactionRecord,
   importTransactions,
   deleteAllTransactions,
-  getStocks,
-  getStockList,
   StockListEntry,
   createStock,
-  getTransaction,
 } from "@/services/api";
 import { useCreateTransaction, useUpdateTransaction, TXN_DEPENDENT_QUERY_KEYS } from "@/hooks/useTransactionMutations";
+import { showErrorAlert } from "@/lib/errorHandling";
 import { useThemeStore } from "@/services/themeStore";
-import { useResponsive } from "@/hooks/useResponsive";
+import { todayISO } from "@/lib/dateUtils";
+import { FormScreen } from "@/components/screens";
 import {
   FormField,
   SegmentedControl,
@@ -179,7 +176,6 @@ function toPayload(values: TxnFormValues): TransactionCreate {
 
 export default function AddTransactionScreen() {
   const { colors } = useThemeStore();
-  const { isDesktop } = useResponsive();
   const router = useRouter();
   const queryClient = useQueryClient();
   const params = useLocalSearchParams<{ symbol?: string; portfolio?: string; editId?: string }>();
@@ -196,25 +192,15 @@ export default function AddTransactionScreen() {
   const [uploadResult, setUploadResult] = useState<any>(null);
 
   // ── Fetch existing transaction in edit mode ────────────────────
-  const { data: editTxn, isLoading: isLoadingEdit } = useQuery({
-    queryKey: ["transaction", params.editId],
-    queryFn: () => getTransaction(Number(params.editId)),
-    enabled: isEditMode,
-    staleTime: 0,
-  });
+  const { data: editTxn, isLoading: isLoadingEdit } = useTransaction(params.editId);
 
   // ── Also fetch user's existing stocks (for potential enrichment) ─
-  const { data: stocksData } = useQuery({
-    queryKey: ["stocks"],
-    queryFn: () => getStocks(),
-    staleTime: 60_000,
-  });
+  const { data: stocksData } = useStocks();
 
   const {
     control,
     handleSubmit,
     watch,
-    setValue,
     reset,
     formState: { errors },
   } = useForm<TxnFormValues>({
@@ -222,7 +208,7 @@ export default function AddTransactionScreen() {
     defaultValues: {
       portfolio: (params.portfolio as "KFH" | "BBYN" | "USA") ?? "KFH",
       stock_symbol: params.symbol ?? "",
-      txn_date: new Date().toISOString().slice(0, 10),
+      txn_date: todayISO(),
       txn_type: "Buy",
       shares: undefined as unknown as number,
       purchase_cost: "" as unknown as number,
@@ -283,12 +269,7 @@ export default function AddTransactionScreen() {
 
   // ── Fetch full reference stock list (yfinance) for dropdown ────
   // These are static hardcoded lists – cache aggressively (never refetch)
-  const { data: refStocksData } = useQuery({
-    queryKey: ["stock-list", market],
-    queryFn: () => getStockList({ market }),
-    staleTime: Infinity,
-    gcTime: 24 * 60 * 60_000, // keep in memory 24h
-  });
+  const { data: refStocksData } = useStockList(market);
 
   // Filter reference stocks by search text (market already filtered by query)
   const filteredStocks = useMemo(() => {
@@ -326,7 +307,7 @@ export default function AddTransactionScreen() {
           currency: values.portfolio === "USA" ? "USD" : "KWD",
           yf_ticker: refMatch?.yf_ticker,
         });
-        queryClient.invalidateQueries({ queryKey: ["stocks"] });
+        await queryClient.invalidateQueries({ queryKey: ["stocks"] });
       } catch {
         // Stock might already exist (race condition / duplicate) — continue
       }
@@ -356,11 +337,7 @@ export default function AddTransactionScreen() {
       if (Platform.OS === "web") window.alert(msg);
       else Alert.alert("Import Complete", msg);
     },
-    onError: (err: any) => {
-      const msg = err?.response?.data?.detail ?? err?.message ?? "Upload failed";
-      if (Platform.OS === "web") window.alert(`Error: ${msg}`);
-      else Alert.alert("Import Error", String(msg));
-    },
+    onError: (err) => showErrorAlert("Import Error", err, "Upload failed"),
   });
 
   // ── Delete-all mutation ─────────────────────────────────────────
@@ -376,11 +353,7 @@ export default function AddTransactionScreen() {
       if (Platform.OS === "web") window.alert(msg);
       else Alert.alert("Deleted", msg);
     },
-    onError: (err: any) => {
-      const msg = err?.response?.data?.detail ?? err?.message ?? "Delete failed";
-      if (Platform.OS === "web") window.alert(`Error: ${msg}`);
-      else Alert.alert("Error", String(msg));
-    },
+    onError: (err) => showErrorAlert("Error", err, "Delete failed"),
   });
 
   // ── File picker handler ─────────────────────────────────────────
@@ -434,35 +407,193 @@ export default function AddTransactionScreen() {
     }
   };
 
+  // ── Footer (import + danger zone, edit-mode hides these) ──────
+  const footerContent = !isEditMode ? (
+    <>
+      <View style={[styles.divider, { borderColor: colors.borderColor }]} />
+
+      <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>
+        <FontAwesome name="upload" size={16} color={colors.textPrimary} />{" "}
+        Import from Excel
+      </Text>
+      <Text style={[styles.sectionHint, { color: colors.textSecondary }]}>
+        Upload an Excel file (.xlsx) with a &quot;Transactions&quot; sheet to bulk-import.
+      </Text>
+
+      {/* Portfolio selector */}
+      <View style={styles.uploadRow}>
+        <Text style={[styles.uploadLabel, { color: colors.textSecondary }]}>Portfolio</Text>
+        <View style={styles.segmentRow}>
+          {(["KFH", "BBYN", "USA"] as const).map((p) => (
+            <Pressable
+              key={p}
+              onPress={() => setUploadPortfolio(p)}
+              style={[
+                styles.segmentBtn,
+                {
+                  backgroundColor: uploadPortfolio === p ? colors.accentPrimary : colors.bgSecondary,
+                  borderColor: colors.borderColor,
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.segmentText,
+                  { color: uploadPortfolio === p ? "#fff" : colors.textPrimary },
+                ]}
+              >
+                {p}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      </View>
+
+      {/* Mode selector */}
+      <View style={styles.uploadRow}>
+        <Text style={[styles.uploadLabel, { color: colors.textSecondary }]}>Mode</Text>
+        <View style={styles.segmentRow}>
+          {([
+            { key: "merge" as const, label: "Merge (Append)", icon: "plus" as const },
+            { key: "replace" as const, label: "Replace All", icon: "refresh" as const },
+          ]).map((m) => (
+            <Pressable
+              key={m.key}
+              onPress={() => setUploadMode(m.key)}
+              style={[
+                styles.segmentBtn,
+                {
+                  backgroundColor: uploadMode === m.key ? colors.accentPrimary : colors.bgSecondary,
+                  borderColor: colors.borderColor,
+                  flex: 1,
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.segmentText,
+                  { color: uploadMode === m.key ? "#fff" : colors.textPrimary },
+                ]}
+              >
+                <FontAwesome
+                  name={m.icon}
+                  size={12}
+                  color={uploadMode === m.key ? "#fff" : colors.textPrimary}
+                />{" "}
+                {m.label}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      </View>
+      {uploadMode === "replace" && (
+        <Text style={[styles.warningText, { color: colors.warning ?? "#e67e22" }]}>
+          ⚠ Replace mode will delete all existing transactions in {uploadPortfolio} before importing.
+        </Text>
+      )}
+
+      {/* File picker */}
+      <Pressable
+        onPress={pickFile}
+        style={[
+          styles.filePickBtn,
+          { backgroundColor: colors.bgSecondary, borderColor: colors.borderColor },
+        ]}
+      >
+        <FontAwesome name="file-excel-o" size={20} color={colors.accentPrimary} />
+        <Text style={[styles.filePickText, { color: colors.textPrimary }]}>
+          {selectedFile ? selectedFile.name : "Choose Excel File…"}
+        </Text>
+      </Pressable>
+
+      {/* Upload button */}
+      <Pressable
+        onPress={() => uploadMutation.mutate()}
+        disabled={!selectedFile || uploadMutation.isPending}
+        style={({ pressed }) => [
+          styles.submitBtn,
+          {
+            backgroundColor: !selectedFile ? colors.textMuted ?? "#888" : colors.accentPrimary,
+            opacity: pressed || uploadMutation.isPending ? 0.7 : 1,
+          },
+        ]}
+      >
+        {uploadMutation.isPending ? (
+          <View style={styles.loadingRow}>
+            <ActivityIndicator size="small" color="#fff" />
+            <Text style={[styles.submitText, { marginLeft: 8 }]}>Importing…</Text>
+          </View>
+        ) : (
+          <Text style={styles.submitText}>
+            <FontAwesome name="cloud-upload" size={16} color="#fff" /> Upload &amp; Import
+          </Text>
+        )}
+      </Pressable>
+
+      {/* Upload result */}
+      {uploadResult && (
+        <View style={[styles.resultBox, { backgroundColor: colors.bgSecondary, borderColor: colors.borderColor }]}>
+          <Text style={[styles.resultTitle, { color: colors.accentPrimary }]}>Import Result</Text>
+          <Text style={{ color: colors.textPrimary }}>
+            Imported: {uploadResult.imported ?? 0} | Skipped: {uploadResult.skipped ?? 0} | Errors: {uploadResult.errors ?? 0}
+          </Text>
+          {uploadResult.mode && (
+            <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 4 }}>
+              Mode: {uploadResult.mode}
+            </Text>
+          )}
+        </View>
+      )}
+
+      {/* ── Danger Zone ─────────────────────────────────────── */}
+      <View style={[styles.divider, { borderColor: colors.borderColor }]} />
+
+      <Text style={[styles.sectionTitle, { color: colors.danger ?? "#e74c3c" }]}>
+        <FontAwesome name="exclamation-triangle" size={16} color={colors.danger ?? "#e74c3c"} />{" "}
+        Danger Zone
+      </Text>
+
+      <Pressable
+        onPress={confirmDeleteAll}
+        disabled={deleteMutation.isPending}
+        style={({ pressed }) => [
+          styles.deleteAllBtn,
+          {
+            borderColor: colors.danger ?? "#e74c3c",
+            opacity: pressed || deleteMutation.isPending ? 0.7 : 1,
+          },
+        ]}
+      >
+        {deleteMutation.isPending ? (
+          <View style={styles.loadingRow}>
+            <ActivityIndicator size="small" color={colors.danger ?? "#e74c3c"} />
+            <Text style={[styles.deleteAllText, { color: colors.danger ?? "#e74c3c", marginLeft: 8 }]}>
+              Deleting…
+            </Text>
+          </View>
+        ) : (
+          <Text style={[styles.deleteAllText, { color: colors.danger ?? "#e74c3c" }]}>
+            <FontAwesome name="trash" size={14} color={colors.danger ?? "#e74c3c"} />{" "}
+            Delete All Transactions
+          </Text>
+        )}
+      </Pressable>
+      <Text style={[styles.sectionHint, { color: colors.textSecondary }]}>
+        Soft-deletes all transactions. They can be restored from the Transactions list.
+      </Text>
+    </>
+  ) : undefined;
+
   // ── Render ──────────────────────────────────────────────────────
 
   return (
-    <KeyboardAvoidingView
-      style={{ flex: 1 }}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
+    <FormScreen
+      title={isEditMode ? "Edit Transaction" : "Add Transaction"}
+      onSubmit={handleSubmit(onSubmit)}
+      isSubmitting={activeMutation.isPending || (isEditMode && isLoadingEdit)}
+      submitLabel={isEditMode ? "Update Transaction" : "Add Transaction"}
+      footer={footerContent}
     >
-      <ScrollView
-        style={[styles.screen, { backgroundColor: colors.bgPrimary }]}
-        contentContainerStyle={[
-          styles.scrollContent,
-          isDesktop && { maxWidth: 600, alignSelf: "center", width: "100%" },
-        ]}
-        keyboardShouldPersistTaps="handled"
-      >
-        {/* ── Header ────────────────────────────── */}
-        <View style={styles.headerRow}>
-          <Pressable onPress={() => router.back()} style={styles.backBtn}>
-            <FontAwesome
-              name="arrow-left"
-              size={18}
-              color={colors.textPrimary}
-            />
-          </Pressable>
-          <Text style={[styles.title, { color: colors.textPrimary }]}>
-            {isEditMode ? "Edit Transaction" : "Add Transaction"}
-          </Text>
-        </View>
-
         {/* ── Loading spinner for edit mode ──── */}
         {isEditMode && isLoadingEdit && (
           <View style={{ alignItems: "center", paddingVertical: 40 }}>
@@ -662,9 +793,7 @@ export default function AddTransactionScreen() {
               render={({ field: { value, onChange } }) => (
                 <NumberInput
                   value={value != null ? String(value) : ""}
-                  onChangeText={(t) =>
-                    onChange(t === "" ? undefined : Number(t))
-                  }
+                  onChangeText={(t) => onChange(t === "" ? undefined : t)}
                   placeholder="0"
                   hasError={!!errors.shares}
                 />
@@ -686,9 +815,7 @@ export default function AddTransactionScreen() {
               render={({ field: { value, onChange } }) => (
                 <NumberInput
                   value={value != null && value !== ("" as any) ? String(value) : ""}
-                  onChangeText={(t) =>
-                    onChange(t === "" ? "" : Number(t))
-                  }
+                  onChangeText={(t) => onChange(t)}
                   placeholder="Total cost"
                   suffix="KWD"
                   hasError={!!errors.purchase_cost}
@@ -711,9 +838,7 @@ export default function AddTransactionScreen() {
               render={({ field: { value, onChange } }) => (
                 <NumberInput
                   value={value != null && value !== ("" as any) ? String(value) : ""}
-                  onChangeText={(t) =>
-                    onChange(t === "" ? "" : Number(t))
-                  }
+                  onChangeText={(t) => onChange(t)}
                   placeholder="Total proceeds"
                   suffix="KWD"
                   hasError={!!errors.sell_value}
@@ -745,7 +870,7 @@ export default function AddTransactionScreen() {
             render={({ field: { value, onChange } }) => (
               <NumberInput
                 value={value != null && value !== ("" as any) ? String(value) : ""}
-                onChangeText={(t) => onChange(t === "" ? "" : Number(t))}
+                onChangeText={(t) => onChange(t)}
                 placeholder="0.000"
                 suffix="KWD"
                 hasError={!!errors.cash_dividend}
@@ -762,7 +887,7 @@ export default function AddTransactionScreen() {
             render={({ field: { value, onChange } }) => (
               <NumberInput
                 value={value != null && value !== ("" as any) ? String(value) : ""}
-                onChangeText={(t) => onChange(t === "" ? "" : Number(t))}
+                onChangeText={(t) => onChange(t)}
                 placeholder="0.000"
                 suffix="KWD"
               />
@@ -778,7 +903,7 @@ export default function AddTransactionScreen() {
             render={({ field: { value, onChange } }) => (
               <NumberInput
                 value={value != null && value !== ("" as any) ? String(value) : ""}
-                onChangeText={(t) => onChange(t === "" ? "" : Number(t))}
+                onChangeText={(t) => onChange(t)}
                 placeholder="0"
               />
             )}
@@ -817,7 +942,7 @@ export default function AddTransactionScreen() {
                     render={({ field: { value, onChange } }) => (
                       <NumberInput
                         value={value != null && value !== ("" as any) ? String(value) : ""}
-                        onChangeText={(t) => onChange(t === "" ? "" : Number(t))}
+                        onChangeText={(t) => onChange(t)}
                         placeholder="0.000"
                         suffix="KWD"
                       />
@@ -833,7 +958,7 @@ export default function AddTransactionScreen() {
                     render={({ field: { value, onChange } }) => (
                       <NumberInput
                         value={value != null && value !== ("" as any) ? String(value) : ""}
-                        onChangeText={(t) => onChange(t === "" ? "" : Number(t))}
+                        onChangeText={(t) => onChange(t)}
                         placeholder="0.000000"
                       />
                     )}
@@ -848,7 +973,7 @@ export default function AddTransactionScreen() {
                     render={({ field: { value, onChange } }) => (
                       <NumberInput
                         value={value != null && value !== ("" as any) ? String(value) : ""}
-                        onChangeText={(t) => onChange(t === "" ? "" : Number(t))}
+                        onChangeText={(t) => onChange(t)}
                         placeholder="0"
                       />
                     )}
@@ -905,229 +1030,14 @@ export default function AddTransactionScreen() {
             )}
           />
         </FormField>
-
-        {/* ── Submit ────────────────────────────── */}
-        <Pressable
-          onPress={handleSubmit(onSubmit)}
-          disabled={activeMutation.isPending || (isEditMode && isLoadingEdit)}
-          style={({ pressed }) => [
-            styles.submitBtn,
-            {
-              backgroundColor: colors.accentPrimary,
-              opacity: pressed || activeMutation.isPending ? 0.7 : 1,
-            },
-          ]}
-        >
-          {activeMutation.isPending ? (
-            <Text style={styles.submitText}>{isEditMode ? "Updating…" : "Submitting…"}</Text>
-          ) : (
-            <Text style={styles.submitText}>{isEditMode ? "Update Transaction" : "Add Transaction"}</Text>
-          )}
-        </Pressable>
         </>)}
-
-        {/* ══════════════════════════════════════════════════════════
-            ── Excel Import & Danger Zone (hidden in edit mode) ──
-            ══════════════════════════════════════════════════════════ */}
-        {!isEditMode && (<>
-        <View style={[styles.divider, { borderColor: colors.borderColor }]} />
-
-        <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>
-          <FontAwesome name="upload" size={16} color={colors.textPrimary} />{" "}
-          Import from Excel
-        </Text>
-        <Text style={[styles.sectionHint, { color: colors.textSecondary }]}>
-          Upload an Excel file (.xlsx) with a &quot;Transactions&quot; sheet to bulk-import.
-        </Text>
-
-        {/* Portfolio selector */}
-        <View style={styles.uploadRow}>
-          <Text style={[styles.uploadLabel, { color: colors.textSecondary }]}>Portfolio</Text>
-          <View style={styles.segmentRow}>
-            {(["KFH", "BBYN", "USA"] as const).map((p) => (
-              <Pressable
-                key={p}
-                onPress={() => setUploadPortfolio(p)}
-                style={[
-                  styles.segmentBtn,
-                  {
-                    backgroundColor: uploadPortfolio === p ? colors.accentPrimary : colors.bgSecondary,
-                    borderColor: colors.borderColor,
-                  },
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.segmentText,
-                    { color: uploadPortfolio === p ? "#fff" : colors.textPrimary },
-                  ]}
-                >
-                  {p}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
-        </View>
-
-        {/* Mode selector */}
-        <View style={styles.uploadRow}>
-          <Text style={[styles.uploadLabel, { color: colors.textSecondary }]}>Mode</Text>
-          <View style={styles.segmentRow}>
-            {([
-              { key: "merge" as const, label: "Merge (Append)", icon: "plus" as const },
-              { key: "replace" as const, label: "Replace All", icon: "refresh" as const },
-            ]).map((m) => (
-              <Pressable
-                key={m.key}
-                onPress={() => setUploadMode(m.key)}
-                style={[
-                  styles.segmentBtn,
-                  {
-                    backgroundColor: uploadMode === m.key ? colors.accentPrimary : colors.bgSecondary,
-                    borderColor: colors.borderColor,
-                    flex: 1,
-                  },
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.segmentText,
-                    { color: uploadMode === m.key ? "#fff" : colors.textPrimary },
-                  ]}
-                >
-                  <FontAwesome
-                    name={m.icon}
-                    size={12}
-                    color={uploadMode === m.key ? "#fff" : colors.textPrimary}
-                  />{" "}
-                  {m.label}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
-        </View>
-        {uploadMode === "replace" && (
-          <Text style={[styles.warningText, { color: colors.warning ?? "#e67e22" }]}>
-            ⚠ Replace mode will delete all existing transactions in {uploadPortfolio} before importing.
-          </Text>
-        )}
-
-        {/* File picker */}
-        <Pressable
-          onPress={pickFile}
-          style={[
-            styles.filePickBtn,
-            { backgroundColor: colors.bgSecondary, borderColor: colors.borderColor },
-          ]}
-        >
-          <FontAwesome name="file-excel-o" size={20} color={colors.accentPrimary} />
-          <Text style={[styles.filePickText, { color: colors.textPrimary }]}>
-            {selectedFile ? selectedFile.name : "Choose Excel File…"}
-          </Text>
-        </Pressable>
-
-        {/* Upload button */}
-        <Pressable
-          onPress={() => uploadMutation.mutate()}
-          disabled={!selectedFile || uploadMutation.isPending}
-          style={({ pressed }) => [
-            styles.submitBtn,
-            {
-              backgroundColor: !selectedFile ? colors.textMuted ?? "#888" : colors.accentPrimary,
-              opacity: pressed || uploadMutation.isPending ? 0.7 : 1,
-            },
-          ]}
-        >
-          {uploadMutation.isPending ? (
-            <View style={styles.loadingRow}>
-              <ActivityIndicator size="small" color="#fff" />
-              <Text style={[styles.submitText, { marginLeft: 8 }]}>Importing…</Text>
-            </View>
-          ) : (
-            <Text style={styles.submitText}>
-              <FontAwesome name="cloud-upload" size={16} color="#fff" /> Upload &amp; Import
-            </Text>
-          )}
-        </Pressable>
-
-        {/* Upload result */}
-        {uploadResult && (
-          <View style={[styles.resultBox, { backgroundColor: colors.bgSecondary, borderColor: colors.borderColor }]}>
-            <Text style={[styles.resultTitle, { color: colors.accentPrimary }]}>Import Result</Text>
-            <Text style={{ color: colors.textPrimary }}>
-              Imported: {uploadResult.imported ?? 0} | Skipped: {uploadResult.skipped ?? 0} | Errors: {uploadResult.errors ?? 0}
-            </Text>
-            {uploadResult.mode && (
-              <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 4 }}>
-                Mode: {uploadResult.mode}
-              </Text>
-            )}
-          </View>
-        )}
-
-        {/* ══════════════════════════════════════════════════════════
-            ── Danger Zone ───────────────────────────────────────
-            ══════════════════════════════════════════════════════════ */}
-        <View style={[styles.divider, { borderColor: colors.borderColor }]} />
-
-        <Text style={[styles.sectionTitle, { color: colors.danger ?? "#e74c3c" }]}>
-          <FontAwesome name="exclamation-triangle" size={16} color={colors.danger ?? "#e74c3c"} />{" "}
-          Danger Zone
-        </Text>
-
-        <Pressable
-          onPress={confirmDeleteAll}
-          disabled={deleteMutation.isPending}
-          style={({ pressed }) => [
-            styles.deleteAllBtn,
-            {
-              borderColor: colors.danger ?? "#e74c3c",
-              opacity: pressed || deleteMutation.isPending ? 0.7 : 1,
-            },
-          ]}
-        >
-          {deleteMutation.isPending ? (
-            <View style={styles.loadingRow}>
-              <ActivityIndicator size="small" color={colors.danger ?? "#e74c3c"} />
-              <Text style={[styles.deleteAllText, { color: colors.danger ?? "#e74c3c", marginLeft: 8 }]}>
-                Deleting…
-              </Text>
-            </View>
-          ) : (
-            <Text style={[styles.deleteAllText, { color: colors.danger ?? "#e74c3c" }]}>
-              <FontAwesome name="trash" size={14} color={colors.danger ?? "#e74c3c"} />{" "}
-              Delete All Transactions
-            </Text>
-          )}
-        </Pressable>
-        <Text style={[styles.sectionHint, { color: colors.textSecondary }]}>
-          Soft-deletes all transactions. They can be restored from the Transactions list.
-        </Text>
-        </>)}
-      </ScrollView>
-    </KeyboardAvoidingView>
+    </FormScreen>
   );
 }
 
 // ── Styles ──────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  screen: { flex: 1 },
-  scrollContent: { padding: 20, paddingBottom: 60 },
-  headerRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 24,
-    gap: 12,
-  },
-  backBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  title: { fontSize: 24, fontWeight: "700" },
   // Stock picker / dropdown
   stockPickerBtn: {
     flexDirection: "row",

@@ -6,28 +6,23 @@
  * • Mutation with React Query cache invalidation
  */
 
-import React, { useState } from "react";
+import React, { useRef, useEffect } from "react";
 import {
-  View,
-  Text,
-  ScrollView,
-  Pressable,
-  StyleSheet,
   Platform,
   Alert,
-  ActivityIndicator,
-  KeyboardAvoidingView,
 } from "react-native";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import FontAwesome from "@expo/vector-icons/FontAwesome";
 
 import { createDeposit, updateDeposit } from "@/services/api";
+import { showErrorAlert } from "@/lib/errorHandling";
+import { ALERT_DEFER_MS } from "@/constants/layout";
 import { useThemeStore } from "@/services/themeStore";
-import { useResponsive } from "@/hooks/useResponsive";
+import { todayISO } from "@/lib/dateUtils";
+import { FormScreen } from "@/components/screens";
 import {
   FormField,
   SegmentedControl,
@@ -72,7 +67,6 @@ export default function AddDepositScreen() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { colors } = useThemeStore();
-  const { isDesktop } = useResponsive();
 
   // ── Edit mode params ──────────────────────────────────────────
   const params = useLocalSearchParams<{
@@ -99,7 +93,7 @@ export default function AddDepositScreen() {
     defaultValues: {
       portfolio: (params.editPortfolio as "KFH" | "BBYN" | "USA") ?? "KFH",
       source: (params.editSource as "deposit" | "withdrawal") ?? "deposit",
-      deposit_date: params.editDate ?? new Date().toISOString().slice(0, 10),
+      deposit_date: params.editDate ?? todayISO(),
       amount: params.editAmount ?? "",
       currency: params.editCurrency ?? "KWD",
       bank_name: params.editBankName ?? "",
@@ -109,6 +103,8 @@ export default function AddDepositScreen() {
 
   const selectedPortfolio = watch("portfolio");
   const selectedSource = watch("source");
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (timerRef.current) clearTimeout(timerRef.current); }, []);
 
   // Auto-sync currency when portfolio changes
   React.useEffect(() => {
@@ -150,50 +146,37 @@ export default function AddDepositScreen() {
       // Navigate back first, then show non-blocking success message
       router.back();
       const successMsg = isEditMode ? "Deposit updated successfully!" : "Deposit saved successfully!";
-      setTimeout(() => {
+      timerRef.current = setTimeout(() => {
         if (Platform.OS === "web") {
           window.alert(successMsg);
         } else {
           Alert.alert("Success", successMsg);
         }
-      }, 100);
+      }, ALERT_DEFER_MS);
     },
-    onError: (err: any) => {
-      const msg = err?.response?.data?.detail ?? err?.message ?? "Failed to save";
-      if (Platform.OS === "web") {
-        window.alert(`Error: ${msg}`);
-      } else {
-        Alert.alert("Error", msg);
-      }
-    },
+    onError: (err) => showErrorAlert("Error", err, "Failed to save"),
   });
 
   const onSubmit = handleSubmit((values) => mutation.mutate(values));
 
+  // ── Submit label / colour logic ────────────────────────────────
+  const submitLabel = isEditMode
+    ? "Update Deposit"
+    : selectedSource === "withdrawal"
+      ? "Record Withdrawal"
+      : "Record Deposit";
+  const submitColor = selectedSource === "withdrawal" ? colors.danger : undefined;
+
   // ── Render ────────────────────────────────────────────────────
 
   return (
-    <KeyboardAvoidingView
-      style={{ flex: 1, backgroundColor: colors.bgPrimary }}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
+    <FormScreen
+      title={isEditMode ? "Edit Deposit" : "Add Cash Deposit"}
+      onSubmit={onSubmit}
+      isSubmitting={mutation.isPending}
+      submitLabel={submitLabel}
+      submitColor={submitColor}
     >
-      <ScrollView
-        contentContainerStyle={[
-          s.scroll,
-          isDesktop && { maxWidth: 600, alignSelf: "center", width: "100%" },
-        ]}
-        keyboardShouldPersistTaps="handled"
-      >
-        {/* ── Header ──────────────────────────────────────────── */}
-        <View style={s.headerRow}>
-          <Pressable onPress={() => router.back()} style={s.backBtn}>
-            <FontAwesome name="arrow-left" size={18} color={colors.textPrimary} />
-          </Pressable>
-          <Text style={[s.title, { color: colors.textPrimary }]}>
-            {isEditMode ? "Edit Deposit" : "Add Cash Deposit"}
-          </Text>
-        </View>
-
         {/* ── Source toggle (Deposit / Withdrawal) ────────────── */}
         <Controller
           control={control}
@@ -305,71 +288,8 @@ export default function AddDepositScreen() {
             </FormField>
           )}
         />
-
-        {/* ── Submit ──────────────────────────────────────────── */}
-        <Pressable
-          onPress={onSubmit}
-          disabled={mutation.isPending}
-          style={[
-            s.submitBtn,
-            {
-              backgroundColor: selectedSource === "withdrawal"
-                ? colors.danger
-                : colors.accentPrimary,
-              opacity: mutation.isPending ? 0.6 : 1,
-            },
-          ]}
-        >
-          {mutation.isPending ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text style={s.submitLabel}>
-              {isEditMode
-                ? "Update Deposit"
-                : selectedSource === "withdrawal"
-                  ? "Record Withdrawal"
-                  : "Record Deposit"}
-            </Text>
-          )}
-        </Pressable>
-      </ScrollView>
-    </KeyboardAvoidingView>
+    </FormScreen>
   );
 }
 
-// ── Styles ──────────────────────────────────────────────────────────
 
-const s = StyleSheet.create({
-  scroll: {
-    padding: 20,
-    paddingBottom: 60,
-  },
-  headerRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 20,
-    gap: 12,
-  },
-  backBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  title: {
-    fontSize: 22,
-    fontWeight: "700",
-  },
-  submitBtn: {
-    paddingVertical: 16,
-    borderRadius: 12,
-    alignItems: "center",
-    marginTop: 8,
-  },
-  submitLabel: {
-    color: "#fff",
-    fontSize: 16,
-    fontWeight: "700",
-  },
-});

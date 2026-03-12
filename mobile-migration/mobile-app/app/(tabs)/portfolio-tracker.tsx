@@ -23,15 +23,16 @@ import {
   Alert,
   LayoutChangeEvent,
 } from "react-native";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 
+import { useSnapshots } from "@/hooks/queries";
 import {
-  getSnapshots,
   saveSnapshot,
   deleteSnapshot,
   deleteAllSnapshots,
   recalculateSnapshots,
+  updatePrices,
   SnapshotRecord,
 } from "@/services/api";
 import { useThemeStore } from "@/services/themeStore";
@@ -40,38 +41,101 @@ import { LoadingScreen } from "@/components/ui/LoadingScreen";
 import { ErrorScreen } from "@/components/ui/ErrorScreen";
 import SnapshotLineChart, {
   ChartDataPoint,
+  ChartPalette,
 } from "@/components/charts/SnapshotLineChart";
 import type { ThemePalette } from "@/constants/theme";
-
-// ── Formatting helpers ──────────────────────────────────────────────
-
-/** Format number with commas and fixed decimals */
-function fmtMoney(val: number, dp: number = 2): string {
-  return val.toLocaleString("en-US", {
-    minimumFractionDigits: dp,
-    maximumFractionDigits: dp,
-  });
-}
-
-/** Format number as money with 0 decimals */
-function fmtMoney0(val: number): string {
-  return val.toLocaleString("en-US", {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  });
-}
-
-/** Format percent with +/- sign */
-function fmtPercent(val: number): string {
-  const sign = val >= 0 ? "+" : "";
-  return `${sign}${val.toFixed(2)}%`;
-}
+import { fmtNum, formatPercent } from "@/lib/currency";
+import { showErrorAlert, logError } from "@/lib/errorHandling";
 
 // ── Chart color constants (matching Streamlit Plotly) ────────────────
 
 const CHART_COLORS = {
   valueLine: { dark: "#06b6d4", light: "#1D4ED8" },
   gainLine: { dark: "#10b981", light: "#047857" },
+};
+
+// ── Premium chart palettes ──────────────────────────────────────────
+
+/** Teal → Cyan palette for the Portfolio Value chart */
+const VALUE_PALETTE_DARK: ChartPalette = {
+  primary: "#06B6D4",
+  secondary: "#0EA5E9",
+  primaryLight: "#22D3EE",
+  secondaryLight: "#38BDF8",
+  primaryGlow: "rgba(6,182,212,0.45)",
+  secondaryGlow: "rgba(14,165,233,0.45)",
+  areaTopOpacity: 0.45,
+  areaMidOpacity: 0.12,
+  areaBotOpacity: 0.02,
+  guideLine: "rgba(255,255,255,0.15)",
+  dotFill: "#FFFFFF",
+  tooltipBg: "rgba(18,18,28,0.88)",
+  tooltipBorder: "rgba(6,182,212,0.35)",
+  tooltipShadow: "rgba(6,182,212,0.25)",
+  tooltipValue: "#FFFFFF",
+  tooltipDate: "rgba(255,255,255,0.55)",
+  chartBg: "#0F0F0F",
+};
+
+const VALUE_PALETTE_LIGHT: ChartPalette = {
+  primary: "#0891B2",
+  secondary: "#0284C7",
+  primaryLight: "#06B6D4",
+  secondaryLight: "#0EA5E9",
+  primaryGlow: "rgba(8,145,178,0.22)",
+  secondaryGlow: "rgba(2,132,199,0.22)",
+  areaTopOpacity: 0.28,
+  areaMidOpacity: 0.08,
+  areaBotOpacity: 0.01,
+  guideLine: "rgba(100,116,139,0.22)",
+  dotFill: "#FFFFFF",
+  tooltipBg: "rgba(255,255,255,0.92)",
+  tooltipBorder: "rgba(8,145,178,0.25)",
+  tooltipShadow: "rgba(100,116,139,0.18)",
+  tooltipValue: "#1e293b",
+  tooltipDate: "rgba(100,116,139,0.72)",
+  chartBg: "#F7F8FC",
+};
+
+/** Emerald → Teal palette for the Net Gain chart */
+const GAIN_PALETTE_DARK: ChartPalette = {
+  primary: "#10B981",
+  secondary: "#14B8A6",
+  primaryLight: "#34D399",
+  secondaryLight: "#2DD4BF",
+  primaryGlow: "rgba(16,185,129,0.45)",
+  secondaryGlow: "rgba(20,184,166,0.45)",
+  areaTopOpacity: 0.45,
+  areaMidOpacity: 0.12,
+  areaBotOpacity: 0.02,
+  guideLine: "rgba(255,255,255,0.15)",
+  dotFill: "#FFFFFF",
+  tooltipBg: "rgba(18,18,28,0.88)",
+  tooltipBorder: "rgba(16,185,129,0.35)",
+  tooltipShadow: "rgba(16,185,129,0.25)",
+  tooltipValue: "#FFFFFF",
+  tooltipDate: "rgba(255,255,255,0.55)",
+  chartBg: "#0F0F0F",
+};
+
+const GAIN_PALETTE_LIGHT: ChartPalette = {
+  primary: "#059669",
+  secondary: "#0D9488",
+  primaryLight: "#10B981",
+  secondaryLight: "#14B8A6",
+  primaryGlow: "rgba(5,150,105,0.22)",
+  secondaryGlow: "rgba(13,148,136,0.22)",
+  areaTopOpacity: 0.28,
+  areaMidOpacity: 0.08,
+  areaBotOpacity: 0.01,
+  guideLine: "rgba(100,116,139,0.22)",
+  dotFill: "#FFFFFF",
+  tooltipBg: "rgba(255,255,255,0.92)",
+  tooltipBorder: "rgba(5,150,105,0.25)",
+  tooltipShadow: "rgba(100,116,139,0.18)",
+  tooltipValue: "#1e293b",
+  tooltipDate: "rgba(100,116,139,0.72)",
+  chartBg: "#F7F8FC",
 };
 
 // ── KPI card colors ─────────────────────────────────────────────────
@@ -88,6 +152,10 @@ const KPI_STYLES = {
   roi: {
     dark: { bg: "rgba(138,43,226,0.12)", border: "rgba(138,43,226,0.3)", accent: "#8a2be2" },
     light: { bg: "rgba(99,102,241,0.08)", border: "rgba(99,102,241,0.2)", accent: "#6366f1" },
+  },
+  avgMovement: {
+    dark: { bg: "rgba(245,158,11,0.12)", border: "rgba(245,158,11,0.3)", accent: "#f59e0b" },
+    light: { bg: "rgba(217,119,6,0.08)", border: "rgba(217,119,6,0.2)", accent: "#d97706" },
   },
 };
 
@@ -114,32 +182,19 @@ export default function PortfolioTrackerScreen() {
     error,
     refetch,
     isFetching,
-  } = useQuery({
-    queryKey: ["snapshots"],
-    queryFn: () => getSnapshots(),
-  });
+  } = useSnapshots();
 
   const saveMutation = useMutation({
     mutationFn: () => saveSnapshot(),
     onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ["snapshots"] });
-      const msg = `${result.action}: ${result.message}\nPortfolio Value: ${fmtMoney(result.portfolio_value)} KWD`;
+      const msg = `${result.action}: ${result.message}\nPortfolio Value: ${fmtNum(result.portfolio_value)} KWD`;
       if (Platform.OS === "web") window.alert(msg);
       else Alert.alert("Snapshot Saved", msg);
     },
     onError: (err: any) => {
-      console.error("[SaveSnapshot] Error:", err);
-      console.error("[SaveSnapshot] Response:", err?.response?.status, err?.response?.data);
-      console.error("[SaveSnapshot] Code:", err?.code, "Message:", err?.message);
-      const detail = err?.response?.data?.detail;
-      const status = err?.response?.status;
-      const msg = detail
-        ? `${status ? `[${status}] ` : ""}${detail}`
-        : err?.message
-          ? `${err.message}${err.code ? ` (${err.code})` : ""}`
-          : "Failed to save snapshot";
-      if (Platform.OS === "web") window.alert(msg);
-      else Alert.alert("Error", msg);
+      logError("SaveSnapshot", err);
+      showErrorAlert("Error", err, "Failed to save snapshot");
     },
     retry: 1,
   });
@@ -160,8 +215,12 @@ export default function PortfolioTrackerScreen() {
   });
 
   const recalcMutation = useMutation({
-    mutationFn: recalculateSnapshots,
+    mutationFn: () => {
+      console.log("[Recalculate] Starting recalculation request...");
+      return recalculateSnapshots();
+    },
     onSuccess: (result) => {
+      console.log("[Recalculate] Success:", result);
       queryClient.invalidateQueries({ queryKey: ["snapshots"] });
       const msg = `Recalculated ${result.updated} snapshots`;
       if (Platform.OS === "web") window.alert(msg);
@@ -169,8 +228,29 @@ export default function PortfolioTrackerScreen() {
     },
     onError: (err: any) => {
       console.error("[Recalculate] Error:", err);
+      console.error("[Recalculate] Response status:", err?.response?.status);
+      console.error("[Recalculate] Response data:", err?.response?.data);
       const detail = err?.response?.data?.detail;
       const msg = detail ?? err?.message ?? "Recalculation failed";
+      if (Platform.OS === "web") window.alert(`Recalculation error: ${msg}`);
+      else Alert.alert("Error", msg);
+    },
+    retry: 1,
+  });
+
+  const refreshPricesMutation = useMutation({
+    mutationFn: updatePrices,
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ["holdings"] });
+      queryClient.invalidateQueries({ queryKey: ["snapshots"] });
+      const msg = result.message ?? "Prices updated successfully";
+      if (Platform.OS === "web") window.alert(msg);
+      else Alert.alert("Prices Refreshed", msg);
+    },
+    onError: (err: any) => {
+      console.error("[RefreshPrices] Error:", err);
+      const detail = err?.response?.data?.detail;
+      const msg = detail ?? err?.message ?? "Price refresh failed";
       if (Platform.OS === "web") window.alert(msg);
       else Alert.alert("Error", msg);
     },
@@ -215,6 +295,13 @@ export default function PortfolioTrackerScreen() {
   );
   const latest = sortedAsc.length > 0 ? sortedAsc[sortedAsc.length - 1] : null;
 
+  // Average Daily Movement = sum(daily_movement) / number of records
+  const avgDailyMovement = useMemo(() => {
+    if (sortedAsc.length === 0) return 0;
+    const total = sortedAsc.reduce((sum, s) => sum + (s.daily_movement ?? 0), 0);
+    return total / sortedAsc.length;
+  }, [sortedAsc]);
+
   const valueChartData: ChartDataPoint[] = useMemo(
     () => sortedAsc.map((s) => ({ label: s.snapshot_date, value: s.portfolio_value })),
     [sortedAsc],
@@ -241,12 +328,20 @@ export default function PortfolioTrackerScreen() {
         <Text style={[st.pageTitle, { color: colors.textPrimary }]}>Portfolio Tracker</Text>
         <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
           <Pressable
+            onPress={() => refreshPricesMutation.mutate()}
+            disabled={refreshPricesMutation.isPending}
+            style={[st.actionBtn, { backgroundColor: isDark ? "#0ea5e9" : "#0284c7", opacity: refreshPricesMutation.isPending ? 0.5 : 1 }]}
+          >
+            <FontAwesome name="refresh" size={14} color="#fff" />
+            <Text style={st.actionBtnText}>{refreshPricesMutation.isPending ? "Refreshing..." : "Refresh Prices"}</Text>
+          </Pressable>
+          <Pressable
             onPress={() => saveMutation.mutate()}
             disabled={saveMutation.isPending}
             style={[st.actionBtn, { backgroundColor: colors.accentPrimary, opacity: saveMutation.isPending ? 0.5 : 1 }]}
           >
             <FontAwesome name="camera" size={14} color="#fff" />
-            <Text style={st.actionBtnText}>Save Snapshot</Text>
+            <Text style={st.actionBtnText}>{saveMutation.isPending ? "Saving..." : "Save Snapshot"}</Text>
           </Pressable>
           {snapshots.length > 0 && (
             <Pressable
@@ -254,7 +349,7 @@ export default function PortfolioTrackerScreen() {
               disabled={recalcMutation.isPending}
               style={[st.actionBtn, { backgroundColor: colors.success, opacity: recalcMutation.isPending ? 0.5 : 1 }]}
             >
-              <FontAwesome name="refresh" size={14} color="#fff" />
+              <FontAwesome name="calculator" size={14} color="#fff" />
               <Text style={st.actionBtnText}>Recalculate</Text>
             </Pressable>
           )}
@@ -280,14 +375,14 @@ export default function PortfolioTrackerScreen() {
         <View style={st.kpiRow}>
           <KpiCard
             label="Total Portfolio Value"
-            value={`${fmtMoney(latest.portfolio_value, 0)} KWD`}
+            value={`${fmtNum(latest.portfolio_value, 0)} KWD`}
             subtitle="↑ Current Value"
             kpiStyle={isDark ? KPI_STYLES.value.dark : KPI_STYLES.value.light}
             colors={colors}
           />
           <KpiCard
             label="Net Gain From Stocks"
-            value={`${fmtMoney(latest.net_gain, 0)} KWD`}
+            value={`${fmtNum(latest.net_gain, 0)} KWD`}
             subtitle="↑ Net Gain"
             kpiStyle={isDark ? KPI_STYLES.netGain.dark : KPI_STYLES.netGain.light}
             colors={colors}
@@ -301,6 +396,14 @@ export default function PortfolioTrackerScreen() {
             colors={colors}
             valueColor={(latest.roi_percent ?? 0) >= 0 ? (isDark ? "#8a2be2" : "#6366f1") : colors.danger}
           />
+          <KpiCard
+            label="Average Daily Movement"
+            value={`${avgDailyMovement >= 0 ? "+" : ""}${fmtNum(avgDailyMovement)} KWD`}
+            subtitle={`↑ Avg over ${sortedAsc.length} day${sortedAsc.length !== 1 ? "s" : ""}`}
+            kpiStyle={isDark ? KPI_STYLES.avgMovement.dark : KPI_STYLES.avgMovement.light}
+            colors={colors}
+            valueColor={avgDailyMovement >= 0 ? (isDark ? "#f59e0b" : "#d97706") : colors.danger}
+          />
         </View>
       )}
 
@@ -312,18 +415,20 @@ export default function PortfolioTrackerScreen() {
             title="Total Portfolio Value Over Time"
             colors={colors}
             lineColor={isDark ? CHART_COLORS.valueLine.dark : CHART_COLORS.valueLine.light}
+            palette={isDark ? VALUE_PALETTE_DARK : VALUE_PALETTE_LIGHT}
             height={300}
             width={containerWidth}
-            formatValue={(v) => fmtMoney0(v)}
+            formatValue={(v) => fmtNum(v, 0)}
           />
           <SnapshotLineChart
             data={gainChartData}
             title="Net Gain from Stocks Over Time"
             colors={colors}
             lineColor={isDark ? CHART_COLORS.gainLine.dark : CHART_COLORS.gainLine.light}
+            palette={isDark ? GAIN_PALETTE_DARK : GAIN_PALETTE_LIGHT}
             height={300}
             width={containerWidth}
-            formatValue={(v) => fmtMoney0(v)}
+            formatValue={(v) => fmtNum(v, 0)}
           />
         </>
       )}
@@ -354,6 +459,7 @@ export default function PortfolioTrackerScreen() {
               <Text style={[st.th, st.colSmall, { color: colors.textSecondary }]}>Accum. Cash</Text>
               <Text style={[st.th, st.colMoney, { color: colors.textSecondary }]}>Net Gain</Text>
               <Text style={[st.th, st.colPct, { color: colors.textSecondary }]}>Change %</Text>
+              <Text style={[st.th, st.colPct, { color: colors.textSecondary }]}>ROI %</Text>
               <Text style={[st.th, st.colAction, { color: colors.textSecondary }]}></Text>
             </View>
             {/* Table Rows — most recent first */}
@@ -364,16 +470,18 @@ export default function PortfolioTrackerScreen() {
                 const bd = snap.beginning_difference ?? 0;
                 const ng = snap.net_gain ?? 0;
                 const cp = snap.change_percent ?? 0;
+                const rp = snap.roi_percent ?? 0;
                 return (
                   <View key={snap.id} style={[st.tableRow, { borderBottomColor: colors.borderColor }]}>
                     <Text style={[st.td, st.colDate, { color: colors.textPrimary }]}>{snap.snapshot_date}</Text>
-                    <Text style={[st.td, st.colMoney, { color: colors.textPrimary }]}>{fmtMoney(snap.portfolio_value)}</Text>
-                    <Text style={[st.td, st.colMoney, { color: dm >= 0 ? colors.success : colors.danger, fontWeight: "600" }]}>{fmtMoney(dm)}</Text>
-                    <Text style={[st.td, st.colMoney, { color: bd >= 0 ? colors.success : colors.danger, fontWeight: "600" }]}>{fmtMoney(bd)}</Text>
-                    <Text style={[st.td, st.colSmall, { color: colors.textPrimary }]}>{fmtMoney0(snap.deposit_cash ?? 0)}</Text>
-                    <Text style={[st.td, st.colSmall, { color: colors.textPrimary }]}>{fmtMoney0(snap.accumulated_cash ?? 0)}</Text>
-                    <Text style={[st.td, st.colMoney, { color: ng >= 0 ? colors.success : colors.danger, fontWeight: "600" }]}>{fmtMoney(ng)}</Text>
-                    <Text style={[st.td, st.colPct, { color: cp >= 0 ? colors.success : colors.danger, fontWeight: "600" }]}>{fmtPercent(cp)}</Text>
+                    <Text style={[st.td, st.colMoney, { color: colors.textPrimary }]}>{fmtNum(snap.portfolio_value)}</Text>
+                    <Text style={[st.td, st.colMoney, { color: dm >= 0 ? colors.success : colors.danger, fontWeight: "600" }]}>{fmtNum(dm)}</Text>
+                    <Text style={[st.td, st.colMoney, { color: bd >= 0 ? colors.success : colors.danger, fontWeight: "600" }]}>{fmtNum(bd)}</Text>
+                    <Text style={[st.td, st.colSmall, { color: colors.textPrimary }]}>{fmtNum(snap.deposit_cash ?? 0, 0)}</Text>
+                    <Text style={[st.td, st.colSmall, { color: colors.textPrimary }]}>{fmtNum(snap.accumulated_cash ?? 0, 0)}</Text>
+                    <Text style={[st.td, st.colMoney, { color: ng >= 0 ? colors.success : colors.danger, fontWeight: "600" }]}>{fmtNum(ng)}</Text>
+                    <Text style={[st.td, st.colPct, { color: cp >= 0 ? colors.success : colors.danger, fontWeight: "600" }]}>{formatPercent(cp)}</Text>
+                    <Text style={[st.td, st.colPct, { color: rp >= 0 ? colors.success : colors.danger, fontWeight: "600" }]}>{formatPercent(rp)}</Text>
                     <View style={st.colAction}>
                       <Pressable onPress={() => handleDeleteOne(snap)} style={{ padding: 4 }}>
                         <FontAwesome name="trash-o" size={14} color={colors.danger} />
@@ -471,7 +579,7 @@ const st = StyleSheet.create({
   kpiSub: { fontSize: 11, marginTop: 4, fontWeight: "500" },
   empty: { alignItems: "center", paddingVertical: 60, gap: 12 },
   emptyText: { fontSize: 14, textAlign: "center", maxWidth: 280 },
-  table: { borderWidth: 1, borderRadius: 8, overflow: "hidden", minWidth: 1050 },
+  table: { borderWidth: 1, borderRadius: 8, overflow: "hidden", minWidth: 1130 },
   tableRow: {
     flexDirection: "row",
     alignItems: "center",

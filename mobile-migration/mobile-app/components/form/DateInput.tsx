@@ -71,7 +71,6 @@ function WebDateInput({ value, onChangeText, hasError }: DateInputProps) {
 function NativeDateInput({ value, onChangeText, hasError }: DateInputProps) {
   const { colors } = useThemeStore();
   const [showPicker, setShowPicker] = useState(false);
-  const [tempDate, setTempDate] = useState(() => value ? new Date(value) : new Date());
 
   // Date part helpers
   const [selYear, setSelYear] = useState(() => (value ? new Date(value) : new Date()).getFullYear());

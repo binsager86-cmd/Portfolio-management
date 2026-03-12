@@ -13,36 +13,30 @@ import {
   ScrollView,
   Pressable,
   RefreshControl,
-  FlatList,
   Alert,
   Platform,
   TextInput,
 } from "react-native";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { FlashList } from "@shopify/flash-list";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 
-import {
-  getDividends,
-  getDividendsByStock,
-  getBonusShares,
-  deleteDividend,
-  DividendRecord,
-  DividendByStock,
-  BonusShareRecord,
-  BonusByStock,
-} from "@/services/api";
+import { useDividends, useDividendsByStock, useBonusShares } from "@/hooks/queries";
+import { deleteDividend } from "@/services/api";
 import { useThemeStore } from "@/services/themeStore";
+import { showErrorAlert } from "@/lib/errorHandling";
 import { useResponsive } from "@/hooks/useResponsive";
+import { useScreenStyles } from "@/hooks/useScreenStyles";
 import { LoadingScreen } from "@/components/ui/LoadingScreen";
 import { ErrorScreen } from "@/components/ui/ErrorScreen";
 import { formatCurrency } from "@/lib/currency";
 import { exportYieldCalcPdf } from "@/lib/exportYieldPdf";
-import type { ThemePalette } from "@/constants/theme";
 
 type TabKey = "all" | "by-stock" | "bonus" | "calculator";
 
 export default function DividendsScreen() {
   const { colors } = useThemeStore();
+  const ss = useScreenStyles();
   const { isDesktop } = useResponsive();
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<TabKey>("all");
@@ -65,21 +59,11 @@ export default function DividendsScreen() {
     error,
     refetch,
     isFetching,
-  } = useQuery({
-    queryKey: ["dividends", page],
-    queryFn: () => getDividends({ page, page_size: 50 }),
-  });
+  } = useDividends(page);
 
-  const { data: byStockData } = useQuery({
-    queryKey: ["dividends-by-stock"],
-    queryFn: () => getDividendsByStock(),
-  });
+  const { data: byStockData } = useDividendsByStock();
 
-  const { data: bonusData } = useQuery({
-    queryKey: ["bonus-shares"],
-    queryFn: () => getBonusShares(),
-    enabled: tab === "bonus",
-  });
+  const { data: bonusData } = useBonusShares(tab === "bonus");
 
   const deleteMut = useMutation({
     mutationFn: (id: number) => deleteDividend(id),
@@ -90,10 +74,7 @@ export default function DividendsScreen() {
       const msg = "Dividend record deleted";
       Platform.OS === "web" ? window.alert(msg) : Alert.alert("Success", msg);
     },
-    onError: (err: any) => {
-      const msg = err?.response?.data?.detail ?? err?.message ?? "Delete failed";
-      Platform.OS === "web" ? window.alert(msg) : Alert.alert("Error", msg);
-    },
+    onError: (err) => showErrorAlert("Error", err, "Delete failed"),
   });
 
   const handleDelete = (id: number) => {
@@ -209,10 +190,10 @@ export default function DividendsScreen() {
   ];
 
   return (
-    <View style={[s.container, { backgroundColor: colors.bgPrimary }]}>
+    <View style={ss.container}>
       {/* Header */}
-      <View style={[s.header, { borderBottomColor: colors.borderColor }]}>
-        <Text style={[s.title, { color: colors.textPrimary }]}>Dividends Tracker</Text>
+      <View style={ss.header}>
+        <Text style={ss.title}>Dividends Tracker</Text>
       </View>
 
       {/* Totals Row */}
@@ -263,10 +244,10 @@ export default function DividendsScreen() {
 
       {/* ── Tab: All Dividends ── */}
       {tab === "all" && (
-        <FlatList
+        <FlashList
           data={dividends}
           keyExtractor={(item) => String(item.id)}
-          contentContainerStyle={[s.listContent, isDesktop && { maxWidth: 900, alignSelf: "center", width: "100%" }]}
+          contentContainerStyle={[ss.listContent, isDesktop && { maxWidth: 900, alignSelf: "center", width: "100%" }]}
           refreshControl={
             <RefreshControl refreshing={isFetching && !isLoading} onRefresh={refetch} tintColor={colors.accentPrimary} />
           }
@@ -334,10 +315,10 @@ export default function DividendsScreen() {
 
       {/* ── Tab: By Stock ── */}
       {tab === "by-stock" && (
-        <FlatList
+        <FlashList
           data={byStockList}
           keyExtractor={(item) => item.stock_symbol}
-          contentContainerStyle={[s.listContent, isDesktop && { maxWidth: 900, alignSelf: "center", width: "100%" }]}
+          contentContainerStyle={[ss.listContent, isDesktop && { maxWidth: 900, alignSelf: "center", width: "100%" }]}
           renderItem={({ item }) => (
             <View style={[s.divRow, { backgroundColor: colors.bgCard, borderColor: colors.borderColor }]}>
               <View style={{ flex: 1 }}>
@@ -372,7 +353,7 @@ export default function DividendsScreen() {
 
       {/* ── Tab: Bonus Shares ── */}
       {tab === "bonus" && (
-        <ScrollView contentContainerStyle={[s.listContent, isDesktop && { maxWidth: 900, alignSelf: "center", width: "100%" }]}>
+        <ScrollView contentContainerStyle={[ss.listContent, isDesktop && { maxWidth: 900, alignSelf: "center", width: "100%" }]}>
           {/* Summary cards */}
           <View style={[s.totalsRow, { borderBottomWidth: 0, paddingHorizontal: 0, marginBottom: 8 }]}>
             <View style={[s.totalCard, { backgroundColor: colors.bgCard, borderColor: colors.borderColor }]}>
@@ -430,7 +411,7 @@ export default function DividendsScreen() {
 
       {/* ── Tab: Yield Calculator ── */}
       {tab === "calculator" && (
-        <ScrollView contentContainerStyle={[s.listContent, isDesktop && { maxWidth: 600, alignSelf: "center", width: "100%" }]}>
+        <ScrollView contentContainerStyle={[ss.listContent, isDesktop && { maxWidth: 600, alignSelf: "center", width: "100%" }]}>
           <Text style={[s.sectionLabel, { color: colors.textSecondary }]}>Dividend Yield Calculator</Text>
 
           <View style={[s.calcCard, { backgroundColor: colors.bgCard, borderColor: colors.borderColor }]}>
@@ -711,14 +692,6 @@ export default function DividendsScreen() {
 }
 
 const s = StyleSheet.create({
-  container: { flex: 1 },
-  header: {
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 12,
-    borderBottomWidth: 1,
-  },
-  title: { fontSize: 24, fontWeight: "700" },
   totalsRow: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -751,7 +724,6 @@ const s = StyleSheet.create({
     borderBottomWidth: 2,
     borderBottomColor: "transparent",
   },
-  listContent: { paddingHorizontal: 12, paddingTop: 8, paddingBottom: 80 },
   divRow: {
     flexDirection: "row",
     alignItems: "center",

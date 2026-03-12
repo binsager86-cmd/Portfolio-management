@@ -42,8 +42,12 @@ import Animated, {
   withDelay,
   Easing,
 } from "react-native-reanimated";
+
+import { CHART_WIDE_LABEL_MIN } from "@/constants/layout";
 import { useThemeStore } from "@/services/themeStore";
+import { formatShortDate, formatFullDate } from "@/lib/dateUtils";
 import { formatCurrency } from "@/lib/currency";
+import { fmtAxisVal } from "@/lib/formatting";
 
 // ── Public types ────────────────────────────────────────────────────
 
@@ -112,14 +116,6 @@ const GRAD_LIGHT = {
   placeholderBg: "#F7F8FC",
 } as const;
 
-// ── Compact value formatter for axis labels ────────────────────────
-
-function fmtAxisVal(v: number): string {
-  const abs = Math.abs(v);
-  if (abs >= 1_000_000) return (v / 1_000_000).toFixed(1).replace(/\.0$/, "") + "M";
-  if (abs >= 1_000) return (v / 1_000).toFixed(1).replace(/\.0$/, "") + "K";
-  return v.toFixed(0);
-}
 
 /** Compute "nice" rounded tick values for a Y-axis. */
 function niceYTicks(lo: number, hi: number, count: number): number[] {
@@ -180,7 +176,7 @@ function smoothPath(pts: { x: number; y: number }[]): string {
 
 // ── Component ───────────────────────────────────────────────────────
 
-export function PortfolioChart({
+export const PortfolioChart = React.memo(function PortfolioChart({
   data,
   style,
   height = 300,
@@ -312,15 +308,12 @@ export function PortfolioChart({
 
   const dateLabels = useMemo(() => {
     if (!geo || data.length < 2) return [];
-    const count = containerWidth > 640 ? 5 : 3;
+    const count = containerWidth > CHART_WIDE_LABEL_MIN ? 5 : 3;
     return Array.from({ length: count }, (_, i) => {
       const idx = Math.round((i / (count - 1)) * (data.length - 1));
       return {
         x: geo.pts[idx].x,
-        label: new Date(data[idx].date).toLocaleDateString(undefined, {
-          month: "short",
-          day: "numeric",
-        }),
+        label: formatShortDate(data[idx].date),
       };
     });
   }, [geo, data, containerWidth]);
@@ -540,11 +533,7 @@ export function PortfolioChart({
                   {formatCurrency(tip.value)}
                 </Text>
                 <Text style={[tooltipS.date, { color: pal.tooltipDate }]}>
-                  {new Date(tip.date).toLocaleDateString(undefined, {
-                    year: "numeric",
-                    month: "short",
-                    day: "numeric",
-                  })}
+                  {formatFullDate(tip.date)}
                 </Text>
               </View>
             )}
@@ -553,7 +542,7 @@ export function PortfolioChart({
       )}
     </View>
   );
-}
+});
 
 // ── Styles ──────────────────────────────────────────────────────────
 

@@ -1,0 +1,112 @@
+# ──────────────────────────────────────────────────────────────────────
+# DigitalOcean App Platform — Combined Spec
+#
+# TWO components on ONE domain:
+#   1. Static Site  → Expo Web SPA (route: /)
+#   2. Web Service  → FastAPI backend  (route: /api)
+#
+# Import via:
+#   doctl apps create --spec mobile-migration/.do/app.yaml
+# Or paste into the App Platform dashboard under "App Spec".
+# ──────────────────────────────────────────────────────────────────────
+
+name: portfolio-combined-app
+
+# ── 1. FastAPI Backend (Web Service) ─────────────────────────────────
+services:
+  - name: api
+    github:
+      repo: binsager86-cmd/Portfolio-Backend-API
+      branch: main
+      deploy_on_push: true
+    dockerfile_path: Dockerfile
+    http_port: 8002
+    instance_size_slug: basic-xxs
+    instance_count: 1
+
+    # Only requests starting with /api are forwarded here.
+    # The full path is preserved (not stripped).
+    routes:
+      - path: /api
+
+    envs:
+      - key: ENVIRONMENT
+        value: "production"
+        scope: RUN_TIME
+      - key: SECRET_KEY
+        value: "${SECRET_KEY}"
+        type: SECRET
+        scope: RUN_TIME
+      - key: DATABASE_URL
+        value: "${DATABASE_URL}"
+        type: SECRET
+        scope: RUN_TIME
+      - key: CORS_ORIGINS
+        value: "${APP_URL}"
+        scope: RUN_TIME
+      - key: CRON_SECRET_KEY
+        value: "${CRON_SECRET_KEY}"
+        type: SECRET
+        scope: RUN_TIME
+      - key: GEMINI_API_KEY
+        value: "${GEMINI_API_KEY}"
+        type: SECRET
+        scope: RUN_TIME
+      - key: JWT_ALGORITHM
+        value: "HS256"
+        scope: RUN_TIME
+      - key: JWT_EXPIRE_MINUTES
+        value: "1440"
+        scope: RUN_TIME
+      - key: FX_CACHE_TTL
+        value: "3600"
+        scope: RUN_TIME
+      - key: PRICE_UPDATE_ENABLED
+        value: "true"
+        scope: RUN_TIME
+      - key: PRICE_UPDATE_HOUR
+        value: "14"
+        scope: RUN_TIME
+      - key: PRICE_UPDATE_MINUTE
+        value: "0"
+        scope: RUN_TIME
+
+    health_check:
+      http_path: /api/health
+      initial_delay_seconds: 10
+      period_seconds: 30
+      timeout_seconds: 5
+      failure_threshold: 3
+
+# ── 2. Expo Web Static Site ──────────────────────────────────────────
+static_sites:
+  - name: web
+    github:
+      repo: binsager86-cmd/Portfolio-Mobile-App
+      branch: main
+      deploy_on_push: true
+    build_command: npm install && npx expo export --platform web --clear && node scripts/create-spa-redirects.js
+    output_dir: dist
+    environment_slug: node-js
+
+    # Default route: everything NOT matched by /api goes here
+    routes:
+      - path: /
+
+    # ⭐ SPA fallback — THIS is the critical line that fixes 404 on refresh.
+    # Any path that doesn't match a real file in dist/ serves index.html.
+    catchall_document: index.html
+
+    envs:
+      # Empty string → frontend uses relative paths "/api/v1/..."
+      # (same domain, no CORS needed for API calls)
+      - key: EXPO_PUBLIC_API_URL
+        value: ""
+        scope: BUILD_TIME
+      - key: EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID
+        value: "549902495569-6kbcenrhcir2iqskj377fm561e8e6l50.apps.googleusercontent.com"
+        scope: BUILD_TIME
+
+    cors:
+      allow_origins:
+        - prefix: "*"

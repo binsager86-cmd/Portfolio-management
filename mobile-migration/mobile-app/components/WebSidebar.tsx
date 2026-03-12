@@ -8,21 +8,19 @@
  * parent layout renders a MobileDrawer overlay instead.
  */
 
-import React, { useState } from "react";
-import {
-  View,
-  Text,
-  Pressable,
-  StyleSheet,
-  ScrollView,
-  Platform,
-} from "react-native";
-import FontAwesome from "@expo/vector-icons/FontAwesome";
-import { useRouter, usePathname } from "expo-router";
+import { useResponsive } from "@/hooks/useResponsive";
 import { useAuthStore } from "@/services/authStore";
 import { useThemeStore } from "@/services/themeStore";
-import { useResponsive } from "@/hooks/useResponsive";
-import type { ThemePalette } from "@/constants/theme";
+import FontAwesome from "@expo/vector-icons/FontAwesome";
+import { usePathname, useRouter } from "expo-router";
+import React from "react";
+import {
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Text,
+    View,
+} from "react-native";
 
 // ── Nav items ───────────────────────────────────────────────────────
 
@@ -45,6 +43,7 @@ export const NAV_ITEMS: NavItem[] = [
   { label: "Dividends", icon: "money", path: "/(tabs)/dividends" },
   { label: "Add Stock", icon: "plus-square", path: "/(tabs)/add-stock", section: "Management" },
   { label: "Planner", icon: "calculator", path: "/(tabs)/planner" },
+  { label: "Extraction", icon: "magic", path: "/(tabs)/financial-extraction", section: "Analysis" },
   { label: "Integrity", icon: "stethoscope", path: "/(tabs)/integrity", section: "System" },
   { label: "Backup", icon: "cloud-download", path: "/(tabs)/backup" },
   { label: "Settings", icon: "cog", path: "/(tabs)/settings" },
@@ -68,7 +67,7 @@ export default function WebSidebar({ collapsed: collapsedProp, onToggleCollapse 
   const pathname = usePathname();
   const logout = useAuthStore((s) => s.logout);
   const { colors, toggle, mode } = useThemeStore();
-  const { isTablet, isDesktop } = useResponsive();
+  const { isTablet } = useResponsive();
 
   // Auto-collapse on tablet unless prop overrides
   const isCollapsed = collapsedProp ?? isTablet;
@@ -182,7 +181,7 @@ export default function WebSidebar({ collapsed: collapsedProp, onToggleCollapse 
           accessibilityLabel={mode === "dark" ? "Switch to light mode" : "Switch to dark mode"}
         >
           <FontAwesome
-            name={mode === "dark" ? "sun-o" : "moon-o"}
+            name={mode === "dark" ? "lightbulb-o" : "moon-o"}
             size={18}
             color={colors.textSecondary}
             style={s.navIcon}

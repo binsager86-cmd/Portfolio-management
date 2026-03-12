@@ -70,3 +70,20 @@ export function formatPercent(
   const prefix = value >= 0 ? "+" : "";
   return `${prefix}${value.toFixed(decimals)}%`;
 }
+
+/** Format a number with locale grouping and fixed decimals. Null/undefined → "—". */
+export function fmt(n: number | null | undefined, decimals = 2): string {
+  if (n == null) return "—";
+  return n.toLocaleString(undefined, {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  });
+}
+
+/** Format a number (non-nullable) with locale grouping and fixed decimals. */
+export function fmtNum(n: number, decimals = 2): string {
+  return n.toLocaleString(undefined, {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  });
+}

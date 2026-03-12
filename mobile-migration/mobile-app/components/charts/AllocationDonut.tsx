@@ -15,7 +15,7 @@
  */
 
 import React, { useMemo, useEffect } from "react";
-import { View, Text, StyleSheet, ScrollView, Platform } from "react-native";
+import { View, Text, StyleSheet, ScrollView } from "react-native";
 import Svg, { G, Path, Text as SvgText, Defs, LinearGradient, Stop } from "react-native-svg";
 import Animated, {
   useSharedValue,
@@ -109,7 +109,7 @@ function describeArc(
 
 // ── Component ───────────────────────────────────────────────────────
 
-export function AllocationDonut({
+export const AllocationDonut = React.memo(function AllocationDonut({
   data,
   title = "Portfolio Allocation by Weight",
   colors,
@@ -296,7 +296,7 @@ export function AllocationDonut({
       </View>
     </Animated.View>
   );
-}
+});
 
 // ── Styles ──────────────────────────────────────────────────────────
 

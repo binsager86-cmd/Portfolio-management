@@ -46,7 +46,7 @@ export function ResponsiveContainer({
   contentStyle,
   fullWidth = false,
 }: Props) {
-  const { spacing, maxContentWidth, isDesktop } = useResponsive();
+  const { spacing, maxContentWidth } = useResponsive();
   const { colors } = useThemeStore();
 
   const inner: ViewStyle = {

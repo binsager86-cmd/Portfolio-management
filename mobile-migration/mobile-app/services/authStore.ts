@@ -27,6 +27,7 @@ import {
   logAuthError,
   type AuthError,
 } from "@/services/authErrors";
+import { API_BASE_URL } from "@/constants/Config";
 
 // ── State shape ─────────────────────────────────────────────────────
 
@@ -42,7 +43,7 @@ interface AuthState {
   username: string | null;
   name: string | null;
   /** True while any auth operation is in progress. */
-  loading: boolean;
+  isLoading: boolean;
   /** User-facing error message (null = no error). */
   error: string | null;
   /** Structured error for analytics/Sentry (null = no error). */
@@ -86,7 +87,7 @@ async function persistAndSetSession(
     userId: res.user_id ?? null,
     username: res.username ?? null,
     name: res.name ?? null,
-    loading: false,
+    isLoading: false,
     error: null,
     lastAuthError: null,
   });
@@ -101,7 +102,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   userId: null,
   username: null,
   name: null,
-  loading: true, // start true — wait for hydration before navigating
+  isLoading: true, // start true — wait for hydration before navigating
   error: null,
   lastAuthError: null,
 
@@ -110,27 +111,61 @@ export const useAuthStore = create<AuthState>((set) => ({
   // ── Hydrate ─────────────────────────────────────────────────────
 
   hydrate: async () => {
-    set({ loading: true });
+    set({ isLoading: true });
     try {
       const [stored, storedRefresh] = await Promise.all([
         getToken(),
         getRefreshToken(),
       ]);
+      if (__DEV__) console.log("[hydrate] stored token:", stored ? `${stored.substring(0, 20)}...` : "null");
       if (stored) {
-        set({ token: stored, refreshToken: storedRefresh, loading: false });
+        // Validate the stored token with a direct fetch to /me
+        // (avoids circular dependency with api.ts)
+        try {
+          if (__DEV__) console.log("[hydrate] Validating token via", `${API_BASE_URL}/api/v1/auth/me`);
+          const resp = await fetch(`${API_BASE_URL}/api/v1/auth/me`, {
+            headers: { Authorization: `Bearer ${stored}` },
+          });
+          if (__DEV__) console.log("[hydrate] /me response status:", resp.status);
+          if (!resp.ok) throw new Error(`Token invalid (${resp.status})`);
+          const json = await resp.json();
+          const me = json.data ?? json;
+          if (__DEV__) console.log("[hydrate] Token valid, user:", me.username);
+          set({
+            token: stored,
+            refreshToken: storedRefresh,
+            userId: me.user_id,
+            username: me.username,
+            name: me.name ?? null,
+            isLoading: false,
+          });
+        } catch (err) {
+          if (__DEV__) console.log("[hydrate] Token invalid, clearing:", err);
+          // Token invalid — clear everything and force login
+          await Promise.all([removeToken(), removeRefreshToken()]);
+          set({
+            token: null,
+            refreshToken: null,
+            userId: null,
+            username: null,
+            name: null,
+            isLoading: false,
+          });
+        }
       } else {
-        set({ loading: false });
+        if (__DEV__) console.log("[hydrate] No stored token, showing login");
+        set({ isLoading: false });
       }
     } catch {
       // Ignore storage errors — treat as logged out
-      set({ loading: false });
+      set({ isLoading: false });
     }
   },
 
   // ── Login ───────────────────────────────────────────────────────
 
   login: async (username: string, password: string) => {
-    set({ loading: true, error: null, lastAuthError: null });
+    set({ isLoading: true, error: null, lastAuthError: null });
     try {
       const res: LoginResponse = await apiLogin(username, password);
       await persistAndSetSession(res, set);
@@ -138,7 +173,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     } catch (err: unknown) {
       const mapped = mapAuthError(err, "login");
       logAuthError(mapped, "login");
-      set({ loading: false, error: mapped.message, lastAuthError: mapped });
+      set({ isLoading: false, error: mapped.message, lastAuthError: mapped });
       return false;
     }
   },
@@ -146,7 +181,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   // ── Register (auto-login) ──────────────────────────────────────
 
   register: async (username: string, password: string, name?: string) => {
-    set({ loading: true, error: null, lastAuthError: null });
+    set({ isLoading: true, error: null, lastAuthError: null });
     try {
       const res: LoginResponse = await apiRegister(username, password, name);
 
@@ -163,7 +198,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     } catch (err: unknown) {
       const mapped = mapAuthError(err, "register");
       logAuthError(mapped, "register");
-      set({ loading: false, error: mapped.message, lastAuthError: mapped });
+      set({ isLoading: false, error: mapped.message, lastAuthError: mapped });
       return false;
     }
   },
@@ -171,19 +206,24 @@ export const useAuthStore = create<AuthState>((set) => ({
   // ── Google Sign-In ─────────────────────────────────────────────
 
   googleSignIn: async (idToken: string) => {
-    set({ loading: true, error: null, lastAuthError: null });
+    if (__DEV__) console.log("[AuthStore] 🔵 googleSignIn called");
+    set({ isLoading: true, error: null, lastAuthError: null });
     try {
       // Dynamic import to avoid bundling Google auth code when unused
       const { googleSignIn: apiGoogleSignIn } = await import(
         "@/services/api"
       );
+      if (__DEV__) console.log("[AuthStore] 🔵 Calling POST /api/v1/auth/google…");
       const res: LoginResponse = await apiGoogleSignIn(idToken);
+      if (__DEV__) console.log("[AuthStore] ✅ Backend returned tokens");
       await persistAndSetSession(res, set);
+      if (__DEV__) console.log("[AuthStore] ✅ Session persisted, user is now authenticated");
       return true;
     } catch (err: unknown) {
+      if (__DEV__) console.error("[AuthStore] ❌ googleSignIn error:", err);
       const mapped = mapAuthError(err, "google");
       logAuthError(mapped, "googleSignIn");
-      set({ loading: false, error: mapped.message, lastAuthError: mapped });
+      set({ isLoading: false, error: mapped.message, lastAuthError: mapped });
       return false;
     }
   },

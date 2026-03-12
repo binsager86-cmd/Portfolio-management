@@ -17,13 +17,13 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://YOUR-BACKEND.onrender.com"
+        "EXPO_PUBLIC_API_URL": "https://backend-api-app-hfc2n.ondigitalocean.app"
       }
     },
     "production": {
       "autoIncrement": true,
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://YOUR-BACKEND.onrender.com"
+        "EXPO_PUBLIC_API_URL": "https://backend-api-app-hfc2n.ondigitalocean.app"
       }
     }
   },
