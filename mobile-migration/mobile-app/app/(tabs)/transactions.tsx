@@ -10,27 +10,28 @@ import {
   View,
   Text,
   StyleSheet,
-  FlatList,
   Pressable,
   RefreshControl,
   Platform,
   Alert,
 } from "react-native";
-import { useQuery } from "@tanstack/react-query";
+import { FlashList } from "@shopify/flash-list";
 import { useRouter } from "expo-router";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
-import { getTransactions, TransactionRecord } from "@/services/api";
+import { useTransactions } from "@/hooks/queries";
+import { TransactionRecord } from "@/services/api";
 import { useDeleteTransaction } from "@/hooks/useTransactionMutations";
 import { useThemeStore } from "@/services/themeStore";
 import { useResponsive } from "@/hooks/useResponsive";
 import { LoadingScreen } from "@/components/ui/LoadingScreen";
 import { ErrorScreen } from "@/components/ui/ErrorScreen";
+import { FilterChip } from "@/components/ui/FilterChip";
 import { formatCurrency } from "@/lib/currency";
 import type { ThemePalette } from "@/constants/theme";
 
 // ── Transaction Row ─────────────────────────────────────────────────
 
-function TxnRow({
+const TxnRow = React.memo(function TxnRow({
   txn,
   colors,
   onEdit,
@@ -112,7 +113,7 @@ function TxnRow({
       </View>
     </View>
   );
-}
+});
 
 // ── Main Screen ─────────────────────────────────────────────────────
 
@@ -124,14 +125,10 @@ export default function TransactionsScreen() {
   const [portfolioFilter, setPortfolioFilter] = useState<string | undefined>(undefined);
   const [typeFilter, setTypeFilter] = useState<string | undefined>(undefined);
 
-  const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
-    queryKey: ["transactions", page, portfolioFilter, typeFilter],
-    queryFn: () => getTransactions({
-      page,
-      per_page: 50,
-      portfolio: portfolioFilter,
-      symbol: undefined,
-    }),
+  const { data, isLoading, isError, error, refetch, isFetching } = useTransactions({
+    page,
+    perPage: 50,
+    portfolio: portfolioFilter,
   });
 
   const deleteMutation = useDeleteTransaction();
@@ -198,32 +195,29 @@ export default function TransactionsScreen() {
       {/* Filters */}
       <View style={[styles.filterRow, { borderBottomColor: colors.borderColor }]}>
         {[undefined, "KFH", "BBYN", "USA"].map((pf) => (
-          <Pressable
+          <FilterChip
             key={pf ?? "all"}
+            label={pf ?? "All"}
+            active={portfolioFilter === pf}
             onPress={() => { setPortfolioFilter(pf); setPage(1); }}
-            style={[styles.filterChip, { backgroundColor: portfolioFilter === pf ? colors.accentPrimary : colors.bgCard, borderColor: colors.borderColor }]}
-          >
-            <Text style={[styles.filterChipText, { color: portfolioFilter === pf ? "#fff" : colors.textSecondary }]}>
-              {pf ?? "All"}
-            </Text>
-          </Pressable>
+            colors={colors}
+          />
         ))}
         <View style={{ width: 8 }} />
         {[undefined, "Buy", "Sell"].map((tp) => (
-          <Pressable
+          <FilterChip
             key={tp ?? "any"}
+            label={tp ?? "All Types"}
+            active={typeFilter === tp}
             onPress={() => setTypeFilter(tp)}
-            style={[styles.filterChip, { backgroundColor: typeFilter === tp ? (tp === "Buy" ? colors.danger : tp === "Sell" ? colors.success : colors.accentPrimary) : colors.bgCard, borderColor: colors.borderColor }]}
-          >
-            <Text style={[styles.filterChipText, { color: typeFilter === tp ? "#fff" : colors.textSecondary }]}>
-              {tp ?? "All Types"}
-            </Text>
-          </Pressable>
+            activeColor={tp === "Buy" ? colors.danger : tp === "Sell" ? colors.success : undefined}
+            colors={colors}
+          />
         ))}
       </View>
 
       {/* List */}
-      <FlatList
+      <FlashList
         data={transactions}
         keyExtractor={(item) => String(item.id)}
         renderItem={({ item }) => <TxnRow txn={item} colors={colors} onEdit={handleEdit} onDelete={handleDelete} />}
@@ -381,13 +375,6 @@ const styles = StyleSheet.create({
     gap: 6,
     borderBottomWidth: 1,
   },
-  filterChip: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-    borderWidth: 1,
-  },
-  filterChipText: { fontSize: 12, fontWeight: "600" },
   actionBtn: {
     padding: 8,
   },

@@ -9,15 +9,16 @@
  * Fonts ≥ 14px on mobile for readability.
  */
 
-import React, { useState } from "react";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import { Tabs, useRouter } from "expo-router";
-import { Platform, Pressable, View, Text, StyleSheet } from "react-native";
+import React, { useState } from "react";
+import { Platform, Pressable, StyleSheet, View } from "react-native";
+
+import { MobileDrawer } from "@/components/MobileDrawer";
+import WebSidebar from "@/components/WebSidebar";
+import { useResponsive } from "@/hooks/useResponsive";
 import { useAuthStore } from "@/services/authStore";
 import { useThemeStore } from "@/services/themeStore";
-import { useResponsive } from "@/hooks/useResponsive";
-import WebSidebar from "@/components/WebSidebar";
-import { MobileDrawer } from "@/components/MobileDrawer";
 
 // ── Shared icon helper ──────────────────────────────────────────────
 
@@ -34,7 +35,7 @@ export default function TabLayout() {
   const router = useRouter();
   const logout = useAuthStore((s) => s.logout);
   const { colors, toggle, mode } = useThemeStore();
-  const { isDesktop, isTablet, isPhone, showSidebar, showHamburger, touchTarget, fonts } = useResponsive();
+  const { showSidebar, showHamburger, fonts } = useResponsive();
 
   const [drawerOpen, setDrawerOpen] = useState(false);
 
@@ -61,6 +62,7 @@ export default function TabLayout() {
                   height: 56,
                   paddingBottom: Platform.OS === "ios" ? 20 : 6,
                 },
+            lazy: true,
             tabBarActiveTintColor: colors.accentPrimary,
             tabBarInactiveTintColor: colors.textMuted,
             tabBarLabelStyle: {
@@ -108,7 +110,7 @@ export default function TabLayout() {
                   <Pressable onPress={toggle} style={ls.headerBtn}>
                     {({ pressed }) => (
                       <FontAwesome
-                        name={mode === "dark" ? "sun-o" : "moon-o"}
+                        name={mode === "dark" ? "lightbulb-o" : "moon-o"}
                         size={20}
                         color={colors.textSecondary}
                         style={{ opacity: pressed ? 0.5 : 1 }}
@@ -176,6 +178,7 @@ export default function TabLayout() {
           <Tabs.Screen name="pfm" options={{ href: null, title: "PFM" }} />
           <Tabs.Screen name="integrity" options={{ href: null, title: "Integrity" }} />
           <Tabs.Screen name="backup" options={{ href: null, title: "Backup" }} />
+          <Tabs.Screen name="financial-extraction" options={{ href: null, title: "Extraction" }} />
           <Tabs.Screen name="settings" options={{ href: null, title: "Settings" }} />
           <Tabs.Screen name="holdings" options={{ href: null }} />
           <Tabs.Screen name="add-transaction" options={{ href: null, headerShown: false }} />

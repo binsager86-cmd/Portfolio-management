@@ -19,6 +19,8 @@ import {
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import type { Holding } from "@/services/api";
 import type { ThemePalette } from "@/constants/theme";
+import { todayISO } from "@/lib/dateUtils";
+import { fmt } from "@/lib/currency";
 
 // ── Column definitions ──────────────────────────────────────────────
 
@@ -29,14 +31,6 @@ interface Column {
   align?: "left" | "right";
   format?: (v: any, item: Holding) => string;
   colorFn?: (item: Holding) => string | undefined;
-}
-
-function fmt(n: number | null | undefined, decimals = 2): string {
-  if (n == null) return "—";
-  return n.toLocaleString(undefined, {
-    minimumFractionDigits: decimals,
-    maximumFractionDigits: decimals,
-  });
 }
 
 function pnlColor(n: number, c: ThemePalette): string | undefined {
@@ -183,11 +177,11 @@ export default function HoldingsTable({
 }: HoldingsTableProps) {
   const columns = useMemo(() => COLUMNS(colors), [colors]);
 
-  const totalWidth = columns.reduce((a, c) => a + c.width, 0);
+  const totalWidth = useMemo(() => columns.reduce((a, c) => a + c.width, 0), [columns]);
 
   const handleDownload = () => {
     const csv = generateCSV(holdings, columns);
-    downloadCSV(csv, `holdings_${filterLabel}_${new Date().toISOString().slice(0, 10)}.csv`);
+    downloadCSV(csv, `holdings_${filterLabel}_${todayISO()}.csv`);
   };
 
   return (

@@ -12,14 +12,9 @@ import { useResponsive } from "@/hooks/useResponsive";
 import { formatCurrency, formatSignedCurrency } from "@/lib/currency";
 import type { ThemePalette } from "@/constants/theme";
 
-export interface PortfolioCardData {
-  market_value?: number;
-  market_value_kwd?: number;
-  total_cost_kwd?: number;
-  currency?: string;
-  holding_count?: number;
-  [key: string]: any;
-}
+import type { PortfolioValueEntry } from "@/services/api";
+
+export interface PortfolioCardData extends PortfolioValueEntry {}
 
 interface PortfolioCardProps {
   /** Portfolio name (e.g. "KFH", "BBYN", "USA") */
@@ -36,7 +31,7 @@ function pnlColor(n: number, c: ThemePalette): string {
   return c.textSecondary;
 }
 
-export function PortfolioCard({ name, data, onPress }: PortfolioCardProps) {
+export const PortfolioCard = React.memo(function PortfolioCard({ name, data, onPress }: PortfolioCardProps) {
   const { colors } = useThemeStore();
   const { isPhone, spacing } = useResponsive();
   const ccy = data.currency ?? "KWD";
@@ -103,7 +98,7 @@ export function PortfolioCard({ name, data, onPress }: PortfolioCardProps) {
   }
 
   return content;
-}
+});
 
 const styles = StyleSheet.create({
   card: {

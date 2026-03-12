@@ -46,7 +46,7 @@ function trendArrow(trend: TrendDirection | undefined): string {
   return "";
 }
 
-export function MetricCard({
+export const MetricCard = React.memo(function MetricCard({
   label,
   value,
   icon,
@@ -57,7 +57,7 @@ export function MetricCard({
   width = "48%",
 }: MetricCardProps) {
   const { colors } = useThemeStore();
-  const { isPhone, spacing, fonts } = useResponsive();
+  const { isPhone, spacing } = useResponsive();
   const accent = accentColor ?? trendColor(trend, colors);
 
   return (
@@ -132,7 +132,7 @@ export function MetricCard({
       ) : null}
     </View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   card: {

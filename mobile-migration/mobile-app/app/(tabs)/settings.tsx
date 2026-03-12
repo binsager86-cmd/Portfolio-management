@@ -15,27 +15,27 @@ import {
   Platform,
   Alert,
 } from "react-native";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
+import { useRouter } from "expo-router";
 
-import { getMe, changePassword, updatePrices, saveApiKey, getApiKey } from "@/services/api";
+import { useMe, useApiKey } from "@/hooks/queries";
+import { changePassword, updatePrices, saveApiKey } from "@/services/api";
+import { showErrorAlert } from "@/lib/errorHandling";
 import { useAuthStore } from "@/services/authStore";
 import { useThemeStore } from "@/services/themeStore";
 import { useResponsive } from "@/hooks/useResponsive";
-import { useRouter } from "expo-router";
-import type { ThemePalette } from "@/constants/theme";
+import { useScreenStyles } from "@/hooks/useScreenStyles";
 
 export default function SettingsScreen() {
   const { colors, toggle, mode } = useThemeStore();
+  const ss = useScreenStyles();
   const { isDesktop } = useResponsive();
   const router = useRouter();
   const logout = useAuthStore((s) => s.logout);
 
   // User info
-  const { data: user } = useQuery({
-    queryKey: ["me"],
-    queryFn: getMe,
-  });
+  const { data: user } = useMe();
 
   // Change password state
   const [currentPw, setCurrentPw] = useState("");
@@ -52,11 +52,7 @@ export default function SettingsScreen() {
       if (Platform.OS === "web") window.alert(msg);
       else Alert.alert("Success", msg);
     },
-    onError: (err: any) => {
-      const msg = err?.response?.data?.detail ?? err?.message ?? "Failed to change password";
-      if (Platform.OS === "web") window.alert(msg);
-      else Alert.alert("Error", msg);
-    },
+    onError: (err) => showErrorAlert("Error", err, "Failed to change password"),
   });
 
   const priceMutation = useMutation({
@@ -77,10 +73,7 @@ export default function SettingsScreen() {
   const [apiKeyInput, setApiKeyInput] = useState("");
   const [showApiKey, setShowApiKey] = useState(false);
 
-  const { data: apiKeyData, refetch: refetchApiKey } = useQuery({
-    queryKey: ["api-key"],
-    queryFn: getApiKey,
-  });
+  const { data: apiKeyData, refetch: refetchApiKey } = useApiKey();
 
   const apiKeyMutation = useMutation({
     mutationFn: () => saveApiKey(apiKeyInput),
@@ -125,10 +118,10 @@ export default function SettingsScreen() {
 
   return (
     <ScrollView
-      style={[s.container, { backgroundColor: colors.bgPrimary }]}
-      contentContainerStyle={[s.content, isDesktop && { maxWidth: 600, alignSelf: "center", width: "100%" }]}
+      style={ss.container}
+      contentContainerStyle={[ss.content, isDesktop && { maxWidth: 600, alignSelf: "center", width: "100%" }]}
     >
-      <Text style={[s.title, { color: colors.textPrimary }]}>Settings</Text>
+      <Text style={[ss.title, { marginBottom: 16 }]}>Settings</Text>
 
       {/* User Profile */}
       <View style={[s.card, { backgroundColor: colors.bgCard, borderColor: colors.borderColor }]}>
@@ -149,7 +142,7 @@ export default function SettingsScreen() {
       {/* Theme Toggle */}
       <View style={[s.card, { backgroundColor: colors.bgCard, borderColor: colors.borderColor }]}>
         <View style={s.cardHeader}>
-          <FontAwesome name={mode === "dark" ? "sun-o" : "moon-o"} size={20} color={colors.accentPrimary} />
+          <FontAwesome name={mode === "dark" ? "lightbulb-o" : "moon-o"} size={20} color={colors.accentPrimary} />
           <Text style={[s.cardTitle, { color: colors.textPrimary }]}>Appearance</Text>
         </View>
         <Pressable
@@ -204,7 +197,7 @@ export default function SettingsScreen() {
             },
           ]}
         >
-          <Text style={{ color: "#fff", fontSize: 14, fontWeight: "600" }}>
+          <Text style={s.btnText}>
             {apiKeyMutation.isPending ? "Saving..." : "Save API Key"}
           </Text>
         </Pressable>
@@ -230,7 +223,7 @@ export default function SettingsScreen() {
             },
           ]}
         >
-          <Text style={{ color: "#fff", fontSize: 14, fontWeight: "600" }}>
+          <Text style={s.btnText}>
             {priceMutation.isPending ? "Updating..." : "Update All Prices"}
           </Text>
         </Pressable>
@@ -277,7 +270,7 @@ export default function SettingsScreen() {
             },
           ]}
         >
-          <Text style={{ color: "#fff", fontSize: 14, fontWeight: "600" }}>
+          <Text style={s.btnText}>
             {pwMutation.isPending ? "Changing..." : "Change Password"}
           </Text>
         </Pressable>
@@ -298,9 +291,6 @@ export default function SettingsScreen() {
 }
 
 const s = StyleSheet.create({
-  container: { flex: 1 },
-  content: { padding: 16 },
-  title: { fontSize: 24, fontWeight: "700", marginBottom: 16 },
   card: {
     padding: 16,
     borderRadius: 14,
@@ -346,4 +336,5 @@ const s = StyleSheet.create({
     borderWidth: 2,
     marginTop: 8,
   },
+  btnText: { color: "#fff", fontSize: 14, fontWeight: "600" as const },
 });

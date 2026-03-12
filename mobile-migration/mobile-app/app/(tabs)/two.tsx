@@ -13,34 +13,21 @@ import {
   StyleSheet,
   FlatList,
   RefreshControl,
-  ActivityIndicator,
-  TouchableOpacity,
   Pressable,
   Platform,
 } from "react-native";
-import { useQuery } from "@tanstack/react-query";
+import { LoadingScreen } from "@/components/ui/LoadingScreen";
+import { ErrorScreen } from "@/components/ui/ErrorScreen";
+import { FilterChip } from "@/components/ui/FilterChip";
+import { useHoldings, useAccounts } from "@/hooks/queries";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
-import { getHoldings, getAccounts, Holding, HoldingsResponse } from "@/services/api";
+import { Holding, HoldingsResponse } from "@/services/api";
 import { useThemeStore } from "@/services/themeStore";
 import { useResponsive } from "@/hooks/useResponsive";
 import HoldingsTable from "@/components/HoldingsTable";
 import type { ThemePalette } from "@/constants/theme";
-
-// ── Helpers ─────────────────────────────────────────────────────────
-
-function fmt(n: number | null | undefined, decimals = 2): string {
-  if (n == null) return "—";
-  return n.toLocaleString(undefined, {
-    minimumFractionDigits: decimals,
-    maximumFractionDigits: decimals,
-  });
-}
-
-function pnlColor(n: number, c: ThemePalette): string {
-  if (n > 0) return c.success;
-  if (n < 0) return c.danger;
-  return c.textSecondary;
-}
+import { fmt } from "@/lib/currency";
+import { pnlColor } from "@/lib/formatting";
 
 // ── Sub-components ──────────────────────────────────────────────────
 
@@ -68,7 +55,7 @@ function MiniMetric({
   );
 }
 
-function HoldingCard({
+const HoldingCard = React.memo(function HoldingCard({
   item,
   colors,
 }: {
@@ -145,7 +132,7 @@ function HoldingCard({
       </View>
     </View>
   );
-}
+});
 
 // ── Main Screen ─────────────────────────────────────────────────────
 
@@ -154,7 +141,7 @@ type SortKey = "symbol" | "market_value_kwd" | "total_pnl" | "pnl_pct" | "unreal
 
 export default function HoldingsScreen() {
   const { colors } = useThemeStore();
-  const { isDesktop, isPhone, spacing, fonts, maxContentWidth } = useResponsive();
+  const { isDesktop, spacing, maxContentWidth } = useResponsive();
 
   const [filter, setFilter] = useState<string | undefined>(undefined);
   const [viewMode, setViewMode] = useState<ViewMode>(
@@ -163,15 +150,9 @@ export default function HoldingsScreen() {
   const [sortKey, setSortKey] = useState<SortKey>("market_value_kwd");
   const [sortAsc, setSortAsc] = useState(false);
 
-  const { data: resp, isLoading: loading, isError, error, refetch, isFetching: refreshing } = useQuery<HoldingsResponse>({
-    queryKey: ["holdings", filter],
-    queryFn: () => getHoldings(filter),
-  });
+  const { data: resp, isLoading, isError, error, refetch, isFetching } = useHoldings(filter);
 
-  const { data: accountsData } = useQuery({
-    queryKey: ["accounts"],
-    queryFn: () => getAccounts(),
-  });
+  const { data: accountsData } = useAccounts();
 
   const onRefresh = useCallback(() => { refetch(); }, [refetch]);
 
@@ -196,25 +177,13 @@ export default function HoldingsScreen() {
   const filterLabels = ["All", "KFH", "BBYN", "USA"];
 
   // ── Loading ──
-  if (loading && !refreshing) {
-    return (
-      <View style={[st.center, { backgroundColor: colors.bgPrimary }]}>
-        <ActivityIndicator size="large" color={colors.accentPrimary} />
-        <Text style={[st.loadingText, { color: colors.textSecondary }]}>
-          Loading holdings…
-        </Text>
-      </View>
-    );
+  if (isLoading && !isFetching) {
+    return <LoadingScreen message="Loading holdings…" />;
   }
 
   // ── Error ──
   if (isError) {
-    return (
-      <View style={[st.center, { backgroundColor: colors.bgPrimary }]}>
-        <Text style={st.errorEmoji}>⚠️</Text>
-        <Text style={[st.errorText, { color: colors.danger }]}>{(error as any)?.message ?? "Failed to load"}</Text>
-      </View>
-    );
+    return <ErrorScreen message={(error as any)?.message ?? "Failed to load"} />;
   }
 
   const filterLabel = filter ?? "All";
@@ -224,29 +193,15 @@ export default function HoldingsScreen() {
       {/* Filter tabs + view toggle row */}
       <View style={[st.filterRow, { paddingHorizontal: spacing.pagePx }]}>
         <View style={{ flexDirection: "row", gap: 8, flex: 1, flexWrap: "wrap" }}>
-          {portfolios.map((p, i) => {
-            const active = filter === p;
-            return (
-              <TouchableOpacity
-                key={filterLabels[i]}
-                style={[
-                  st.filterBtn,
-                  { backgroundColor: active ? colors.accentPrimary : colors.bgCard },
-                  { borderColor: colors.borderColor },
-                ]}
-                onPress={() => setFilter(p)}
-              >
-                <Text
-                  style={[
-                    st.filterText,
-                    { color: active ? "#fff" : colors.textSecondary },
-                  ]}
-                >
-                  {filterLabels[i]}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
+          {portfolios.map((p, i) => (
+            <FilterChip
+              key={filterLabels[i]}
+              label={filterLabels[i]}
+              active={filter === p}
+              onPress={() => setFilter(p)}
+              colors={colors}
+            />
+          ))}
         </View>
 
         {/* View mode toggle */}
@@ -301,7 +256,7 @@ export default function HoldingsScreen() {
             <FontAwesome
               name="refresh"
               size={14}
-              color={refreshing ? colors.accentPrimary : colors.textMuted}
+              color={isFetching ? colors.accentPrimary : colors.textMuted}
             />
           </Pressable>
         </View>
@@ -388,6 +343,10 @@ export default function HoldingsScreen() {
           renderItem={({ item }) => (
             <HoldingCard item={item} colors={colors} />
           )}
+          windowSize={5}
+          maxToRenderPerBatch={10}
+          initialNumToRender={10}
+          removeClippedSubviews={true}
           contentContainerStyle={[
             st.listContent,
             {
@@ -402,7 +361,7 @@ export default function HoldingsScreen() {
           columnWrapperStyle={isDesktop ? st.columnWrapper : undefined}
           refreshControl={
             <RefreshControl
-              refreshing={refreshing}
+              refreshing={isFetching}
               onRefresh={onRefresh}
               tintColor={colors.accentPrimary}
             />
@@ -422,10 +381,6 @@ export default function HoldingsScreen() {
 
 const st = StyleSheet.create({
   container: { flex: 1 },
-  center: { flex: 1, justifyContent: "center", alignItems: "center" },
-  loadingText: { marginTop: 12, fontSize: 15 },
-  errorEmoji: { fontSize: 48, marginBottom: 12 },
-  errorText: { fontSize: 16, textAlign: "center", paddingHorizontal: 24 },
   emptyText: { textAlign: "center", marginTop: 40, fontSize: 15 },
 
   filterRow: {
@@ -435,15 +390,6 @@ const st = StyleSheet.create({
     paddingTop: 12,
     paddingBottom: 8,
   },
-  filterBtn: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-    borderWidth: 1,
-    minHeight: 44,
-    justifyContent: "center",
-  },
-  filterText: { fontSize: 14, fontWeight: "600" },
 
   sortBar: {
     flexDirection: "row",

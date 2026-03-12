@@ -5,7 +5,7 @@
  * Mirrors Streamlit's Personal Finance section with its 4 tabs.
  */
 
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useMemo } from "react";
 import {
   View,
   Text,
@@ -14,44 +14,35 @@ import {
   Pressable,
   Platform,
   Alert,
-  FlatList,
 } from "react-native";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 
+import { usePfmSnapshots, usePfmSnapshot } from "@/hooks/queries";
 import {
-  getPfmSnapshots,
-  getPfmSnapshot,
   deletePfmSnapshot,
   PfmSnapshotSummary,
-  PfmSnapshotFull,
 } from "@/services/api";
 import { useThemeStore } from "@/services/themeStore";
 import { useResponsive } from "@/hooks/useResponsive";
+import { useScreenStyles } from "@/hooks/useScreenStyles";
 import { LoadingScreen } from "@/components/ui/LoadingScreen";
 import { ErrorScreen } from "@/components/ui/ErrorScreen";
 import { formatCurrency } from "@/lib/currency";
-import type { ThemePalette } from "@/constants/theme";
 
 type Tab = "snapshots" | "balance" | "income" | "ratios";
 
 export default function PfmScreen() {
   const { colors } = useThemeStore();
+  const ss = useScreenStyles();
   const { isDesktop } = useResponsive();
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<Tab>("snapshots");
   const [selectedId, setSelectedId] = useState<number | null>(null);
 
-  const { data: listData, isLoading, isError, error, refetch } = useQuery({
-    queryKey: ["pfm-snapshots"],
-    queryFn: () => getPfmSnapshots({ page: 1, page_size: 100 }),
-  });
+  const { data: listData, isLoading, isError, error, refetch } = usePfmSnapshots();
 
-  const { data: detailData, isLoading: detailLoading } = useQuery({
-    queryKey: ["pfm-snapshot", selectedId],
-    queryFn: () => getPfmSnapshot(selectedId!),
-    enabled: selectedId != null,
-  });
+  const { data: detailData } = usePfmSnapshot(selectedId);
 
   const deleteMutation = useMutation({
     mutationFn: deletePfmSnapshot,
@@ -82,11 +73,24 @@ export default function PfmScreen() {
   const snapshots = listData?.snapshots ?? [];
   const detail = detailData;
 
+  const ratios = useMemo(() => {
+    if (!detail) return null;
+    let totalIncome = 0, totalExpenses = 0, financeCosts = 0;
+    for (const ie of detail.income_expenses) {
+      if (ie.kind === "income") totalIncome += ie.monthly_amount;
+      else if (ie.kind === "expense") totalExpenses += ie.monthly_amount;
+      if (ie.is_finance_cost) financeCosts += ie.monthly_amount;
+    }
+    const savingsRate = totalIncome > 0 ? ((totalIncome - totalExpenses) / totalIncome * 100) : 0;
+    const debtToAsset = detail.total_assets > 0 ? (detail.total_liabilities / detail.total_assets * 100) : 0;
+    return { totalIncome, totalExpenses, financeCosts, savingsRate, debtToAsset };
+  }, [detail]);
+
   return (
-    <View style={[s.container, { backgroundColor: colors.bgPrimary }]}>
+    <View style={ss.container}>
       {/* Header */}
-      <View style={[s.header, { borderBottomColor: colors.borderColor }]}>
-        <Text style={[s.title, { color: colors.textPrimary }]}>Personal Finance</Text>
+      <View style={ss.header}>
+        <Text style={ss.title}>Personal Finance</Text>
       </View>
 
       {/* Tabs */}
@@ -238,25 +242,11 @@ export default function PfmScreen() {
           </View>
         )}
 
-        {tab === "ratios" && detail && (
+        {tab === "ratios" && detail && ratios && (
           <>
             <Text style={[s.sectionTitle, { color: colors.textPrimary }]}>
               Financial Ratios — {detail.snapshot_date}
             </Text>
-            {(() => {
-              const totalIncome = detail.income_expenses
-                .filter((ie) => ie.kind === "income")
-                .reduce((sum, ie) => sum + ie.monthly_amount, 0);
-              const totalExpenses = detail.income_expenses
-                .filter((ie) => ie.kind === "expense")
-                .reduce((sum, ie) => sum + ie.monthly_amount, 0);
-              const savingsRate = totalIncome > 0 ? ((totalIncome - totalExpenses) / totalIncome * 100) : 0;
-              const debtToAsset = detail.total_assets > 0 ? (detail.total_liabilities / detail.total_assets * 100) : 0;
-              const financeCosts = detail.income_expenses
-                .filter((ie) => ie.is_finance_cost)
-                .reduce((sum, ie) => sum + ie.monthly_amount, 0);
-
-              return (
                 <View style={s.ratiosGrid}>
                   <View style={[s.ratioCard, { backgroundColor: colors.bgCard, borderColor: colors.borderColor }]}>
                     <Text style={[s.ratioLabel, { color: colors.textSecondary }]}>Net Worth</Text>
@@ -266,37 +256,35 @@ export default function PfmScreen() {
                   </View>
                   <View style={[s.ratioCard, { backgroundColor: colors.bgCard, borderColor: colors.borderColor }]}>
                     <Text style={[s.ratioLabel, { color: colors.textSecondary }]}>Savings Rate</Text>
-                    <Text style={[s.ratioValue, { color: savingsRate >= 0 ? colors.success : colors.danger }]}>
-                      {savingsRate.toFixed(1)}%
+                    <Text style={[s.ratioValue, { color: ratios.savingsRate >= 0 ? colors.success : colors.danger }]}>
+                      {ratios.savingsRate.toFixed(1)}%
                     </Text>
                   </View>
                   <View style={[s.ratioCard, { backgroundColor: colors.bgCard, borderColor: colors.borderColor }]}>
                     <Text style={[s.ratioLabel, { color: colors.textSecondary }]}>Debt / Assets</Text>
-                    <Text style={[s.ratioValue, { color: debtToAsset < 50 ? colors.success : colors.danger }]}>
-                      {debtToAsset.toFixed(1)}%
+                    <Text style={[s.ratioValue, { color: ratios.debtToAsset < 50 ? colors.success : colors.danger }]}>
+                      {ratios.debtToAsset.toFixed(1)}%
                     </Text>
                   </View>
                   <View style={[s.ratioCard, { backgroundColor: colors.bgCard, borderColor: colors.borderColor }]}>
                     <Text style={[s.ratioLabel, { color: colors.textSecondary }]}>Monthly Income</Text>
                     <Text style={[s.ratioValue, { color: colors.success }]}>
-                      {formatCurrency(totalIncome, "KWD")}
+                      {formatCurrency(ratios.totalIncome, "KWD")}
                     </Text>
                   </View>
                   <View style={[s.ratioCard, { backgroundColor: colors.bgCard, borderColor: colors.borderColor }]}>
                     <Text style={[s.ratioLabel, { color: colors.textSecondary }]}>Monthly Expenses</Text>
                     <Text style={[s.ratioValue, { color: colors.danger }]}>
-                      {formatCurrency(totalExpenses, "KWD")}
+                      {formatCurrency(ratios.totalExpenses, "KWD")}
                     </Text>
                   </View>
                   <View style={[s.ratioCard, { backgroundColor: colors.bgCard, borderColor: colors.borderColor }]}>
                     <Text style={[s.ratioLabel, { color: colors.textSecondary }]}>Finance Costs</Text>
                     <Text style={[s.ratioValue, { color: colors.danger }]}>
-                      {formatCurrency(financeCosts, "KWD")}
+                      {formatCurrency(ratios.financeCosts, "KWD")}
                     </Text>
                   </View>
                 </View>
-              );
-            })()}
           </>
         )}
 
@@ -313,14 +301,6 @@ export default function PfmScreen() {
 }
 
 const s = StyleSheet.create({
-  container: { flex: 1 },
-  header: {
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 12,
-    borderBottomWidth: 1,
-  },
-  title: { fontSize: 24, fontWeight: "700" },
   content: { padding: 16, paddingBottom: 80 },
   sectionTitle: { fontSize: 18, fontWeight: "700", marginBottom: 10 },
   subTitle: { fontSize: 15, fontWeight: "700", marginTop: 14, marginBottom: 6 },

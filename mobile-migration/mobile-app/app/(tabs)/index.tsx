@@ -13,283 +13,53 @@
  * Light/Dark theme matches the legacy Streamlit CSS vars.
  */
 
-import React, { useMemo, useCallback, useState } from "react";
+import { PortfolioChart } from "@/components/charts/PortfolioChart";
+import { AIFinancialIntelligence } from "@/components/overview/AIFinancialIntelligence";
+import { RealizedTradesSection } from "@/components/overview/RealizedTradesSection";
+import { PortfolioCard } from "@/components/portfolio/PortfolioCard";
+import { ErrorScreen } from "@/components/ui/ErrorScreen";
+import { LoadingScreen } from "@/components/ui/LoadingScreen";
+import { MetricCard } from "@/components/ui/MetricCard";
+import { useAuth } from "@/hooks/useAuth";
+import { usePriceRefresh } from "@/hooks/usePriceRefresh";
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  RefreshControl,
-  Platform,
-  Pressable,
-  TextInput,
-  ActivityIndicator,
-} from "react-native";
-import { useQuery, useMutation } from "@tanstack/react-query";
-import FontAwesome from "@expo/vector-icons/FontAwesome";
+  usePortfolioOverview,
+  useOverviewDependentQueries,
+  useRiskMetrics,
+} from "@/hooks/queries";
+import { useRfRateSetting, useAiStatus } from "@/hooks/queries";
+import { useResponsive } from "@/hooks/useResponsive";
 import {
-  getOverview,
-  getPerformance,
-  getRiskMetrics,
-  getSnapshots,
-  getRealizedProfit,
-  analyzePortfolio,
-  getAIStatus,
-  getRfRate,
-  setRfRate,
-  OverviewData,
-  PerformanceData,
-  RiskMetrics,
-  SnapshotRecord,
-  RealizedProfitData,
+    formatCurrency,
+    formatPercent,
+    formatSignedCurrency,
+} from "@/lib/currency";
+import { pnlColor } from "@/lib/formatting";
+import {
+    analyzePortfolio,
+    OverviewData,
+    RiskMetrics,
+    saveSnapshot,
+    setRfRate,
+    SnapshotRecord
 } from "@/services/api";
 import { useThemeStore } from "@/services/themeStore";
-import { useResponsive } from "@/hooks/useResponsive";
-import { usePriceRefresh } from "@/hooks/usePriceRefresh";
-import { useAuth } from "@/hooks/useAuth";
-import { MetricCard } from "@/components/ui/MetricCard";
-import { LoadingScreen } from "@/components/ui/LoadingScreen";
-import { ErrorScreen } from "@/components/ui/ErrorScreen";
-import { PortfolioCard } from "@/components/portfolio/PortfolioCard";
-import { PortfolioChart } from "@/components/charts/PortfolioChart";
+import FontAwesome from "@expo/vector-icons/FontAwesome";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { isAxiosError } from "axios";
+
+import React, { useCallback, useMemo, useState } from "react";
 import {
-  formatCurrency,
-  formatSignedCurrency,
-  formatPercent,
-} from "@/lib/currency";
-import type { ThemePalette } from "@/constants/theme";
-
-// ── Helpers ─────────────────────────────────────────────────────────
-
-function pnlColor(n: number, c: ThemePalette): string {
-  if (n > 0) return c.success;
-  if (n < 0) return c.danger;
-  return c.textSecondary;
-}
-
-// ── AI Prompt Library ────────────────────────────────────────────────
-
-const AI_PROMPT_CATEGORIES = [
-  {
-    label: "Portfolio Health",
-    icon: "heartbeat" as const,
-    prompts: [
-      "Analyze my portfolio health and diversification",
-      "What are my biggest risk exposures?",
-      "How well diversified is my portfolio across sectors?",
-    ],
-  },
-  {
-    label: "Performance",
-    icon: "line-chart" as const,
-    prompts: [
-      "Identify my top and bottom performers",
-      "Compare my portfolio performance vs market",
-      "Which stocks are dragging down my returns?",
-    ],
-  },
-  {
-    label: "Recommendations",
-    icon: "lightbulb-o" as const,
-    prompts: [
-      "What changes would you recommend to improve my portfolio?",
-      "Should I rebalance? If so, how?",
-      "Which positions should I consider adding to or trimming?",
-    ],
-  },
-  {
-    label: "Dividends",
-    icon: "money" as const,
-    prompts: [
-      "Analyze my dividend income potential",
-      "Which stocks have the best dividend yield?",
-      "How can I improve my passive income?",
-    ],
-  },
-];
-
-// ── Realized Trades Breakdown ───────────────────────────────────────
-
-function RealizedTradesSection({
-  data,
-  colors,
-  fonts,
-  isPhone,
-}: {
-  data: RealizedProfitData;
-  colors: ThemePalette;
-  fonts: { caption: number };
-  isPhone: boolean;
-}) {
-  const [expanded, setExpanded] = useState(false);
-
-  // Summary by stock
-  const byStock = useMemo(() => {
-    const map: Record<string, { symbol: string; trades: number; profit: number; loss: number; net: number }> = {};
-    for (const d of data.details) {
-      if (!map[d.symbol]) {
-        map[d.symbol] = { symbol: d.symbol, trades: 0, profit: 0, loss: 0, net: 0 };
-      }
-      map[d.symbol].trades++;
-      if (d.realized_pnl_kwd >= 0) map[d.symbol].profit += d.realized_pnl_kwd;
-      else map[d.symbol].loss += d.realized_pnl_kwd;
-      map[d.symbol].net += d.realized_pnl_kwd;
-    }
-    return Object.values(map).sort((a, b) => b.net - a.net);
-  }, [data.details]);
-
-  const profitCount = data.details.filter((d) => d.realized_pnl > 0).length;
-  const lossCount = data.details.filter((d) => d.realized_pnl < 0).length;
-
-  return (
-    <View style={{ marginBottom: 16 }}>
-      <Pressable
-        onPress={() => setExpanded(!expanded)}
-        style={{
-          flexDirection: "row",
-          alignItems: "center",
-          paddingVertical: 8,
-          gap: 8,
-        }}
-      >
-        <FontAwesome
-          name={expanded ? "chevron-down" : "chevron-right"}
-          size={12}
-          color={colors.textSecondary}
-        />
-        <Text
-          style={[
-            styles.sectionTitle,
-            { color: colors.textSecondary, fontSize: Math.max(fonts.caption, 13), marginBottom: 0, marginTop: 0 },
-          ]}
-        >
-          Realized Trades Breakdown
-        </Text>
-        <View style={{ flexDirection: "row", gap: 8, marginLeft: "auto" }}>
-          <Text style={{ color: colors.success, fontSize: 12, fontWeight: "600" }}>
-            {profitCount} wins
-          </Text>
-          <Text style={{ color: colors.danger, fontSize: 12, fontWeight: "600" }}>
-            {lossCount} losses
-          </Text>
-        </View>
-      </Pressable>
-
-      {expanded && (
-        <View>
-          {/* Summary row */}
-          <View
-            style={[
-              styles.grid,
-              { gap: 8, marginBottom: 12 },
-            ]}
-          >
-            <MetricCard
-              label="Total Trades"
-              value={`${data.details.length}`}
-              subline={`${profitCount}W / ${lossCount}L`}
-              icon="exchange"
-              accentColor={colors.accentPrimary}
-              width={isPhone ? "48%" : "24%"}
-            />
-            <MetricCard
-              label="Total Realized"
-              value={formatSignedCurrency(data.total_realized_kwd)}
-              subline="Net P/L (KWD)"
-              trend={data.total_realized_kwd >= 0 ? "up" : "down"}
-              width={isPhone ? "48%" : "24%"}
-            />
-            <MetricCard
-              label="Gross Gains"
-              value={formatCurrency(data.total_profit_kwd)}
-              subline="Winning trades"
-              accentColor={colors.success}
-              width={isPhone ? "48%" : "24%"}
-            />
-            <MetricCard
-              label="Gross Losses"
-              value={formatCurrency(Math.abs(data.total_loss_kwd))}
-              subline="Losing trades"
-              accentColor={colors.danger}
-              width={isPhone ? "48%" : "24%"}
-            />
-          </View>
-
-          {/* Summary by stock table */}
-          <Text style={{ color: colors.textSecondary, fontSize: 12, fontWeight: "700", letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 6 }}>
-            Summary by Stock
-          </Text>
-          <View style={{ borderWidth: 1, borderColor: colors.borderColor, borderRadius: 8, overflow: "hidden", marginBottom: 12 }}>
-            {/* Header */}
-            <View style={{ flexDirection: "row", backgroundColor: colors.bgSecondary, paddingVertical: 8, paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: colors.borderColor }}>
-              <Text style={{ flex: 2, color: colors.textSecondary, fontSize: 11, fontWeight: "700" }}>Symbol</Text>
-              <Text style={{ flex: 1, color: colors.textSecondary, fontSize: 11, fontWeight: "700", textAlign: "right" }}>Trades</Text>
-              <Text style={{ flex: 1.5, color: colors.textSecondary, fontSize: 11, fontWeight: "700", textAlign: "right" }}>Gains</Text>
-              <Text style={{ flex: 1.5, color: colors.textSecondary, fontSize: 11, fontWeight: "700", textAlign: "right" }}>Losses</Text>
-              <Text style={{ flex: 1.5, color: colors.textSecondary, fontSize: 11, fontWeight: "700", textAlign: "right" }}>Net P/L</Text>
-            </View>
-            {/* Rows */}
-            {byStock.map((row, idx) => (
-              <View
-                key={row.symbol}
-                style={{
-                  flexDirection: "row",
-                  paddingVertical: 8,
-                  paddingHorizontal: 12,
-                  borderBottomWidth: idx < byStock.length - 1 ? StyleSheet.hairlineWidth : 0,
-                  borderBottomColor: colors.borderColor,
-                  backgroundColor: idx % 2 === 0 ? "transparent" : colors.bgCardHover + "20",
-                }}
-              >
-                <Text style={{ flex: 2, color: colors.textPrimary, fontSize: 13, fontWeight: "600" }}>{row.symbol}</Text>
-                <Text style={{ flex: 1, color: colors.textSecondary, fontSize: 13, textAlign: "right" }}>{row.trades}</Text>
-                <Text style={{ flex: 1.5, color: colors.success, fontSize: 13, textAlign: "right" }}>{formatCurrency(row.profit)}</Text>
-                <Text style={{ flex: 1.5, color: colors.danger, fontSize: 13, textAlign: "right" }}>{formatCurrency(Math.abs(row.loss))}</Text>
-                <Text style={{ flex: 1.5, color: row.net >= 0 ? colors.success : colors.danger, fontSize: 13, fontWeight: "600", textAlign: "right" }}>
-                  {row.net >= 0 ? "+" : ""}{formatCurrency(row.net)}
-                </Text>
-              </View>
-            ))}
-          </View>
-
-          {/* Detailed trades table */}
-          <Text style={{ color: colors.textSecondary, fontSize: 12, fontWeight: "700", letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 6 }}>
-            Recent Trades ({Math.min(30, data.details.length)} of {data.details.length})
-          </Text>
-          <View style={{ borderWidth: 1, borderColor: colors.borderColor, borderRadius: 8, overflow: "hidden" }}>
-            {/* Header */}
-            <View style={{ flexDirection: "row", backgroundColor: colors.bgSecondary, paddingVertical: 8, paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: colors.borderColor }}>
-              <Text style={{ flex: 1.5, color: colors.textSecondary, fontSize: 11, fontWeight: "700" }}>Symbol</Text>
-              <Text style={{ flex: 1.5, color: colors.textSecondary, fontSize: 11, fontWeight: "700" }}>Date</Text>
-              <Text style={{ flex: 1, color: colors.textSecondary, fontSize: 11, fontWeight: "700", textAlign: "right" }}>Shares</Text>
-              <Text style={{ flex: 1.5, color: colors.textSecondary, fontSize: 11, fontWeight: "700", textAlign: "right" }}>P/L (KWD)</Text>
-            </View>
-            {data.details.slice(0, 30).map((d, idx) => (
-              <View
-                key={d.id}
-                style={{
-                  flexDirection: "row",
-                  paddingVertical: 7,
-                  paddingHorizontal: 12,
-                  borderBottomWidth: idx < Math.min(29, data.details.length - 1) ? StyleSheet.hairlineWidth : 0,
-                  borderBottomColor: colors.borderColor,
-                  backgroundColor: idx % 2 === 0 ? "transparent" : colors.bgCardHover + "20",
-                }}
-              >
-                <Text style={{ flex: 1.5, color: colors.textPrimary, fontSize: 12, fontWeight: "500" }}>{d.symbol}</Text>
-                <Text style={{ flex: 1.5, color: colors.textSecondary, fontSize: 12 }}>{d.txn_date}</Text>
-                <Text style={{ flex: 1, color: colors.textSecondary, fontSize: 12, textAlign: "right" }}>{d.shares.toLocaleString()}</Text>
-                <Text style={{ flex: 1.5, color: d.realized_pnl_kwd >= 0 ? colors.success : colors.danger, fontSize: 12, fontWeight: "600", textAlign: "right" }}>
-                  {d.realized_pnl_kwd >= 0 ? "+" : ""}{formatCurrency(d.realized_pnl_kwd)}
-                </Text>
-              </View>
-            ))}
-          </View>
-        </View>
-      )}
-    </View>
-  );
-}
+    ActivityIndicator,
+    Alert,
+    Pressable,
+    RefreshControl,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    View,
+} from "react-native";
 
 // ── Main Screen ─────────────────────────────────────────────────────
 
@@ -297,8 +67,10 @@ export default function OverviewScreen() {
   const { user } = useAuth();
   const { colors } = useThemeStore();
   const { metricCols, isDesktop, isPhone, spacing, fonts, maxContentWidth } = useResponsive();
-  const { refresh: refreshPrices, isRefreshing: priceRefreshing } = usePriceRefresh();
+  const { refresh: refreshPrices } = usePriceRefresh();
+  const queryClient = useQueryClient();
   const [refreshing, setRefreshing] = useState(false);
+  const [savingSnapshot, setSavingSnapshot] = useState(false);
 
   // AI state
   const [aiPrompt, setAiPrompt] = useState("");
@@ -311,11 +83,7 @@ export default function OverviewScreen() {
   const [rfRateInput, setRfRateInput] = useState("");
 
   // Fetch stored rf_rate from backend on mount
-  const { data: storedRfRate } = useQuery({
-    queryKey: ["rf-rate-setting"],
-    queryFn: getRfRate,
-    staleTime: Infinity,
-  });
+  const { data: storedRfRate } = useRfRateSetting();
 
   // When stored rate loads, apply it
   React.useEffect(() => {
@@ -331,44 +99,18 @@ export default function OverviewScreen() {
     isError,
     error,
     refetch,
-  } = useQuery<OverviewData>({
-    queryKey: ["portfolio-overview", user?.id],
-    queryFn: getOverview,
-    enabled: true,
-    staleTime: 0,                 // always treat as stale so any invalidation triggers refetch
-    refetchOnMount: "always",     // refetch every time the tab is focused
-    refetchOnWindowFocus: true,   // refetch when window regains focus
-  });
+  } = usePortfolioOverview(user?.id);
 
-  // Additional data for parity with Streamlit
-  const { data: perfData } = useQuery<PerformanceData>({
-    queryKey: ["performance"],
-    queryFn: () => getPerformance({ period: "all" }),
-    enabled: !!data,
-  });
+  // Additional data for parity with Streamlit — fire in parallel once overview loads
+  const [
+    { data: perfData },
+    { data: snapshotData },
+    { data: realizedData },
+  ] = useOverviewDependentQueries(!!data);
 
-  const { data: riskData } = useQuery<RiskMetrics>({
-    queryKey: ["risk-metrics", customRfRate],
-    queryFn: () => getRiskMetrics({ rf_rate: (customRfRate ?? 0) / 100 }),
-    enabled: !!data && customRfRate != null,
-  });
+  const { data: riskData } = useRiskMetrics(customRfRate, !!data && customRfRate != null);
 
-  const { data: snapshotData } = useQuery({
-    queryKey: ["snapshots-chart"],
-    queryFn: () => getSnapshots(),
-    enabled: !!data,
-  });
-
-  const { data: realizedData } = useQuery<RealizedProfitData>({
-    queryKey: ["realized-profit"],
-    queryFn: () => getRealizedProfit(),
-    enabled: !!data,
-  });
-
-  const { data: aiStatusData } = useQuery({
-    queryKey: ["ai-status"],
-    queryFn: () => getAIStatus(),
-  });
+  const { data: aiStatusData } = useAiStatus();
 
   const aiMutation = useMutation({
     mutationFn: (prompt: string) =>
@@ -378,11 +120,13 @@ export default function OverviewScreen() {
         include_performance: true,
         language: "en",
       }),
-    onSuccess: (result: any) => {
+    onSuccess: (result) => {
       setAiResult(result?.analysis ?? "No analysis returned.");
     },
-    onError: (err: any) => {
-      const msg = err?.response?.data?.detail ?? err?.message ?? "AI analysis failed";
+    onError: (err: Error) => {
+      const msg = isAxiosError(err)
+        ? (err.response?.data as Record<string, string>)?.detail ?? err.message
+        : err.message ?? "AI analysis failed";
       setAiResult(`Error: ${msg}`);
     },
   });
@@ -395,11 +139,34 @@ export default function OverviewScreen() {
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    // Fetches latest prices from yfinance, then invalidates ALL
-    // price-dependent queries (holdings, performance, overview, …)
     await refreshPrices();
     setRefreshing(false);
   }, [refreshPrices]);
+
+  const doSaveSnapshot = useCallback(async () => {
+    setSavingSnapshot(true);
+    try {
+      await saveSnapshot();
+      await queryClient.invalidateQueries({ queryKey: ["portfolio-overview"] });
+      await queryClient.invalidateQueries({ queryKey: ["snapshots"] });
+      Alert.alert("Snapshot Saved", "Today's portfolio snapshot has been saved successfully.");
+    } catch (e) {
+      console.warn("Save snapshot failed:", e);
+      Alert.alert("Error", "Failed to save snapshot. Please try again.");
+    }
+    setSavingSnapshot(false);
+  }, [queryClient]);
+
+  const onSaveSnapshot = useCallback(() => {
+    Alert.alert(
+      "Save Snapshot",
+      "Save today's portfolio snapshot? This will record the current portfolio value.",
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Save", onPress: doSaveSnapshot },
+      ],
+    );
+  }, [doSaveSnapshot]);
 
   // ── Derived metrics ──
   const metrics = useMemo(() => {
@@ -411,7 +178,7 @@ export default function OverviewScreen() {
     const roiPct = data.roi_percent ?? 0;
     const holdings = data.portfolio_values
       ? Object.values(data.portfolio_values).reduce(
-          (a: number, pv: any) => a + (pv.holding_count ?? 0),
+          (a: number, pv) => a + (pv.holding_count ?? 0),
           0
         )
       : 0;
@@ -420,14 +187,14 @@ export default function OverviewScreen() {
     // Profit breakdown
     const unrealizedPnl = data.by_portfolio
       ? Object.values(data.by_portfolio).reduce(
-          (a: number, p: any) => a + (p.unrealized_pnl_kwd ?? 0),
+          (a: number, p) => a + (p.unrealized_pnl_kwd ?? 0),
           0
         )
       : 0;
     // Use realized-profit endpoint data (matches Streamlit's calculate_realized_profit_details)
     const realizedPnl = realizedData?.total_realized_kwd ?? (data.by_portfolio
       ? Object.values(data.by_portfolio).reduce(
-          (a: number, p: any) => a + (p.realized_pnl_kwd ?? 0),
+          (a: number, p) => a + (p.realized_pnl_kwd ?? 0),
           0
         )
       : 0);
@@ -478,6 +245,19 @@ export default function OverviewScreen() {
     };
   }, [data, snapshotData, realizedData]);
 
+  const chartData = useMemo(
+    () =>
+      [...(snapshotData?.snapshots ?? [])]
+        .sort((a: SnapshotRecord, b: SnapshotRecord) =>
+          a.snapshot_date.localeCompare(b.snapshot_date),
+        )
+        .map((s: SnapshotRecord) => ({
+          date: s.snapshot_date,
+          value: s.portfolio_value,
+        })),
+    [snapshotData?.snapshots],
+  );
+
   // ── Loading state ──
   if (isLoading) {
     return <LoadingScreen message="Loading portfolio…" />;
@@ -485,10 +265,11 @@ export default function OverviewScreen() {
 
   // ── Error state ──
   if (isError) {
-    const errMsg =
-      (error as any)?.response?.data?.detail ??
-      (error as any)?.message ??
-      "Failed to load";
+    const errMsg = isAxiosError(error)
+      ? (error.response?.data as Record<string, string>)?.detail ?? error.message
+      : error instanceof Error
+        ? error.message
+        : "Failed to load";
     return <ErrorScreen message={errMsg} onRetry={() => refetch()} />;
   }
 
@@ -529,39 +310,13 @@ export default function OverviewScreen() {
           { backgroundColor: colors.bgCard, borderColor: colors.borderColor, padding: spacing.cardPadding + 6, marginBottom: spacing.sectionGap },
         ]}
       >
-        <View
-          style={{
-            flexDirection: "row",
-            justifyContent: "space-between",
-            alignItems: "flex-start",
-          }}
-        >
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.bannerLabel, { color: colors.textSecondary, fontSize: fonts.caption }]}>
-              Total Portfolio Value
-            </Text>
-            <Text style={[styles.bannerValue, { color: colors.textPrimary, fontSize: fonts.hero }]}>
-              {formatCurrency(metrics.totalValue)}
-            </Text>
-          </View>
-          {/* Refresh button */}
-          <Pressable
-            onPress={onRefresh}
-            style={({ pressed }) => ({
-              minWidth: 44,
-              minHeight: 44,
-              alignItems: "center" as const,
-              justifyContent: "center" as const,
-              borderRadius: 8,
-              backgroundColor: pressed ? colors.bgCardHover : "transparent",
-            })}
-          >
-            <FontAwesome
-              name="refresh"
-              size={18}
-              color={refreshing ? colors.accentPrimary : colors.textMuted}
-            />
-          </Pressable>
+        <View style={{ alignItems: "center" }}>
+          <Text style={[styles.bannerLabel, { color: colors.textSecondary, fontSize: fonts.caption }]}>
+            Total Portfolio Value
+          </Text>
+          <Text style={[styles.bannerValue, { color: colors.textPrimary, fontSize: fonts.hero }]}>
+            {formatCurrency(metrics.totalValue)}
+          </Text>
         </View>
         <View style={styles.bannerRow}>
           <Text
@@ -586,6 +341,59 @@ export default function OverviewScreen() {
           Stocks: {formatCurrency(data.portfolio_value)} • Cash:{" "}
           {formatCurrency(data.cash_balance)}
         </Text>
+
+        {/* Action buttons */}
+        <View style={{ flexDirection: "row", gap: 10, marginTop: 14 }}>
+          <Pressable
+            onPress={onRefresh}
+            disabled={refreshing || savingSnapshot}
+            style={({ pressed }) => ({
+              flexDirection: "row" as const,
+              alignItems: "center" as const,
+              justifyContent: "center" as const,
+              gap: 7,
+              paddingHorizontal: 16,
+              paddingVertical: 10,
+              borderRadius: 10,
+              backgroundColor: pressed ? colors.accentSecondary : colors.accentPrimary,
+              opacity: refreshing ? 0.7 : 1,
+            })}
+          >
+            {refreshing ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <FontAwesome name="refresh" size={14} color="#fff" />
+            )}
+            <Text style={{ color: "#fff", fontWeight: "600", fontSize: fonts.caption + 1 }}>
+              {refreshing ? "Refreshing…" : "Refresh Prices"}
+            </Text>
+          </Pressable>
+
+          <Pressable
+            onPress={onSaveSnapshot}
+            disabled={savingSnapshot || refreshing}
+            style={({ pressed }) => ({
+              flexDirection: "row" as const,
+              alignItems: "center" as const,
+              justifyContent: "center" as const,
+              gap: 7,
+              paddingHorizontal: 16,
+              paddingVertical: 10,
+              borderRadius: 10,
+              backgroundColor: pressed ? "#059669" : colors.success,
+              opacity: savingSnapshot ? 0.7 : 1,
+            })}
+          >
+            {savingSnapshot ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <FontAwesome name="camera" size={14} color="#fff" />
+            )}
+            <Text style={{ color: "#fff", fontWeight: "600", fontSize: fonts.caption + 1 }}>
+              {savingSnapshot ? "Saving…" : "Save Snapshot"}
+            </Text>
+          </Pressable>
+        </View>
       </View>
 
       {/* ── Row 1: Portfolio Snapshot ── */}
@@ -683,7 +491,7 @@ export default function OverviewScreen() {
         />
         <MetricCard
           label="MWRR (IRR)"
-          value={perfData ? formatPercent(perfData.mwrr_percent) : "—"}
+          value={formatPercent(data?.mwrr_percent ?? perfData?.mwrr_percent ?? null)}
           subline="Money-Weighted Return"
           icon="line-chart"
           accentColor="#8b5cf6"
@@ -701,30 +509,23 @@ export default function OverviewScreen() {
 
       {/* ── CBK Rate (Rf) Manual Override ── */}
       <View style={[styles.rfRateRow, { backgroundColor: colors.bgCard, borderColor: colors.borderColor }]}>        
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flex: 1 }}>
+        <View style={styles.rfLabelRow}>
           <FontAwesome name="bank" size={14} color="#06b6d4" />
-          <Text style={{ color: colors.textPrimary, fontSize: 13, fontWeight: "600" }}>
+          <Text style={[styles.rfLabel, { color: colors.textPrimary }]}>
             CBK Risk-Free Rate (Rf)
           </Text>
-          <Text style={{ color: colors.textMuted, fontSize: 11, marginLeft: 4 }}>
+          <Text style={[styles.rfValue, { color: colors.textMuted }]}>
             {customRfRate != null ? `${customRfRate.toFixed(2)}%` : "Not set"}
           </Text>
         </View>
         {editingRfRate ? (
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+          <View style={styles.rfEditRow}>
             <TextInput
-              style={{
-                width: 70,
-                height: 32,
-                borderWidth: 1,
-                borderRadius: 6,
+              style={[styles.rfInput, {
                 borderColor: colors.borderColor,
                 backgroundColor: colors.bgInput ?? colors.bgSecondary,
                 color: colors.textPrimary,
-                paddingHorizontal: 8,
-                fontSize: 13,
-                textAlign: "center",
-              }}
+              }]}
               value={rfRateInput}
               onChangeText={setRfRateInput}
               keyboardType="decimal-pad"
@@ -733,34 +534,38 @@ export default function OverviewScreen() {
               autoFocus
             />
             <Pressable
-              onPress={() => {
+              onPress={async () => {
                 const num = parseFloat(rfRateInput);
                 if (!isNaN(num) && num >= 0 && num <= 100) {
                   setCustomRfRate(num);
                   setEditingRfRate(false);
                   // Persist to backend
-                  setRfRate(num).catch(() => {});
+                  try {
+                    await setRfRate(num);
+                  } catch (err: unknown) {
+                    if (__DEV__) console.warn("Failed to persist rf_rate", err);
+                  }
                 }
               }}
-              style={{ width: 30, height: 30, borderRadius: 6, backgroundColor: colors.success + "22", justifyContent: "center", alignItems: "center" }}
+              style={[styles.iconBtn, { backgroundColor: colors.success + "22" }]}
             >
               <FontAwesome name="check" size={12} color={colors.success} />
             </Pressable>
             <Pressable
               onPress={() => { setEditingRfRate(false); setRfRateInput(""); }}
-              style={{ width: 30, height: 30, borderRadius: 6, backgroundColor: colors.danger + "22", justifyContent: "center", alignItems: "center" }}
+              style={[styles.iconBtn, { backgroundColor: colors.danger + "22" }]}
             >
               <FontAwesome name="times" size={12} color={colors.danger} />
             </Pressable>
           </View>
         ) : (
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+          <View style={styles.rfEditRow}>
             <Pressable
               onPress={() => {
                 setRfRateInput(customRfRate != null ? customRfRate.toString() : "");
                 setEditingRfRate(true);
               }}
-              style={{ width: 30, height: 30, borderRadius: 6, backgroundColor: colors.accentPrimary + "20", justifyContent: "center", alignItems: "center" }}
+              style={[styles.iconBtn, { backgroundColor: colors.accentPrimary + "20" }]}
             >
               <FontAwesome name="pencil" size={13} color={colors.accentPrimary} />
             </Pressable>
@@ -813,16 +618,7 @@ export default function OverviewScreen() {
 
       {/* ── Portfolio Value Chart (from snapshots) ── */}
       <PortfolioChart
-        data={
-          [...(snapshotData?.snapshots ?? [])]
-            .sort((a: SnapshotRecord, b: SnapshotRecord) =>
-              a.snapshot_date.localeCompare(b.snapshot_date),
-            )
-            .map((s: SnapshotRecord) => ({
-              date: s.snapshot_date,
-              value: s.portfolio_value,
-            }))
-        }
+        data={chartData}
         title="Total Portfolio Value Over Time"
         style={{ marginTop: 8, marginBottom: 24 }}
         height={300}
@@ -878,7 +674,7 @@ export default function OverviewScreen() {
               ]}
             >
               {Object.entries(data.portfolio_values).map(
-                ([name, pv]: [string, any]) => (
+                ([name, pv]) => (
                   <PortfolioCard key={name} name={name} data={pv} />
                 )
               )}
@@ -887,105 +683,17 @@ export default function OverviewScreen() {
         )}
 
       {/* ── AI Financial Intelligence ── */}
-      <View style={[styles.aiSection, { borderColor: colors.borderColor }]}>
-        <View style={styles.aiHeader}>
-          <FontAwesome name="magic" size={20} color={colors.accentPrimary} />
-          <Text style={[styles.sectionTitle, { color: colors.textSecondary, marginBottom: 0, marginTop: 0, marginLeft: 8 }]}>
-            AI Financial Intelligence
-          </Text>
-        </View>
-
-        {aiStatusData?.configured === false && (
-          <View style={[styles.aiWarning, { backgroundColor: colors.warning + "22", borderColor: colors.warning }]}>
-            <FontAwesome name="exclamation-triangle" size={14} color={colors.warning} />
-            <Text style={{ color: colors.warning, fontSize: 13, marginLeft: 8, flex: 1 }}>
-              AI not configured. Add your Gemini API key in Settings.
-            </Text>
-          </View>
-        )}
-
-        {/* Prompt Categories */}
-        <View style={styles.aiCategories}>
-          {AI_PROMPT_CATEGORIES.map((cat, idx) => (
-            <Pressable
-              key={cat.label}
-              onPress={() => setAiCategory(aiCategory === idx ? null : idx)}
-              style={[
-                styles.aiCatBtn,
-                {
-                  backgroundColor: aiCategory === idx ? colors.accentPrimary + "22" : colors.bgCard,
-                  borderColor: aiCategory === idx ? colors.accentPrimary : colors.borderColor,
-                },
-              ]}
-            >
-              <FontAwesome name={cat.icon} size={14} color={aiCategory === idx ? colors.accentPrimary : colors.textSecondary} />
-              <Text style={{ color: aiCategory === idx ? colors.accentPrimary : colors.textSecondary, fontSize: 12, fontWeight: "600", marginLeft: 6 }}>
-                {cat.label}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
-
-        {/* Prompt suggestions for selected category */}
-        {aiCategory !== null && (
-          <View style={{ marginBottom: 12 }}>
-            {AI_PROMPT_CATEGORIES[aiCategory].prompts.map((p) => (
-              <Pressable
-                key={p}
-                onPress={() => handleAiAnalyze(p)}
-                style={[styles.aiPromptSuggestion, { backgroundColor: colors.bgCard, borderColor: colors.borderColor }]}
-              >
-                <Text style={{ color: colors.textPrimary, fontSize: 13, flex: 1 }}>{p}</Text>
-                <FontAwesome name="arrow-right" size={12} color={colors.accentPrimary} />
-              </Pressable>
-            ))}
-          </View>
-        )}
-
-        {/* Custom prompt input */}
-        <View style={styles.aiInputRow}>
-          <TextInput
-            style={[styles.aiInput, { backgroundColor: colors.bgCard, color: colors.textPrimary, borderColor: colors.borderColor }]}
-            placeholderTextColor={colors.textMuted}
-            placeholder="Ask anything about your portfolio..."
-            value={aiPrompt}
-            onChangeText={setAiPrompt}
-            multiline
-          />
-          <Pressable
-            onPress={() => aiPrompt.trim() && handleAiAnalyze(aiPrompt.trim())}
-            disabled={aiMutation.isPending || !aiPrompt.trim()}
-            style={[
-              styles.aiSendBtn,
-              {
-                backgroundColor: colors.accentPrimary,
-                opacity: aiMutation.isPending || !aiPrompt.trim() ? 0.5 : 1,
-              },
-            ]}
-          >
-            {aiMutation.isPending ? (
-              <ActivityIndicator size="small" color="#fff" />
-            ) : (
-              <FontAwesome name="send" size={16} color="#fff" />
-            )}
-          </Pressable>
-        </View>
-
-        {/* AI Result */}
-        {aiMutation.isPending && (
-          <View style={[styles.aiResultCard, { backgroundColor: colors.bgCard, borderColor: colors.borderColor }]}>
-            <ActivityIndicator size="small" color={colors.accentPrimary} />
-            <Text style={{ color: colors.textSecondary, marginLeft: 12, fontSize: 13 }}>Analyzing portfolio...</Text>
-          </View>
-        )}
-        {aiResult && !aiMutation.isPending && (
-          <View style={[styles.aiResultCard, { backgroundColor: colors.bgCard, borderColor: colors.borderColor }]}>
-            <ScrollView style={{ maxHeight: 400 }} nestedScrollEnabled>
-              <Text style={{ color: colors.textPrimary, fontSize: 14, lineHeight: 22 }}>{aiResult}</Text>
-            </ScrollView>
-          </View>
-        )}
-      </View>
+      <AIFinancialIntelligence
+        colors={colors}
+        aiCategory={aiCategory}
+        setAiCategory={setAiCategory}
+        aiPrompt={aiPrompt}
+        setAiPrompt={setAiPrompt}
+        aiResult={aiResult}
+        aiMutation={aiMutation}
+        handleAiAnalyze={handleAiAnalyze}
+        aiStatusData={aiStatusData}
+      />
 
       {/* ── FX Footer ── */}
       <Text style={[styles.fxNote, { color: colors.textMuted }]}>
@@ -1059,6 +767,26 @@ const styles = StyleSheet.create({
     marginBottom: 14,
     marginTop: -6,
   },
+  rfLabelRow: { flexDirection: "row", alignItems: "center", gap: 8, flex: 1 },
+  rfLabel: { fontSize: 13, fontWeight: "600" },
+  rfValue: { fontSize: 11, marginLeft: 4 },
+  rfEditRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  rfInput: {
+    width: 70,
+    height: 32,
+    borderWidth: 1,
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    fontSize: 13,
+    textAlign: "center",
+  },
+  iconBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 6,
+    justifyContent: "center",
+    alignItems: "center",
+  },
 
   // FX
   fxNote: {
@@ -1066,82 +794,5 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginTop: 8,
     marginBottom: 16,
-  },
-
-  // AI Section
-  aiSection: {
-    marginTop: 8,
-    marginBottom: 16,
-    borderTopWidth: 1,
-    paddingTop: 16,
-  },
-  aiHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 16,
-  },
-  aiWarning: {
-    flexDirection: "row",
-    alignItems: "center",
-    padding: 12,
-    borderRadius: 10,
-    borderWidth: 1,
-    marginBottom: 12,
-  },
-  aiCategories: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-    marginBottom: 12,
-  },
-  aiCatBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 20,
-    borderWidth: 1,
-    minHeight: 44,
-  },
-  aiPromptSuggestion: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    borderRadius: 10,
-    borderWidth: 1,
-    marginBottom: 6,
-    gap: 8,
-    minHeight: 44,
-  },
-  aiInputRow: {
-    flexDirection: "row",
-    alignItems: "flex-end",
-    gap: 8,
-    marginBottom: 12,
-  },
-  aiInput: {
-    flex: 1,
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    fontSize: 14,
-    minHeight: 44,
-    maxHeight: 100,
-  },
-  aiSendBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  aiResultCard: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    padding: 16,
-    borderRadius: 14,
-    borderWidth: 1,
   },
 });

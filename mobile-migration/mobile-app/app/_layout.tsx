@@ -1,28 +1,30 @@
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import {
-  DarkTheme as NavDark,
-  DefaultTheme as NavLight,
-  ThemeProvider,
+    DarkTheme as NavDark,
+    DefaultTheme as NavLight,
+    ThemeProvider,
 } from "@react-navigation/native";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { useFonts } from "expo-font";
-import { Stack, useRouter, useSegments } from "expo-router";
+import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { useEffect } from "react";
+import { Platform } from "react-native";
+import { MD3DarkTheme, MD3LightTheme, PaperProvider } from "react-native-paper";
 import "react-native-reanimated";
-import { PaperProvider, MD3DarkTheme, MD3LightTheme } from "react-native-paper";
-import { QueryClientProvider } from "@tanstack/react-query";
 
-import { useAuthStore } from "@/services/authStore";
-import { useThemeStore } from "@/services/themeStore";
+import { AppErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { queryClient } from "@/lib/queryClient";
 import { getStockList } from "@/services/api";
+import { useAuthStore } from "@/services/authStore";
+import { useThemeStore } from "@/services/themeStore";
 
 export {
-  ErrorBoundary,
+    ErrorBoundary
 } from "expo-router";
 
 export const unstable_settings = {
-  initialRouteName: "(tabs)",
+  initialRouteName: "index",
 };
 
 SplashScreen.preventAutoHideAsync();
@@ -81,18 +83,45 @@ export default function RootLayout() {
 }
 
 function RootLayoutNav() {
-  const router = useRouter();
-  const segments = useSegments();
   const token = useAuthStore((s) => s.token);
-  const authLoading = useAuthStore((s) => s.loading);
   const hydrateAuth = useAuthStore((s) => s.hydrate);
+  const googleSignIn = useAuthStore((s) => s.googleSignIn);
   const hydrateTheme = useThemeStore((s) => s.hydrate);
   const themeMode = useThemeStore((s) => s.mode);
 
-  // Hydrate auth + theme from storage on first mount
+  // ── Single init effect: theme → OAuth hash check → hydration ───
+  // Must be one sequential async flow so nothing can redirect
+  // before auth state is fully resolved.
   useEffect(() => {
-    hydrateAuth();
-    hydrateTheme();
+    async function init() {
+      hydrateTheme();
+
+      // Check for Google OAuth redirect (web only)
+      if (Platform.OS === "web" && typeof window !== "undefined") {
+        const hash = window.location.hash;
+        if (hash && hash.includes("access_token=")) {
+          const params = new URLSearchParams(hash.substring(1));
+          const accessToken = params.get("access_token");
+          if (accessToken) {
+            if (__DEV__) console.log("[Layout] Found OAuth access_token in URL hash");
+            // Clean the URL so the token isn't visible
+            window.history.replaceState(
+              null,
+              "",
+              window.location.pathname + window.location.search,
+            );
+            // Await the full sign-in flow — this sets token + loading:false
+            await googleSignIn(accessToken);
+            return; // skip hydration — googleSignIn already set session
+          }
+        }
+      }
+
+      // Normal path: hydrate from stored tokens (awaited so redirect
+      // effect cannot fire before hydration finishes)
+      await hydrateAuth();
+    }
+    init();
   }, []);
 
   // Prefetch stock reference lists (static data) so dropdowns load instantly
@@ -109,24 +138,6 @@ function RootLayoutNav() {
       staleTime: Infinity,
     });
   }, [token]);
-
-  // Redirect based on auth state — only after hydration completes
-  useEffect(() => {
-    if (authLoading) return;
-
-    const inAuthGroup = segments[0] === "(auth)";
-
-    if (!token && !inAuthGroup) {
-      router.replace("/(auth)/login");
-    } else if (token && inAuthGroup) {
-      router.replace("/(tabs)");
-    }
-  }, [token, authLoading, segments]);
-
-  // While hydrating, render nothing (keep splash visible)
-  if (authLoading) {
-    return null;
-  }
 
   // Paper theme
   const paperTheme =
@@ -166,11 +177,14 @@ function RootLayoutNav() {
     <QueryClientProvider client={queryClient}>
       <PaperProvider theme={paperTheme}>
         <ThemeProvider value={buildNavTheme(themeMode)}>
-          <Stack>
-            <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-            <Stack.Screen name="(auth)" options={{ headerShown: false }} />
-            <Stack.Screen name="modal" options={{ presentation: "modal" }} />
-          </Stack>
+          <AppErrorBoundary>
+            <Stack>
+              <Stack.Screen name="index" options={{ headerShown: false }} />
+              <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+              <Stack.Screen name="(auth)" options={{ headerShown: false }} />
+              <Stack.Screen name="modal" options={{ presentation: "modal" }} />
+            </Stack>
+          </AppErrorBoundary>
         </ThemeProvider>
       </PaperProvider>
     </QueryClientProvider>

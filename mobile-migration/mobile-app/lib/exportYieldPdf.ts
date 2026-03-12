@@ -10,6 +10,8 @@
  * symbols, so we use plain-text section labels only.
  */
 
+import { todayISO } from "@/lib/dateUtils";
+
 // jsPDF is imported dynamically inside the export function
 // to avoid SSR/Metro node-bundle resolution issues.
 type jsPDF = import("jspdf").jsPDF;
@@ -217,7 +219,7 @@ export async function exportYieldCalcPdf(
     year: "numeric",
     month: "long",
     day: "numeric",
-  });
+  }); // Intentional: long-form display date for PDF header
   doc.text(`Generated on ${today}`, mx, 30);
 
   // Badge on right
@@ -441,7 +443,7 @@ export async function exportYieldCalcPdf(
   }
 
   // ─── Download ────────────────────────────────────────────────────
-  const filename = `yield-report-${new Date().toISOString().slice(0, 10)}.pdf`;
+  const filename = `yield-report-${todayISO()}.pdf`;
 
   // Platform-aware save: browser download on web, share sheet on mobile
   const { Platform } = await import("react-native");

@@ -54,11 +54,6 @@ jest.mock("expo-router", () => ({
   },
 }));
 
-// ── Mock react-native-chart-kit ─────────────────────────────────────
-jest.mock("react-native-chart-kit", () => ({
-  LineChart: "LineChart",
-}));
-
 // ── Mock react-native-reanimated ────────────────────────────────────
 jest.mock("react-native-reanimated", () => {
   const Reanimated = require("react-native-reanimated/mock");

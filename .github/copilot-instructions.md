@@ -46,6 +46,18 @@ Help AI agents and contributors quickly understand repo layout, runtime commands
 - **SQLite:** `check_same_thread=False` in `ui.py`; Streamlit is single-process, but beware concurrent writes
 - **DB file:** `portfolio.db` in repo root; treat as local state, back up before migrations
 
+## GitHub Repositories
+- **Frontend (React Native / Expo):** `binsager86-cmd/Portfolio-Mobile-App`
+  - URL: `https://github.com/binsager86-cmd/Portfolio-Mobile-App.git`
+  - Local path: `mobile-migration/mobile-app`
+  - Branch: `main`
+- **Backend (FastAPI):** `binsager86-cmd/Portfolio-Backend-API`
+  - URL: `https://github.com/binsager86-cmd/Portfolio-Backend-API.git`
+  - Local path: `mobile-migration/backend-api`
+  - Branch: `main`
+
+Always push frontend changes to `Portfolio-Mobile-App` and backend changes to `Portfolio-Backend-API`.
+
 ## Examples & References
 - **UI + DB helpers:** `ui.py`
 - **Backend schema + updaters:** `setup_db.py`, `auto_update_prices.py`

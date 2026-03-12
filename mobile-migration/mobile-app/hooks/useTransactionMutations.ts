@@ -10,6 +10,8 @@
 
 import { Platform, Alert } from "react-native";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { showErrorAlert } from "@/lib/errorHandling";
+import { ALERT_DEFER_MS } from "@/constants/layout";
 import {
   createTransaction,
   updateTransaction,
@@ -72,17 +74,7 @@ function showCashAlert(
   }
 }
 
-function showErrorAlert(err: unknown) {
-  const msg =
-    (err as any)?.response?.data?.detail ??
-    (err as any)?.message ??
-    "Unknown error";
-  if (Platform.OS === "web") {
-    window.alert(`Error: ${msg}`);
-  } else {
-    Alert.alert("Error", msg);
-  }
-}
+// Error display now handled by @/lib/errorHandling
 
 // ── Hooks ───────────────────────────────────────────────────────────
 
@@ -109,9 +101,9 @@ export function useCreateTransaction(onSuccessCallback?: () => void) {
           "Transaction added successfully!",
           result.cash_balance
         );
-      }, 100);
+      }, ALERT_DEFER_MS);
     },
-    onError: showErrorAlert,
+    onError: (err) => showErrorAlert("Error", err),
   });
 }
 
@@ -136,9 +128,9 @@ export function useUpdateTransaction(onSuccessCallback?: () => void) {
           "Transaction updated.",
           result.cash_balance
         );
-      }, 100);
+      }, ALERT_DEFER_MS);
     },
-    onError: showErrorAlert,
+    onError: (err) => showErrorAlert("Error", err),
   });
 }
 
@@ -159,7 +151,7 @@ export function useDeleteTransaction(onSuccessCallback?: () => void) {
         result.cash_balance
       );
     },
-    onError: showErrorAlert,
+    onError: (err) => showErrorAlert("Error", err),
   });
 }
 
@@ -180,6 +172,6 @@ export function useRestoreTransaction(onSuccessCallback?: () => void) {
         result.cash_balance
       );
     },
-    onError: showErrorAlert,
+    onError: (err) => showErrorAlert("Error", err),
   });
 }

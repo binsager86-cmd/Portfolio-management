@@ -18,7 +18,7 @@ const mockState = {
   userId: 1,
   username: "testuser",
   name: "Test User",
-  loading: false,
+  isLoading: false,
   error: null,
   login: jest.fn(),
   logout: jest.fn(),
@@ -40,7 +40,7 @@ describe("useAuth", () => {
     mockState.userId = 1;
     mockState.username = "testuser";
     mockState.name = "Test User";
-    mockState.loading = false;
+    mockState.isLoading = false;
     mockState.error = null;
   });
 
@@ -95,10 +95,10 @@ describe("useAuth", () => {
   });
 
   it("returns loading state", () => {
-    mockState.loading = true;
+    mockState.isLoading = true;
 
     const { result } = renderHook(() => useAuth());
-    expect(result.current.loading).toBe(true);
+    expect(result.current.isLoading).toBe(true);
   });
 
   it("returns error state", () => {

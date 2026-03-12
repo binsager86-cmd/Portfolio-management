@@ -25,632 +25,53 @@ import {
   Alert,
   ActivityIndicator,
 } from "react-native";
-import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
+import { useQueryClient, useMutation } from "@tanstack/react-query";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
+import { useTradingSummary, useStocks } from "@/hooks/queries";
 import {
-  getTradingSummary,
   recalculateWAC,
   exportTradingExcel,
-  TradingSummaryResponse,
+  renameStockBySymbol,
+  updateTransaction,
+  deleteTransaction,
   TradingTransaction,
-  TradingSummary,
 } from "@/services/api";
 import { useThemeStore } from "@/services/themeStore";
 import { useResponsive } from "@/hooks/useResponsive";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { LoadingScreen } from "@/components/ui/LoadingScreen";
 import { ErrorScreen } from "@/components/ui/ErrorScreen";
-import { MetricCard, TrendDirection } from "@/components/ui/MetricCard";
-import { ResponsiveGrid } from "@/components/ui/ResponsiveGrid";
-import { formatCurrency, formatSignedCurrency, formatPercent } from "@/lib/currency";
-import type { ThemePalette } from "@/constants/theme";
+import { todayISO } from "@/lib/dateUtils";
+import { fmtNum } from "@/lib/currency";
+import { showErrorAlert } from "@/lib/errorHandling";
 
-// ── Helpers ─────────────────────────────────────────────────────────
-
-function pnlTrend(v: number): TrendDirection {
-  if (v > 0) return "up";
-  if (v < 0) return "down";
-  return "neutral";
-}
-
-function fmtNum(v: number, decimals = 0): string {
-  return v.toLocaleString(undefined, {
-    minimumFractionDigits: decimals,
-    maximumFractionDigits: decimals,
-  });
-}
-
-// ── Column definitions (matches Streamlit render_trading_table exactly) ──
-
-type ColAlign = "left" | "right";
-type FmtType =
-  | "id" | "date" | "text_bold" | "text" | "type_badge" | "status"
-  | "source" | "quantity" | "price" | "money" | "money_colored"
-  | "percent_colored" | "money_small";
-
-interface ColDef {
-  key: keyof TradingTransaction;
-  label: string;
-  fmt: FmtType;
-  width: number;
-  align: ColAlign;
-}
-
-const TABLE_COLUMNS: ColDef[] = [
-  { key: "id",            label: "ID",            fmt: "id",              width: 52,  align: "left" },
-  { key: "date",          label: "Date",          fmt: "date",            width: 90,  align: "left" },
-  { key: "symbol",        label: "Symbol",        fmt: "text_bold",       width: 100, align: "left" },
-  { key: "portfolio",     label: "Portfolio",     fmt: "text",            width: 72,  align: "left" },
-  { key: "type",          label: "Type",          fmt: "type_badge",      width: 80,  align: "left" },
-  { key: "status",        label: "Status",        fmt: "status",          width: 82,  align: "left" },
-  { key: "source",        label: "Source",         fmt: "source",          width: 80,  align: "left" },
-  { key: "quantity",      label: "Qty",           fmt: "quantity",        width: 68,  align: "right" },
-  { key: "avg_cost",      label: "Avg Cost",      fmt: "price",           width: 82,  align: "right" },
-  { key: "price",         label: "Price",         fmt: "price",           width: 76,  align: "right" },
-  { key: "current_price", label: "Curr. Price",   fmt: "price",           width: 82,  align: "right" },
-  { key: "sell_price",    label: "Sell Price",    fmt: "price",           width: 82,  align: "right" },
-  { key: "value",         label: "Value",         fmt: "money",           width: 88,  align: "right" },
-  { key: "pnl",           label: "P&L",           fmt: "money_colored",   width: 92,  align: "right" },
-  { key: "pnl_pct",       label: "P&L %",         fmt: "percent_colored", width: 76,  align: "right" },
-  { key: "fees",          label: "Fees",          fmt: "money_small",     width: 68,  align: "right" },
-  { key: "dividend",      label: "Dividend",      fmt: "money_small",     width: 76,  align: "right" },
-  { key: "bonus_shares",  label: "Bonus",         fmt: "quantity",        width: 60,  align: "right" },
-  { key: "notes",         label: "Notes",         fmt: "text",            width: 120, align: "left" },
-];
-
-const TOTAL_TABLE_WIDTH = TABLE_COLUMNS.reduce((sum, c) => sum + c.width, 0);
-
-// ── Cell formatter (matches Streamlit _fmt) ─────────────────────────
-
-function fmtCell(
-  val: any,
-  fmt: FmtType,
-  colors: ThemePalette
-): { text: string; color: string; bold: boolean; badgeBg?: string } {
-  const muted = colors.textMuted;
-  const primary = colors.textPrimary;
-  const pos = colors.success;
-  const neg = colors.danger;
-
-  if (val == null || val === "" || val === "None") {
-    return { text: "-", color: muted, bold: false };
-  }
-
-  switch (fmt) {
-    case "id":
-      return { text: String(Math.round(Number(val))), color: muted, bold: false };
-
-    case "date": {
-      const s = String(val).substring(0, 10);
-      return { text: s === "NaT" ? "-" : s, color: primary, bold: false };
-    }
-
-    case "text_bold":
-      return { text: String(val), color: primary, bold: true };
-
-    case "text":
-      return { text: String(val), color: primary, bold: false };
-
-    case "type_badge": {
-      const t = String(val).toLowerCase();
-      if (t.includes("buy")) return { text: "Buy", color: pos, bold: true, badgeBg: pos + "22" };
-      if (t.includes("sell")) return { text: "Sell", color: neg, bold: true, badgeBg: neg + "22" };
-      if (t.includes("div")) return { text: "Dividend", color: "#3b82f6", bold: true, badgeBg: "#3b82f622" };
-      if (t.includes("deposit") || t.includes("withdraw"))
-        return { text: String(val), color: "#f59e0b", bold: true, badgeBg: "#f59e0b22" };
-      if (t.includes("bonus"))
-        return { text: "Bonus", color: colors.accentSecondary, bold: true, badgeBg: colors.accentSecondary + "22" };
-      return { text: String(val), color: muted, bold: true, badgeBg: muted + "22" };
-    }
-
-    case "status": {
-      const s = String(val).toLowerCase();
-      if (s === "realized") return { text: "Realized", color: muted, bold: false };
-      if (s === "unrealized") return { text: "Unrealized", color: pos, bold: true };
-      if (s === "closed") return { text: "Closed", color: muted, bold: false };
-      if (s === "income") return { text: "Income", color: colors.accentTertiary, bold: false };
-      if (s === "bonus") return { text: "Bonus", color: colors.accentSecondary, bold: false };
-      return { text: String(val) || "-", color: muted, bold: false };
-    }
-
-    case "source": {
-      const map: Record<string, string> = {
-        MANUAL: "✍️ Manual", UPLOAD: "📤 Upload", RESTORE: "🔄 Restore",
-        API: "🔌 API", LEGACY: "📜 Legacy",
-      };
-      const sv = String(val).trim();
-      return { text: map[sv] ?? `📋 ${sv}`, color: primary, bold: false };
-    }
-
-    case "quantity": {
-      const n = Number(val);
-      if (!n || n === 0) return { text: "-", color: muted, bold: false };
-      return { text: fmtNum(n), color: primary, bold: false };
-    }
-
-    case "price": {
-      const n = Number(val);
-      if (!n || n <= 0) return { text: "-", color: muted, bold: false };
-      return { text: fmtNum(n, 3), color: primary, bold: false };
-    }
-
-    case "money": {
-      const n = Number(val);
-      if (!n || n === 0) return { text: "-", color: muted, bold: false };
-      return { text: fmtNum(n, 2), color: primary, bold: false };
-    }
-
-    case "money_colored": {
-      const n = Number(val);
-      if (!n || n === 0) return { text: "-", color: muted, bold: false };
-      if (n > 0) return { text: `+${fmtNum(n, 2)}`, color: pos, bold: true };
-      return { text: fmtNum(n, 2), color: neg, bold: true };
-    }
-
-    case "percent_colored": {
-      const n = Number(val);
-      if (!n || n === 0) return { text: "-", color: muted, bold: false };
-      if (n > 0) return { text: `+${n.toFixed(2)}%`, color: pos, bold: true };
-      return { text: `${n.toFixed(2)}%`, color: neg, bold: true };
-    }
-
-    case "money_small": {
-      const n = Number(val);
-      if (!n || n <= 0) return { text: "-", color: muted, bold: false };
-      return { text: fmtNum(n, 2), color: primary, bold: false };
-    }
-
-    default:
-      return { text: String(val), color: primary, bold: false };
-  }
-}
-
-// ── Sort helper ─────────────────────────────────────────────────────
-
-type SortDir = "asc" | "desc" | null;
-
-function sortTransactions(
-  txns: TradingTransaction[],
-  sortCol: keyof TradingTransaction | null,
-  sortDir: SortDir
-): TradingTransaction[] {
-  if (!sortCol || !sortDir) return txns;
-  return [...txns].sort((a, b) => {
-    const aVal = a[sortCol];
-    const bVal = b[sortCol];
-    const dir = sortDir === "asc" ? 1 : -1;
-    if (aVal == null && bVal == null) return 0;
-    if (aVal == null) return 1;
-    if (bVal == null) return -1;
-    if (typeof aVal === "number" && typeof bVal === "number") return (aVal - bVal) * dir;
-    return String(aVal).localeCompare(String(bVal)) * dir;
-  });
-}
-
-// ── Table Header Cell ───────────────────────────────────────────────
-
-function HeaderCell({
-  col,
-  colors,
-  sortCol,
-  sortDir,
-  onSort,
-}: {
-  col: ColDef;
-  colors: ThemePalette;
-  sortCol: keyof TradingTransaction | null;
-  sortDir: SortDir;
-  onSort: (key: keyof TradingTransaction) => void;
-}) {
-  const isActive = sortCol === col.key;
-  const arrow = isActive ? (sortDir === "asc" ? " ↑" : " ↓") : " ⇅";
-  return (
-    <Pressable
-      onPress={() => onSort(col.key)}
-      style={[
-        ts.headerCell,
-        {
-          width: col.width,
-          backgroundColor: isActive ? colors.bgCardHover : "transparent",
-        },
-      ]}
-    >
-      <Text
-        style={[
-          ts.headerText,
-          {
-            color: isActive ? colors.accentPrimary : colors.textPrimary,
-            textAlign: col.align,
-          },
-        ]}
-        numberOfLines={1}
-      >
-        {col.label}
-        <Text style={{ opacity: isActive ? 1 : 0.35, fontSize: 10 }}>{arrow}</Text>
-      </Text>
-    </Pressable>
-  );
-}
-
-// ── Table Data Cell ─────────────────────────────────────────────────
-
-function DataCell({
-  col,
-  txn,
-  colors,
-}: {
-  col: ColDef;
-  txn: TradingTransaction;
-  colors: ThemePalette;
-}) {
-  const val = txn[col.key];
-  const { text, color, bold, badgeBg } = fmtCell(val, col.fmt, colors);
-
-  if (badgeBg) {
-    // Render as badge (type column)
-    return (
-      <View style={[ts.dataCell, { width: col.width }]}>
-        <View style={[ts.badge, { backgroundColor: badgeBg }]}>
-          <Text style={[ts.badgeText, { color }]} numberOfLines={1}>
-            {text}
-          </Text>
-        </View>
-      </View>
-    );
-  }
-
-  return (
-    <View style={[ts.dataCell, { width: col.width }]}>
-      <Text
-        style={[
-          ts.cellText,
-          {
-            color,
-            fontWeight: bold ? "700" : "400",
-            textAlign: col.align,
-          },
-        ]}
-        numberOfLines={1}
-      >
-        {text}
-      </Text>
-    </View>
-  );
-}
-
-// ── Table Row ───────────────────────────────────────────────────────
-
-function TableRow({
-  txn,
-  colors,
-  isEven,
-}: {
-  txn: TradingTransaction;
-  colors: ThemePalette;
-  isEven: boolean;
-}) {
-  const typ = (txn.type ?? "").toLowerCase();
-  const rowBg = typ.includes("buy")
-    ? colors.success + "08"
-    : typ.includes("sell")
-    ? colors.danger + "08"
-    : isEven
-    ? "transparent"
-    : colors.bgCardHover + "30";
-
-  return (
-    <View style={[ts.dataRow, { backgroundColor: rowBg, borderBottomColor: colors.borderColor }]}>
-      {TABLE_COLUMNS.map((col) => (
-        <DataCell key={col.key} col={col} txn={txn} colors={colors} />
-      ))}
-    </View>
-  );
-}
-
-// ── Summary Section (Professional Dashboard Cards) ──────────────────
-
-function SummaryMetrics({ summary, dateFrom, dateTo }: { summary: TradingSummary; dateFrom?: string; dateTo?: string }) {
-  const { colors } = useThemeStore();
-  const { isPhone } = useResponsive();
-
-  const hasDateFilter = !!(dateFrom || dateTo);
-  const periodLabel = hasDateFilter
-    ? `${dateFrom || "Inception"} → ${dateTo || "Today"}`
-    : "Since Inception";
-
-  // Professional card renderer
-  const Card = ({
-    icon,
-    iconColor,
-    label,
-    value,
-    sub,
-    valueColor,
-    borderAccent,
-  }: {
-    icon: React.ComponentProps<typeof FontAwesome>["name"];
-    iconColor: string;
-    label: string;
-    value: string;
-    sub?: string;
-    valueColor?: string;
-    borderAccent?: string;
-  }) => (
-    <View
-      style={[
-        cardStyles.card,
-        {
-          backgroundColor: colors.bgCard,
-          borderColor: colors.borderColor,
-          borderLeftColor: borderAccent || colors.borderColor,
-          borderLeftWidth: borderAccent ? 3 : 1,
-        },
-      ]}
-    >
-      <View style={cardStyles.cardHeader}>
-        <View style={[cardStyles.iconCircle, { backgroundColor: iconColor + "18" }]}>
-          <FontAwesome name={icon} size={isPhone ? 14 : 16} color={iconColor} />
-        </View>
-        <Text style={[cardStyles.cardLabel, { color: colors.textSecondary }]} numberOfLines={1}>
-          {label}
-        </Text>
-      </View>
-      <Text
-        style={[
-          cardStyles.cardValue,
-          {
-            color: valueColor || colors.textPrimary,
-            fontSize: isPhone ? 17 : 19,
-          },
-        ]}
-        numberOfLines={1}
-        adjustsFontSizeToFit
-      >
-        {value}
-      </Text>
-      {sub ? (
-        <Text style={[cardStyles.cardSub, { color: colors.textMuted }]}>{sub}</Text>
-      ) : null}
-    </View>
-  );
-
-  const pnlColor = (v: number) => (v > 0 ? colors.success : v < 0 ? colors.danger : colors.textMuted);
-
-  return (
-    <View style={cardStyles.wrapper}>
-      {/* Period indicator */}
-      <View style={[cardStyles.periodBadge, { backgroundColor: colors.accentPrimary + "12", borderColor: colors.accentPrimary + "30" }]}>
-        <FontAwesome name="calendar" size={11} color={colors.accentPrimary} />
-        <Text style={[cardStyles.periodText, { color: colors.accentPrimary }]}>{periodLabel}</Text>
-        <Text style={[cardStyles.periodCcy, { color: colors.textMuted }]}>All values in KWD</Text>
-      </View>
-
-      {/* Row 1: Capital Flow */}
-      <Text style={[cardStyles.sectionLabel, { color: colors.textSecondary }]}>CAPITAL FLOW</Text>
-      <ResponsiveGrid columns={{ phone: 2, tablet: 4, desktop: 4 }}>
-        <Card
-          icon="arrow-circle-down"
-          iconColor="#10b981"
-          label="Total Buys"
-          value={formatCurrency(summary.total_buys, "KWD")}
-          sub={`${summary.buy_count} transactions`}
-          borderAccent="#10b981"
-        />
-        <Card
-          icon="arrow-circle-up"
-          iconColor="#f59e0b"
-          label="Total Sells"
-          value={formatCurrency(summary.total_sells, "KWD")}
-          sub={`${summary.sell_count} transactions`}
-          borderAccent="#f59e0b"
-        />
-        <Card
-          icon="bank"
-          iconColor="#3b82f6"
-          label="Deposits"
-          value={formatCurrency(summary.total_deposits, "KWD")}
-          sub={`${summary.deposit_count} deposits`}
-          borderAccent="#3b82f6"
-        />
-        <Card
-          icon="sign-out"
-          iconColor="#ef4444"
-          label="Withdrawals"
-          value={formatCurrency(summary.total_withdrawals, "KWD")}
-          sub={`${summary.withdrawal_count} transactions`}
-          borderAccent="#ef4444"
-        />
-      </ResponsiveGrid>
-
-      {/* Row 2: Profit & Loss */}
-      <Text style={[cardStyles.sectionLabel, { color: colors.textSecondary }]}>PROFIT & LOSS</Text>
-      <ResponsiveGrid columns={{ phone: 2, tablet: 4, desktop: 4 }}>
-        <Card
-          icon="line-chart"
-          iconColor={pnlColor(summary.unrealized_pnl)}
-          label="Unrealized P&L"
-          value={formatSignedCurrency(summary.unrealized_pnl, "KWD")}
-          sub="Open positions"
-          valueColor={pnlColor(summary.unrealized_pnl)}
-          borderAccent={pnlColor(summary.unrealized_pnl)}
-        />
-        <Card
-          icon="check-circle"
-          iconColor={pnlColor(summary.realized_pnl)}
-          label="Realized P&L"
-          value={formatSignedCurrency(summary.realized_pnl, "KWD")}
-          sub="Closed positions"
-          valueColor={pnlColor(summary.realized_pnl)}
-          borderAccent={pnlColor(summary.realized_pnl)}
-        />
-        <Card
-          icon="trophy"
-          iconColor={pnlColor(summary.total_pnl)}
-          label="Total P&L"
-          value={formatSignedCurrency(summary.total_pnl, "KWD")}
-          sub={`Unrealized (${formatSignedCurrency(summary.unrealized_pnl, "KWD")}) + Realized (${formatSignedCurrency(summary.realized_pnl, "KWD")})`}
-          valueColor={pnlColor(summary.total_pnl)}
-          borderAccent={pnlColor(summary.total_pnl)}
-        />
-        <Card
-          icon="list-ol"
-          iconColor={colors.accentPrimary}
-          label="Total Txns"
-          value={fmtNum(summary.total_transactions)}
-          sub="All transaction types"
-          borderAccent={colors.accentPrimary}
-        />
-      </ResponsiveGrid>
-
-      {/* Row 3: Returns & Income */}
-      <Text style={[cardStyles.sectionLabel, { color: colors.textSecondary }]}>RETURNS & INCOME</Text>
-      <ResponsiveGrid columns={{ phone: 2, tablet: 4, desktop: 4 }}>
-        <Card
-          icon="money"
-          iconColor="#8b5cf6"
-          label="Cash Dividends"
-          value={formatCurrency(summary.total_dividends, "KWD")}
-          sub={`${summary.dividend_count} records`}
-          borderAccent="#8b5cf6"
-        />
-        <Card
-          icon="percent"
-          iconColor="#6366f1"
-          label="Total Fees"
-          value={formatCurrency(summary.total_fees, "KWD")}
-          sub="Brokerage & commissions"
-          borderAccent="#6366f1"
-        />
-        <Card
-          icon="exchange"
-          iconColor={pnlColor(summary.net_cash_flow)}
-          label="Net Cash Flow"
-          value={formatSignedCurrency(summary.net_cash_flow, "KWD")}
-          sub="Sells + Dep − Buys − Fees"
-          valueColor={pnlColor(summary.net_cash_flow)}
-          borderAccent={pnlColor(summary.net_cash_flow)}
-        />
-        <Card
-          icon="area-chart"
-          iconColor={pnlColor(summary.total_return_pct)}
-          label="Total Return"
-          value={summary.total_buys > 0 ? formatPercent(summary.total_return_pct) : "N/A"}
-          sub="Including dividends"
-          valueColor={pnlColor(summary.total_return_pct)}
-          borderAccent={pnlColor(summary.total_return_pct)}
-        />
-      </ResponsiveGrid>
-    </View>
-  );
-}
-
-const cardStyles = StyleSheet.create({
-  wrapper: {
-    marginBottom: 8,
-  },
-  periodBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    alignSelf: "flex-start",
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
-    borderWidth: 1,
-    marginBottom: 12,
-  },
-  periodText: {
-    fontSize: 12,
-    fontWeight: "600",
-  },
-  periodCcy: {
-    fontSize: 10,
-    fontWeight: "500",
-    marginLeft: 4,
-  },
-  sectionLabel: {
-    fontSize: 10,
-    fontWeight: "700",
-    letterSpacing: 1.2,
-    textTransform: "uppercase",
-    marginBottom: 6,
-    marginTop: 4,
-  },
-  card: {
-    borderRadius: 10,
-    borderWidth: 1,
-    padding: 14,
-    minHeight: 96,
-    width: "100%",
-  },
-  cardHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    marginBottom: 8,
-  },
-  iconCircle: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  cardLabel: {
-    fontSize: 11,
-    fontWeight: "600",
-    letterSpacing: 0.3,
-    textTransform: "uppercase",
-    flex: 1,
-  },
-  cardValue: {
-    fontSize: 19,
-    fontWeight: "800",
-    letterSpacing: -0.3,
-    marginBottom: 2,
-  },
-  cardSub: {
-    fontSize: 11,
-    fontWeight: "500",
-    marginTop: 2,
-  },
-});
-
-// ── Filter chips ────────────────────────────────────────────────────
-
-const PORTFOLIOS = ["KFH", "BBYN", "USA"] as const;
-const TXN_TYPES = ["Buy", "Sell", "Deposit", "Withdrawal", "Dividend", "Bonus Shares", "Dividend_Only"] as const;
-
-function FilterChip({
-  label,
-  active,
-  onPress,
-  activeColor,
-  colors,
-}: {
-  label: string;
-  active: boolean;
-  onPress: () => void;
-  activeColor?: string;
-  colors: ThemePalette;
-}) {
-  const bg = active ? (activeColor ?? colors.accentPrimary) : colors.bgCard;
-  return (
-    <Pressable
-      onPress={onPress}
-      style={[s.chip, { backgroundColor: bg, borderColor: colors.borderColor }]}
-    >
-      <Text style={[s.chipText, { color: active ? "#fff" : colors.textSecondary }]}>
-        {label}
-      </Text>
-    </Pressable>
-  );
-}
+// Extracted components
+import { TradingSummaryCards } from "@/components/trading/TradingSummary";
+import {
+  TABLE_COLUMNS,
+  TOTAL_TABLE_WIDTH,
+  sortTransactions,
+  HeaderCell,
+  TableRow,
+  ts,
+} from "@/components/trading/TradingTable";
+import type { SortDir } from "@/components/trading/TradingTable";
+import { FilterChip, PORTFOLIOS, TXN_TYPES } from "@/components/trading/TradingFilters";
+import {
+  EditRowData,
+  txnToEditRow,
+  editRowChanged,
+  EDIT_COLUMNS,
+  EDIT_TABLE_WIDTH,
+  EditableTableRow,
+  editStyles,
+} from "@/components/trading/TradingEditableRow";
 
 // ── Main Screen ─────────────────────────────────────────────────────
 
 export default function TradingScreen() {
   const { colors } = useThemeStore();
-  const { isDesktop, isPhone, spacing, fonts } = useResponsive();
+  const { isDesktop, fonts } = useResponsive();
   const queryClient = useQueryClient();
 
   const [portfolios, setPortfolios] = useState<string[]>([]);
@@ -659,6 +80,10 @@ export default function TradingScreen() {
   const [dateTo, setDateTo] = useState("");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
+
+  const debouncedSearch = useDebouncedValue(search);
+  const debouncedDateFrom = useDebouncedValue(dateFrom);
+  const debouncedDateTo = useDebouncedValue(dateTo);
 
   const hasActiveFilters = !!(portfolios.length || txnTypes.length || dateFrom || dateTo || search);
 
@@ -671,19 +96,14 @@ export default function TradingScreen() {
     setPage(1);
   }, []);
 
-  const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
-    queryKey: ["trading-summary", portfolios, txnTypes, dateFrom, dateTo, search, page],
-    queryFn: () =>
-      getTradingSummary({
-        portfolio: portfolios.length === 1 ? portfolios[0] : undefined,
-        txn_type: txnTypes.length === 1 ? txnTypes[0] : undefined,
-        date_from: dateFrom || undefined,
-        date_to: dateTo || undefined,
-        search: search.trim() || undefined,
-        page,
-        page_size: 100,
-      }),
-    placeholderData: (prev) => prev,
+  const { data, isLoading, isError, error, refetch, isFetching } = useTradingSummary({
+    portfolios,
+    txnTypes,
+    dateFrom: debouncedDateFrom,
+    dateTo: debouncedDateTo,
+    search: debouncedSearch,
+    page,
+    pageSize: 100,
   });
 
   // Recalculate WAC mutation
@@ -697,10 +117,32 @@ export default function TradingScreen() {
         + (result.errors.length > 0 ? `\n\nErrors: ${result.errors.join(", ")}` : "")
       );
     },
+    onError: (err) => showErrorAlert("Error", err, "Failed to recalculate"),
+  });
+
+  // Fetch cached stocks for the stock picker in edit mode
+  const { data: stocksData } = useStocks();
+  const allStocks = useMemo(() => stocksData?.stocks ?? [], [stocksData]);
+
+  // Rename stock mutation (inline edit on company name)
+  const renameMutation = useMutation({
+    mutationFn: ({ symbol, name }: { symbol: string; name: string }) =>
+      renameStockBySymbol(symbol, name),
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ["trading-summary"] });
+      Alert.alert("Updated", `"${result.symbol}" renamed to "${result.name}"`);
+    },
     onError: (err: any) => {
-      Alert.alert("Error", err?.message ?? "Failed to recalculate");
+      Alert.alert("Rename Failed", err?.message ?? "Could not rename stock");
     },
   });
+
+  const handleRename = useCallback(
+    (symbol: string, newName: string) => {
+      renameMutation.mutate({ symbol, name: newName });
+    },
+    [renameMutation]
+  );
 
   // Export handler
   const handleExport = useCallback(async () => {
@@ -710,7 +152,7 @@ export default function TradingScreen() {
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = `transactions_${new Date().toISOString().slice(0, 10)}.xlsx`;
+        a.download = `transactions_${todayISO()}.xlsx`;
         a.click();
         URL.revokeObjectURL(url);
       } else {
@@ -773,6 +215,162 @@ export default function TradingScreen() {
     [filteredTransactions, sortCol, sortDir]
   );
 
+  // ── Edit Mode state ───────────────────────────────────────────
+  const [editMode, setEditMode] = useState(false);
+  const [editRows, setEditRows] = useState<Record<number, EditRowData>>({});
+  const [originalRows, setOriginalRows] = useState<Record<number, EditRowData>>({});
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [deleteConfirmPending, setDeleteConfirmPending] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  // Populate edit rows when entering edit mode or when data changes
+  const enterEditMode = useCallback(() => {
+    const rows: Record<number, EditRowData> = {};
+    const orig: Record<number, EditRowData> = {};
+    for (const txn of sortedTransactions) {
+      const r = txnToEditRow(txn);
+      rows[txn.id] = { ...r };
+      orig[txn.id] = { ...r };
+    }
+    setEditRows(rows);
+    setOriginalRows(orig);
+    setSelectedIds(new Set());
+    setDeleteConfirmPending(false);
+    setEditMode(true);
+  }, [sortedTransactions]);
+
+  const exitEditMode = useCallback(() => {
+    setEditMode(false);
+    setEditRows({});
+    setOriginalRows({});
+    setSelectedIds(new Set());
+    setDeleteConfirmPending(false);
+  }, []);
+
+  const handleToggleSelect = useCallback((id: number) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const handleUpdateField = useCallback(
+    (id: number, field: keyof EditRowData, value: string) => {
+      setEditRows((prev) => ({
+        ...prev,
+        [id]: { ...prev[id], [field]: value },
+      }));
+    },
+    []
+  );
+
+  // Save changes — compare each row and call updateTransaction for changed rows
+  const handleSaveChanges = useCallback(async () => {
+    setIsSaving(true);
+    try {
+      let changes = 0;
+      const errors: string[] = [];
+
+      for (const [idStr, editRow] of Object.entries(editRows)) {
+        const id = Number(idStr);
+        const orig = originalRows[id];
+        if (!orig || !editRowChanged(editRow, orig)) continue;
+
+        const qty = parseFloat(editRow.quantity) || 0;
+        const price = parseFloat(editRow.price) || 0;
+        const fees = parseFloat(editRow.fees) || 0;
+        const txnType = editRow.type;
+
+        // Calculate purchase_cost / sell_value based on type (matches Streamlit logic)
+        let purchase_cost: number | null = null;
+        let sell_value: number | null = null;
+        if (txnType === "Buy" || txnType === "Deposit") {
+          purchase_cost = qty > 0 && price > 0 ? qty * price : 0;
+          sell_value = 0;
+        } else if (txnType === "Sell" || txnType === "Withdrawal") {
+          purchase_cost = 0;
+          sell_value = qty > 0 && price > 0 ? qty * price : 0;
+        }
+
+        try {
+          await updateTransaction(id, {
+            txn_date: editRow.date,
+            stock_symbol: editRow.symbol,
+            portfolio: editRow.portfolio,
+            txn_type: txnType as any,
+            shares: qty,
+            fees,
+            notes: editRow.notes || null,
+            ...(purchase_cost != null ? { purchase_cost } : {}),
+            ...(sell_value != null ? { sell_value } : {}),
+          });
+          changes++;
+        } catch (err: any) {
+          errors.push(`ID ${id}: ${err?.message ?? "Failed"}`);
+        }
+      }
+
+      if (changes > 0) {
+        queryClient.invalidateQueries({ queryKey: ["trading-summary"] });
+        // Recalculate WAC after edits
+        try { await recalculateWAC(); } catch (_) { /* non-critical */ }
+        queryClient.invalidateQueries({ queryKey: ["trading-summary"] });
+        Alert.alert(
+          "Saved",
+          `Updated ${changes} transaction(s).` +
+            (errors.length > 0 ? `\n\nErrors:\n${errors.join("\n")}` : "")
+        );
+      } else if (errors.length > 0) {
+        Alert.alert("Errors", errors.join("\n"));
+      } else {
+        Alert.alert("No Changes", "No modifications detected.");
+      }
+      exitEditMode();
+    } catch (err: any) {
+      Alert.alert("Save Error", err?.message ?? "Failed to save changes");
+    } finally {
+      setIsSaving(false);
+    }
+  }, [editRows, originalRows, queryClient, exitEditMode]);
+
+  // Delete selected rows
+  const handleDeleteSelected = useCallback(async () => {
+    setIsDeleting(true);
+    try {
+      let deleted = 0;
+      const errors: string[] = [];
+      for (const id of selectedIds) {
+        try {
+          await deleteTransaction(id);
+          deleted++;
+        } catch (err: any) {
+          errors.push(`ID ${id}: ${err?.message ?? "Failed"}`);
+        }
+      }
+      if (deleted > 0) {
+        queryClient.invalidateQueries({ queryKey: ["trading-summary"] });
+        try { await recalculateWAC(); } catch (_) { /* non-critical */ }
+        queryClient.invalidateQueries({ queryKey: ["trading-summary"] });
+        Alert.alert(
+          "Deleted",
+          `Deleted ${deleted} transaction(s). Use Trash to undo.` +
+            (errors.length > 0 ? `\n\nErrors:\n${errors.join("\n")}` : "")
+        );
+      } else if (errors.length > 0) {
+        Alert.alert("Errors", errors.join("\n"));
+      }
+      exitEditMode();
+    } catch (err: any) {
+      Alert.alert("Delete Error", err?.message ?? "Failed to delete");
+    } finally {
+      setIsDeleting(false);
+      setDeleteConfirmPending(false);
+    }
+  }, [selectedIds, queryClient, exitEditMode]);
+
   if (isLoading && !data) return <LoadingScreen />;
   if (isError && !data)
     return <ErrorScreen message={error?.message ?? "Failed to load"} onRetry={refetch} />;
@@ -786,16 +384,16 @@ export default function TradingScreen() {
       {/* Title */}
       <View style={[s.headerCard, { backgroundColor: colors.bgCard, borderColor: colors.borderColor }]}>
         <Text style={[s.title, { color: colors.textPrimary, fontSize: fonts.title }]}>
-          📈 Trading Section
+          ًں“ˆ Trading Section
         </Text>
         <Text style={[s.subtitle, { color: colors.textSecondary }]}>
-          All transactions · Real-time P&L · CFA-compliant cost basis
+          All transactions آ· Real-time P&L آ· CFA-compliant cost basis
         </Text>
       </View>
 
       {/* Info card */}
       <View style={[s.infoCard, { backgroundColor: colors.bgCard, borderColor: colors.borderColor }]}>
-        <Text style={[s.infoTitle, { color: colors.textPrimary }]}>📋 All your saved transactions</Text>
+        <Text style={[s.infoTitle, { color: colors.textPrimary }]}>ًں“‹ All your saved transactions</Text>
         <Text style={[s.infoBody, { color: colors.textSecondary }]}>
           Buy/Sell trades, Cash Deposits/Withdrawals, Dividends, Bonus Shares — all in one view.
           {"\n"}P&L calculated using CFA-compliant Weighted Average Cost method per portfolio.
@@ -803,7 +401,7 @@ export default function TradingScreen() {
       </View>
 
       {/* Summary metrics */}
-      {summary && <SummaryMetrics summary={summary} dateFrom={dateFrom} dateTo={dateTo} />}
+      {summary && <TradingSummaryCards summary={summary} dateFrom={dateFrom} dateTo={dateTo} />}
 
       {/* Section header: Filters */}
       <View style={[s.sectionHeader, { borderBottomColor: colors.borderColor }]}>
@@ -884,7 +482,7 @@ export default function TradingScreen() {
             />
           )}
         </View>
-        <Text style={{ color: colors.textMuted, fontSize: 13 }}>→</Text>
+        <Text style={{ color: colors.textMuted, fontSize: 13 }}>â†’</Text>
         <View style={[s.dateInputWrap, { backgroundColor: colors.bgInput, borderColor: colors.borderColor }]}>
           <FontAwesome name="calendar" size={12} color={colors.textMuted} />
           {Platform.OS === "web" ? (
@@ -951,11 +549,11 @@ export default function TradingScreen() {
       <View style={s.resultsRow}>
         <Text style={[s.resultsText, { color: colors.textSecondary }]}>
           {data?.pagination?.total_items ?? 0} transactions
-          {portfolios.length ? ` · ${portfolios.join(", ")}` : ""}
-          {txnTypes.length ? ` · ${txnTypes.join(", ")}` : ""}
-          {dateFrom ? ` · from ${dateFrom}` : ""}
-          {dateTo ? ` · to ${dateTo}` : ""}
-          {search ? ` · "${search}"` : ""}
+          {portfolios.length ? ` آ· ${portfolios.join(", ")}` : ""}
+          {txnTypes.length ? ` آ· ${txnTypes.join(", ")}` : ""}
+          {dateFrom ? ` آ· from ${dateFrom}` : ""}
+          {dateTo ? ` آ· to ${dateTo}` : ""}
+          {search ? ` آ· "${search}"` : ""}
         </Text>
       </View>
 
@@ -1003,6 +601,154 @@ export default function TradingScreen() {
         <FontAwesome name="list" size={14} color={colors.success} />
         <Text style={[s.sectionTitle, { color: colors.textPrimary }]}>Transaction Log</Text>
       </View>
+
+      {/* View / Edit mode toggle */}
+      <View style={[editStyles.modeToggle, { borderColor: colors.borderColor }]}>
+        <Pressable
+          onPress={() => { if (editMode) exitEditMode(); }}
+          style={[
+            editStyles.modeBtn,
+            {
+              backgroundColor: !editMode ? colors.accentPrimary : "transparent",
+            },
+          ]}
+        >
+          <FontAwesome name="bar-chart" size={12} color={!editMode ? "#fff" : colors.textSecondary} />
+          <Text style={[editStyles.modeBtnText, { color: !editMode ? "#fff" : colors.textSecondary }]}>
+            View
+          </Text>
+        </Pressable>
+        <Pressable
+          onPress={() => { if (!editMode) enterEditMode(); }}
+          style={[
+            editStyles.modeBtn,
+            {
+              backgroundColor: editMode ? colors.accentPrimary : "transparent",
+            },
+          ]}
+        >
+          <FontAwesome name="pencil" size={12} color={editMode ? "#fff" : colors.textSecondary} />
+          <Text style={[editStyles.modeBtnText, { color: editMode ? "#fff" : colors.textSecondary }]}>
+            Edit
+          </Text>
+        </Pressable>
+      </View>
+
+      {/* Edit mode warning */}
+      {editMode && (
+        <View style={[editStyles.editWarning, { backgroundColor: "#f59e0b18", borderColor: "#f59e0b50" }]}>
+          <FontAwesome name="exclamation-triangle" size={14} color="#f59e0b" />
+          <Text style={[editStyles.editWarningText, { color: "#f59e0b" }]}>
+            Editing here updates the main transactions table. Changes affect portfolio positions and cash.
+          </Text>
+        </View>
+      )}
+
+      {/* Edit mode: Save / Delete action buttons */}
+      {editMode && (
+        <>
+          <View style={editStyles.editActionRow}>
+            <Pressable
+              onPress={handleSaveChanges}
+              disabled={isSaving}
+              style={[
+                editStyles.editActionBtn,
+                {
+                  backgroundColor: colors.accentPrimary + "18",
+                  borderColor: colors.accentPrimary,
+                  opacity: isSaving ? 0.6 : 1,
+                },
+              ]}
+            >
+              {isSaving ? (
+                <ActivityIndicator size="small" color={colors.accentPrimary} />
+              ) : (
+                <FontAwesome name="save" size={13} color={colors.accentPrimary} />
+              )}
+              <Text style={[editStyles.editActionBtnText, { color: colors.accentPrimary }]}>
+                {isSaving ? "Saving..." : "Save Changes"}
+              </Text>
+            </Pressable>
+
+            <Pressable
+              onPress={() => {
+                if (selectedIds.size === 0) return;
+                setDeleteConfirmPending(true);
+              }}
+              disabled={selectedIds.size === 0 || isDeleting}
+              style={[
+                editStyles.editActionBtn,
+                {
+                  backgroundColor: selectedIds.size > 0 ? colors.danger + "18" : colors.bgCard,
+                  borderColor: selectedIds.size > 0 ? colors.danger : colors.borderColor,
+                  opacity: selectedIds.size === 0 ? 0.5 : 1,
+                },
+              ]}
+            >
+              <FontAwesome
+                name="trash"
+                size={13}
+                color={selectedIds.size > 0 ? colors.danger : colors.textMuted}
+              />
+              <Text
+                style={[
+                  editStyles.editActionBtnText,
+                  { color: selectedIds.size > 0 ? colors.danger : colors.textMuted },
+                ]}
+              >
+                Delete ({selectedIds.size})
+              </Text>
+            </Pressable>
+
+            <Pressable
+              onPress={exitEditMode}
+              style={[editStyles.editActionBtn, { borderColor: colors.borderColor }]}
+            >
+              <FontAwesome name="times" size={13} color={colors.textSecondary} />
+              <Text style={[editStyles.editActionBtnText, { color: colors.textSecondary }]}>Cancel</Text>
+            </Pressable>
+          </View>
+
+          {/* Delete confirmation dialog */}
+          {deleteConfirmPending && (
+            <View style={[editStyles.confirmOverlay, { backgroundColor: colors.danger + "10", borderColor: colors.danger + "50" }]}>
+              <Text style={[editStyles.confirmText, { color: colors.danger }]}>
+                âڑ ï¸ڈ CONFIRM DELETE: You are about to permanently delete {selectedIds.size} transaction(s). This cannot be undone!
+              </Text>
+              <View style={editStyles.confirmBtnRow}>
+                <Pressable
+                  onPress={handleDeleteSelected}
+                  disabled={isDeleting}
+                  style={[editStyles.confirmBtn, { backgroundColor: colors.danger, borderColor: colors.danger }]}
+                >
+                  {isDeleting ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <FontAwesome name="check" size={11} color="#fff" />
+                  )}
+                  <Text style={[editStyles.confirmBtnText, { color: "#fff" }]}>
+                    {isDeleting ? "Deleting..." : "Yes, Delete"}
+                  </Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => setDeleteConfirmPending(false)}
+                  style={[editStyles.confirmBtn, { borderColor: colors.borderColor }]}
+                >
+                  <FontAwesome name="times" size={11} color={colors.textSecondary} />
+                  <Text style={[editStyles.confirmBtnText, { color: colors.textSecondary }]}>Cancel</Text>
+                </Pressable>
+              </View>
+            </View>
+          )}
+        </>
+      )}
+
+      {/* Hint for view mode */}
+      {!editMode && (
+        <Text style={{ fontSize: 11, color: colors.textMuted, marginBottom: 6 }}>
+          Switch to <Text style={{ fontWeight: "700" }}>Edit</Text> mode to modify transactions.
+        </Text>
+      )}
     </View>
   );
 
@@ -1034,7 +780,52 @@ export default function TradingScreen() {
               Use "Add Transactions" to record trades
             </Text>
           </View>
+        ) : editMode ? (
+          /* ── EDIT MODE TABLE ──────────────────────────────────── */
+          <View style={[ts.tableOuter, { borderColor: colors.accentPrimary + "50", backgroundColor: colors.bgCard }]}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={true}>
+              <View style={{ minWidth: EDIT_TABLE_WIDTH }}>
+                {/* Edit header row */}
+                <View
+                  style={[
+                    ts.headerRow,
+                    { borderBottomColor: colors.accentPrimary, backgroundColor: colors.bgSecondary },
+                  ]}
+                >
+                  {EDIT_COLUMNS.map((col) => (
+                    <View key={col.key} style={[ts.headerCell, { width: col.width }]}>
+                      <Text
+                        style={[ts.headerText, { color: colors.textPrimary, textAlign: "center" }]}
+                        numberOfLines={1}
+                      >
+                        {col.label}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+
+                {/* Editable data rows */}
+                {sortedTransactions.map((txn, idx) => {
+                  const row = editRows[txn.id];
+                  if (!row) return null;
+                  return (
+                    <EditableTableRow
+                      key={txn.id}
+                      row={row}
+                      isSelected={selectedIds.has(txn.id)}
+                      onToggleSelect={handleToggleSelect}
+                      onUpdateField={handleUpdateField}
+                      colors={colors}
+                      isEven={idx % 2 === 0}
+                      stocks={allStocks}
+                    />
+                  );
+                })}
+              </View>
+            </ScrollView>
+          </View>
         ) : (
+          /* ── VIEW MODE TABLE ──────────────────────────────────── */
           <View style={[ts.tableOuter, { borderColor: colors.borderColor, backgroundColor: colors.bgCard }]}>
             <ScrollView horizontal showsHorizontalScrollIndicator={true}>
               <View style={{ minWidth: TOTAL_TABLE_WIDTH }}>
@@ -1059,7 +850,7 @@ export default function TradingScreen() {
 
                 {/* Data rows */}
                 {sortedTransactions.map((txn, idx) => (
-                  <TableRow key={txn.id} txn={txn} colors={colors} isEven={idx % 2 === 0} />
+                  <TableRow key={txn.id} txn={txn} colors={colors} isEven={idx % 2 === 0} onRename={handleRename} />
                 ))}
               </View>
             </ScrollView>
@@ -1109,14 +900,14 @@ export default function TradingScreen() {
         <View style={[s.footer, { backgroundColor: colors.bgSecondary, borderTopColor: colors.borderColor }]}>
           <View style={s.footerStat}>
             <Text style={[s.footerValue, { color: colors.accentPrimary }]}>
-              {fmtNum(summary.total_transactions)}
+              {fmtNum(summary.total_transactions, 0)}
             </Text>
             <Text style={[s.footerLabel, { color: colors.textSecondary }]}>Total Txns</Text>
           </View>
           <View style={[s.footerDivider, { backgroundColor: colors.borderColor }]} />
           <View style={s.footerStat}>
             <Text style={[s.footerValue, { color: colors.accentSecondary }]}>
-              {fmtNum(summary.total_trades)}
+              {fmtNum(summary.total_trades, 0)}
             </Text>
             <Text style={[s.footerLabel, { color: colors.textSecondary }]}>Buy/Sell</Text>
           </View>
@@ -1133,53 +924,6 @@ export default function TradingScreen() {
   );
 }
 
-// ── Table styles (ts) ───────────────────────────────────────────────
-
-const ts = StyleSheet.create({
-  tableOuter: {
-    borderRadius: 10,
-    borderWidth: 1,
-    overflow: "hidden",
-    marginBottom: 12,
-  },
-  headerRow: {
-    flexDirection: "row",
-    borderBottomWidth: 2,
-  },
-  headerCell: {
-    paddingHorizontal: 6,
-    paddingVertical: 10,
-    justifyContent: "center",
-  },
-  headerText: {
-    fontSize: 11,
-    fontWeight: "700",
-    textTransform: "uppercase",
-    letterSpacing: 0.3,
-  },
-  dataRow: {
-    flexDirection: "row",
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  dataCell: {
-    paddingHorizontal: 6,
-    paddingVertical: 8,
-    justifyContent: "center",
-  },
-  cellText: {
-    fontSize: 12,
-  },
-  badge: {
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 6,
-    alignSelf: "flex-start",
-  },
-  badgeText: {
-    fontSize: 11,
-    fontWeight: "700",
-  },
-});
 
 // ── General styles (s) ──────────────────────────────────────────────
 

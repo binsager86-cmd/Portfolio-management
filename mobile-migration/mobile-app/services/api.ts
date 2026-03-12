@@ -11,7 +11,10 @@ import axios, {
   AxiosResponse,
   InternalAxiosRequestConfig,
 } from "axios";
+import { z } from "zod";
+
 import { API_BASE_URL, API_TIMEOUT } from "@/constants/Config";
+import { API_TIMEOUT_LONG } from "@/constants/layout";
 import {
   getToken,
   setToken,
@@ -89,6 +92,9 @@ api.interceptors.response.use(
         );
 
         await setToken(data.access_token);
+        if (data.refresh_token) {
+          await setRefreshToken(data.refresh_token);
+        }
         onTokenRefreshed(data.access_token);
 
         // Retry the original request with the new token
@@ -135,8 +141,36 @@ export interface LoginResponse {
 
 export interface RefreshResponse {
   access_token: string;
+  refresh_token?: string;
   token_type: string;
   expires_in: number;
+}
+
+export interface PortfolioBreakdown {
+  market_value_kwd?: number;
+  total_cost_kwd?: number;
+  unrealized_pnl_kwd?: number;
+  realized_pnl_kwd?: number;
+  holding_count?: number;
+  currency?: string;
+  [key: string]: unknown;
+}
+
+export interface PortfolioValueEntry {
+  market_value?: number;
+  market_value_kwd?: number;
+  total_cost_kwd?: number;
+  currency?: string;
+  holding_count?: number;
+  [key: string]: unknown;
+}
+
+export interface AccountEntry {
+  id: number;
+  name: string;
+  balance?: number;
+  currency?: string;
+  [key: string]: unknown;
 }
 
 export interface OverviewData {
@@ -154,9 +188,9 @@ export interface OverviewData {
   total_gain: number;
   roi_percent: number;
   usd_kwd_rate: number;
-  by_portfolio: Record<string, any>;
-  portfolio_values: Record<string, any>;
-  accounts: any[];
+  by_portfolio: Record<string, PortfolioBreakdown>;
+  portfolio_values: Record<string, PortfolioValueEntry>;
+  accounts: AccountEntry[];
   // Daily movement (live value vs previous snapshot)
   daily_movement?: number;
   daily_movement_pct?: number;
@@ -167,6 +201,8 @@ export interface OverviewData {
   cagr_years?: number;
   cagr_start_value?: number;
   cagr_start_date?: string;
+  // MWRR (IRR) — inline from overview
+  mwrr_percent?: number | null;
 }
 
 export interface Holding {
@@ -214,14 +250,32 @@ export interface HoldingsResponse {
 
 // ── API functions ───────────────────────────────────────────────────
 
+// ── Auth input schemas (defense-in-depth) ──────────────────────────
+const loginInputSchema = z.object({
+  username: z.string().min(1).max(200).trim(),
+  password: z.string().min(1).max(128),
+});
+
+const registerInputSchema = z.object({
+  username: z.string().min(1).max(200).trim(),
+  password: z.string().min(6).max(128),
+  name: z.string().max(100).trim().optional(),
+});
+
+const changePasswordInputSchema = z.object({
+  currentPassword: z.string().min(1).max(128),
+  newPassword: z.string().min(6).max(128),
+});
+
 /** Login using JSON body (v1). Returns JWT access + refresh tokens + user info. */
 export async function login(
   username: string,
   password: string
 ): Promise<LoginResponse> {
+  const validated = loginInputSchema.parse({ username, password });
   const { data } = await api.post<LoginResponse>("/api/v1/auth/login", {
-    username,
-    password,
+    username: validated.username,
+    password: validated.password,
   });
   return data;
 }
@@ -255,7 +309,12 @@ export async function getPortfolioTable(
   holdings: Holding[];
   count: number;
 }> {
-  const { data } = await api.get<{ status: string; data: any }>(
+  const { data } = await api.get<{ status: string; data: {
+    portfolio: string;
+    currency: string;
+    holdings: Holding[];
+    count: number;
+  } }>(
     `/api/portfolio/table/${portfolioName}`
   );
   return data.data;
@@ -266,7 +325,7 @@ export async function getFxRate(): Promise<{
   usd_kwd: number;
   source: string;
 }> {
-  const { data } = await api.get<{ status: string; data: any }>(
+  const { data } = await api.get<{ status: string; data: { usd_kwd: number; source: string } }>(
     "/api/portfolio/fx-rate"
   );
   return data.data;
@@ -513,6 +572,45 @@ export async function exportDepositsExcel(): Promise<Blob> {
   return data;
 }
 
+/** Download sample template for deposit uploads. Returns blob. */
+export async function downloadDepositsTemplate(): Promise<Blob> {
+  const { data } = await api.get("/api/v1/cash/deposits-template", {
+    responseType: "blob",
+  });
+  return data;
+}
+
+/** Import deposits from Excel upload. */
+export async function importDepositsExcel(
+  file: FormData,
+  mode: "merge" | "replace" = "merge",
+): Promise<{
+  imported: number;
+  skipped: number;
+  total_rows: number;
+  errors: Array<{ row: number; error: string }>;
+  mode: string;
+}> {
+  const { data } = await api.post<{
+    status: string;
+    data: {
+      imported: number;
+      skipped: number;
+      total_rows: number;
+      errors: Array<{ row: number; error: string }>;
+      mode: string;
+    };
+  }>(
+    "/api/v1/cash/deposits-import",
+    file,
+    {
+      headers: { "Content-Type": "multipart/form-data" },
+      params: { mode },
+    }
+  );
+  return data.data;
+}
+
 // ── Portfolio Cash Balances ─────────────────────────────────────────
 
 export interface PortfolioCashBalance {
@@ -707,6 +805,8 @@ export interface TradingTransaction {
   id: number;
   date: string | null;
   symbol: string | null;
+  company_name: string | null;
+  stock_id: number | null;
   portfolio: string;
   type: string;
   status: string;
@@ -951,9 +1051,38 @@ export async function updateStock(stockId: number, payload: Partial<StockCreate>
   return data.data;
 }
 
+/** Rename a stock by symbol (inline edit from trading table). */
+export async function renameStockBySymbol(
+  symbol: string,
+  name: string
+): Promise<{ stock_id: number; symbol: string; name: string; message: string }> {
+  const { data } = await api.patch<{
+    status: string;
+    data: { stock_id: number; symbol: string; name: string; message: string };
+  }>("/api/v1/portfolio/rename-stock", null, {
+    params: { symbol, name },
+  });
+  return data.data;
+}
+
 /** Delete stock. */
 export async function deleteStock(stockId: number): Promise<void> {
   await api.delete(`/api/v1/stocks/${stockId}`);
+}
+
+/** Merge two stock records: move all transactions from source into target, delete source. */
+export async function mergeStocks(
+  sourceStockId: number,
+  targetStockId: number
+): Promise<{ message: string; source_symbol: string; target_symbol: string; transactions_moved: number }> {
+  const { data } = await api.post<{
+    status: string;
+    data: { message: string; source_symbol: string; target_symbol: string; transactions_moved: number };
+  }>("/api/v1/stocks/merge", {
+    source_stock_id: sourceStockId,
+    target_stock_id: targetStockId,
+  });
+  return data.data;
 }
 
 /** Trigger price update for all stocks. */
@@ -1023,7 +1152,7 @@ export async function saveSnapshot(payload?: {
   const { data } = await api.post<{ status: string; data: SaveSnapshotResponse }>(
     "/api/v1/tracker/save-snapshot",
     payload ?? {},
-    { timeout: 120_000 }, // allow up to 2 min — live valuation can be slow
+    { timeout: API_TIMEOUT_LONG }, // allow up to 2 min — live valuation can be slow
   );
   return data.data;
 }
@@ -1046,24 +1175,38 @@ export async function recalculateSnapshots(): Promise<{ updated: number; message
   const { data } = await api.post<{ status: string; data: { updated: number; message: string } }>(
     "/api/v1/tracker/recalculate",
     {},
-    { timeout: 120_000 }, // allow up to 2 min for large snapshot sets
+    { timeout: API_TIMEOUT_LONG }, // allow up to 2 min for large snapshot sets
   );
   return data.data;
 }
 
 // ── Integrity API ───────────────────────────────────────────────────
 
+export interface IntegrityCheckResult {
+  status: string;
+  checks: Array<{ name: string; passed: boolean; details?: string }>;
+  [key: string]: unknown;
+}
+
 /** Run full integrity check. */
-export async function integrityCheck(): Promise<any> {
-  const { data } = await api.get<{ status: string; data: any }>(
+export async function integrityCheck(): Promise<IntegrityCheckResult> {
+  const { data } = await api.get<{ status: string; data: IntegrityCheckResult }>(
     "/api/v1/integrity/check"
   );
   return data.data;
 }
 
+export interface CashIntegrityResult {
+  portfolio: string;
+  expected: number;
+  actual: number;
+  difference: number;
+  [key: string]: unknown;
+}
+
 /** Check cash balance for a portfolio. */
-export async function checkCashIntegrity(portfolio: string): Promise<any> {
-  const { data } = await api.get<{ status: string; data: any }>(
+export async function checkCashIntegrity(portfolio: string): Promise<CashIntegrityResult> {
+  const { data } = await api.get<{ status: string; data: CashIntegrityResult }>(
     `/api/v1/integrity/cash/${portfolio}`
   );
   return data.data;
@@ -1079,15 +1222,22 @@ export async function exportBackup(): Promise<Blob> {
   return response.data;
 }
 
+export interface BackupImportResult {
+  imported: number;
+  skipped: number;
+  message: string;
+  [key: string]: unknown;
+}
+
 /** Import transactions from Excel (Backup & Restore flow). */
 export async function importBackup(
   file: FormData,
   mode: "merge" | "replace" = "merge",
   sheetName?: string,
-): Promise<any> {
+): Promise<BackupImportResult> {
   const params: Record<string, string> = { mode };
   if (sheetName) params.sheet_name = sheetName;
-  const { data } = await api.post<{ status: string; data: any }>(
+  const { data } = await api.post<{ status: string; data: BackupImportResult }>(
     "/api/v1/backup/import",
     file,
     {
@@ -1142,12 +1292,19 @@ export interface PfmSnapshotFull extends PfmSnapshotSummary {
   income_expenses: PfmIncomeExpense[];
 }
 
+export interface PaginationInfo {
+  page: number;
+  page_size: number;
+  total_pages: number;
+  total_count: number;
+}
+
 /** List PFM snapshots. */
 export async function getPfmSnapshots(params?: {
   page?: number;
   page_size?: number;
-}): Promise<{ snapshots: PfmSnapshotSummary[]; count: number; pagination: any }> {
-  const { data } = await api.get<{ status: string; data: any }>(
+}): Promise<{ snapshots: PfmSnapshotSummary[]; count: number; pagination: PaginationInfo }> {
+  const { data } = await api.get<{ status: string; data: { snapshots: PfmSnapshotSummary[]; count: number; pagination: PaginationInfo } }>(
     "/api/v1/pfm/snapshots",
     { params }
   );
@@ -1170,7 +1327,7 @@ export async function createPfmSnapshot(payload: {
   liabilities: PfmLiability[];
   income_expenses: PfmIncomeExpense[];
 }): Promise<{ id: number; net_worth: number; message: string }> {
-  const { data } = await api.post<{ status: string; data: any }>(
+  const { data } = await api.post<{ status: string; data: { id: number; net_worth: number; message: string } }>(
     "/api/v1/pfm/snapshots",
     payload
   );
@@ -1263,8 +1420,8 @@ export interface ValuationResult {
   model_type: string;
   valuation_date: string;
   intrinsic_value: number | null;
-  parameters: Record<string, any>;
-  assumptions: Record<string, any>;
+  parameters: Record<string, number | string | null>;
+  assumptions: Record<string, number | string | null>;
   created_by_user_id: number | null;
   created_at: number;
 }
@@ -1311,7 +1468,7 @@ export async function createAnalysisStock(payload: {
   country?: string;
   outstanding_shares?: number;
 }): Promise<{ id: number; symbol: string; message: string }> {
-  const { data } = await api.post<{ status: string; data: any }>(
+  const { data } = await api.post<{ status: string; data: { id: number; symbol: string; message: string } }>(
     "/api/v1/fundamental/stocks",
     payload,
   );
@@ -1330,7 +1487,7 @@ export async function updateAnalysisStock(
     outstanding_shares: number;
   }>,
 ): Promise<{ message: string }> {
-  const { data } = await api.put<{ status: string; data: any }>(
+  const { data } = await api.put<{ status: string; data: { message: string } }>(
     `/api/v1/fundamental/stocks/${stockId}`,
     payload,
   );
@@ -1367,7 +1524,7 @@ export async function createStatement(
     line_items?: Array<{ code: string; name: string; amount: number; is_total?: boolean }>;
   },
 ): Promise<{ id: number; message: string }> {
-  const { data } = await api.post<{ status: string; data: any }>(
+  const { data } = await api.post<{ status: string; data: { id: number; message: string } }>(
     `/api/v1/fundamental/stocks/${stockId}/statements`,
     payload,
   );
@@ -1434,7 +1591,7 @@ export async function uploadFinancialStatement(
       uri: fileUri,
       name: fileName,
       type: mimeType,
-    } as any);
+    } as unknown);
   }
 
   const { data } = await api.post<{ status: string; data: AIUploadResult }>(
@@ -1442,7 +1599,7 @@ export async function uploadFinancialStatement(
     formData,
     {
       headers: { "Content-Type": "multipart/form-data" },
-      timeout: 120_000, // 2 min timeout for AI processing
+      timeout: API_TIMEOUT_LONG, // 5 min timeout for AI extraction pipeline
     },
   );
   return data.data;
@@ -1453,7 +1610,7 @@ export async function getStockMetrics(
   stockId: number,
   metricType?: string,
 ): Promise<{ metrics: StockMetric[]; grouped: Record<string, StockMetric[]>; count: number }> {
-  const { data } = await api.get<{ status: string; data: any }>(
+  const { data } = await api.get<{ status: string; data: { metrics: StockMetric[]; grouped: Record<string, StockMetric[]>; count: number } }>(
     `/api/v1/fundamental/stocks/${stockId}/metrics`,
     { params: metricType ? { metric_type: metricType } : undefined },
   );
@@ -1465,7 +1622,7 @@ export async function calculateMetrics(
   stockId: number,
   payload: { period_end_date: string; fiscal_year: number; fiscal_quarter?: number },
 ): Promise<{ metrics: Record<string, Record<string, number | null>> }> {
-  const { data } = await api.post<{ status: string; data: any }>(
+  const { data } = await api.post<{ status: string; data: { metrics: Record<string, Record<string, number | null>> } }>(
     `/api/v1/fundamental/stocks/${stockId}/metrics/calculate`,
     payload,
   );
@@ -1476,7 +1633,7 @@ export async function calculateMetrics(
 export async function getGrowthAnalysis(
   stockId: number,
 ): Promise<{ growth: Record<string, Array<{ period: string; prev_period: string; growth: number }>> }> {
-  const { data } = await api.get<{ status: string; data: any }>(
+  const { data } = await api.get<{ status: string; data: { growth: Record<string, Array<{ period: string; prev_period: string; growth: number }>> } }>(
     `/api/v1/fundamental/stocks/${stockId}/growth`,
   );
   return data.data;
@@ -1484,7 +1641,7 @@ export async function getGrowthAnalysis(
 
 /** Get / compute stock score. */
 export async function getStockScore(stockId: number): Promise<StockScoreSummary & { details?: Record<string, number>; error?: string }> {
-  const { data } = await api.get<{ status: string; data: any }>(
+  const { data } = await api.get<{ status: string; data: StockScoreSummary & { details?: Record<string, number>; error?: string } }>(
     `/api/v1/fundamental/stocks/${stockId}/score`,
   );
   return data.data;
@@ -1492,7 +1649,7 @@ export async function getStockScore(stockId: number): Promise<StockScoreSummary 
 
 /** Get score history. */
 export async function getScoreHistory(stockId: number): Promise<{ scores: StockScore[]; count: number }> {
-  const { data } = await api.get<{ status: string; data: any }>(
+  const { data } = await api.get<{ status: string; data: { scores: StockScore[]; count: number } }>(
     `/api/v1/fundamental/stocks/${stockId}/scores/history`,
   );
   return data.data;
@@ -1500,18 +1657,28 @@ export async function getScoreHistory(stockId: number): Promise<{ scores: StockS
 
 /** Get saved valuations. */
 export async function getValuations(stockId: number): Promise<{ valuations: ValuationResult[]; count: number }> {
-  const { data } = await api.get<{ status: string; data: any }>(
+  const { data } = await api.get<{ status: string; data: { valuations: ValuationResult[]; count: number } }>(
     `/api/v1/fundamental/stocks/${stockId}/valuations`,
   );
   return data.data;
+}
+
+export interface ValuationRunResult {
+  id: number;
+  model_type: string;
+  intrinsic_value: number | null;
+  parameters: Record<string, number | string | null>;
+  assumptions: Record<string, number | string | null>;
+  message?: string;
+  [key: string]: unknown;
 }
 
 /** Run Graham Number valuation. */
 export async function runGrahamValuation(
   stockId: number,
   payload: { eps: number; book_value_per_share: number; multiplier?: number },
-): Promise<any> {
-  const { data } = await api.post<{ status: string; data: any }>(
+): Promise<ValuationRunResult> {
+  const { data } = await api.post<{ status: string; data: ValuationRunResult }>(
     `/api/v1/fundamental/stocks/${stockId}/valuations/graham`,
     payload,
   );
@@ -1531,8 +1698,8 @@ export async function runDCFValuation(
     terminal_growth?: number;
     shares_outstanding?: number;
   },
-): Promise<any> {
-  const { data } = await api.post<{ status: string; data: any }>(
+): Promise<ValuationRunResult> {
+  const { data } = await api.post<{ status: string; data: ValuationRunResult }>(
     `/api/v1/fundamental/stocks/${stockId}/valuations/dcf`,
     payload,
   );
@@ -1549,8 +1716,8 @@ export async function runDDMValuation(
     high_growth_years?: number;
     high_growth_rate?: number;
   },
-): Promise<any> {
-  const { data } = await api.post<{ status: string; data: any }>(
+): Promise<ValuationRunResult> {
+  const { data } = await api.post<{ status: string; data: ValuationRunResult }>(
     `/api/v1/fundamental/stocks/${stockId}/valuations/ddm`,
     payload,
   );
@@ -1566,8 +1733,8 @@ export async function runMultiplesValuation(
     multiple_type?: string;
     shares_outstanding?: number;
   },
-): Promise<any> {
-  const { data } = await api.post<{ status: string; data: any }>(
+): Promise<ValuationRunResult> {
+  const { data } = await api.post<{ status: string; data: ValuationRunResult }>(
     `/api/v1/fundamental/stocks/${stockId}/valuations/multiples`,
     payload,
   );
@@ -1610,7 +1777,7 @@ export async function createSecurity(payload: {
   country?: string;
   sector?: string;
 }): Promise<{ security_id: string; message: string }> {
-  const { data } = await api.post<{ status: string; data: any }>(
+  const { data } = await api.post<{ status: string; data: { security_id: string; message: string } }>(
     "/api/v1/securities",
     payload
   );
@@ -1619,6 +1786,14 @@ export async function createSecurity(payload: {
 
 // ── AI Analyst API ──────────────────────────────────────────────────
 
+export interface AIAnalysisResult {
+  analysis: string;
+  model: string;
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  [key: string]: unknown;
+}
+
 /** Generate AI portfolio analysis. */
 export async function analyzePortfolio(payload: {
   prompt?: string;
@@ -1626,8 +1801,8 @@ export async function analyzePortfolio(payload: {
   include_transactions?: boolean;
   include_performance?: boolean;
   language?: string;
-}): Promise<any> {
-  const { data } = await api.post<{ status: string; data: any }>(
+}): Promise<AIAnalysisResult> {
+  const { data } = await api.post<{ status: string; data: AIAnalysisResult }>(
     "/api/v1/ai/analyze",
     payload
   );
@@ -1642,11 +1817,19 @@ export async function getAIStatus(): Promise<{ configured: boolean; model: strin
   return data.data;
 }
 
+const apiKeyInputSchema = z.object({
+  api_key: z.string()
+    .min(1, "API key is required")
+    .max(256, "API key too long")
+    .regex(/^AIzaSy[A-Za-z0-9_-]{33}$/, "Invalid Gemini API key format"),
+});
+
 /** Save user's Gemini API key. */
 export async function saveApiKey(apiKey: string): Promise<{ message: string }> {
+  const validated = apiKeyInputSchema.parse({ api_key: apiKey.trim() });
   const { data } = await api.put<{ status: string; data: { message: string } }>(
     "/api/v1/auth/api-key",
-    { api_key: apiKey }
+    { api_key: validated.api_key }
   );
   return data.data;
 }
@@ -1667,10 +1850,11 @@ export async function register(
   password: string,
   name?: string
 ): Promise<LoginResponse> {
+  const validated = registerInputSchema.parse({ username, password, name });
   const { data } = await api.post<LoginResponse>("/api/v1/auth/register", {
-    username,
-    password,
-    name,
+    username: validated.username,
+    password: validated.password,
+    name: validated.name,
   });
   return data;
 }
@@ -1688,22 +1872,23 @@ export async function changePassword(
   currentPassword: string,
   newPassword: string
 ): Promise<{ message: string }> {
+  const validated = changePasswordInputSchema.parse({ currentPassword, newPassword });
   const { data } = await api.put<{ status: string; data: { message: string } }>(
     "/api/v1/auth/change-password",
-    { current_password: currentPassword, new_password: newPassword }
+    { current_password: validated.currentPassword, new_password: validated.newPassword }
   );
   return data.data;
 }
 
 /** Get current user info. */
 export async function getMe(): Promise<{ user_id: number; username: string; name: string }> {
-  const { data } = await api.get<{ status: string; data: any }>("/api/v1/auth/me");
+  const { data } = await api.get<{ status: string; data: { user_id: number; username: string; name: string } }>("/api/v1/auth/me");
   return data.data;
 }
 
 /** Get account/cash balances. */
-export async function getAccounts(): Promise<{ total_cash_kwd: number; accounts: any[] }> {
-  const { data } = await api.get<{ status: string; data: any }>("/api/portfolio/accounts");
+export async function getAccounts(): Promise<{ total_cash_kwd: number; accounts: AccountEntry[] }> {
+  const { data } = await api.get<{ status: string; data: { total_cash_kwd: number; accounts: AccountEntry[] } }>("/api/portfolio/accounts");
   return data.data;
 }
 
@@ -1717,18 +1902,25 @@ export async function deleteAllTransactions(): Promise<{ deleted_count: number; 
   return data.data;
 }
 
+export interface TransactionImportResult {
+  imported: number;
+  skipped?: number;
+  message?: string;
+  [key: string]: unknown;
+}
+
 /** Import transactions from Excel with mode (merge | replace). */
 export async function importTransactions(
   file: File,
   portfolio: string,
   mode: "merge" | "replace" = "merge",
   sheetName?: string,
-): Promise<any> {
+): Promise<TransactionImportResult> {
   const formData = new FormData();
   formData.append("file", file);
   const params: Record<string, string> = { portfolio, mode };
   if (sheetName) params.sheet_name = sheetName;
-  const { data } = await api.post<{ status: string; data: any }>(
+  const { data } = await api.post<{ status: string; data: TransactionImportResult }>(
     "/api/v1/backup/import",
     formData,
     {

@@ -14,7 +14,6 @@ import {
   StyleSheet,
   ScrollView,
   Animated,
-  Dimensions,
   Platform,
 } from "react-native";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
@@ -178,7 +177,7 @@ export function MobileDrawer({ visible, onClose }: MobileDrawerProps) {
             ]}
           >
             <FontAwesome
-              name={mode === "dark" ? "sun-o" : "moon-o"}
+              name={mode === "dark" ? "lightbulb-o" : "moon-o"}
               size={20}
               color={colors.textSecondary}
               style={s.navIcon}

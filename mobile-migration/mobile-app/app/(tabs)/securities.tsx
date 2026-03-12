@@ -9,28 +9,30 @@ import {
   View,
   Text,
   StyleSheet,
-  FlatList,
   Pressable,
   TextInput,
   RefreshControl,
 } from "react-native";
-import { useQuery } from "@tanstack/react-query";
+import { FlashList } from "@shopify/flash-list";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 
-import { getSecurities, getStocks, SecurityRecord, StockRecord } from "@/services/api";
+import { useStocks, useSecurities } from "@/hooks/queries";
 import { useThemeStore } from "@/services/themeStore";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { useResponsive } from "@/hooks/useResponsive";
+import { useScreenStyles } from "@/hooks/useScreenStyles";
 import { LoadingScreen } from "@/components/ui/LoadingScreen";
-import { ErrorScreen } from "@/components/ui/ErrorScreen";
-import type { ThemePalette } from "@/constants/theme";
+import { FilterChip } from "@/components/ui/FilterChip";
 
 type Tab = "stocks" | "securities";
 
 export default function SecuritiesMasterScreen() {
   const { colors } = useThemeStore();
+  const ss = useScreenStyles();
   const { isDesktop } = useResponsive();
   const [tab, setTab] = useState<Tab>("stocks");
   const [search, setSearch] = useState("");
+  const debouncedSearch = useDebouncedValue(search);
   const [portfolioFilter, setPortfolioFilter] = useState<string | undefined>(undefined);
 
   const {
@@ -38,30 +40,23 @@ export default function SecuritiesMasterScreen() {
     isLoading: stocksLoading,
     refetch: refetchStocks,
     isFetching: stocksFetching,
-  } = useQuery({
-    queryKey: ["stocks", portfolioFilter, search],
-    queryFn: () => getStocks({ portfolio: portfolioFilter, search: search || undefined }),
-  });
+  } = useStocks({ portfolio: portfolioFilter, search: debouncedSearch });
 
   const {
     data: securitiesData,
     isLoading: securitiesLoading,
     refetch: refetchSecurities,
     isFetching: securitiesFetching,
-  } = useQuery({
-    queryKey: ["securities", search],
-    queryFn: () => getSecurities({ search: search || undefined }),
-    enabled: tab === "securities",
-  });
+  } = useSecurities(debouncedSearch, tab === "securities");
 
   const stocks = stocksData?.stocks ?? [];
   const securities = securitiesData?.securities ?? [];
 
   return (
-    <View style={[s.container, { backgroundColor: colors.bgPrimary }]}>
+    <View style={ss.container}>
       {/* Header */}
-      <View style={[s.header, { borderBottomColor: colors.borderColor }]}>
-        <Text style={[s.title, { color: colors.textPrimary }]}>Securities Master</Text>
+      <View style={ss.header}>
+        <Text style={ss.title}>Securities Master</Text>
       </View>
 
       {/* Tabs */}
@@ -104,15 +99,13 @@ export default function SecuritiesMasterScreen() {
         {tab === "stocks" && (
           <View style={s.pfFilter}>
             {[undefined, "KFH", "BBYN", "USA"].map((pf) => (
-              <Pressable
+              <FilterChip
                 key={pf ?? "all"}
+                label={pf ?? "All"}
+                active={portfolioFilter === pf}
                 onPress={() => setPortfolioFilter(pf)}
-                style={[s.filterChip, { backgroundColor: portfolioFilter === pf ? colors.accentPrimary : colors.bgCard, borderColor: colors.borderColor }]}
-              >
-                <Text style={{ color: portfolioFilter === pf ? "#fff" : colors.textSecondary, fontSize: 11, fontWeight: "600" }}>
-                  {pf ?? "All"}
-                </Text>
-              </Pressable>
+                colors={colors}
+              />
             ))}
           </View>
         )}
@@ -123,10 +116,10 @@ export default function SecuritiesMasterScreen() {
         stocksLoading ? (
           <LoadingScreen />
         ) : (
-          <FlatList
+          <FlashList
             data={stocks}
             keyExtractor={(item) => String(item.id)}
-            contentContainerStyle={[s.listContent, isDesktop && { maxWidth: 900, alignSelf: "center", width: "100%" }]}
+            contentContainerStyle={[ss.listContent, isDesktop && { maxWidth: 900, alignSelf: "center", width: "100%" }]}
             refreshControl={
               <RefreshControl refreshing={stocksFetching && !stocksLoading} onRefresh={refetchStocks} tintColor={colors.accentPrimary} />
             }
@@ -162,10 +155,10 @@ export default function SecuritiesMasterScreen() {
       ) : securitiesLoading ? (
         <LoadingScreen />
       ) : (
-        <FlatList
+        <FlashList
           data={securities}
           keyExtractor={(item) => item.security_id}
-          contentContainerStyle={[s.listContent, isDesktop && { maxWidth: 900, alignSelf: "center", width: "100%" }]}
+          contentContainerStyle={[ss.listContent, isDesktop && { maxWidth: 900, alignSelf: "center", width: "100%" }]}
           refreshControl={
             <RefreshControl refreshing={securitiesFetching && !securitiesLoading} onRefresh={refetchSecurities} tintColor={colors.accentPrimary} />
           }
@@ -201,14 +194,6 @@ export default function SecuritiesMasterScreen() {
 }
 
 const s = StyleSheet.create({
-  container: { flex: 1 },
-  header: {
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 12,
-    borderBottomWidth: 1,
-  },
-  title: { fontSize: 24, fontWeight: "700" },
   tabRow: { flexDirection: "row", borderBottomWidth: 1 },
   tabBtn: { paddingHorizontal: 20, paddingVertical: 12 },
   searchRow: {
@@ -231,13 +216,6 @@ const s = StyleSheet.create({
     flexDirection: "row",
     gap: 6,
   },
-  filterChip: {
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 12,
-    borderWidth: 1,
-  },
-  listContent: { paddingHorizontal: 12, paddingTop: 8, paddingBottom: 80 },
   stockRow: {
     flexDirection: "row",
     alignItems: "center",

@@ -2,40 +2,45 @@
  * Theme store (Zustand) — persists light/dark preference.
  *
  * On Web  → localStorage
- * On Native → AsyncStorage
+ * On Native → MMKV (fast synchronous storage)
  */
 
-import { create } from "zustand";
 import { Platform } from "react-native";
-import { ThemePalette, LightTheme, DarkTheme, getTheme } from "@/constants/theme";
+import { create } from "zustand";
+
+import { ThemePalette, DarkTheme, getTheme } from "@/constants/theme";
 
 const STORAGE_KEY = "app_theme_mode";
 
+// ── MMKV instance (native only) ────────────────────────────────────
+
+let mmkv: import("react-native-mmkv").MMKV | null = null;
+if (Platform.OS !== "web") {
+  const { MMKV } = require("react-native-mmkv");
+  mmkv = new MMKV({ id: "theme-storage" });
+}
+
 // ── Persistence helpers ─────────────────────────────────────────────
 
-async function loadMode(): Promise<"light" | "dark"> {
+function loadMode(): "light" | "dark" {
   try {
     if (Platform.OS === "web") {
       const v = localStorage.getItem(STORAGE_KEY);
       if (v === "light" || v === "dark") return v;
-    } else {
-      const AsyncStorage =
-        require("@react-native-async-storage/async-storage").default;
-      const v = await AsyncStorage.getItem(STORAGE_KEY);
+    } else if (mmkv) {
+      const v = mmkv.getString(STORAGE_KEY);
       if (v === "light" || v === "dark") return v;
     }
   } catch {}
   return "dark"; // default
 }
 
-async function saveMode(mode: "light" | "dark"): Promise<void> {
+function saveMode(mode: "light" | "dark"): void {
   try {
     if (Platform.OS === "web") {
       localStorage.setItem(STORAGE_KEY, mode);
-    } else {
-      const AsyncStorage =
-        require("@react-native-async-storage/async-storage").default;
-      await AsyncStorage.setItem(STORAGE_KEY, mode);
+    } else if (mmkv) {
+      mmkv.set(STORAGE_KEY, mode);
     }
   } catch {}
 }
@@ -46,7 +51,7 @@ interface ThemeState {
   mode: "light" | "dark";
   colors: ThemePalette;
   hydrated: boolean;
-  hydrate: () => Promise<void>;
+  hydrate: () => void;
   toggle: () => void;
   setMode: (m: "light" | "dark") => void;
 }
@@ -56,8 +61,8 @@ export const useThemeStore = create<ThemeState>((set, get) => ({
   colors: DarkTheme,
   hydrated: false,
 
-  hydrate: async () => {
-    const m = await loadMode();
+  hydrate: () => {
+    const m = loadMode();
     set({ mode: m, colors: getTheme(m), hydrated: true });
   },
 

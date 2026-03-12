@@ -1,7 +1,7 @@
 /**
  * Convenience hook — thin wrapper around the Zustand auth store.
  *
- * Provides an interface matching `{ user, token, login, logout, loading, error }`
+ * Provides an interface matching `{ user, token, login, logout, isLoading, error }`
  * so screens don't import the store directly and the shape
  * can be swapped later without touching every consumer.
  */
@@ -20,7 +20,7 @@ export function useAuth() {
   const userId = useAuthStore((s) => s.userId);
   const username = useAuthStore((s) => s.username);
   const name = useAuthStore((s) => s.name);
-  const loading = useAuthStore((s) => s.loading);
+  const isLoading = useAuthStore((s) => s.isLoading);
   const error = useAuthStore((s) => s.error);
   const login = useAuthStore((s) => s.login);
   const logout = useAuthStore((s) => s.logout);
@@ -32,5 +32,5 @@ export function useAuth() {
 
   const isAuthenticated = !!token;
 
-  return { user, token, isAuthenticated, loading, error, login, logout };
+  return { user, token, isAuthenticated, isLoading, error, login, logout };
 }

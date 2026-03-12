@@ -8,20 +8,32 @@
 
 import { z } from "zod";
 
+// ── Shared strong-password rule ─────────────────────────────────────
+
+const strongPassword = z
+  .string()
+  .min(8, "Password must be at least 8 characters")
+  .max(128, "Password cannot exceed 128 characters")
+  .regex(/[A-Z]/, "Password must contain at least one uppercase letter")
+  .regex(/[0-9]/, "Password must contain at least one number")
+  .regex(
+    /[^A-Za-z0-9]/,
+    "Password must contain at least one special character",
+  );
+
 // ── Login Schema ────────────────────────────────────────────────────
 
 export const loginSchema = z.object({
-  username: z
+  email: z
     .string()
-    .min(1, "Username is required")
-    .min(3, "Username must be at least 3 characters")
-    .max(50, "Username cannot exceed 50 characters")
+    .min(1, "Email is required")
+    .email("Please enter a valid email address")
+    .max(200, "Email cannot exceed 200 characters")
     .trim(),
   password: z
     .string()
     .min(1, "Password is required")
-    .min(6, "Password must be at least 6 characters")
-    .max(128, "Password cannot exceed 128 characters"),
+    .pipe(strongPassword),
 });
 
 export type LoginFormData = z.infer<typeof loginSchema>;
@@ -30,16 +42,16 @@ export type LoginFormData = z.infer<typeof loginSchema>;
 
 export const registerSchema = z
   .object({
-    username: z
+    email: z
       .string()
-      .min(1, "Username is required")
-      .min(3, "Username must be at least 3 characters")
-      .max(50, "Username cannot exceed 50 characters")
-      .regex(
-        /^[a-zA-Z0-9_ ]+$/,
-        "Username can only contain letters, numbers, underscores, and spaces"
-      )
-      .trim(),
+      .min(1, "Email is required")
+      .email("Please enter a valid email address")
+      .max(200, "Email cannot exceed 200 characters")
+      .trim()
+      .transform((val) => val.toLowerCase())
+      .refine((val) => !val.includes("+"), {
+        message: "Gmail alias addresses are not supported",
+      }),
     displayName: z
       .string()
       .max(100, "Display name cannot exceed 100 characters")
@@ -49,8 +61,7 @@ export const registerSchema = z
     password: z
       .string()
       .min(1, "Password is required")
-      .min(6, "Password must be at least 6 characters")
-      .max(128, "Password cannot exceed 128 characters"),
+      .pipe(strongPassword),
     confirmPassword: z.string().min(1, "Please confirm your password"),
   })
   .refine((data) => data.password === data.confirmPassword, {
@@ -67,10 +78,7 @@ export const changePasswordSchema = z
     currentPassword: z
       .string()
       .min(1, "Current password is required"),
-    newPassword: z
-      .string()
-      .min(6, "New password must be at least 6 characters")
-      .max(128, "Password cannot exceed 128 characters"),
+    newPassword: strongPassword,
     confirmNewPassword: z.string().min(1, "Please confirm your new password"),
   })
   .refine((data) => data.newPassword === data.confirmNewPassword, {

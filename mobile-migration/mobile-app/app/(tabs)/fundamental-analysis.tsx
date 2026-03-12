@@ -19,46 +19,51 @@ import {
   Modal,
   Platform,
   Animated,
-  Dimensions,
   ActivityIndicator,
 } from "react-native";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import * as DocumentPicker from "expo-document-picker";
+import { FlashList } from "@shopify/flash-list";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import {
+  useAnalysisStocks,
+  useStatements,
+  useStockMetrics,
+  useGrowthAnalysis,
+  useStockScore,
+  useScoreHistory,
+  useValuations,
+  analysisKeys,
+} from "@/hooks/queries";
+import { useStockList } from "@/hooks/queries";
 
 import {
-  getAnalysisStocks,
-  getAnalysisStock,
   createAnalysisStock,
   updateAnalysisStock,
   deleteAnalysisStock,
-  getStatements,
-  getStockMetrics,
   calculateMetrics,
-  getGrowthAnalysis,
-  getStockScore,
-  getScoreHistory,
-  getValuations,
   runGrahamValuation,
   runDCFValuation,
   runDDMValuation,
   runMultiplesValuation,
   updateLineItem,
-  getStockList,
   uploadFinancialStatement,
+  validateFinancialStatement,
+  verifyStatementPlacement,
   AnalysisStock,
   FinancialStatement,
-  FinancialLineItem,
   StockMetric,
-  StockScore,
-  ValuationResult,
   StockListEntry,
   AIUploadResult,
+  AIValidationResult,
 } from "@/services/api";
 import { useThemeStore } from "@/services/themeStore";
+import { showErrorAlert, extractErrorMessage } from "@/lib/errorHandling";
+import { exportCSV, exportExcel, exportPDF, type TableData } from "@/lib/exportAnalysis";
 import { useResponsive } from "@/hooks/useResponsive";
+import { MAX_UPLOAD_BYTES, UPLOAD_PROGRESS_NUDGE_MS } from "@/constants/layout";
 import { LoadingScreen } from "@/components/ui/LoadingScreen";
-import { ErrorScreen } from "@/components/ui/ErrorScreen";
 import type { ThemePalette } from "@/constants/theme";
 
 /* ────────────────────────────────────────────────────────────────── */
@@ -135,9 +140,12 @@ function StatementTabBar({
   colors: ThemePalette;
   showAll?: boolean;
 }) {
-  const tabs = showAll
-    ? [{ key: undefined as string | undefined, label: "All", icon: "th-list" as const, color: colors.accentPrimary }, ...STMNT_TYPES.map((t) => ({ key: t as string | undefined, ...STMNT_META[t] }))]
-    : STMNT_TYPES.map((t) => ({ key: t as string | undefined, ...STMNT_META[t] }));
+  const tabs = useMemo(
+    () => showAll
+      ? [{ key: undefined as string | undefined, label: "All", icon: "th-list" as const, color: colors.accentPrimary }, ...STMNT_TYPES.map((t) => ({ key: t as string | undefined, ...STMNT_META[t] }))]
+      : STMNT_TYPES.map((t) => ({ key: t as string | undefined, ...STMNT_META[t] })),
+    [showAll, colors.accentPrimary],
+  );
 
   return (
     <View style={{
@@ -185,6 +193,71 @@ function StatementTabBar({
           </Pressable>
         );
       })}
+    </View>
+  );
+}
+
+/** Compact export button with dropdown (Excel / CSV / PDF) */
+function ExportBar({
+  onExport, colors, disabled,
+}: { onExport: (fmt: "xlsx" | "csv" | "pdf") => Promise<void>; colors: ThemePalette; disabled?: boolean }) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
+  const off = disabled || busy != null;
+
+  const handle = async (fmt: "xlsx" | "csv" | "pdf") => {
+    setOpen(false);
+    setBusy(fmt);
+    try { await onExport(fmt); }
+    catch (e) { Alert.alert("Export Failed", e instanceof Error ? e.message : "Unknown error"); }
+    setBusy(null);
+  };
+
+  const items: { fmt: "xlsx" | "csv" | "pdf"; icon: React.ComponentProps<typeof FontAwesome>["name"]; label: string; color: string }[] = [
+    { fmt: "xlsx", icon: "file-excel-o", label: "Excel (.xlsx)", color: colors.success },
+    { fmt: "csv",  icon: "file-text-o",  label: "CSV (.csv)",    color: colors.accentPrimary },
+    { fmt: "pdf",  icon: "file-pdf-o",   label: "PDF (.pdf)",    color: "#ef4444" },
+  ];
+
+  return (
+    <View style={{ position: "relative", zIndex: 50 }}>
+      {/* trigger */}
+      <Pressable
+        onPress={() => setOpen((p) => !p)}
+        disabled={off}
+        style={({ pressed }) => ([
+          st.exportTrigger,
+          { borderColor: colors.borderColor, backgroundColor: pressed ? colors.accentPrimary + "12" : "transparent", opacity: off ? 0.4 : 1 },
+        ])}
+      >
+        {busy ? (
+          <ActivityIndicator size={11} color={colors.accentPrimary} />
+        ) : (
+          <>
+            <FontAwesome name="download" size={11} color={colors.accentPrimary} />
+            <Text style={{ fontSize: 10, fontWeight: "700", color: colors.accentPrimary, marginLeft: 4 }}>Export</Text>
+            <FontAwesome name={open ? "chevron-up" : "chevron-down"} size={7} color={colors.textMuted} style={{ marginLeft: 3 }} />
+          </>
+        )}
+      </Pressable>
+
+      {/* dropdown */}
+      {open && (
+        <Pressable style={st.exportOverlay} onPress={() => setOpen(false)}>
+          <View style={[st.exportDropdown, { backgroundColor: colors.bgCard, borderColor: colors.borderColor }]}>
+            {items.map(({ fmt, icon, label, color }) => (
+              <Pressable
+                key={fmt}
+                onPress={() => handle(fmt)}
+                style={({ pressed }) => ([st.exportDropItem, pressed && { backgroundColor: color + "12" }])}
+              >
+                <FontAwesome name={icon} size={12} color={color} style={{ width: 18, textAlign: "center" }} />
+                <Text style={{ fontSize: 12, color: colors.textPrimary, fontWeight: "600", marginLeft: 8 }}>{label}</Text>
+              </Pressable>
+            ))}
+          </View>
+        </Pressable>
+      )}
     </View>
   );
 }
@@ -296,10 +369,12 @@ function FadeIn({ children, delay = 0 }: { children: React.ReactNode; delay?: nu
   const opacity = useRef(new Animated.Value(0)).current;
   const translateY = useRef(new Animated.Value(8)).current;
   useEffect(() => {
-    Animated.parallel([
+    const anim = Animated.parallel([
       Animated.timing(opacity, { toValue: 1, duration: 350, delay, useNativeDriver: true }),
       Animated.timing(translateY, { toValue: 0, duration: 350, delay, useNativeDriver: true }),
-    ]).start();
+    ]);
+    anim.start();
+    return () => anim.stop();
   }, []);
   return (
     <Animated.View style={{ opacity, transform: [{ translateY }] }}>
@@ -336,7 +411,7 @@ export default function FundamentalAnalysisScreen() {
       {/* ── Header ─────────────────────────────────────────── */}
       <View style={[st.header, { backgroundColor: colors.headerBg, borderBottomColor: colors.borderColor }]}>
         <View style={{ flex: 1 }}>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+          <View style={[st.rowCenter, { gap: 10 }]}>
             {selectedStockId && (
               <Pressable onPress={handleBack} hitSlop={12} style={st.headerBack}>
                 <FontAwesome name="chevron-left" size={14} color={colors.accentPrimary} />
@@ -397,11 +472,11 @@ export default function FundamentalAnalysisScreen() {
       {/* ── Content ────────────────────────────────────────── */}
       {tab === "stocks" && <StocksPanel colors={colors} isDesktop={isDesktop} onSelect={handleSelectStock} />}
       {tab === "statements" && selectedStockId && <StatementsPanel stockId={selectedStockId} colors={colors} isDesktop={isDesktop} />}
-      {tab === "comparison" && selectedStockId && <ComparisonPanel stockId={selectedStockId} colors={colors} isDesktop={isDesktop} />}
-      {tab === "metrics" && selectedStockId && <MetricsPanel stockId={selectedStockId} colors={colors} isDesktop={isDesktop} />}
-      {tab === "growth" && selectedStockId && <GrowthPanel stockId={selectedStockId} colors={colors} isDesktop={isDesktop} />}
-      {tab === "score" && selectedStockId && <ScorePanel stockId={selectedStockId} colors={colors} isDesktop={isDesktop} />}
-      {tab === "valuations" && selectedStockId && <ValuationsPanel stockId={selectedStockId} colors={colors} isDesktop={isDesktop} />}
+      {tab === "comparison" && selectedStockId && <ComparisonPanel stockId={selectedStockId} stockSymbol={selectedStockSymbol} colors={colors} isDesktop={isDesktop} />}
+      {tab === "metrics" && selectedStockId && <MetricsPanel stockId={selectedStockId} stockSymbol={selectedStockSymbol} colors={colors} isDesktop={isDesktop} />}
+      {tab === "growth" && selectedStockId && <GrowthPanel stockId={selectedStockId} stockSymbol={selectedStockSymbol} colors={colors} isDesktop={isDesktop} />}
+      {tab === "score" && selectedStockId && <ScorePanel stockId={selectedStockId} stockSymbol={selectedStockSymbol} colors={colors} isDesktop={isDesktop} />}
+      {tab === "valuations" && selectedStockId && <ValuationsPanel stockId={selectedStockId} stockSymbol={selectedStockSymbol} colors={colors} isDesktop={isDesktop} />}
     </View>
   );
 }
@@ -415,17 +490,16 @@ function StocksPanel({
 }: { colors: ThemePalette; isDesktop: boolean; onSelect: (stock: AnalysisStock) => void }) {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
+  const debouncedSearch = useDebouncedValue(search);
   const [showAdd, setShowAdd] = useState(false);
   const [editStock, setEditStock] = useState<AnalysisStock | null>(null);
 
-  const { data, isLoading, refetch, isFetching } = useQuery({
-    queryKey: ["analysis-stocks", search],
-    queryFn: () => getAnalysisStocks({ search: search || undefined }),
-  });
+  const { data, isLoading, refetch, isFetching } = useAnalysisStocks(debouncedSearch);
 
   const deleteMut = useMutation({
     mutationFn: (id: number) => deleteAnalysisStock(id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["analysis-stocks"] }),
+    onError: (err) => showErrorAlert("Delete Failed", err),
   });
 
   const stocks = data?.stocks ?? [];
@@ -470,7 +544,7 @@ function StocksPanel({
       {isLoading ? (
         <LoadingScreen />
       ) : (
-        <FlatList
+        <FlashList
           data={stocks}
           keyExtractor={(item) => String(item.id)}
           contentContainerStyle={[st.listContent, isDesktop && { maxWidth: 900, alignSelf: "center", width: "100%" }]}
@@ -478,7 +552,7 @@ function StocksPanel({
           renderItem={({ item, index }) => (
             <FadeIn delay={index * 40}>
               <Pressable onPress={() => onSelect(item)}>
-                <Card colors={colors} style={{ flexDirection: "row", alignItems: "center" }}>
+                <Card colors={colors} style={st.rowCenter}>
                   {/* Symbol badge */}
                   <View style={[st.symbolBadge, { backgroundColor: colors.accentPrimary + "15" }]}>
                     <Text style={{ color: colors.accentPrimary, fontSize: 14, fontWeight: "800", letterSpacing: 0.5 }}>
@@ -491,7 +565,7 @@ function StocksPanel({
                     <Text style={{ color: colors.textSecondary, fontSize: 13, marginTop: 1 }} numberOfLines={1}>
                       {item.company_name}
                     </Text>
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 4 }}>
+                    <View style={[st.rowCenter, { gap: 6, marginTop: 4 }]}>
                       <View style={[st.tagPill, { backgroundColor: colors.bgInput }]}>
                         <Text style={{ color: colors.textMuted, fontSize: 10, fontWeight: "600" }}>{item.exchange}</Text>
                       </View>
@@ -526,8 +600,8 @@ function StocksPanel({
               <View style={[st.emptyIcon, { backgroundColor: colors.accentPrimary + "10" }]}>
                 <FontAwesome name="flask" size={32} color={colors.accentPrimary} />
               </View>
-              <Text style={{ color: colors.textPrimary, fontSize: 16, fontWeight: "700", marginTop: 16 }}>No stocks yet</Text>
-              <Text style={{ color: colors.textMuted, fontSize: 13, marginTop: 4, textAlign: "center" }}>
+              <Text style={[st.emptyTitle, { color: colors.textPrimary }]}>No stocks yet</Text>
+              <Text style={[st.emptySubtitle, { color: colors.textMuted, textAlign: "center" }]}>
                 Add your first stock profile to begin{"\n"}fundamental analysis
               </Text>
               <Pressable onPress={() => setShowAdd(true)} style={[st.addBtn, { backgroundColor: colors.accentPrimary, marginTop: 20, paddingHorizontal: 24 }]}>
@@ -566,12 +640,7 @@ function StockFormModal({ stock, colors, onClose }: { stock?: AnalysisStock; col
   const [selectedEntry, setSelectedEntry] = useState<StockListEntry | null>(null);
 
   // Fetch cached stock list
-  const stockListQ = useQuery({
-    queryKey: ["stock-list", market],
-    queryFn: () => getStockList({ market }),
-    staleTime: 1000 * 60 * 30, // 30 min cache
-    enabled: !isEdit,
-  });
+  const stockListQ = useStockList(market, !isEdit);
 
   const filteredStocks = useMemo(() => {
     const all = stockListQ.data?.stocks ?? [];
@@ -620,7 +689,7 @@ function StockFormModal({ stock, colors, onClose }: { stock?: AnalysisStock; col
       <Pressable style={st.modalOverlay} onPress={onClose}>
         <Pressable style={[st.modalBox, { backgroundColor: colors.bgCard, borderColor: colors.borderColor, maxHeight: "85%" }]} onPress={() => {}}>
           {/* Title row */}
-          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+          <View style={[st.rowBetween, { marginBottom: 16 }]}>
             <Text style={[st.modalTitle, { color: colors.textPrimary }]}>
               {isEdit ? `Edit ${stock!.symbol}` : "Add Analysis Stock"}
             </Text>
@@ -641,7 +710,7 @@ function StockFormModal({ stock, colors, onClose }: { stock?: AnalysisStock; col
                 </View>
 
                 {/* Search */}
-                <Text style={{ color: colors.textMuted, fontSize: 11, fontWeight: "600", marginBottom: 4, letterSpacing: 0.5 }}>SEARCH & SELECT STOCK *</Text>
+                <Text style={[st.fieldLabel, { color: colors.textMuted }]}>SEARCH & SELECT STOCK *</Text>
                 <View style={[st.searchBox, { backgroundColor: colors.bgInput, borderColor: colors.borderColor, marginBottom: 8 }]}>
                   <FontAwesome name="search" size={12} color={colors.textMuted} />
                   <TextInput
@@ -670,6 +739,8 @@ function StockFormModal({ stock, colors, onClose }: { stock?: AnalysisStock; col
                       data={filteredStocks}
                       keyExtractor={(item) => item.symbol}
                       keyboardShouldPersistTaps="handled"
+                      initialNumToRender={15}
+                      maxToRenderPerBatch={10}
                       renderItem={({ item, index }) => (
                         <Pressable
                           onPress={() => handlePickStock(item)}
@@ -802,10 +873,7 @@ function StockFormModal({ stock, colors, onClose }: { stock?: AnalysisStock; col
 function StatementsPanel({ stockId, colors, isDesktop }: { stockId: number; colors: ThemePalette; isDesktop: boolean }) {
   const queryClient = useQueryClient();
   const [typeFilter, setTypeFilter] = useState<string | undefined>("income");
-  const { data, isLoading, refetch, isFetching } = useQuery({
-    queryKey: ["analysis-statements", stockId, typeFilter],
-    queryFn: () => getStatements(stockId, typeFilter),
-  });
+  const { data, isLoading, refetch, isFetching } = useStatements(stockId, typeFilter);
 
   // ── AI Upload state ───────────────────────────────────────────────
   const [uploading, setUploading] = useState(false);
@@ -826,54 +894,92 @@ function StatementsPanel({ stockId, colors, isDesktop }: { stockId: number; colo
       if (!file.uri) return;
 
       // Validate file
-      if (file.size && file.size > 50 * 1024 * 1024) {
+      if (file.size && file.size > MAX_UPLOAD_BYTES) {
         Alert.alert("File Too Large", "Maximum file size is 50 MB.");
         return;
       }
 
       setUploading(true);
-      setUploadProgress("Uploading PDF to server...");
       setUploadError(null);
       setUploadResult(null);
 
-      setTimeout(() => {
-        if (uploading) setUploadProgress("AI is analyzing the financial statements...");
-      }, 3000);
+      const fileName = file.name || "financial_report.pdf";
+      const mimeType = file.mimeType || "application/pdf";
+      let valCorrections = 0;
+      let placeCorrections = 0;
+
+      // ── Step 1/3: Extract financials ────────────────────────────
+      setUploadProgress("⏳ Step 1/3 — Extracting financials from PDF...");
 
       const res = await uploadFinancialStatement(
         stockId,
         file.uri,
-        file.name || "financial_report.pdf",
-        file.mimeType || "application/pdf",
+        fileName,
+        mimeType,
       );
 
       setUploadResult(res);
+
+      // ── Step 2/3: Validate extraction ───────────────────────────
+      setUploadProgress("🔍 Step 2/3 — AI is validating extracted data...");
+
+      try {
+        const valRes = await validateFinancialStatement(
+          stockId,
+          file.uri,
+          fileName,
+          mimeType,
+        );
+        valCorrections = valRes.corrections_applied || 0;
+      } catch (valErr: any) {
+        // Non-fatal — continue to step 3
+        if (__DEV__) console.warn("Validation step failed (non-fatal):", valErr);
+      }
+
+      // ── Step 3/3: Verify placement ──────────────────────────────
+      setUploadProgress("✅ Step 3/3 — Verifying item placement...");
+
+      try {
+        const placeRes = await verifyStatementPlacement(
+          stockId,
+          file.uri,
+          fileName,
+          mimeType,
+        );
+        placeCorrections = placeRes.corrections_applied || 0;
+      } catch (placeErr: any) {
+        // Non-fatal
+        if (__DEV__) console.warn("Placement step failed (non-fatal):", placeErr);
+      }
+
+      const totalItems = res.statements.reduce((s, st) => s + st.line_items_count, 0);
       setUploadProgress("");
       queryClient.invalidateQueries({ queryKey: ["analysis-statements"] });
-      Alert.alert(
-        "Extraction Complete",
-        `${res.statements.length} statements extracted with ${res.statements.reduce((s, st) => s + st.line_items_count, 0)} line items.`,
-      );
-    } catch (err: any) {
-      const detail = err?.response?.data?.detail;
-      let msg: string;
-      if (typeof detail === "string") {
-        msg = detail;
-      } else if (Array.isArray(detail)) {
-        // FastAPI validation errors: [{type, loc, msg, input, ctx}, ...]
-        msg = detail.map((e: any) => (typeof e === "string" ? e : e?.msg || JSON.stringify(e))).join("; ");
-      } else if (detail && typeof detail === "object") {
-        msg = detail.msg || detail.message || JSON.stringify(detail);
+
+      const summaryParts = [
+        `${res.statements.length} statements extracted with ${totalItems} line items.`,
+      ];
+      if (valCorrections > 0) {
+        summaryParts.push(`\n\n🔍 Validation: ${valCorrections} correction(s) applied.`);
       } else {
-        msg = err?.message || "Upload failed.";
+        summaryParts.push(`\n\n🔍 Validation passed.`);
       }
+      if (placeCorrections > 0) {
+        summaryParts.push(`\n✅ Placement: ${placeCorrections} item(s) corrected.`);
+      } else {
+        summaryParts.push(`\n✅ Placement verified.`);
+      }
+
+      Alert.alert("Extraction Complete", summaryParts.join(""));
+    } catch (err: any) {
+      const msg = extractErrorMessage(err, "Upload failed.");
       setUploadError(msg);
       setUploadProgress("");
       Alert.alert("Upload Failed", msg);
     } finally {
       setUploading(false);
     }
-  }, [stockId, queryClient, uploading]);
+  }, [stockId, queryClient]);
 
   const statements = data?.statements ?? [];
 
@@ -939,7 +1045,7 @@ function StatementsPanel({ stockId, colors, isDesktop }: { stockId: number; colo
             backgroundColor: colors.success + "10",
             borderWidth: 1, borderColor: colors.success + "30",
           }}>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+            <View style={[st.rowCenter, { gap: 8 }]}>
               <FontAwesome name="check-circle" size={16} color={colors.success} />
               <Text style={{ color: colors.success, fontSize: 13, fontWeight: "700", flex: 1 }}>
                 Extraction Complete
@@ -982,7 +1088,7 @@ function StatementsPanel({ stockId, colors, isDesktop }: { stockId: number; colo
             backgroundColor: colors.danger + "10",
             borderWidth: 1, borderColor: colors.danger + "30",
           }}>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+            <View style={[st.rowCenter, { gap: 8 }]}>
               <FontAwesome name="exclamation-circle" size={16} color={colors.danger} />
               <Text style={{ color: colors.danger, fontSize: 13, fontWeight: "600", flex: 1 }}>
                 {uploadError}
@@ -1024,6 +1130,7 @@ function StatementsTable({
   const updateMut = useMutation({
     mutationFn: ({ itemId, amount }: { itemId: number; amount: number }) => updateLineItem(itemId, amount),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["analysis-statements"] }); setEditingKey(null); },
+    onError: (err) => showErrorAlert("Update Failed", err),
   });
 
   // Build columns (periods sorted by date)
@@ -1060,8 +1167,8 @@ function StatementsTable({
         <View style={[st.emptyIcon, { backgroundColor: colors.accentSecondary + "10" }]}>
           <FontAwesome name="file-text-o" size={32} color={colors.accentSecondary} />
         </View>
-        <Text style={{ color: colors.textPrimary, fontSize: 16, fontWeight: "700", marginTop: 16 }}>No statements</Text>
-        <Text style={{ color: colors.textMuted, fontSize: 13, marginTop: 4 }}>Upload a financial report PDF above to extract statements with AI</Text>
+        <Text style={[st.emptyTitle, { color: colors.textPrimary }]}>No statements</Text>
+        <Text style={[st.emptySubtitle, { color: colors.textMuted }]}>Upload a financial report PDF above to extract statements with AI</Text>
       </View>
     );
   }
@@ -1135,7 +1242,7 @@ function StatementsTable({
                 return (
                   <View key={p.period} style={{ width: COL_VAL_W, alignItems: "flex-end", justifyContent: "center" }}>
                     {isEditing ? (
-                      <View style={{ flexDirection: "row", alignItems: "center", gap: 3 }}>
+                      <View style={[st.rowCenter, { gap: 3 }]}>
                         <TextInput
                           value={editValue}
                           onChangeText={setEditValue}
@@ -1171,7 +1278,7 @@ function StatementsTable({
                         onPress={() => {
                           if (cellKey) { setEditingKey(cellKey); setEditValue(String(val)); }
                         }}
-                        style={{ flexDirection: "row", alignItems: "center" }}
+                        style={st.rowCenter}
                       >
                         <Text style={{
                           fontSize: 12,
@@ -1202,12 +1309,9 @@ function StatementsTable({
 /*  COMPARISON PANEL — Multi-Period Side-by-Side                      */
 /* ═══════════════════════════════════════════════════════════════════ */
 
-function ComparisonPanel({ stockId, colors, isDesktop }: { stockId: number; colors: ThemePalette; isDesktop: boolean }) {
+function ComparisonPanel({ stockId, stockSymbol, colors, isDesktop: _isDesktop }: { stockId: number; stockSymbol: string; colors: ThemePalette; isDesktop: boolean }) {
   const [typeFilter, setTypeFilter] = useState<string>("income");
-  const { data, isLoading, refetch, isFetching } = useQuery({
-    queryKey: ["analysis-statements", stockId, typeFilter],
-    queryFn: () => getStatements(stockId, typeFilter),
-  });
+  const { data, isLoading, refetch, isFetching } = useStatements(stockId, typeFilter);
 
   const statements = data?.statements ?? [];
 
@@ -1234,6 +1338,29 @@ function ComparisonPanel({ stockId, colors, isDesktop }: { stockId: number; colo
     return codes;
   }, [statements]);
 
+  const exportTables = useCallback((): TableData[] => {
+    const headers = ["Line Item"];
+    for (let i = 0; i < periods.length; i++) {
+      headers.push(periods[i].label);
+      if (i > 0) headers.push("YoY %");
+    }
+    const rows = allCodes.map((item) => {
+      const row: (string | number | null)[] = [item.name];
+      for (let i = 0; i < periods.length; i++) {
+        const val = periods[i].items[item.code]?.amount;
+        row.push(val != null ? val : null);
+        if (i > 0) {
+          const prevVal = periods[i - 1].items[item.code]?.amount;
+          const yoy = prevVal && prevVal !== 0 && val != null ? ((val - prevVal) / Math.abs(prevVal)) * 100 : null;
+          row.push(yoy != null ? `${yoy >= 0 ? "+" : ""}${yoy.toFixed(1)}%` : null);
+        }
+      }
+      return row;
+    });
+    const typeName = STMNT_META[typeFilter]?.label ?? typeFilter;
+    return [{ title: `${typeName} — Period Comparison`, headers, rows }];
+  }, [periods, allCodes, typeFilter]);
+
   return (
     <View style={{ flex: 1 }}>
       <StatementTabBar value={typeFilter} onChange={(v) => setTypeFilter(v ?? "income")} colors={colors} />
@@ -1245,12 +1372,24 @@ function ComparisonPanel({ stockId, colors, isDesktop }: { stockId: number; colo
           <View style={[st.emptyIcon, { backgroundColor: colors.warning + "10" }]}>
             <FontAwesome name="columns" size={32} color={colors.warning} />
           </View>
-          <Text style={{ color: colors.textPrimary, fontSize: 16, fontWeight: "700", marginTop: 16 }}>Need 2+ periods</Text>
-          <Text style={{ color: colors.textMuted, fontSize: 13, marginTop: 4 }}>Upload statements for multiple fiscal years to compare.</Text>
+          <Text style={[st.emptyTitle, { color: colors.textPrimary }]}>Need 2+ periods</Text>
+          <Text style={[st.emptySubtitle, { color: colors.textMuted }]}>Upload statements for multiple fiscal years to compare.</Text>
         </View>
       ) : (
         <ScrollView refreshControl={<RefreshControl refreshing={isFetching && !isLoading} onRefresh={refetch} tintColor={colors.accentPrimary} />}>
-          <ScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={{ paddingHorizontal: 12, paddingTop: 8, paddingBottom: 80 }}>
+          <View style={{ paddingHorizontal: 12, paddingTop: 8, flexDirection: "row", justifyContent: "flex-end" }}>
+            <ExportBar
+              onExport={async (fmt) => {
+                const t = exportTables();
+                if (fmt === "xlsx") await exportExcel(t, stockSymbol, "Comparison");
+                else if (fmt === "csv") await exportCSV(t, stockSymbol, "Comparison");
+                else await exportPDF(t, stockSymbol, "Comparison");
+              }}
+              colors={colors}
+              disabled={periods.length < 2}
+            />
+          </View>
+          <ScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={{ paddingHorizontal: 12, paddingTop: 0, paddingBottom: 80 }}>
             <View>
               {/* Header row */}
               <View style={[st.compHeaderRow, { borderBottomColor: colors.borderColor }]}>
@@ -1316,12 +1455,12 @@ function ComparisonPanel({ stockId, colors, isDesktop }: { stockId: number; colo
 /*  METRICS PANEL                                                     */
 /* ═══════════════════════════════════════════════════════════════════ */
 
-function MetricsPanel({ stockId, colors, isDesktop }: { stockId: number; colors: ThemePalette; isDesktop: boolean }) {
+function MetricsPanel({ stockId, stockSymbol, colors, isDesktop }: { stockId: number; stockSymbol: string; colors: ThemePalette; isDesktop: boolean }) {
   const queryClient = useQueryClient();
   const [viewMode, setViewMode] = useState<"historical" | "grouped">("historical");
   const [calcAllRunning, setCalcAllRunning] = useState(false);
 
-  const stmtQ = useQuery({ queryKey: ["analysis-statements", stockId], queryFn: () => getStatements(stockId) });
+  const stmtQ = useStatements(stockId);
   const periods = useMemo(() => {
     const seen = new Set<string>();
     return (stmtQ.data?.statements ?? [])
@@ -1331,10 +1470,7 @@ function MetricsPanel({ stockId, colors, isDesktop }: { stockId: number; colors:
   }, [stmtQ.data]);
 
   const [selectedPeriod, setSelectedPeriod] = useState<string | null>(null);
-  const { data, isLoading, refetch, isFetching } = useQuery({
-    queryKey: ["analysis-metrics", stockId],
-    queryFn: () => getStockMetrics(stockId),
-  });
+  const { data, isLoading, refetch, isFetching } = useStockMetrics(stockId);
 
   const calcMut = useMutation({
     mutationFn: (p: { period_end_date: string; fiscal_year: number; fiscal_quarter?: number }) => calculateMetrics(stockId, p),
@@ -1345,7 +1481,11 @@ function MetricsPanel({ stockId, colors, isDesktop }: { stockId: number; colors:
     if (periods.length === 0) return;
     setCalcAllRunning(true);
     for (const p of periods) {
-      await calculateMetrics(stockId, { period_end_date: p.period_end_date, fiscal_year: p.fiscal_year, fiscal_quarter: p.fiscal_quarter ?? undefined }).catch(() => {});
+      try {
+        await calculateMetrics(stockId, { period_end_date: p.period_end_date, fiscal_year: p.fiscal_year, fiscal_quarter: p.fiscal_quarter ?? undefined });
+      } catch (err: unknown) {
+        if (__DEV__) console.warn("calculateMetrics failed for period", p.period_end_date, err);
+      }
     }
     queryClient.invalidateQueries({ queryKey: ["analysis-metrics", stockId] });
     setCalcAllRunning(false);
@@ -1355,6 +1495,23 @@ function MetricsPanel({ stockId, colors, isDesktop }: { stockId: number; colors:
   const allMetrics = data?.metrics ?? [];
   const categories = Object.keys(grouped);
   const historicalCategories = useMemo(() => buildHistoricalMetrics(allMetrics), [allMetrics]);
+
+  const exportTables = useCallback((): TableData[] => {
+    return Object.entries(historicalCategories).map(([cat, { metricNames, yearData, years }]) => {
+      const catLabel = CATEGORY_LABELS[cat]?.label ?? cat;
+      return {
+        title: catLabel,
+        headers: ["Metric", ...years.map((yr) => `FY${yr}`)],
+        rows: metricNames.map((name) => [
+          name,
+          ...years.map((yr) => {
+            const val = yearData[yr]?.[name];
+            return val != null ? formatMetricValue(name, val) : null;
+          }),
+        ]),
+      };
+    });
+  }, [historicalCategories]);
 
   return (
     <ScrollView
@@ -1419,17 +1576,27 @@ function MetricsPanel({ stockId, colors, isDesktop }: { stockId: number; colors:
           <View style={[st.emptyIcon, { backgroundColor: colors.accentPrimary + "10" }]}>
             <FontAwesome name="bar-chart" size={32} color={colors.accentPrimary} />
           </View>
-          <Text style={{ color: colors.textPrimary, fontSize: 16, fontWeight: "700", marginTop: 16 }}>No metrics yet</Text>
-          <Text style={{ color: colors.textMuted, fontSize: 13, marginTop: 4, textAlign: "center" }}>
+          <Text style={[st.emptyTitle, { color: colors.textPrimary }]}>No metrics yet</Text>
+          <Text style={[st.emptySubtitle, { color: colors.textMuted, textAlign: "center" }]}>
             Upload statements and calculate metrics above.
           </Text>
         </View>
       ) : (
         <>
           {/* View toggle */}
-          <View style={{ flexDirection: "row", marginBottom: 14, gap: 8 }}>
+          <View style={{ flexDirection: "row", marginBottom: 14, gap: 8, alignItems: "center" }}>
             <Chip label="Historical Table" active={viewMode === "historical"} onPress={() => setViewMode("historical")} colors={colors} icon="table" />
             <Chip label="Grouped List" active={viewMode === "grouped"} onPress={() => setViewMode("grouped")} colors={colors} icon="list-ul" />
+            <View style={{ flex: 1 }} />
+            <ExportBar
+              onExport={async (fmt) => {
+                const t = exportTables();
+                if (fmt === "xlsx") await exportExcel(t, stockSymbol, "Metrics");
+                else if (fmt === "csv") await exportCSV(t, stockSymbol, "Metrics");
+                else await exportPDF(t, stockSymbol, "Metrics");
+              }}
+              colors={colors}
+            />
           </View>
 
           {viewMode === "historical" ? (
@@ -1502,14 +1669,23 @@ function MetricsPanel({ stockId, colors, isDesktop }: { stockId: number; colors:
 /*  GROWTH PANEL                                                      */
 /* ═══════════════════════════════════════════════════════════════════ */
 
-function GrowthPanel({ stockId, colors, isDesktop }: { stockId: number; colors: ThemePalette; isDesktop: boolean }) {
-  const { data, isLoading, refetch, isFetching } = useQuery({
-    queryKey: ["analysis-growth", stockId],
-    queryFn: () => getGrowthAnalysis(stockId),
-  });
+function GrowthPanel({ stockId, stockSymbol, colors, isDesktop }: { stockId: number; stockSymbol: string; colors: ThemePalette; isDesktop: boolean }) {
+  const { data, isLoading, refetch, isFetching } = useGrowthAnalysis(stockId);
 
   const growth = data?.growth ?? {};
   const labels = Object.keys(growth);
+
+  const exportTables = useCallback((): TableData[] => {
+    return labels.map((label) => ({
+      title: label,
+      headers: ["From Period", "To Period", "Growth %"],
+      rows: (growth[label] ?? []).map((g: any) => [
+        g.prev_period,
+        g.period,
+        `${g.growth >= 0 ? "+" : ""}${(g.growth * 100).toFixed(1)}%`,
+      ]),
+    }));
+  }, [growth, labels]);
 
   return (
     <ScrollView
@@ -1524,11 +1700,23 @@ function GrowthPanel({ stockId, colors, isDesktop }: { stockId: number; colors: 
           <View style={[st.emptyIcon, { backgroundColor: colors.success + "10" }]}>
             <FontAwesome name="line-chart" size={32} color={colors.success} />
           </View>
-          <Text style={{ color: colors.textPrimary, fontSize: 16, fontWeight: "700", marginTop: 16 }}>Insufficient data</Text>
-          <Text style={{ color: colors.textMuted, fontSize: 13, marginTop: 4 }}>Need at least 2 periods of financial statements.</Text>
+          <Text style={[st.emptyTitle, { color: colors.textPrimary }]}>Insufficient data</Text>
+          <Text style={[st.emptySubtitle, { color: colors.textMuted }]}>Need at least 2 periods of financial statements.</Text>
         </View>
       ) : (
-        labels.map((label, idx) => (
+        <>
+        <View style={{ alignItems: "flex-end", marginBottom: 2 }}>
+          <ExportBar
+            onExport={async (fmt) => {
+              const t = exportTables();
+              if (fmt === "xlsx") await exportExcel(t, stockSymbol, "Growth");
+              else if (fmt === "csv") await exportCSV(t, stockSymbol, "Growth");
+              else await exportPDF(t, stockSymbol, "Growth");
+            }}
+            colors={colors}
+          />
+        </View>
+        {labels.map((label, idx) => (
           <FadeIn key={label} delay={idx * 60}>
             <SectionHeader title={label} icon="line-chart" iconColor={colors.success} colors={colors} badge={growth[label].length} />
             <Card colors={colors} style={{ marginBottom: 16 }}>
@@ -1539,7 +1727,7 @@ function GrowthPanel({ stockId, colors, isDesktop }: { stockId: number; colors: 
                 return (
                   <View key={i} style={[st.growthRow, i < growth[label].length - 1 && { borderBottomWidth: 1, borderBottomColor: colors.borderColor + "30" }]}>
                     <View style={{ flex: 1 }}>
-                      <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 6 }}>
+                      <View style={[st.rowCenter, { marginBottom: 6 }]}>
                         <Text style={{ color: colors.textMuted, fontSize: 11 }}>{g.prev_period}</Text>
                         <FontAwesome name="long-arrow-right" size={10} color={colors.textMuted} style={{ marginHorizontal: 6 }} />
                         <Text style={{ color: colors.textSecondary, fontSize: 11, fontWeight: "500" }}>{g.period}</Text>
@@ -1557,7 +1745,7 @@ function GrowthPanel({ stockId, colors, isDesktop }: { stockId: number; colors: 
                       </View>
                     </View>
                     <View style={{ alignItems: "flex-end", marginLeft: 12, minWidth: 70 }}>
-                      <View style={{ flexDirection: "row", alignItems: "center" }}>
+                      <View style={st.rowCenter}>
                         <FontAwesome
                           name={positive ? "caret-up" : "caret-down"}
                           size={16}
@@ -1579,7 +1767,8 @@ function GrowthPanel({ stockId, colors, isDesktop }: { stockId: number; colors: 
               })}
             </Card>
           </FadeIn>
-        ))
+        ))}
+        </>
       )}
     </ScrollView>
   );
@@ -1589,18 +1778,54 @@ function GrowthPanel({ stockId, colors, isDesktop }: { stockId: number; colors: 
 /*  SCORE PANEL                                                       */
 /* ═══════════════════════════════════════════════════════════════════ */
 
-function ScorePanel({ stockId, colors, isDesktop }: { stockId: number; colors: ThemePalette; isDesktop: boolean }) {
-  const { data, isLoading, refetch, isFetching } = useQuery({
-    queryKey: ["analysis-score", stockId],
-    queryFn: () => getStockScore(stockId),
-  });
-  const historyQ = useQuery({
-    queryKey: ["analysis-score-history", stockId],
-    queryFn: () => getScoreHistory(stockId),
-  });
+function ScorePanel({ stockId, stockSymbol, colors, isDesktop }: { stockId: number; stockSymbol: string; colors: ThemePalette; isDesktop: boolean }) {
+  const { data, isLoading, refetch, isFetching } = useStockScore(stockId);
+  const historyQ = useScoreHistory(stockId);
 
   const score = data;
   const scoreHistory = historyQ.data?.scores ?? [];
+
+  const exportTables = useCallback((): TableData[] => {
+    const tables: TableData[] = [];
+    if (score && score.overall_score != null) {
+      tables.push({
+        title: "Score Summary",
+        headers: ["Component", "Weight", "Score"],
+        rows: [
+          ["Overall", "100%", score.overall_score.toFixed(0)],
+          ["Fundamental", "30%", score.fundamental_score?.toFixed(0) ?? "–"],
+          ["Valuation", "25%", score.valuation_score?.toFixed(0) ?? "–"],
+          ["Growth", "25%", score.growth_score?.toFixed(0) ?? "–"],
+          ["Quality", "20%", score.quality_score?.toFixed(0) ?? "–"],
+        ],
+      });
+    }
+    if (scoreHistory.length > 0) {
+      tables.push({
+        title: "Score History",
+        headers: ["Date", "Overall", "Fundamental", "Valuation", "Growth", "Quality"],
+        rows: scoreHistory.map((sh) => [
+          sh.scoring_date,
+          sh.overall_score?.toFixed(0) ?? "–",
+          sh.fundamental_score?.toFixed(0) ?? "–",
+          sh.valuation_score?.toFixed(0) ?? "–",
+          sh.growth_score?.toFixed(0) ?? "–",
+          sh.quality_score?.toFixed(0) ?? "–",
+        ]),
+      });
+    }
+    if (score?.details && Object.keys(score.details).length > 0) {
+      tables.push({
+        title: "Underlying Metrics",
+        headers: ["Metric", "Value"],
+        rows: Object.entries(score.details).map(([name, val]) => [
+          name,
+          formatMetricValue(name, val as number),
+        ]),
+      });
+    }
+    return tables;
+  }, [score, scoreHistory]);
 
   return (
     <ScrollView
@@ -1615,13 +1840,25 @@ function ScorePanel({ stockId, colors, isDesktop }: { stockId: number; colors: T
           <View style={[st.emptyIcon, { backgroundColor: colors.warning + "10" }]}>
             <FontAwesome name="star-o" size={32} color={colors.warning} />
           </View>
-          <Text style={{ color: colors.textPrimary, fontSize: 16, fontWeight: "700", marginTop: 16 }}>
+          <Text style={[st.emptyTitle, { color: colors.textPrimary }]}>
             {score?.error ?? "No score available"}
           </Text>
-          <Text style={{ color: colors.textMuted, fontSize: 13, marginTop: 4 }}>Calculate metrics first, then compute the score.</Text>
+          <Text style={[st.emptySubtitle, { color: colors.textMuted }]}>Calculate metrics first, then compute the score.</Text>
         </View>
       ) : (
         <>
+          <View style={{ alignItems: "flex-end", marginBottom: 2 }}>
+            <ExportBar
+              onExport={async (fmt) => {
+                const t = exportTables();
+                if (fmt === "xlsx") await exportExcel(t, stockSymbol, "Score");
+                else if (fmt === "csv") await exportCSV(t, stockSymbol, "Score");
+                else await exportPDF(t, stockSymbol, "Score");
+              }}
+              colors={colors}
+            />
+          </View>
+
           {/* Overall Score */}
           <FadeIn>
             <Card colors={colors} style={{ alignItems: "center", paddingVertical: 28, marginBottom: 16 }}>
@@ -1712,8 +1949,8 @@ function ScoreBarPremium({
   const barColor = scoreColor(v, colors);
   return (
     <View style={{ marginBottom: 14 }}>
-      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-        <View style={{ flexDirection: "row", alignItems: "center" }}>
+      <View style={[st.rowBetween, { marginBottom: 6 }]}>
+        <View style={st.rowCenter}>
           <View style={[st.sectionIcon, { backgroundColor: iconColor + "18", width: 22, height: 22 }]}>
             <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: iconColor }} />
           </View>
@@ -1733,7 +1970,7 @@ function ScoreBarPremium({
 /*  VALUATIONS PANEL                                                  */
 /* ═══════════════════════════════════════════════════════════════════ */
 
-function ValuationsPanel({ stockId, colors, isDesktop }: { stockId: number; colors: ThemePalette; isDesktop: boolean }) {
+function ValuationsPanel({ stockId, stockSymbol, colors, isDesktop }: { stockId: number; stockSymbol: string; colors: ThemePalette; isDesktop: boolean }) {
   const queryClient = useQueryClient();
   const [model, setModel] = useState<"graham" | "dcf" | "ddm" | "multiples">("graham");
 
@@ -1750,10 +1987,7 @@ function ValuationsPanel({ stockId, colors, isDesktop }: { stockId: number; colo
   const [mv, setMv] = useState("");
   const [pm, setPm] = useState("");
 
-  const { data, isLoading, refetch, isFetching } = useQuery({
-    queryKey: ["analysis-valuations", stockId],
-    queryFn: () => getValuations(stockId),
-  });
+  const { data, isLoading, refetch, isFetching } = useValuations(stockId);
 
   const grahamMut = useMutation({
     mutationFn: () => runGrahamValuation(stockId, { eps: parseFloat(eps), book_value_per_share: parseFloat(bvps) }),
@@ -1776,6 +2010,20 @@ function ValuationsPanel({ stockId, colors, isDesktop }: { stockId: number; colo
   });
 
   const valuations = data?.valuations ?? [];
+
+  const exportTables = useCallback((): TableData[] => {
+    if (valuations.length === 0) return [];
+    return [{
+      title: "Valuation History",
+      headers: ["Model", "Date", "Intrinsic Value", "Parameters"],
+      rows: valuations.map((v) => [
+        v.model_type.toUpperCase(),
+        v.valuation_date,
+        v.intrinsic_value != null ? v.intrinsic_value.toFixed(2) : "N/A",
+        v.parameters ? Object.entries(v.parameters).map(([k, val]) => `${k}: ${typeof val === "number" ? val.toFixed(4) : val}`).join("; ") : "",
+      ]),
+    }];
+  }, [valuations]);
 
   const MODEL_INFO: Record<string, { title: string; formula: string; icon: React.ComponentProps<typeof FontAwesome>["name"] }> = {
     graham:    { title: "Graham Number", formula: "V = √(22.5 × EPS × BVPS)", icon: "university" },
@@ -1805,7 +2053,7 @@ function ValuationsPanel({ stockId, colors, isDesktop }: { stockId: number; colo
 
         <Card colors={colors}>
           {/* Model header */}
-          <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 12 }}>
+          <View style={[st.rowCenter, { marginBottom: 12 }]}>
             <View style={[st.sectionIcon, { backgroundColor: colors.accentTertiary + "18" }]}>
               <FontAwesome name={info.icon} size={12} color={colors.accentTertiary} />
             </View>
@@ -1871,11 +2119,25 @@ function ValuationsPanel({ stockId, colors, isDesktop }: { stockId: number; colo
       {/* Valuation history */}
       {valuations.length > 0 && (
         <FadeIn delay={100}>
-          <SectionHeader title="Valuation History" icon="history" iconColor={colors.accentSecondary} badge={valuations.length} colors={colors} style={{ marginTop: 20 }} />
+          <View style={{ flexDirection: "row", alignItems: "center", marginTop: 20 }}>
+            <View style={{ flex: 1 }}>
+              <SectionHeader title="Valuation History" icon="history" iconColor={colors.accentSecondary} badge={valuations.length} colors={colors} />
+            </View>
+            <ExportBar
+              onExport={async (fmt) => {
+                const t = exportTables();
+                if (fmt === "xlsx") await exportExcel(t, stockSymbol, "Valuations");
+                else if (fmt === "csv") await exportCSV(t, stockSymbol, "Valuations");
+                else await exportPDF(t, stockSymbol, "Valuations");
+              }}
+              colors={colors}
+            />
+          </View>
+
           {valuations.map((v, idx) => (
             <FadeIn key={v.id} delay={idx * 40}>
               <Card colors={colors} style={{ marginBottom: 10 }}>
-                <View style={{ flexDirection: "row", alignItems: "center" }}>
+                <View style={st.rowCenter}>
                   {/* Model icon */}
                   <View style={[st.sectionIcon, { backgroundColor: colors.accentPrimary + "15" }]}>
                     <FontAwesome name={MODEL_INFO[v.model_type]?.icon ?? "calculator"} size={12} color={colors.accentPrimary} />
@@ -2263,6 +2525,38 @@ const st = StyleSheet.create({
     marginTop: 4,
   },
   actionBtnText: { fontSize: 14, fontWeight: "700" },
+  exportTrigger: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  exportOverlay: {
+    position: "absolute",
+    top: 0,
+    right: 0,
+    paddingTop: 32,
+    zIndex: 99,
+  },
+  exportDropdown: {
+    borderRadius: 10,
+    borderWidth: 1,
+    paddingVertical: 4,
+    minWidth: 150,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  exportDropItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
   errorBanner: {
     flexDirection: "row",
     alignItems: "center",
@@ -2292,4 +2586,15 @@ const st = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
   },
+
+  /* Reusable layout */
+  rowCenter: { flexDirection: "row" as const, alignItems: "center" as const },
+  rowBetween: { flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "space-between" as const },
+
+  /* Empty-state typography */
+  emptyTitle: { fontSize: 16, fontWeight: "700" as const, marginTop: 16 },
+  emptySubtitle: { fontSize: 13, marginTop: 4 },
+
+  /* Field label */
+  fieldLabel: { fontSize: 11, fontWeight: "600" as const, marginBottom: 4, letterSpacing: 0.5 },
 });

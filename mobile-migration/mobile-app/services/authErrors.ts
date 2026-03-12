@@ -78,8 +78,8 @@ const LOGIN_ERROR_MAP: Record<number, { code: string; message: string; severity:
 
 const REGISTER_ERROR_MAP: Record<number, { code: string; message: string; severity: ErrorSeverity }> = {
   409: {
-    code: "auth/username-taken",
-    message: "This username is already taken. Please choose a different one.",
+    code: "auth/email-exists",
+    message: "An account with this email already exists.",
     severity: "warning",
   },
   400: {
@@ -128,8 +128,8 @@ export function mapAuthError(
       return {
         ...mapped,
         statusCode: status,
-        // Use server detail if it's more specific than our generic message
-        message: detail || mapped.message,
+        // Prefer our curated user-friendly message; keep raw detail for logging only
+        message: mapped.message,
         serverDetail: detail || undefined,
         originalError: err,
       };
@@ -198,24 +198,16 @@ export function logAuthError(authError: AuthError, context?: string): void {
   const tag = `[AUTH:${authError.code}]`;
   const ctx = context ? ` (${context})` : "";
 
-  if (authError.severity === "error" || authError.severity === "fatal") {
-    console.error(`${tag}${ctx} ${authError.message}`, {
-      code: authError.code,
-      severity: authError.severity,
-      statusCode: authError.statusCode,
-      serverDetail: authError.serverDetail,
-    });
-  } else {
-    console.warn(`${tag}${ctx} ${authError.message}`);
+  if (__DEV__) {
+    if (authError.severity === "error" || authError.severity === "fatal") {
+      console.error(`${tag}${ctx} ${authError.message}`, {
+        code: authError.code,
+        severity: authError.severity,
+      });
+    } else {
+      console.warn(`${tag}${ctx} ${authError.message}`);
+    }
   }
-
-  // Sentry integration (uncomment when Sentry is installed):
-  // if (authError.originalError instanceof Error) {
-  //   Sentry.captureException(authError.originalError, {
-  //     tags: { authCode: authError.code, severity: authError.severity },
-  //     extra: { serverDetail: authError.serverDetail, statusCode: authError.statusCode },
-  //   });
-  // }
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────
