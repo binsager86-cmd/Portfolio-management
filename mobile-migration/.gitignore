@@ -1,0 +1,12 @@
+# Debug / temp scripts
+_debug_*.py
+_check_*.py
+_fix_*.py
+_restore_*.py
+_test_endpoint.py
+
+# Audit artifacts
+code-audit.txt
+
+# Backup / old files
+*.old.ts
