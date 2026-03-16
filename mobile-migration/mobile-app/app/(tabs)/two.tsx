@@ -6,28 +6,29 @@
  * Supports Light/Dark and Phone/Tablet/Desktop layouts.
  */
 
-import React, { useState, useCallback } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  FlatList,
-  RefreshControl,
-  Pressable,
-  Platform,
-} from "react-native";
-import { LoadingScreen } from "@/components/ui/LoadingScreen";
+import HoldingsTable from "@/components/HoldingsTable";
 import { ErrorScreen } from "@/components/ui/ErrorScreen";
 import { FilterChip } from "@/components/ui/FilterChip";
-import { useHoldings, useAccounts } from "@/hooks/queries";
-import FontAwesome from "@expo/vector-icons/FontAwesome";
-import { Holding, HoldingsResponse } from "@/services/api";
-import { useThemeStore } from "@/services/themeStore";
-import { useResponsive } from "@/hooks/useResponsive";
-import HoldingsTable from "@/components/HoldingsTable";
+import { LoadingScreen } from "@/components/ui/LoadingScreen";
 import type { ThemePalette } from "@/constants/theme";
+import { useAccounts, useHoldings } from "@/hooks/queries";
+import { useResponsive } from "@/hooks/useResponsive";
 import { fmt } from "@/lib/currency";
 import { pnlColor } from "@/lib/formatting";
+import { Holding } from "@/services/api";
+import { useThemeStore } from "@/services/themeStore";
+import { getApiErrorMessage } from "@/src/features/fundamental-analysis/types";
+import FontAwesome from "@expo/vector-icons/FontAwesome";
+import React, { useCallback, useState } from "react";
+import {
+    FlatList,
+    Platform,
+    Pressable,
+    RefreshControl,
+    StyleSheet,
+    Text,
+    View,
+} from "react-native";
 
 // ── Sub-components ──────────────────────────────────────────────────
 
@@ -183,7 +184,7 @@ export default function HoldingsScreen() {
 
   // ── Error ──
   if (isError) {
-    return <ErrorScreen message={(error as any)?.message ?? "Failed to load"} />;
+    return <ErrorScreen message={getApiErrorMessage(error, "Failed to load")} />;
   }
 
   const filterLabel = filter ?? "All";

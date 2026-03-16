@@ -213,7 +213,7 @@ export function logAuthError(authError: AuthError, context?: string): void {
 // ── Helpers ─────────────────────────────────────────────────────────
 
 function isAxiosError(err: unknown): err is AxiosError {
-  return (err as any)?.isAxiosError === true;
+  return err instanceof AxiosError || (typeof err === "object" && err !== null && "isAxiosError" in err && (err as AxiosError).isAxiosError === true);
 }
 
 function extractDetail(data: unknown): string | null {

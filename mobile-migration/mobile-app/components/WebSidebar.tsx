@@ -43,7 +43,6 @@ export const NAV_ITEMS: NavItem[] = [
   { label: "Dividends", icon: "money", path: "/(tabs)/dividends" },
   { label: "Add Stock", icon: "plus-square", path: "/(tabs)/add-stock", section: "Management" },
   { label: "Planner", icon: "calculator", path: "/(tabs)/planner" },
-  { label: "Extraction", icon: "magic", path: "/(tabs)/financial-extraction", section: "Analysis" },
   { label: "Integrity", icon: "stethoscope", path: "/(tabs)/integrity", section: "System" },
   { label: "Backup", icon: "cloud-download", path: "/(tabs)/backup" },
   { label: "Settings", icon: "cog", path: "/(tabs)/settings" },

@@ -19,6 +19,7 @@
     },
     "android": {
       "package": "com.portfoliotracker.app",
+      "usesCleartextTraffic": true,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"

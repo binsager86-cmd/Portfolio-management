@@ -4,77 +4,43 @@
  * securities master, and AI analyst.
  */
 
-import api from "./client";
 import { API_TIMEOUT_LONG } from "@/constants/layout";
+import api from "./client";
 import type {
-  PerformanceData,
-  RiskMetrics,
-  RealizedProfitData,
-  SnapshotRecord,
-  TradingSummaryResponse,
-  DividendListResponse,
-  DividendByStock,
-  BonusSharesResponse,
-  SaveSnapshotResponse,
-  IntegrityCheckResult,
-  CashIntegrityResult,
-  BackupImportResult,
   AIAnalysisResult,
-  SecurityRecord,
-  PfmSnapshotSummary,
-  PfmSnapshotFull,
-  PfmAsset,
-  PfmLiability,
-  PfmIncomeExpense,
-  PaginationInfo,
-  AnalysisStock,
-  StockScoreSummary,
-  FinancialStatement,
-  StockMetric,
-  StockScore,
   AIUploadResult,
   AIValidationResult,
+  AnalysisStock,
+  BackupImportResult,
+  BonusSharesResponse,
+  CashIntegrityResult,
+  DividendByStock,
+  DividendListResponse,
+  FinancialStatement,
+  IntegrityCheckResult,
+  PaginationInfo,
+  PerformanceData,
+  PfmAsset,
+  PfmIncomeExpense,
+  PfmLiability,
+  PfmSnapshotFull,
+  PfmSnapshotSummary,
+  RealizedProfitData,
+  RiskMetrics,
+  SaveSnapshotResponse,
+  SecurityRecord,
+  SnapshotRecord,
+  StockMetric,
+  StockScore,
+  StockScoreSummary,
+  TradingSummaryResponse,
   ValuationResult,
   ValuationRunResult,
 } from "./types";
 
 export type {
-  PerformanceData,
-  RiskMetrics,
-  RealizedProfitDetail,
-  RealizedProfitData,
-  SnapshotRecord,
-  TradingSummary,
-  TradingTransaction,
-  TradingSummaryResponse,
-  DividendRecord,
-  DividendListResponse,
-  DividendByStock,
-  BonusShareRecord,
-  BonusByStock,
-  BonusSharesResponse,
-  SaveSnapshotResponse,
-  IntegrityCheckResult,
-  CashIntegrityResult,
-  BackupImportResult,
-  AIAnalysisResult,
-  SecurityRecord,
-  PfmSnapshotSummary,
-  PfmAsset,
-  PfmLiability,
-  PfmIncomeExpense,
-  PfmSnapshotFull,
-  PaginationInfo,
-  AnalysisStock,
-  StockScoreSummary,
-  FinancialStatement,
-  FinancialLineItem,
-  StockMetric,
-  ValuationResult,
-  StockScore,
-  AIUploadResult,
-  AIValidationResult,
-  ValuationRunResult,
+  AIAnalysisResult, AIUploadResult,
+  AIValidationResult, AnalysisStock, BackupImportResult, BonusByStock, BonusShareRecord, BonusSharesResponse, CashIntegrityResult, DividendByStock, DividendListResponse, DividendRecord, FinancialLineItem, FinancialStatement, IntegrityCheckResult, PaginationInfo, PerformanceData, PfmAsset, PfmIncomeExpense, PfmLiability, PfmSnapshotFull, PfmSnapshotSummary, RealizedProfitData, RealizedProfitDetail, RiskMetrics, SaveSnapshotResponse, SecurityRecord, SnapshotRecord, StockMetric, StockScore, StockScoreSummary, TradingSummary, TradingSummaryResponse, TradingTransaction, ValuationResult, ValuationRunResult
 } from "./types";
 
 // ── Performance & Risk ──────────────────────────────────────────────
@@ -523,35 +489,78 @@ export async function updateLineItem(
  */
 export async function uploadFinancialStatement(
   stockId: number,
-  fileUri: string,
+  file: File | Blob | string,
   fileName: string,
   mimeType: string = "application/pdf",
+  options?: { signal?: AbortSignal; force?: boolean },
 ): Promise<AIUploadResult> {
   const formData = new FormData();
 
-  if (typeof window !== "undefined" && typeof window.document !== "undefined") {
-    const response = await fetch(fileUri);
-    const blob = await response.blob();
-    const file = new File([blob], fileName, { type: mimeType });
-    formData.append("file", file);
-  } else {
+  if (typeof file === "string") {
+    // Native: pass URI object
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     formData.append("file", {
-      uri: fileUri,
+      uri: file,
       name: fileName,
       type: mimeType,
     } as any);
+  } else {
+    // Web: File or Blob already created by caller
+    formData.append("file", file, fileName);
   }
 
+  const forceParam = options?.force ? "?force=true" : "";
   const { data } = await api.post<{ status: string; data: AIUploadResult }>(
-    `/api/v1/fundamental/stocks/${stockId}/upload-statement`,
+    `/api/v1/fundamental/stocks/${stockId}/upload-statement${forceParam}`,
     formData,
     {
       headers: { "Content-Type": "multipart/form-data" },
-      timeout: API_TIMEOUT_LONG, // 5 min for AI extraction
+      timeout: 240_000, // 4 min — large PDFs need more time for AI extraction
+      signal: options?.signal,
     },
   );
   return data.data;
+}
+
+/** Status response from the extraction polling endpoint. */
+export interface ExtractionStatusResponse {
+  status: "pending" | "processing" | "completed" | "failed";
+  stage: "preparing" | "uploading" | "processing" | "finalizing";
+  pages_processed: number;
+  total_pages: number;
+  result?: AIUploadResult;
+  error_message?: string;
+}
+
+/**
+ * Poll extraction progress for a long-running upload.
+ * TODO: Backend endpoint not yet implemented — wire up when available.
+ */
+export async function getExtractionStatus(
+  uploadId: string,
+): Promise<ExtractionStatusResponse> {
+  const { data } = await api.get<ExtractionStatusResponse>(
+    `/api/v1/fundamental/extraction-status/${encodeURIComponent(uploadId)}`,
+  );
+  return data;
+}
+
+/**
+ * Check if a document has been previously extracted (by content hash).
+ * TODO: Backend endpoint not yet implemented — wire up when available.
+ */
+export async function getCachedStatement(
+  stockId: number,
+  fileHash: string,
+): Promise<AIUploadResult | null> {
+  try {
+    const { data } = await api.get<{ data: AIUploadResult | null }>(
+      `/api/v1/fundamental/stocks/${stockId}/cached-statement/${encodeURIComponent(fileHash)}`,
+    );
+    return data.data;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -560,24 +569,21 @@ export async function uploadFinancialStatement(
  */
 export async function validateFinancialStatement(
   stockId: number,
-  fileUri: string,
+  file: File | Blob | string,
   fileName: string,
   mimeType: string = "application/pdf",
 ): Promise<AIValidationResult> {
   const formData = new FormData();
 
-  if (typeof window !== "undefined" && typeof window.document !== "undefined") {
-    const response = await fetch(fileUri);
-    const blob = await response.blob();
-    const file = new File([blob], fileName, { type: mimeType });
-    formData.append("file", file);
-  } else {
+  if (typeof file === "string") {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     formData.append("file", {
-      uri: fileUri,
+      uri: file,
       name: fileName,
       type: mimeType,
     } as any);
+  } else {
+    formData.append("file", file, fileName);
   }
 
   const { data } = await api.post<{ status: string; data: AIValidationResult }>(
@@ -585,7 +591,7 @@ export async function validateFinancialStatement(
     formData,
     {
       headers: { "Content-Type": "multipart/form-data" },
-      timeout: API_TIMEOUT_LONG, // 5 min for AI validation
+      timeout: 120_000, // 2 min — aligned with hook timeout
     },
   );
   return data.data;
@@ -597,24 +603,21 @@ export async function validateFinancialStatement(
  */
 export async function verifyStatementPlacement(
   stockId: number,
-  fileUri: string,
+  file: File | Blob | string,
   fileName: string,
   mimeType: string = "application/pdf",
 ): Promise<AIValidationResult> {
   const formData = new FormData();
 
-  if (typeof window !== "undefined" && typeof window.document !== "undefined") {
-    const response = await fetch(fileUri);
-    const blob = await response.blob();
-    const file = new File([blob], fileName, { type: mimeType });
-    formData.append("file", file);
-  } else {
+  if (typeof file === "string") {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     formData.append("file", {
-      uri: fileUri,
+      uri: file,
       name: fileName,
       type: mimeType,
     } as any);
+  } else {
+    formData.append("file", file, fileName);
   }
 
   const { data } = await api.post<{ status: string; data: AIValidationResult }>(
@@ -622,10 +625,94 @@ export async function verifyStatementPlacement(
     formData,
     {
       headers: { "Content-Type": "multipart/form-data" },
-      timeout: API_TIMEOUT_LONG, // 5 min for placement verification
+      timeout: 120_000, // 2 min — aligned with hook timeout
     },
   );
   return data.data;
+}
+
+/**
+ * Step 4: AI Attribution Expert — user-triggered.
+ * Uses cached extraction (no file re-upload needed). AI reviews item
+ * attribution: placement, key naming, is_total flags, value signs.
+ */
+export async function aiAttributeExtraction(
+  stockId: number,
+): Promise<AIValidationResult> {
+  const { data } = await api.post<{ status: string; data: AIValidationResult }>(
+    `/api/v1/fundamental/stocks/${stockId}/ai-attribute`,
+    null,
+    { timeout: 180_000 },
+  );
+  return data.data;
+}
+
+/** Log a change to a statement line item for audit trail. */
+export async function logStatementChange(
+  stockId: number,
+  statementId: number,
+  lineItemId: number,
+  action: "extracted" | "validated" | "manually_edited" | "ai_corrected",
+  oldValue: number | null,
+  newValue: number,
+  changedBy: "ai" | "user",
+  notes?: string,
+): Promise<{ id: number; message: string }> {
+  const { data } = await api.post<{ status: string; data: { id: number; message: string } }>(
+    `/api/v1/fundamental/stocks/${stockId}/statements/${statementId}/line-items/${lineItemId}/audit`,
+    {
+      action,
+      old_value: oldValue,
+      new_value: newValue,
+      changed_by: changedBy,
+      notes,
+    },
+  );
+  return data.data;
+}
+
+// ── PDF file management ─────────────────────────────────────────────
+
+export interface SavedPdf {
+  id: number;
+  original_name: string;
+  file_size: number;
+  created_at: number;
+}
+
+/** List all saved PDFs for a stock. */
+export async function listStockPdfs(stockId: number): Promise<SavedPdf[]> {
+  const { data } = await api.get<{ status: string; data: SavedPdf[] }>(
+    `/api/v1/fundamental/stocks/${stockId}/pdfs`,
+  );
+  return data.data;
+}
+
+/** Get the download URL for a saved PDF. */
+export function getStockPdfDownloadUrl(stockId: number, pdfId: number): string {
+  return `/api/v1/fundamental/stocks/${stockId}/pdfs/${pdfId}/download`;
+}
+
+/** Download a saved PDF and trigger browser download (web) or return blob. */
+export async function downloadStockPdf(stockId: number, pdfId: number, filename: string): Promise<void> {
+  const response = await api.get(
+    `/api/v1/fundamental/stocks/${stockId}/pdfs/${pdfId}/download`,
+    { responseType: "blob" },
+  );
+  const blob = new Blob([response.data], { type: "application/pdf" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+/** Delete a saved PDF. */
+export async function deleteStockPdf(stockId: number, pdfId: number): Promise<void> {
+  await api.delete(`/api/v1/fundamental/stocks/${stockId}/pdfs/${pdfId}`);
 }
 
 /** Get metrics for a stock. */
