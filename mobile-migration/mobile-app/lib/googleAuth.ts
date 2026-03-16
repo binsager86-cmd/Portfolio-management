@@ -13,8 +13,8 @@
  * properly relay the token back to the parent window on web.
  */
 
-import { Platform } from "react-native";
 import { GOOGLE_WEB_CLIENT_ID } from "@/constants/Config";
+import { Platform } from "react-native";
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -137,37 +137,71 @@ async function performWebGoogleSignIn(): Promise<GoogleAuthResult> {
   }
 }
 
-// ── Native: @react-native-google-signin ─────────────────────────────
+// ── Native: expo-auth-session (Expo Go compatible) ──────────────────
 
 export async function performNativeGoogleSignIn(): Promise<GoogleAuthResult> {
   try {
-    const { GoogleSignin } = await import(
-      "@react-native-google-signin/google-signin"
-    );
+    const AuthSession = await import("expo-auth-session");
+    const WebBrowser = await import("expo-web-browser");
 
-    GoogleSignin.configure({
-      webClientId: GOOGLE_WEB_CLIENT_ID,
-      offlineAccess: true,
+    WebBrowser.maybeCompleteAuthSession();
+
+    const discovery: AuthSession.DiscoveryDocument = {
+      authorizationEndpoint: "https://accounts.google.com/o/oauth2/v2/auth",
+      tokenEndpoint: "https://oauth2.googleapis.com/token",
+    };
+
+    const redirectUri = AuthSession.makeRedirectUri({
+      scheme: "portfolio-tracker",
     });
 
-    await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
-    const userInfo = await GoogleSignin.signIn();
-    const idToken = userInfo.data?.idToken;
+    if (__DEV__) console.log("[GoogleAuth Native] Redirect URI:", redirectUri);
 
-    if (!idToken) {
+    const request = new AuthSession.AuthRequest({
+      clientId: GOOGLE_WEB_CLIENT_ID,
+      scopes: ["openid", "profile", "email"],
+      responseType: AuthSession.ResponseType.Token,
+      redirectUri,
+      usePKCE: false,
+    });
+
+    const result = await request.promptAsync(discovery);
+
+    if (__DEV__) console.log("[GoogleAuth Native] Result type:", result.type);
+
+    if (result.type === "cancel" || result.type === "dismiss") {
+      return { success: false, cancelled: true };
+    }
+
+    if (result.type === "success") {
+      const accessToken = result.params?.access_token;
+      if (!accessToken) {
+        return {
+          success: false,
+          cancelled: false,
+          error: "Google did not return an access token.",
+        };
+      }
+      if (__DEV__) console.log("[GoogleAuth Native] ✅ Got access_token");
+      return { success: true, idToken: accessToken };
+    }
+
+    if (result.type === "error") {
+      const errorCode = result.params?.error || "unknown_error";
+      const errorDesc = result.params?.error_description || "Google Sign-In returned an error.";
       return {
         success: false,
         cancelled: false,
-        error: "Google Sign-In did not return an ID token.",
+        error: `${errorCode}: ${errorDesc}`,
       };
     }
 
-    if (__DEV__) console.log("[GoogleAuth Native] ✅ Got id_token");
-    return { success: true, idToken };
+    return {
+      success: false,
+      cancelled: false,
+      error: `Google Sign-In returned unexpected result: ${result.type}`,
+    };
   } catch (err: any) {
-    if (err?.code === "SIGN_IN_CANCELLED") {
-      return { success: false, cancelled: true };
-    }
     if (__DEV__) console.error("[GoogleAuth Native] ❌ Error:", err);
     return {
       success: false,

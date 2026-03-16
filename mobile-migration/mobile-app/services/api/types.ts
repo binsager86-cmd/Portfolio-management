@@ -649,6 +649,7 @@ export interface StockScore {
 
 export interface AIUploadResult {
   message: string;
+  upload_id?: string;
   statements: Array<{
     statement_id: number;
     statement_type: string;
@@ -675,6 +676,8 @@ export interface AIUploadResult {
       expected: number;
       actual: number;
       passed: boolean;
+      detail: string;
+      discrepancy: number;
     }>;
   };
 }
@@ -701,6 +704,18 @@ export interface ValuationRunResult {
   assumptions: Record<string, number | string | null>;
   message?: string;
   [key: string]: unknown;
+}
+
+export interface StatementAuditLog {
+  id: number;
+  statement_id: number;
+  line_item_id: number;
+  action: "extracted" | "validated" | "manually_edited" | "ai_corrected";
+  old_value: number | null;
+  new_value: number;
+  changed_by: "ai" | "user";
+  timestamp: number;
+  notes?: string;
 }
 
 // ── Securities Master ───────────────────────────────────────────────

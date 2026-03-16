@@ -20,7 +20,7 @@ const ENV_API_URL =
 
 // ── Local dev fallbacks ─────────────────────────────────────────────
 // Change LAN IP if testing on a physical device over Wi-Fi
-const LOCAL_LAN_API = "http://192.168.1.5:8004";
+const LOCAL_LAN_API = "http://192.168.1.2:8004";
 const LOCAL_WEB_API = "http://127.0.0.1:8004";
 
 /**

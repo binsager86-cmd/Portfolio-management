@@ -1,46 +1,40 @@
 /**
  * Theme store (Zustand) — persists light/dark preference.
  *
- * On Web  → localStorage
- * On Native → MMKV (fast synchronous storage)
+ * On Web    → localStorage (sync)
+ * On Native → expo-secure-store (async, Expo Go compatible)
  */
 
 import { Platform } from "react-native";
 import { create } from "zustand";
 
-import { ThemePalette, DarkTheme, getTheme } from "@/constants/theme";
+import { DarkTheme, getTheme, ThemePalette } from "@/constants/theme";
 
 const STORAGE_KEY = "app_theme_mode";
 
-// ── MMKV instance (native only) ────────────────────────────────────
-
-let mmkv: import("react-native-mmkv").MMKV | null = null;
-if (Platform.OS !== "web") {
-  const { MMKV } = require("react-native-mmkv");
-  mmkv = new MMKV({ id: "theme-storage" });
-}
-
 // ── Persistence helpers ─────────────────────────────────────────────
 
-function loadMode(): "light" | "dark" {
+async function loadMode(): Promise<"light" | "dark"> {
   try {
     if (Platform.OS === "web") {
       const v = localStorage.getItem(STORAGE_KEY);
       if (v === "light" || v === "dark") return v;
-    } else if (mmkv) {
-      const v = mmkv.getString(STORAGE_KEY);
+    } else {
+      const SecureStore = await import("expo-secure-store");
+      const v = await SecureStore.getItemAsync(STORAGE_KEY);
       if (v === "light" || v === "dark") return v;
     }
   } catch {}
   return "dark"; // default
 }
 
-function saveMode(mode: "light" | "dark"): void {
+async function saveMode(mode: "light" | "dark"): Promise<void> {
   try {
     if (Platform.OS === "web") {
       localStorage.setItem(STORAGE_KEY, mode);
-    } else if (mmkv) {
-      mmkv.set(STORAGE_KEY, mode);
+    } else {
+      const SecureStore = await import("expo-secure-store");
+      await SecureStore.setItemAsync(STORAGE_KEY, mode);
     }
   } catch {}
 }
@@ -61,8 +55,8 @@ export const useThemeStore = create<ThemeState>((set, get) => ({
   colors: DarkTheme,
   hydrated: false,
 
-  hydrate: () => {
-    const m = loadMode();
+  hydrate: async () => {
+    const m = await loadMode();
     set({ mode: m, colors: getTheme(m), hydrated: true });
   },
 

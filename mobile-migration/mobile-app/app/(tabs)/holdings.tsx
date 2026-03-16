@@ -10,48 +10,48 @@
  * section with manual override capability.
  */
 
-import React, { useState, useMemo, useCallback } from "react";
+import { AllocationDonut, AllocationSlice } from "@/components/charts/AllocationDonut";
+import { KpiCard } from "@/components/portfolio/KpiWidgets";
+import { DataScreen } from "@/components/screens";
+import { FilterChip } from "@/components/ui/FilterChip";
+import type { ThemePalette } from "@/constants/theme";
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  Pressable,
-  TouchableOpacity,
-  RefreshControl,
-  Platform,
-  TextInput as RNTextInput,
-  Alert,
-  Modal,
-  ActivityIndicator,
-} from "react-native";
-import { useQueryClient, useMutation } from "@tanstack/react-query";
-import FontAwesome from "@expo/vector-icons/FontAwesome";
-import {
-  useHoldings,
-  useCashBalances,
-  useDepositTotals,
-  useAllStocksForMerge,
+    useAllStocksForMerge,
+    useCashBalances,
+    useDepositTotals,
+    useHoldings,
 } from "@/hooks/queries";
+import { useResponsive } from "@/hooks/useResponsive";
+import { fmtNum } from "@/lib/currency";
+import { todayISO } from "@/lib/dateUtils";
+import { showErrorAlert } from "@/lib/errorHandling";
 import {
-  Holding,
-  HoldingsResponse,
-  setCashOverride,
-  clearCashOverride,
-  PortfolioCashBalance,
-  exportHoldingsExcel,
-  mergeStocks,
+    clearCashOverride,
+    exportHoldingsExcel,
+    Holding,
+    mergeStocks,
+    PortfolioCashBalance,
+    setCashOverride
 } from "@/services/api";
 import { useThemeStore } from "@/services/themeStore";
-import { useResponsive } from "@/hooks/useResponsive";
-import { todayISO } from "@/lib/dateUtils";
-import { DataScreen } from "@/components/screens";
-import { AllocationDonut, AllocationSlice } from "@/components/charts/AllocationDonut";
-import type { ThemePalette } from "@/constants/theme";
-import { fmtNum } from "@/lib/currency";
-import { showErrorAlert } from "@/lib/errorHandling";
-import { FilterChip } from "@/components/ui/FilterChip";
-import { KpiCard } from "@/components/portfolio/KpiWidgets";
+import { getApiErrorMessage } from "@/src/features/fundamental-analysis/types";
+import FontAwesome from "@expo/vector-icons/FontAwesome";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import React, { useCallback, useMemo, useState } from "react";
+import {
+    ActivityIndicator,
+    Alert,
+    Modal,
+    Platform,
+    Pressable,
+    RefreshControl,
+    TextInput as RNTextInput,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
+} from "react-native";
 
 // ── Column types & definitions ──────────────────────────────────────
 
@@ -791,7 +791,7 @@ export default function HoldingsScreen() {
   return (
     <DataScreen
       loading={isLoading}
-      error={isError ? ((error as any)?.message ?? "Failed to load holdings") : null}
+      error={isError ? getApiErrorMessage(error, "Failed to load holdings") : null}
       onRetry={() => refetch()}
       loadingMessage="Loading holdings…"
       bare

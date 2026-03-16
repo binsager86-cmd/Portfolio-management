@@ -7,23 +7,24 @@
  */
 
 import axios, {
-  AxiosError,
-  AxiosResponse,
-  InternalAxiosRequestConfig,
+    AxiosError,
+    AxiosResponse,
+    InternalAxiosRequestConfig,
 } from "axios";
 import { z } from "zod";
 
 import { API_BASE_URL, API_TIMEOUT } from "@/constants/Config";
 import { API_TIMEOUT_LONG } from "@/constants/layout";
-import {
-  getToken,
-  setToken,
-  getRefreshToken,
-  setRefreshToken,
-  removeToken,
-  removeRefreshToken,
-} from "./tokenStorage";
+import { Platform } from "react-native";
 import { useAuthStore } from "./authStore";
+import {
+    getRefreshToken,
+    getToken,
+    removeRefreshToken,
+    removeToken,
+    setRefreshToken,
+    setToken,
+} from "./tokenStorage";
 
 // ── Axios instance ──────────────────────────────────────────────────
 
@@ -32,6 +33,8 @@ const api = axios.create({
   timeout: API_TIMEOUT,
   headers: { "Content-Type": "application/json" },
 });
+
+if (__DEV__) console.log("[API] baseURL =", JSON.stringify(API_BASE_URL), "Platform.OS =", Platform.OS);
 
 // ── Request interceptor: attach access token ────────────────────────
 
@@ -1536,6 +1539,18 @@ export async function deleteStatement(stockId: number, statementId: number): Pro
   await api.delete(`/api/v1/fundamental/stocks/${stockId}/statements/${statementId}`);
 }
 
+/** Delete all statements for the given period_end_date values. */
+export async function deleteStatementsByPeriod(
+  stockId: number,
+  periods: string[],
+): Promise<{ message: string; deleted_count: number }> {
+  const { data } = await api.post<{ status: string; data: { message: string; deleted_count: number } }>(
+    `/api/v1/fundamental/stocks/${stockId}/statements/delete-periods`,
+    { periods },
+  );
+  return data.data;
+}
+
 /** Update a single line item amount. */
 export async function updateLineItem(
   itemId: number,
@@ -1551,6 +1566,7 @@ export async function updateLineItem(
 /** AI Upload response types. */
 export interface AIUploadResult {
   message: string;
+  upload_id?: string;
   statements: Array<{
     statement_id: number;
     statement_type: string;
@@ -1562,6 +1578,23 @@ export interface AIUploadResult {
   source_file: string;
   pages_processed: number;
   model: string;
+  confidence: number;
+  cached: boolean;
+  audit: {
+    checks_total: number;
+    checks_passed: number;
+    checks_failed: number;
+    retries_used: number;
+    validation_corrections: number;
+    details: Array<{
+      statement_type: string;
+      period: string;
+      rule: string;
+      expected: number;
+      actual: number;
+      passed: boolean;
+    }>;
+  };
 }
 
 /**
@@ -1570,28 +1603,24 @@ export interface AIUploadResult {
  */
 export async function uploadFinancialStatement(
   stockId: number,
-  fileUri: string,
+  file: File | Blob | string,
   fileName: string,
   mimeType: string = "application/pdf",
+  options?: { signal?: AbortSignal },
 ): Promise<AIUploadResult> {
   const formData = new FormData();
 
-  // On web, fetch the blob from the URI and append as a File object.
-  // The RN-style {uri, name, type} object doesn't work on web — the
-  // server receives a plain string instead of an actual file upload.
-  if (typeof window !== "undefined" && typeof window.document !== "undefined") {
-    // Web platform
-    const response = await fetch(fileUri);
-    const blob = await response.blob();
-    const file = new File([blob], fileName, { type: mimeType });
-    formData.append("file", file);
-  } else {
-    // React Native (mobile)
+  if (typeof file === "string") {
+    // Native: pass URI object
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     formData.append("file", {
-      uri: fileUri,
+      uri: file,
       name: fileName,
       type: mimeType,
-    } as unknown);
+    } as any);
+  } else {
+    // Web: File or Blob already created by caller
+    formData.append("file", file, fileName);
   }
 
   const { data } = await api.post<{ status: string; data: AIUploadResult }>(
@@ -1599,7 +1628,91 @@ export async function uploadFinancialStatement(
     formData,
     {
       headers: { "Content-Type": "multipart/form-data" },
-      timeout: API_TIMEOUT_LONG, // 5 min timeout for AI extraction pipeline
+      timeout: 120_000, // 2 min — aligned with hook timeout
+      signal: options?.signal,
+    },
+  );
+  return data.data;
+}
+
+/** AI Validation / Placement response. */
+export interface AIValidationResult {
+  message: string;
+  corrections_applied: number;
+  confidence: number;
+  statements?: Array<{
+    statement_id: number;
+    statement_type: string;
+    period_end_date: string;
+    fiscal_year: number;
+    line_items_count: number;
+    currency: string;
+  }>;
+}
+
+/**
+ * Step 2: Validate extracted financial data against the PDF.
+ * Sends the same PDF again — backend uses cached extraction for cross-check.
+ */
+export async function validateFinancialStatement(
+  stockId: number,
+  file: File | Blob | string,
+  fileName: string,
+  mimeType: string = "application/pdf",
+): Promise<AIValidationResult> {
+  const formData = new FormData();
+
+  if (typeof file === "string") {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    formData.append("file", {
+      uri: file,
+      name: fileName,
+      type: mimeType,
+    } as any);
+  } else {
+    formData.append("file", file, fileName);
+  }
+
+  const { data } = await api.post<{ status: string; data: AIValidationResult }>(
+    `/api/v1/fundamental/stocks/${stockId}/validate-statement`,
+    formData,
+    {
+      headers: { "Content-Type": "multipart/form-data" },
+      timeout: 120_000, // 2 min — aligned with hook timeout
+    },
+  );
+  return data.data;
+}
+
+/**
+ * Step 3: Verify every line item is placed in the correct statement type.
+ * Sends the same PDF — backend uses cached data for AI placement check.
+ */
+export async function verifyStatementPlacement(
+  stockId: number,
+  file: File | Blob | string,
+  fileName: string,
+  mimeType: string = "application/pdf",
+): Promise<AIValidationResult> {
+  const formData = new FormData();
+
+  if (typeof file === "string") {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    formData.append("file", {
+      uri: file,
+      name: fileName,
+      type: mimeType,
+    } as any);
+  } else {
+    formData.append("file", file, fileName);
+  }
+
+  const { data } = await api.post<{ status: string; data: AIValidationResult }>(
+    `/api/v1/fundamental/stocks/${stockId}/verify-placement`,
+    formData,
+    {
+      headers: { "Content-Type": "multipart/form-data" },
+      timeout: 120_000, // 2 min — aligned with hook timeout
     },
   );
   return data.data;
