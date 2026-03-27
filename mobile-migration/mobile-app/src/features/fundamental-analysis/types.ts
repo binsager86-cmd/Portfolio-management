@@ -76,11 +76,43 @@ export const INITIAL_STEPS: ProcessingStep[] = [
 
 // ── Valuation model info ──────────────────────────────────────────
 export const MODEL_INFO: Record<string, { title: string; formula: string; icon: IconName }> = {
-  graham:    { title: "Graham Number",        formula: "V = √(22.5 × EPS × BVPS)",   icon: "university" },
+  graham:    { title: "Graham Growth",        formula: "IV = EPS × (8.5 + 2g) × 4.4 / Y",  icon: "university" },
   dcf:       { title: "Two-Stage DCF",        formula: "Gordon Growth Terminal Value", icon: "sitemap" },
   ddm:       { title: "Dividend Discount",    formula: "Gordon Growth Model",          icon: "money" },
   multiples: { title: "Comparable Multiples", formula: "e.g., P/E × EPS",             icon: "balance-scale" },
 };
+
+/**
+ * CFA-Based Composite Scoring Model v2.0
+ *
+ * Methodology: Weighted linear combination of five factors
+ * Source: CFA Program Curriculum Level II – Equity Valuation
+ *
+ * Weight Rationale:
+ * - Fundamental (25%): Core profitability (ROIC/ROE), margins & leverage
+ * - Quality (20%): Earnings quality, cash conversion, accruals
+ * - Growth (20%): Multi-year CAGRs, stability, profit-aware growth
+ * - Valuation (20%): Earnings yield, EV/EBIT, P/B, intrinsic value discount
+ * - Risk (15%): Volatility, drawdown, balance sheet risk, market cap
+ *
+ * Note: Scores are absolute (0-100), not peer-relative.
+ * Use sector_percentile (when available) for peer comparison.
+ */
+export const SCORE_WEIGHTS = {
+  FUNDAMENTAL: { value: 0.25, label: "25%", key: "fundamental_score" as const, iconColor: "#10b981" },
+  QUALITY:     { value: 0.20, label: "20%", key: "quality_score" as const,     iconColor: "#3b82f6" },
+  GROWTH:      { value: 0.20, label: "20%", key: "growth_score" as const,      iconColor: "#f97316" },
+  VALUATION:   { value: 0.20, label: "20%", key: "valuation_score" as const,   iconColor: "#6366f1" },
+  RISK:        { value: 0.15, label: "15%", key: "risk_score" as const,        iconColor: "#ef4444" },
+} as const;
+
+export const SCORE_THRESHOLDS = {
+  EXCEPTIONAL: 85,
+  STRONG: 70,
+  ACCEPTABLE: 55,
+  WEAK: 40,
+  AVOID: 0,
+} as const;
 
 // ── Panel prop interfaces ─────────────────────────────────────────
 export interface PanelProps {

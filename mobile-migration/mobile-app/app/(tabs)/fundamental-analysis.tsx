@@ -112,7 +112,7 @@ export default function FundamentalAnalysisScreen() {
       )}
       {tab === "statements" && selectedStockId && (
         <ErrorBoundary colors={colors}>
-          <StatementsPanel stockId={selectedStockId} colors={colors} isDesktop={isDesktop} />
+          <StatementsPanel stockId={selectedStockId} stockSymbol={selectedStockSymbol} colors={colors} isDesktop={isDesktop} />
         </ErrorBoundary>
       )}
       {tab === "comparison" && selectedStockId && (

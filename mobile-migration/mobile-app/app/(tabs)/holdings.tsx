@@ -90,7 +90,7 @@ const TABLE_COLUMNS: ColDef[] = [
   { key: "reinvested_dividends",            label: "Reinvested",           fmt: "money",           width: 90,  align: "right", summable: true },
   { key: "bonus_dividend_shares",           label: "Bonus Shares",         fmt: "quantity",        width: 90,  align: "right", summable: true },
   { key: "bonus_share_value",               label: "Bonus Value",          fmt: "money",           width: 95,  align: "right", summable: true },
-  { key: "weight_by_cost",                  label: "Weight %",             fmt: "percent",         width: 80,  align: "right" },
+  { key: "allocation_pct",                  label: "Weight %",             fmt: "percent",         width: 80,  align: "right" },
   { key: "dividend_yield_on_cost_pct",      label: "Yield %",              fmt: "percent",         width: 75,  align: "right" },
   { key: "yield_amount",                    label: "Yield Amt",            fmt: "money",           width: 90,  align: "right", summable: true },
   { key: "weighted_dividend_yield_on_cost", label: "Wt. Yield %",          fmt: "percent",         width: 85,  align: "right" },
@@ -282,8 +282,8 @@ function computeTotals(holdings: Holding[]): Record<string, number> {
   if (totals.total_cost && totals.total_cost > 0) {
     totals.current_pnl_pct = (totals.current_pnl / totals.total_cost) * 100;
   }
-  // Weight sums to 100%
-  totals.weight_by_cost = 100;
+  // Allocation sums to 100%
+  totals.allocation_pct = 100;
   return totals;
 }
 
@@ -400,7 +400,7 @@ function TotalCell({
   }
 
   // Non-summable columns are blank
-  if (!col.summable && col.key !== "pnl_pct" && col.key !== "weight_by_cost") {
+  if (!col.summable && col.key !== "pnl_pct" && col.key !== "allocation_pct") {
     return <View style={[ts.dataCell, { width: col.width }]} />;
   }
 
@@ -759,10 +759,10 @@ export default function HoldingsScreen() {
   const allocationData: AllocationSlice[] = useMemo(() => {
     const holdings = resp?.holdings ?? [];
     return holdings
-      .filter((h) => (h.weight_by_cost ?? 0) > 0)
+      .filter((h) => (h.allocation_pct ?? 0) > 0)
       .map((h) => ({
         company: h.company,
-        weight: h.weight_by_cost ?? 0,
+        weight: h.allocation_pct ?? 0,
         pnl_pct: h.pnl_pct ?? 0,
       }));
   }, [resp?.holdings]);

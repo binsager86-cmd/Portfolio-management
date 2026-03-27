@@ -11,7 +11,8 @@ import { RefreshControl, ScrollView, Text, View } from "react-native";
 import { LoadingScreen } from "@/components/ui/LoadingScreen";
 import { useStatements, useStockMetrics } from "@/hooks/queries";
 import { showErrorAlert } from "@/lib/errorHandling";
-import { exportCSV, exportExcel, exportPDF, TableData } from "@/lib/exportAnalysis";
+import { exportCSV, exportExcel, TableData } from "@/lib/exportAnalysis";
+import { exportMetricsPdf, type MetricsCategoryData } from "@/lib/exportMetricsPdf";
 import { calculateMetrics, StockMetric } from "@/services/api";
 import { st } from "../styles";
 import { CATEGORY_LABELS, type PanelWithSymbolProps } from "../types";
@@ -154,16 +155,24 @@ export function MetricsPanel({ stockId, stockSymbol, colors, isDesktop }: PanelW
       ) : (
         <>
           {/* View toggle */}
-          <View style={{ flexDirection: "row", marginBottom: 14, gap: 8, alignItems: "center" }}>
+          <View style={{ flexDirection: "row", marginBottom: 14, gap: 8, alignItems: "center", zIndex: 50, overflow: "visible" as const }}>
             <Chip label="Historical Table" active={viewMode === "historical"} onPress={() => setViewMode("historical")} colors={colors} icon="table" />
             <Chip label="Grouped List" active={viewMode === "grouped"} onPress={() => setViewMode("grouped")} colors={colors} icon="list-ul" />
             <View style={{ flex: 1 }} />
             <ExportBar
               onExport={async (fmt) => {
-                const t = exportTables();
-                if (fmt === "xlsx") await exportExcel(t, stockSymbol, "Metrics");
-                else if (fmt === "csv") await exportCSV(t, stockSymbol, "Metrics");
-                else await exportPDF(t, stockSymbol, "Metrics");
+                if (fmt === "pdf") {
+                  const pdfCats: Record<string, MetricsCategoryData> = {};
+                  for (const [cat, { metricNames, yearData, years }] of Object.entries(historicalCategories)) {
+                    const catInfo = CATEGORY_LABELS[cat] ?? { label: cat, color: "#6366f1" };
+                    pdfCats[cat] = { label: catInfo.label, color: catInfo.color, metricNames, yearData, years };
+                  }
+                  await exportMetricsPdf(pdfCats, stockSymbol, allMetrics.length);
+                } else {
+                  const t = exportTables();
+                  if (fmt === "xlsx") await exportExcel(t, stockSymbol, "Metrics");
+                  else await exportCSV(t, stockSymbol, "Metrics");
+                }
               }}
               colors={colors}
             />

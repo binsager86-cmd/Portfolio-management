@@ -232,6 +232,7 @@ export interface Holding {
   total_pnl_kwd: number;
   total_cost_kwd: number;
   weight_by_cost: number;
+  allocation_pct: number;
   weighted_dividend_yield_on_cost: number;
 }
 
@@ -1194,7 +1195,8 @@ export interface IntegrityCheckResult {
 /** Run full integrity check. */
 export async function integrityCheck(): Promise<IntegrityCheckResult> {
   const { data } = await api.get<{ status: string; data: IntegrityCheckResult }>(
-    "/api/v1/integrity/check"
+    "/api/v1/integrity/check",
+    { timeout: API_TIMEOUT_LONG },
   );
   return data.data;
 }
@@ -1210,7 +1212,8 @@ export interface CashIntegrityResult {
 /** Check cash balance for a portfolio. */
 export async function checkCashIntegrity(portfolio: string): Promise<CashIntegrityResult> {
   const { data } = await api.get<{ status: string; data: CashIntegrityResult }>(
-    `/api/v1/integrity/cash/${portfolio}`
+    `/api/v1/integrity/cash/${portfolio}`,
+    { timeout: API_TIMEOUT_LONG },
   );
   return data.data;
 }
@@ -1368,13 +1371,37 @@ export interface AnalysisStock {
   latest_score?: StockScoreSummary | null;
 }
 
+export interface ScoreMetricBreakdown {
+  metric: string;
+  value: number | null;
+  points: number;
+  reason: string;
+}
+
+export interface CategoryBreakdown {
+  base: number;
+  metrics: ScoreMetricBreakdown[];
+}
+
+export interface ScoreBreakdown {
+  fundamental: CategoryBreakdown;
+  valuation: CategoryBreakdown;
+  growth: CategoryBreakdown;
+  quality: CategoryBreakdown;
+  risk: CategoryBreakdown;
+}
+
 export interface StockScoreSummary {
   overall_score: number | null;
   fundamental_score: number | null;
   valuation_score: number | null;
   growth_score: number | null;
   quality_score: number | null;
+  risk_score: number | null;
   scoring_date?: string;
+  sector_percentile?: number | null;
+  sector_name?: string | null;
+  score_breakdown?: ScoreBreakdown;
 }
 
 export interface FinancialStatement {
@@ -1438,6 +1465,7 @@ export interface StockScore {
   valuation_score: number | null;
   growth_score: number | null;
   quality_score: number | null;
+  risk_score: number | null;
   details: Record<string, number>;
   analyst_notes: string | null;
   created_at: number;
@@ -1539,14 +1567,25 @@ export async function deleteStatement(stockId: number, statementId: number): Pro
   await api.delete(`/api/v1/fundamental/stocks/${stockId}/statements/${statementId}`);
 }
 
-/** Delete all statements for the given period_end_date values. */
+/** Delete statements for the given period_end_date values, optionally filtered by type. */
 export async function deleteStatementsByPeriod(
   stockId: number,
   periods: string[],
+  statementType?: string,
 ): Promise<{ message: string; deleted_count: number }> {
   const { data } = await api.post<{ status: string; data: { message: string; deleted_count: number } }>(
     `/api/v1/fundamental/stocks/${stockId}/statements/delete-periods`,
-    { periods },
+    { periods, ...(statementType ? { statement_type: statementType } : {}) },
+  );
+  return data.data;
+}
+
+/** Hard-delete ALL financial statements and line items for a stock. */
+export async function deleteAllStatements(
+  stockId: number,
+): Promise<{ message: string; deleted_count: number }> {
+  const { data } = await api.delete<{ status: string; data: { message: string; deleted_count: number } }>(
+    `/api/v1/fundamental/stocks/${stockId}/statements`,
   );
   return data.data;
 }
@@ -1559,6 +1598,53 @@ export async function updateLineItem(
   const { data } = await api.put<{ status: string; data: { message: string } }>(
     `/api/v1/fundamental/line-items/${itemId}`,
     { amount },
+  );
+  return data.data;
+}
+
+/** Bulk-update order_index for line items (drag-and-drop reorder). */
+export async function reorderLineItems(
+  stockId: number,
+  items: Array<{ id: number; order_index: number }>,
+): Promise<{ message: string; updated: number }> {
+  const { data } = await api.post<{ status: string; data: { message: string; updated: number } }>(
+    `/api/v1/fundamental/stocks/${stockId}/statements/reorder-items`,
+    { items },
+  );
+  return data.data;
+}
+
+/** Create a single line item in an existing statement (fill a dash). */
+export async function createLineItem(
+  stockId: number,
+  payload: { statement_id: number; line_item_code: string; line_item_name: string; amount: number; order_index?: number },
+): Promise<{ id: number; message: string }> {
+  const { data } = await api.post<{ status: string; data: { id: number; message: string } }>(
+    `/api/v1/fundamental/stocks/${stockId}/line-items`,
+    payload,
+  );
+  return data.data;
+}
+
+/** Delete a single line item (row removal). */
+export async function deleteLineItem(
+  itemId: number,
+): Promise<{ message: string }> {
+  const { data } = await api.delete<{ status: string; data: { message: string } }>(
+    `/api/v1/fundamental/line-items/${itemId}`,
+  );
+  return data.data;
+}
+
+/** Merge two line items: keep_code absorbs values from remove_code, then remove_code is deleted. */
+export async function mergeLineItems(
+  stockId: number,
+  keepCode: string,
+  removeCode: string,
+): Promise<{ message: string; merged_count: number; deleted_count: number }> {
+  const { data } = await api.post<{ status: string; data: { message: string; merged_count: number; deleted_count: number } }>(
+    `/api/v1/fundamental/stocks/${stockId}/merge-line-items`,
+    { keep_code: keepCode, remove_code: removeCode },
   );
   return data.data;
 }
@@ -1606,7 +1692,7 @@ export async function uploadFinancialStatement(
   file: File | Blob | string,
   fileName: string,
   mimeType: string = "application/pdf",
-  options?: { signal?: AbortSignal },
+  options?: { signal?: AbortSignal; force?: boolean; model?: string },
 ): Promise<AIUploadResult> {
   const formData = new FormData();
 
@@ -1623,12 +1709,17 @@ export async function uploadFinancialStatement(
     formData.append("file", file, fileName);
   }
 
+  const params = new URLSearchParams();
+  if (options?.force) params.set("force", "true");
+  if (options?.model) params.set("model", options.model);
+  const qs = params.toString();
+
   const { data } = await api.post<{ status: string; data: AIUploadResult }>(
-    `/api/v1/fundamental/stocks/${stockId}/upload-statement`,
+    `/api/v1/fundamental/stocks/${stockId}/upload-statement${qs ? `?${qs}` : ""}`,
     formData,
     {
       headers: { "Content-Type": "multipart/form-data" },
-      timeout: 120_000, // 2 min — aligned with hook timeout
+      timeout: 240_000,
       signal: options?.signal,
     },
   );
@@ -1754,7 +1845,7 @@ export async function getGrowthAnalysis(
 
 /** Get / compute stock score. */
 export async function getStockScore(stockId: number): Promise<StockScoreSummary & { details?: Record<string, number>; error?: string }> {
-  const { data } = await api.get<{ status: string; data: StockScoreSummary & { details?: Record<string, number>; error?: string } }>(
+  const { data } = await api.get<{ status: string; data: StockScoreSummary & { details?: Record<string, number>; score_breakdown?: ScoreBreakdown; error?: string } }>(
     `/api/v1/fundamental/stocks/${stockId}/score`,
   );
   return data.data;
@@ -1776,6 +1867,46 @@ export async function getValuations(stockId: number): Promise<{ valuations: Valu
   return data.data;
 }
 
+/** Delete all saved valuations for a stock. */
+export async function deleteAllValuations(stockId: number): Promise<void> {
+  await api.delete(`/api/v1/fundamental/stocks/${stockId}/valuations`);
+}
+
+/** Delete a single saved valuation. */
+export async function deleteValuation(stockId: number, valuationId: number): Promise<void> {
+  await api.delete(`/api/v1/fundamental/stocks/${stockId}/valuations/${valuationId}`);
+}
+
+export interface ValuationDefaults {
+  eps: number | null;
+  book_value_per_share: number | null;
+  dividends_per_share: number | null;
+  fcf: number | null;
+  fcf_history: { year: number; fcf: number }[];
+  avg_fcf_growth: number | null;
+  shares_outstanding: number | null;
+  revenue_growth: number | null;
+  avg_dividend_growth: number | null;
+  dps_history: { year: number; dps: number }[];
+  total_debt: number | null;
+  total_cash: number | null;
+  net_margin: number | null;
+  roe: number | null;
+  // Graham-specific
+  graham_growth_cagr: number | null;
+  eps_history: { year: number; eps: number | null }[];
+  current_price: number | null;
+  bond_yield: number | null;
+}
+
+/** Get auto-computed valuation defaults for a stock. */
+export async function getValuationDefaults(stockId: number): Promise<ValuationDefaults> {
+  const { data } = await api.get<{ status: string; data: ValuationDefaults }>(
+    `/api/v1/fundamental/stocks/${stockId}/valuation-defaults`,
+  );
+  return data.data;
+}
+
 export interface ValuationRunResult {
   id: number;
   model_type: string;
@@ -1786,16 +1917,26 @@ export interface ValuationRunResult {
   [key: string]: unknown;
 }
 
-/** Run Graham Number valuation. */
+/** Normalize backend result: map `model` → `model_type`. */
+function _normalizeValuationResult(r: ValuationRunResult): ValuationRunResult {
+  if (!r.model_type && (r as Record<string, unknown>).model) {
+    r.model_type = (r as Record<string, unknown>).model as string;
+  }
+  return r;
+}
+
+/** Run Graham Growth Formula valuation. */
 export async function runGrahamValuation(
   stockId: number,
-  payload: { eps: number; book_value_per_share: number; multiplier?: number },
+  payload: { eps: number; growth_rate?: number;
+    corporate_yield?: number; margin_of_safety?: number;
+    current_price?: number | null },
 ): Promise<ValuationRunResult> {
   const { data } = await api.post<{ status: string; data: ValuationRunResult }>(
     `/api/v1/fundamental/stocks/${stockId}/valuations/graham`,
     payload,
   );
-  return data.data;
+  return _normalizeValuationResult(data.data);
 }
 
 /** Run DCF valuation. */
@@ -1810,13 +1951,15 @@ export async function runDCFValuation(
     stage2_years?: number;
     terminal_growth?: number;
     shares_outstanding?: number;
+    cash?: number;
+    debt?: number;
   },
 ): Promise<ValuationRunResult> {
   const { data } = await api.post<{ status: string; data: ValuationRunResult }>(
     `/api/v1/fundamental/stocks/${stockId}/valuations/dcf`,
     payload,
   );
-  return data.data;
+  return _normalizeValuationResult(data.data);
 }
 
 /** Run DDM valuation. */
@@ -1834,7 +1977,7 @@ export async function runDDMValuation(
     `/api/v1/fundamental/stocks/${stockId}/valuations/ddm`,
     payload,
   );
-  return data.data;
+  return _normalizeValuationResult(data.data);
 }
 
 /** Run Comparable Multiples valuation. */
@@ -1850,6 +1993,26 @@ export async function runMultiplesValuation(
   const { data } = await api.post<{ status: string; data: ValuationRunResult }>(
     `/api/v1/fundamental/stocks/${stockId}/valuations/multiples`,
     payload,
+  );
+  return _normalizeValuationResult(data.data);
+}
+
+/** Peer multiple entry from yfinance. */
+export interface PeerMultiple {
+  stock_id: number;
+  symbol: string;
+  company_name: string;
+  pe: number | null;
+  pb: number | null;
+  ps: number | null;
+  pcf: number | null;
+  ev_ebitda: number | null;
+}
+
+/** Fetch valuation multiples for all user's analysis stocks. */
+export async function getPeerMultiples(stockId: number): Promise<{ peers: PeerMultiple[]; count: number }> {
+  const { data } = await api.get<{ status: string; data: { peers: PeerMultiple[]; count: number } }>(
+    `/api/v1/fundamental/stocks/${stockId}/peer-multiples`,
   );
   return data.data;
 }

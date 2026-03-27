@@ -20,14 +20,15 @@ import { PortfolioCard } from "@/components/portfolio/PortfolioCard";
 import { ErrorScreen } from "@/components/ui/ErrorScreen";
 import { LoadingScreen } from "@/components/ui/LoadingScreen";
 import { MetricCard } from "@/components/ui/MetricCard";
+import {
+    useAiStatus,
+    useOverviewDependentQueries,
+    usePortfolioOverview,
+    useRfRateSetting,
+    useRiskMetrics,
+} from "@/hooks/queries";
 import { useAuth } from "@/hooks/useAuth";
 import { usePriceRefresh } from "@/hooks/usePriceRefresh";
-import {
-  usePortfolioOverview,
-  useOverviewDependentQueries,
-  useRiskMetrics,
-} from "@/hooks/queries";
-import { useRfRateSetting, useAiStatus } from "@/hooks/queries";
 import { useResponsive } from "@/hooks/useResponsive";
 import {
     formatCurrency,
@@ -37,8 +38,6 @@ import {
 import { pnlColor } from "@/lib/formatting";
 import {
     analyzePortfolio,
-    OverviewData,
-    RiskMetrics,
     saveSnapshot,
     setRfRate,
     SnapshotRecord
@@ -52,6 +51,7 @@ import React, { useCallback, useMemo, useState } from "react";
 import {
     ActivityIndicator,
     Alert,
+    Platform,
     Pressable,
     RefreshControl,
     ScrollView,
@@ -146,26 +146,36 @@ export default function OverviewScreen() {
   const doSaveSnapshot = useCallback(async () => {
     setSavingSnapshot(true);
     try {
-      await saveSnapshot();
+      const result = await saveSnapshot();
       await queryClient.invalidateQueries({ queryKey: ["portfolio-overview"] });
       await queryClient.invalidateQueries({ queryKey: ["snapshots"] });
-      Alert.alert("Snapshot Saved", "Today's portfolio snapshot has been saved successfully.");
-    } catch (e) {
+      const msg = `Snapshot ${result.action}: ${result.message}\nPortfolio Value: ${formatCurrency(result.portfolio_value)} KWD`;
+      if (Platform.OS === "web") window.alert(msg);
+      else Alert.alert("Snapshot Saved", msg);
+    } catch (e: any) {
       console.warn("Save snapshot failed:", e);
-      Alert.alert("Error", "Failed to save snapshot. Please try again.");
+      const detail = e?.response?.data?.detail ?? "Failed to save snapshot. Please try again.";
+      if (Platform.OS === "web") window.alert(`Error: ${detail}`);
+      else Alert.alert("Error", detail);
     }
     setSavingSnapshot(false);
   }, [queryClient]);
 
   const onSaveSnapshot = useCallback(() => {
-    Alert.alert(
-      "Save Snapshot",
-      "Save today's portfolio snapshot? This will record the current portfolio value.",
-      [
-        { text: "Cancel", style: "cancel" },
-        { text: "Save", onPress: doSaveSnapshot },
-      ],
-    );
+    if (Platform.OS === "web") {
+      if (window.confirm("Save today's portfolio snapshot? This will record the current portfolio value.")) {
+        doSaveSnapshot();
+      }
+    } else {
+      Alert.alert(
+        "Save Snapshot",
+        "Save today's portfolio snapshot? This will record the current portfolio value.",
+        [
+          { text: "Cancel", style: "cancel" },
+          { text: "Save", onPress: doSaveSnapshot },
+        ],
+      );
+    }
   }, [doSaveSnapshot]);
 
   // ── Derived metrics ──
