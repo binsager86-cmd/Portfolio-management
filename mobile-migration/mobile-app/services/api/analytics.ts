@@ -7,40 +7,40 @@
 import { API_TIMEOUT_LONG } from "@/constants/layout";
 import api from "./client";
 import type {
-  AIAnalysisResult,
-  AIUploadResult,
-  AIValidationResult,
-  AnalysisStock,
-  BackupImportResult,
-  BonusSharesResponse,
-  CashIntegrityResult,
-  DividendByStock,
-  DividendListResponse,
-  FinancialStatement,
-  IntegrityCheckResult,
-  PaginationInfo,
-  PerformanceData,
-  PfmAsset,
-  PfmIncomeExpense,
-  PfmLiability,
-  PfmSnapshotFull,
-  PfmSnapshotSummary,
-  RealizedProfitData,
-  RiskMetrics,
-  SaveSnapshotResponse,
-  SecurityRecord,
-  SnapshotRecord,
-  StockMetric,
-  StockScore,
-  StockScoreSummary,
-  TradingSummaryResponse,
-  ValuationResult,
-  ValuationRunResult,
+    AIAnalysisResult,
+    AIUploadResult,
+    AIValidationResult,
+    AnalysisStock,
+    BackupImportResult,
+    BonusSharesResponse,
+    CashIntegrityResult,
+    DividendByStock,
+    DividendListResponse,
+    FinancialStatement,
+    IntegrityCheckResult,
+    PaginationInfo,
+    PerformanceData,
+    PfmAsset,
+    PfmIncomeExpense,
+    PfmLiability,
+    PfmSnapshotFull,
+    PfmSnapshotSummary,
+    RealizedProfitData,
+    RiskMetrics,
+    SaveSnapshotResponse,
+    SecurityRecord,
+    SnapshotRecord,
+    StockMetric,
+    StockScore,
+    StockScoreSummary,
+    TradingSummaryResponse,
+    ValuationResult,
+    ValuationRunResult,
 } from "./types";
 
 export type {
-  AIAnalysisResult, AIUploadResult,
-  AIValidationResult, AnalysisStock, BackupImportResult, BonusByStock, BonusShareRecord, BonusSharesResponse, CashIntegrityResult, DividendByStock, DividendListResponse, DividendRecord, FinancialLineItem, FinancialStatement, IntegrityCheckResult, PaginationInfo, PerformanceData, PfmAsset, PfmIncomeExpense, PfmLiability, PfmSnapshotFull, PfmSnapshotSummary, RealizedProfitData, RealizedProfitDetail, RiskMetrics, SaveSnapshotResponse, SecurityRecord, SnapshotRecord, StockMetric, StockScore, StockScoreSummary, TradingSummary, TradingSummaryResponse, TradingTransaction, ValuationResult, ValuationRunResult
+    AIAnalysisResult, AIUploadResult,
+    AIValidationResult, AnalysisStock, BackupImportResult, BonusByStock, BonusShareRecord, BonusSharesResponse, CashIntegrityResult, DividendByStock, DividendListResponse, DividendRecord, FinancialLineItem, FinancialStatement, IntegrityCheckResult, PaginationInfo, PerformanceData, PfmAsset, PfmIncomeExpense, PfmLiability, PfmSnapshotFull, PfmSnapshotSummary, RealizedProfitData, RealizedProfitDetail, RiskMetrics, SaveSnapshotResponse, SecurityRecord, SnapshotRecord, StockMetric, StockScore, StockScoreSummary, TradingSummary, TradingSummaryResponse, TradingTransaction, ValuationResult, ValuationRunResult
 } from "./types";
 
 // ── Performance & Risk ──────────────────────────────────────────────
@@ -484,16 +484,27 @@ export async function updateLineItem(
   return data.data;
 }
 
+/** Response from the fast upload endpoint (Phase 1). */
+export interface UploadJobResponse {
+  job_id: number;
+  upload_id: string;
+  status: string;
+  message: string;
+  source_file: string;
+}
+
 /**
- * Upload a financial report PDF for AI-powered extraction.
+ * Upload a financial report PDF — returns quickly with a job_id.
+ * The actual AI extraction runs asynchronously on the backend.
+ * Poll extraction status via getExtractionStatus(job_id).
  */
 export async function uploadFinancialStatement(
   stockId: number,
   file: File | Blob | string,
   fileName: string,
   mimeType: string = "application/pdf",
-  options?: { signal?: AbortSignal; force?: boolean },
-): Promise<AIUploadResult> {
+  options?: { signal?: AbortSignal; force?: boolean; model?: string },
+): Promise<UploadJobResponse> {
   const formData = new FormData();
 
   if (typeof file === "string") {
@@ -509,13 +520,16 @@ export async function uploadFinancialStatement(
     formData.append("file", file, fileName);
   }
 
-  const forceParam = options?.force ? "?force=true" : "";
-  const { data } = await api.post<{ status: string; data: AIUploadResult }>(
-    `/api/v1/fundamental/stocks/${stockId}/upload-statement${forceParam}`,
+  const params = new URLSearchParams();
+  if (options?.force) params.set("force", "true");
+  if (options?.model) params.set("model", options.model);
+  const queryStr = params.toString() ? `?${params.toString()}` : "";
+  const { data } = await api.post<{ status: string; data: UploadJobResponse }>(
+    `/api/v1/fundamental/stocks/${stockId}/upload-statement${queryStr}`,
     formData,
     {
       headers: { "Content-Type": "multipart/form-data" },
-      timeout: 240_000, // 4 min — large PDFs need more time for AI extraction
+      timeout: 60_000, // Upload-only — should complete quickly
       signal: options?.signal,
     },
   );
@@ -524,25 +538,36 @@ export async function uploadFinancialStatement(
 
 /** Status response from the extraction polling endpoint. */
 export interface ExtractionStatusResponse {
-  status: "pending" | "processing" | "completed" | "failed";
-  stage: "preparing" | "uploading" | "processing" | "finalizing";
+  job_id: number;
+  upload_id: string;
+  status: "queued" | "running" | "done" | "failed";
+  stage: "uploading" | "extracting" | "saving" | "done";
   pages_processed: number;
   total_pages: number;
-  result?: AIUploadResult;
+  progress_percent: number;
+  model?: string;
   error_message?: string;
+  result?: AIUploadResult;
+  source_file?: string;
+  pdf_hash?: string;
+  attempt_count?: number;
+  created_at?: number;
+  started_at?: number;
+  updated_at?: number;
+  last_heartbeat_at?: number;
+  completed_at?: number;
 }
 
 /**
- * Poll extraction progress for a long-running upload.
- * TODO: Backend endpoint not yet implemented — wire up when available.
+ * Poll extraction progress for a running job.
  */
 export async function getExtractionStatus(
-  uploadId: string,
+  jobId: number | string,
 ): Promise<ExtractionStatusResponse> {
-  const { data } = await api.get<ExtractionStatusResponse>(
-    `/api/v1/fundamental/extraction-status/${encodeURIComponent(uploadId)}`,
+  const { data } = await api.get<{ status: string; data: ExtractionStatusResponse }>(
+    `/api/v1/fundamental/extraction-status/${encodeURIComponent(String(jobId))}`,
   );
-  return data;
+  return data.data;
 }
 
 /**
@@ -643,6 +668,28 @@ export async function aiAttributeExtraction(
     `/api/v1/fundamental/stocks/${stockId}/ai-attribute`,
     null,
     { timeout: 180_000 },
+  );
+  return data.data;
+}
+
+/**
+ * Step 5: AI Rearrange — verify and correct year↔value placement.
+ * Uses AI to detect swapped fiscal year values and correct them in-place.
+ */
+export async function aiRearrangeStatement(
+  stockId: number,
+  statementType: string,
+  periods?: string[],
+  pdfId?: number,
+): Promise<AIValidationResult> {
+  const { data } = await api.post<{ status: string; data: AIValidationResult }>(
+    `/api/v1/fundamental/stocks/${stockId}/ai-rearrange`,
+    {
+      statement_type: statementType,
+      periods: periods ?? null,
+      pdf_id: pdfId ?? null,
+    },
+    { timeout: 300_000 },
   );
   return data.data;
 }

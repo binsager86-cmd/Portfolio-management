@@ -176,6 +176,17 @@ class MetricsCalculator:
         if cfo is not None and net_income and net_income != 0:
             cfm["CFO / Net Income"] = cfo / net_income
 
+        # Free Cash Flow — also pick up from statement line items if not already set
+        if "Free Cash Flow" not in cfm:
+            stmt_fcf = _get("FREE_CASH_FLOW")
+            if stmt_fcf is not None:
+                cfm["Free Cash Flow"] = stmt_fcf
+
+        # Levered Free Cash Flow — from statement line items
+        lfcf = _get("LEVERED_FREE_CASH_FLOW")
+        if lfcf is not None:
+            cfm["Levered Free Cash Flow"] = lfcf
+
         results["cashflow"] = cfm
 
         # ── persist all metrics ────────────────────────────────────────

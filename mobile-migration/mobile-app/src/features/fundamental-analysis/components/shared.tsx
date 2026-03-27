@@ -3,24 +3,25 @@
  */
 
 import FontAwesome from "@expo/vector-icons/FontAwesome";
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  Animated,
-  Pressable,
-  ScrollView,
-  StyleProp,
-  Text,
-  TextInput,
-  View,
-  ViewStyle,
+    ActivityIndicator,
+    Alert,
+    Animated,
+    Modal,
+    Platform,
+    Pressable,
+    StyleProp,
+    Text,
+    TextInput,
+    View,
+    ViewStyle
 } from "react-native";
 
 import type { ThemePalette } from "@/constants/theme";
+import { st } from "../styles";
 import type { IconName } from "../types";
 import { STMNT_META, STMNT_TYPES } from "../types";
-import { st } from "../styles";
 
 /* ── Error Boundary ────────────────────────────────────────────── */
 
@@ -55,6 +56,46 @@ export class ErrorBoundary extends React.Component<
     }
     return this.props.children;
   }
+}
+
+/* ── Network Error State ─────────────────────────────────────── */
+
+export function NetworkErrorState({
+  error,
+  onRetry,
+  colors,
+}: {
+  error: Error | null;
+  onRetry: () => void;
+  colors: ThemePalette;
+}) {
+  return (
+    <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 32 }}>
+      <View style={[st.emptyIcon, { backgroundColor: colors.danger + "10" }]}>
+        <FontAwesome name="wifi" size={32} color={colors.danger} />
+      </View>
+      <Text style={{ color: colors.textPrimary, fontSize: 16, fontWeight: "700", marginTop: 12 }}>
+        Failed to load data
+      </Text>
+      <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: 4, textAlign: "center", lineHeight: 18 }}>
+        {error?.message ?? "A network error occurred. Please check your connection."}
+      </Text>
+      <Pressable
+        onPress={onRetry}
+        style={{
+          marginTop: 16,
+          paddingHorizontal: 20,
+          paddingVertical: 10,
+          backgroundColor: colors.accentPrimary,
+          borderRadius: 8,
+        }}
+        accessibilityRole="button"
+        accessibilityLabel="Retry loading data"
+      >
+        <Text style={{ color: "#fff", fontSize: 13, fontWeight: "700" }}>Retry</Text>
+      </Pressable>
+    </View>
+  );
 }
 
 /* ── Chip ───────────────────────────────────────────────────────── */
@@ -145,15 +186,28 @@ export function ExportBar({
 }: { onExport: (fmt: "xlsx" | "csv" | "pdf") => Promise<void>; colors: ThemePalette; disabled?: boolean }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
+  const [menuPos, setMenuPos] = useState<{ x: number; y: number; w: number } | null>(null);
+  const triggerRef = useRef<View>(null);
   const off = disabled || busy != null;
 
-  const handle = async (fmt: "xlsx" | "csv" | "pdf") => {
+  const handle = useCallback(async (fmt: "xlsx" | "csv" | "pdf") => {
     setOpen(false);
     setBusy(fmt);
     try { await onExport(fmt); }
     catch (e) { Alert.alert("Export Failed", e instanceof Error ? e.message : "Unknown error"); }
     setBusy(null);
-  };
+  }, [onExport]);
+
+  const openMenu = useCallback(() => {
+    if (triggerRef.current) {
+      triggerRef.current.measureInWindow((x, y, w, h) => {
+        setMenuPos({ x: x + w, y: y + h + 4, w });
+        setOpen(true);
+      });
+    } else {
+      setOpen((p) => !p);
+    }
+  }, []);
 
   const items: { fmt: "xlsx" | "csv" | "pdf"; icon: IconName; label: string; color: string }[] = [
     { fmt: "xlsx", icon: "file-excel-o", label: "Excel (.xlsx)", color: colors.success },
@@ -161,10 +215,21 @@ export function ExportBar({
     { fmt: "pdf",  icon: "file-pdf-o",   label: "PDF (.pdf)",    color: "#ef4444" },
   ];
 
+  const dropdown = (
+    <View style={[st.exportDropdown, { backgroundColor: colors.bgCard, borderColor: colors.borderColor }]}>
+      {items.map(({ fmt, icon, label, color }) => (
+        <Pressable key={fmt} onPress={() => handle(fmt)} style={({ pressed }) => ([st.exportDropItem, pressed && { backgroundColor: color + "12" }])}>
+          <FontAwesome name={icon} size={12} color={color} style={{ width: 18, textAlign: "center" }} />
+          <Text style={{ fontSize: 12, color: colors.textPrimary, fontWeight: "600", marginLeft: 8 }}>{label}</Text>
+        </Pressable>
+      ))}
+    </View>
+  );
+
   return (
-    <View style={{ position: "relative", zIndex: 50 }}>
+    <View ref={triggerRef} style={{ zIndex: 50 }}>
       <Pressable
-        onPress={() => setOpen((p) => !p)}
+        onPress={openMenu}
         disabled={off}
         style={({ pressed }) => ([
           st.exportTrigger,
@@ -182,18 +247,13 @@ export function ExportBar({
         )}
       </Pressable>
 
-      {open && (
-        <Pressable style={st.exportOverlay} onPress={() => setOpen(false)}>
-          <View style={[st.exportDropdown, { backgroundColor: colors.bgCard, borderColor: colors.borderColor }]}>
-            {items.map(({ fmt, icon, label, color }) => (
-              <Pressable key={fmt} onPress={() => handle(fmt)} style={({ pressed }) => ([st.exportDropItem, pressed && { backgroundColor: color + "12" }])}>
-                <FontAwesome name={icon} size={12} color={color} style={{ width: 18, textAlign: "center" }} />
-                <Text style={{ fontSize: 12, color: colors.textPrimary, fontWeight: "600", marginLeft: 8 }}>{label}</Text>
-              </Pressable>
-            ))}
+      <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
+        <Pressable style={{ flex: 1 }} onPress={() => setOpen(false)}>
+          <View style={menuPos ? { position: "absolute", top: menuPos.y, right: Platform.OS === "web" ? undefined : 16, ...(Platform.OS === "web" ? { left: menuPos.x - 160 } : {}) } : { position: "absolute", top: 60, right: 16 }}>
+            {dropdown}
           </View>
         </Pressable>
-      )}
+      </Modal>
     </View>
   );
 }
@@ -238,16 +298,44 @@ export function Card({ colors, children, style, noPadding }: { colors: ThemePale
 /* ── LabeledInput ──────────────────────────────────────────────── */
 
 export function LabeledInput({
-  label, value, onChangeText, colors, keyboardType, placeholder, autoCapitalize, flex,
+  label, value, onChangeText, colors, keyboardType, placeholder, autoCapitalize, flex, helperText,
 }: {
   label: string; value: string; onChangeText: (v: string) => void; colors: ThemePalette;
   keyboardType?: "numeric" | "default"; placeholder?: string; autoCapitalize?: "characters" | "none"; flex?: number;
+  helperText?: string;
 }) {
+  const [showHelper, setShowHelper] = useState(false);
   return (
     <View style={[{ flex: flex ?? undefined, marginBottom: 10 }]}>
-      <Text style={{ color: colors.textMuted, fontSize: 11, fontWeight: "600", marginBottom: 4, letterSpacing: 0.5 }}>
-        {label}
-      </Text>
+      <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 4 }}>
+        <Text style={{ color: colors.textMuted, fontSize: 11, fontWeight: "600", letterSpacing: 0.5 }}>
+          {label}
+        </Text>
+        {helperText ? (
+          <Pressable
+            onPress={() => setShowHelper(v => !v)}
+            hitSlop={8}
+            style={{ marginLeft: 5 }}
+          >
+            <FontAwesome name="question-circle" size={13} color={showHelper ? colors.accentPrimary : colors.textMuted + "99"} />
+          </Pressable>
+        ) : null}
+      </View>
+      {showHelper && helperText ? (
+        <View style={{
+          backgroundColor: colors.accentPrimary + "14",
+          borderLeftWidth: 3,
+          borderLeftColor: colors.accentPrimary,
+          borderRadius: 6,
+          paddingHorizontal: 10,
+          paddingVertical: 7,
+          marginBottom: 6,
+        }}>
+          <Text style={{ color: colors.textSecondary, fontSize: 11, lineHeight: 16 }}>
+            {helperText}
+          </Text>
+        </View>
+      ) : null}
       <TextInput
         placeholder={placeholder ?? label}
         placeholderTextColor={colors.textMuted + "80"}

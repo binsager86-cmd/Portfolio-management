@@ -2,9 +2,9 @@
  * Shared test helpers — mock data factories, render wrapper with providers,
  * and assertion utilities for the mobile app test suite.
  */
-import React from "react";
-import { render, RenderOptions } from "@testing-library/react-native";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { render, RenderOptions } from "@testing-library/react-native";
+import React from "react";
 
 // ── Test QueryClient — no retries, instant stale ────────────────────
 
@@ -131,6 +131,7 @@ export const MOCK_HOLDINGS = {
       total_pnl_kwd: 350,
       total_cost_kwd: 3200,
       weight_by_cost: 0.15,
+      allocation_pct: 0.15,
     },
     {
       company: "National Bank of Kuwait",
@@ -154,6 +155,7 @@ export const MOCK_HOLDINGS = {
       total_pnl_kwd: 340,
       total_cost_kwd: 2100,
       weight_by_cost: 0.1,
+      allocation_pct: 0.1,
     },
   ],
   totals: {

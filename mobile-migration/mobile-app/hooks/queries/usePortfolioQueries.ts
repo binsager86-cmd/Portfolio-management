@@ -3,24 +3,24 @@
  * accounts, and deposit totals.
  */
 
-import { useQuery, useQueries } from "@tanstack/react-query";
 import {
-  getOverview,
-  getHoldings,
-  getCashBalances,
-  getAccounts,
-  getDeposits,
-  getPerformance,
-  getSnapshots,
-  getRealizedProfit,
-  getRiskMetrics,
-  type OverviewData,
-  type HoldingsResponse,
-  type PortfolioCashBalance,
-  type PerformanceData,
-  type RiskMetrics,
-  type RealizedProfitData,
+    getAccounts,
+    getCashBalances,
+    getDeposits,
+    getHoldings,
+    getOverview,
+    getPerformance,
+    getRealizedProfit,
+    getRiskMetrics,
+    getSnapshots,
+    type HoldingsResponse,
+    type OverviewData,
+    type PerformanceData,
+    type PortfolioCashBalance,
+    type RealizedProfitData,
+    type RiskMetrics,
 } from "@/services/api";
+import { useQueries, useQuery } from "@tanstack/react-query";
 
 // ── Query key constants ─────────────────────────────────────────────
 
@@ -54,6 +54,9 @@ export function useHoldings(portfolio?: string) {
   return useQuery<HoldingsResponse>({
     queryKey: portfolioKeys.holdings(portfolio),
     queryFn: () => getHoldings(portfolio),
+    staleTime: 0,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: true,
   });
 }
 

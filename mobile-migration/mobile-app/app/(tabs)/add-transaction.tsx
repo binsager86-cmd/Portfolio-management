@@ -9,44 +9,45 @@
  * Submits via React Query mutation + invalidates caches.
  */
 
-import React, { useState, useMemo, useEffect } from "react";
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  Pressable,
-  Alert,
-  Platform,
-  ActivityIndicator,
-} from "react-native";
-import { useRouter, useLocalSearchParams } from "expo-router";
-import { Controller, useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import FontAwesome from "@expo/vector-icons/FontAwesome";
-import * as DocumentPicker from "expo-document-picker";
-import { useTransaction, useStocks, useStockList } from "@/hooks/queries";
-import {
-  TransactionCreate,
-  importTransactions,
-  deleteAllTransactions,
-  StockListEntry,
-  createStock,
-} from "@/services/api";
-import { useCreateTransaction, useUpdateTransaction, TXN_DEPENDENT_QUERY_KEYS } from "@/hooks/useTransactionMutations";
-import { showErrorAlert } from "@/lib/errorHandling";
-import { useThemeStore } from "@/services/themeStore";
-import { todayISO } from "@/lib/dateUtils";
-import { FormScreen } from "@/components/screens";
-import {
-  FormField,
-  SegmentedControl,
-  TextInput,
-  NumberInput,
-  DateInput,
+    DateInput,
+    FormField,
+    NumberInput,
+    SegmentedControl,
+    TextInput,
 } from "@/components/form";
+import { FormScreen } from "@/components/screens";
+import { useStockList, useStocks, useTransaction } from "@/hooks/queries";
+import { TXN_DEPENDENT_QUERY_KEYS, useCreateTransaction, useUpdateTransaction } from "@/hooks/useTransactionMutations";
+import { todayISO } from "@/lib/dateUtils";
+import { showErrorAlert } from "@/lib/errorHandling";
+import {
+    StockListEntry,
+    TransactionCreate,
+    createStock,
+    deleteAllTransactions,
+    fetchStockPrice,
+    importTransactions,
+} from "@/services/api";
+import { useThemeStore } from "@/services/themeStore";
+import FontAwesome from "@expo/vector-icons/FontAwesome";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import * as DocumentPicker from "expo-document-picker";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import React, { useEffect, useMemo, useState } from "react";
+import { Controller, useForm } from "react-hook-form";
+import {
+    ActivityIndicator,
+    Alert,
+    Platform,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Text,
+    View,
+} from "react-native";
+import { z } from "zod";
 
 // ── Schema ──────────────────────────────────────────────────────────
 
@@ -300,11 +301,23 @@ export default function AddTransactionScreen() {
         ? selectedRefStock
         : refList.find((r) => r.symbol.toUpperCase() === values.stock_symbol.toUpperCase());
       try {
+        // Fetch live price so holdings show correct market value immediately
+        const currency = values.portfolio === "USA" ? "USD" : "KWD";
+        let price: number | undefined;
+        if (refMatch?.yf_ticker) {
+          try {
+            const res = await fetchStockPrice(refMatch.yf_ticker, currency);
+            if (res.price != null && res.price > 0) price = res.price;
+          } catch {
+            // price stays undefined — non-fatal
+          }
+        }
         await createStock({
           symbol: values.stock_symbol,
           name: refMatch?.name ?? values.stock_symbol,
           portfolio: values.portfolio,
-          currency: values.portfolio === "USA" ? "USD" : "KWD",
+          currency,
+          current_price: price,
           yf_ticker: refMatch?.yf_ticker,
         });
         await queryClient.invalidateQueries({ queryKey: ["stocks"] });

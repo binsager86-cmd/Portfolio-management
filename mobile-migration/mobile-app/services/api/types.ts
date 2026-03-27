@@ -105,6 +105,7 @@ export interface Holding {
   total_pnl_kwd: number;
   total_cost_kwd: number;
   weight_by_cost: number;
+  allocation_pct: number;
   weighted_dividend_yield_on_cost: number;
 }
 

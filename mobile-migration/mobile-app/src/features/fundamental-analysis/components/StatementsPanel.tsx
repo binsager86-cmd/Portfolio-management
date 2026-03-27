@@ -6,56 +6,84 @@
 
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  Platform,
-  Pressable,
-  RefreshControl,
-  ScrollView,
-  Text,
-  TextInput,
-  View,
+    ActivityIndicator,
+    Alert,
+    Platform,
+    Pressable,
+    RefreshControl,
+    ScrollView,
+    Text,
+    TextInput,
+    View,
 } from "react-native";
+
+// dnd-kit — web only (tree-shaken on native)
+import {
+    closestCenter,
+    DndContext,
+    KeyboardSensor,
+    PointerSensor,
+    useSensor,
+    useSensors,
+    type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+    arrayMove,
+    SortableContext,
+    useSortable,
+    verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 
 import { LoadingScreen } from "@/components/ui/LoadingScreen";
 import type { ThemePalette } from "@/constants/theme";
 import { useStatements } from "@/hooks/queries";
 import { showErrorAlert } from "@/lib/errorHandling";
+import { exportCSV, exportExcel, exportPDF, type TableData } from "@/lib/exportAnalysis";
 import {
-  deleteStatementsByPeriod,
-  FinancialStatement,
-  updateLineItem,
+    createLineItem,
+    createStatement,
+    deleteAllStatements,
+    deleteLineItem,
+    deleteStatementsByPeriod,
+    FinancialStatement,
+    mergeLineItems,
+    reorderLineItems,
+    updateLineItem
 } from "@/services/api";
 import {
-  aiAttributeExtraction,
-  deleteStockPdf,
-  downloadStockPdf,
-  listStockPdfs,
-  logStatementChange,
-  type SavedPdf,
+    aiAttributeExtraction,
+    aiRearrangeStatement,
+    deleteStockPdf,
+    downloadStockPdf,
+    listStockPdfs,
+    logStatementChange,
+    type SavedPdf,
 } from "@/services/api/analytics";
-import { useFinancialStatements } from "../hooks/useFinancialStatements";
+import { useFinancialStatements, type GeminiModel } from "../hooks/useFinancialStatements";
 import { st } from "../styles";
-import type { PanelProps } from "../types";
-import { STMNT_ICONS } from "../types";
+import type { PanelWithSymbolProps } from "../types";
+import { STMNT_ICONS, STMNT_META, STMNT_TYPES } from "../types";
 import { formatNumber } from "../utils";
-import { StatementTabBar } from "./shared";
+import { ExportBar, StatementTabBar } from "./shared";
 
 /* ═══════════════════════════════════════════════════════════════════ */
 /*  STATEMENTS PANEL                                                  */
 /* ═══════════════════════════════════════════════════════════════════ */
 
-export function StatementsPanel({ stockId, colors, isDesktop }: PanelProps) {
+export function StatementsPanel({ stockId, stockSymbol, colors, isDesktop }: PanelWithSymbolProps) {
   const [typeFilter, setTypeFilter] = useState<string | undefined>("income");
   const { data, isLoading, refetch, isFetching } = useStatements(stockId, typeFilter);
+
+  const [selectedModel, setSelectedModel] = useState<GeminiModel>("gemini-2.5-flash");
 
   const {
     processingSteps, uploadResult, uploadError, uploading, allDone,
     handlePickAndUpload,
     dismissSteps, dismissError, dismissResult,
-  } = useFinancialStatements(stockId);
+  } = useFinancialStatements(stockId, selectedModel);
 
   const queryClient = useQueryClient();
 
@@ -63,6 +91,174 @@ export function StatementsPanel({ stockId, colors, isDesktop }: PanelProps) {
   const [attributing, setAttributing] = useState(false);
   const [attributionDismissed, setAttributionDismissed] = useState(false);
   const [attributionResult, setAttributionResult] = useState<{ message: string; corrections: number } | null>(null);
+
+  // Excel import state
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState<string | null>(null);
+
+  /** Detect statement type from sheet/tab name */
+  const detectStatementType = useCallback((sheetName: string): string | null => {
+    const s = sheetName.toLowerCase().trim();
+    if (/balance|financial\s*position|bs\b/.test(s)) return "balance";
+    if (/income|profit|loss|p\s*&\s*l|p&l|earnings/.test(s)) return "income";
+    if (/cash\s*flow|cashflow|cf\b/.test(s)) return "cashflow";
+    if (/equity|changes\s*in\s*equity/.test(s)) return "equity";
+    return null;
+  }, []);
+
+  /**
+   * Parse imported AOA (array-of-arrays) from Excel and create statements.
+   * Expected format:
+   *   Row 0 (headers): ["Line Item", "FY2022", "FY2023", ...]  or  ["", "2022-12-31", "2023-12-31", ...]
+   *   Row 1+: ["Revenue", 1000000, 1200000, ...]
+   */
+  const processImportedAoa = useCallback(async (aoa: unknown[][], stmtType: string): Promise<number> => {
+    const headers = (aoa[0] as (string | number | null)[]).map((h) => String(h ?? "").trim());
+    const yearColumns: { colIdx: number; year: number; period: string }[] = [];
+
+    // Parse year columns from headers (skip col 0 which is line item name)
+    for (let c = 1; c < headers.length; c++) {
+      const h = headers[c];
+      // Match: "FY2022", "2022", "FY2022 Q1", "2022-12-31", etc.
+      const yearMatch = h.match(/(\d{4})/);
+      if (!yearMatch) continue;
+      const year = parseInt(yearMatch[1], 10);
+      if (year < 1900 || year > 2100) continue;
+      // Use a date match if available, otherwise default to Dec 31
+      const dateMatch = h.match(/(\d{4}-\d{2}-\d{2})/);
+      const period = dateMatch ? dateMatch[1] : `${year}-12-31`;
+      yearColumns.push({ colIdx: c, year, period });
+    }
+
+    if (yearColumns.length === 0) throw new Error("No year columns detected. Headers should contain years (e.g. FY2022, 2023, or 2023-12-31)");
+
+    // Parse data rows
+    const dataRows = aoa.slice(1).filter((row) => {
+      const name = String((row as unknown[])[0] ?? "").trim();
+      return name.length > 0;
+    });
+
+    if (dataRows.length === 0) throw new Error("No data rows found");
+
+    let totalCreated = 0;
+    for (const yc of yearColumns) {
+      const lineItems: { code: string; name: string; amount: number; is_total?: boolean }[] = [];
+      for (let ri = 0; ri < dataRows.length; ri++) {
+        const row = dataRows[ri] as (string | number | null)[];
+        const name = String(row[0] ?? "").trim();
+        const rawVal = row[yc.colIdx];
+        // Parse amount: handle strings like "1,234,567" or "(123,456)" for negatives
+        let amount = 0;
+        if (typeof rawVal === "number") {
+          amount = rawVal;
+        } else if (typeof rawVal === "string") {
+          const cleaned = rawVal.replace(/[,$\s]/g, "");
+          if (cleaned.startsWith("(") && cleaned.endsWith(")")) {
+            amount = -parseFloat(cleaned.slice(1, -1)) || 0;
+          } else {
+            amount = parseFloat(cleaned) || 0;
+          }
+        }
+        const code = name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+        const isTotal = name.toLowerCase().includes("total") || name.toLowerCase().startsWith("net ");
+        lineItems.push({ code, name, amount, is_total: isTotal });
+      }
+
+      await createStatement(stockId, {
+        statement_type: stmtType,
+        fiscal_year: yc.year,
+        period_end_date: yc.period,
+        extracted_by: "excel_import",
+        notes: "Imported from Excel",
+        line_items: lineItems,
+      });
+      totalCreated++;
+    }
+
+    return totalCreated;
+  }, [stockId]);
+
+  /** Process all sheets in a workbook */
+  const processWorkbook = useCallback(async (XLSX: typeof import("xlsx"), wb: import("xlsx").WorkBook) => {
+    const results: string[] = [];
+    let totalCreated = 0;
+
+    for (const sheetName of wb.SheetNames) {
+      const detectedType = detectStatementType(sheetName);
+      const stmtType = detectedType ?? typeFilter ?? "income";
+      const ws = wb.Sheets[sheetName];
+      const aoa: unknown[][] = XLSX.utils.sheet_to_json(ws, { header: 1 });
+      if (aoa.length < 2) {
+        results.push(`"${sheetName}": skipped (no data rows)`);
+        continue;
+      }
+      const created = await processImportedAoa(aoa, stmtType);
+      totalCreated += created;
+      results.push(`"${sheetName}" → ${stmtType} (${created} period(s))`);
+    }
+
+    queryClient.invalidateQueries({ queryKey: ["analysis-statements", stockId] });
+    setImportResult(`Imported ${totalCreated} period(s) from ${results.length} sheet(s):\n${results.join("\n")}`);
+  }, [detectStatementType, typeFilter, processImportedAoa, stockId, queryClient]);
+
+  const handleImportExcel = useCallback(async () => {
+    try {
+      if (Platform.OS === "web") {
+        // Web: use file input
+        const input = document.createElement("input");
+        input.type = "file";
+        input.accept = ".xlsx,.xls,.csv";
+        input.onchange = async () => {
+          const file = input.files?.[0];
+          if (!file) return;
+          setImporting(true);
+          setImportResult(null);
+          try {
+            const XLSX = await import("xlsx");
+            const buf = await file.arrayBuffer();
+            const wb = XLSX.read(buf, { type: "array" });
+            await processWorkbook(XLSX, wb);
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : "Import failed";
+            setImportResult(`Error: ${msg}`);
+          } finally {
+            setImporting(false);
+          }
+        };
+        input.click();
+      } else {
+        // Native: use expo-document-picker
+        setImporting(true);
+        setImportResult(null);
+        try {
+          const DocumentPicker = await import("expo-document-picker");
+          const result = await DocumentPicker.getDocumentAsync({
+            type: ["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/vnd.ms-excel", "text/csv"],
+            copyToCacheDirectory: true,
+          });
+          if (result.canceled || !result.assets?.[0]) {
+            setImporting(false);
+            return;
+          }
+          const asset = result.assets[0];
+          const FileSystem = await import("expo-file-system");
+          const base64 = await FileSystem.readAsStringAsync(asset.uri, { encoding: "base64" as const });
+          const XLSX = await import("xlsx");
+          const wb = XLSX.read(base64, { type: "base64" });
+          await processWorkbook(XLSX, wb);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "Import failed";
+          setImportResult(`Error: ${msg}`);
+        } finally {
+          setImporting(false);
+        }
+      }
+    } catch (err) {
+      setImporting(false);
+      const msg = err instanceof Error ? err.message : "Import failed";
+      setImportResult(`Error: ${msg}`);
+    }
+  }, [processWorkbook]);
 
   // Saved PDFs query
   const { data: savedPdfs = [] } = useQuery({
@@ -130,6 +326,89 @@ export function StatementsPanel({ stockId, colors, isDesktop }: PanelProps) {
           </View>
           {!uploading && <FontAwesome name="file-pdf-o" size={20} color={colors.danger + "80"} />}
         </Pressable>
+
+        {/* ── Import Excel Button ──────────────────────────────────── */}
+        <Pressable
+          onPress={handleImportExcel}
+          disabled={importing || uploading}
+          style={({ pressed }) => [
+            {
+              flexDirection: "row", alignItems: "center", justifyContent: "center",
+              paddingVertical: 10, paddingHorizontal: 16, marginTop: 10,
+              borderRadius: 10, borderWidth: 1.5,
+              borderColor: importing ? colors.textMuted : colors.success,
+              backgroundColor: importing ? colors.bgInput : colors.success + "08",
+              gap: 8,
+            },
+            pressed && !importing && { backgroundColor: colors.success + "15", transform: [{ scale: 0.98 }] },
+          ]}
+        >
+          {importing ? (
+            <ActivityIndicator size="small" color={colors.success} />
+          ) : (
+            <FontAwesome name="file-excel-o" size={16} color={colors.success} />
+          )}
+          <Text style={{ color: importing ? colors.textMuted : colors.textPrimary, fontSize: 13, fontWeight: "600" }}>
+            {importing ? "Importing..." : "Import from Excel (.xlsx)"}
+          </Text>
+          <Text style={{ color: colors.textMuted, fontSize: 10 }}>
+            into {STMNT_META[typeFilter ?? "income"]?.label ?? "Income"}
+          </Text>
+        </Pressable>
+
+        {/* Import result banner */}
+        {importResult && (
+          <View style={{
+            flexDirection: "row", alignItems: "center", marginTop: 8,
+            paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8,
+            backgroundColor: importResult.startsWith("Error") ? colors.danger + "15" : colors.success + "15",
+            gap: 6,
+          }}>
+            <FontAwesome
+              name={importResult.startsWith("Error") ? "exclamation-circle" : "check-circle"}
+              size={13}
+              color={importResult.startsWith("Error") ? colors.danger : colors.success}
+            />
+            <Text style={{ flex: 1, fontSize: 11, color: importResult.startsWith("Error") ? colors.danger : colors.success }}>
+              {importResult}
+            </Text>
+            <Pressable onPress={() => setImportResult(null)} hitSlop={8}>
+              <FontAwesome name="times" size={12} color={colors.textMuted} />
+            </Pressable>
+          </View>
+        )}
+
+        {/* ── Model selector ───────────────────────────────────────── */}
+        <View style={{ flexDirection: "row", alignItems: "center", marginTop: 10, gap: 8 }}>
+          <Text style={{ fontSize: 11, color: colors.textMuted, fontWeight: "600" }}>AI Model:</Text>
+          {(["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.5-pro-preview-03-25"] as const).map((m) => {
+            const label = m === "gemini-2.5-flash" ? "2.5 Flash" : m === "gemini-2.5-pro" ? "2.5 Pro" : "3.1 Pro";
+            return (
+              <Pressable
+                key={m}
+                onPress={() => setSelectedModel(m)}
+                disabled={uploading}
+                style={({ pressed }) => ({
+                  paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8,
+                  borderWidth: 1,
+                  borderColor: selectedModel === m ? colors.accentPrimary : colors.borderColor,
+                  backgroundColor: selectedModel === m ? colors.accentPrimary + "18" : "transparent",
+                  opacity: uploading ? 0.5 : pressed ? 0.8 : 1,
+                })}
+              >
+                <Text style={{
+                  fontSize: 11, fontWeight: selectedModel === m ? "700" : "500",
+                  color: selectedModel === m ? colors.accentPrimary : colors.textSecondary,
+                }}>
+                  {label}
+                </Text>
+              </Pressable>
+            );
+          })}
+          {selectedModel !== "gemini-2.5-flash" && (
+            <Text style={{ fontSize: 9, color: colors.warning, fontWeight: "600" }}>Better accuracy, slower</Text>
+          )}
+        </View>
 
         {/* ── Processing indicator ────────────────────────────────── */}
         {processingSteps.length > 0 && (
@@ -381,12 +660,39 @@ export function StatementsPanel({ stockId, colors, isDesktop }: PanelProps) {
       <SavedPdfsList pdfs={savedPdfs} stockId={stockId} colors={colors} />
 
       {/* Type filter tabs */}
-      <StatementTabBar value={typeFilter} onChange={(v) => setTypeFilter(v ?? "income")} colors={colors} showAll={false} />
+      <StatementTabBar value={typeFilter} onChange={setTypeFilter} colors={colors} showAll={true} />
 
       {isLoading ? (
         <LoadingScreen />
+      ) : typeFilter == null ? (
+        /* ── "All" view: grouped by statement type ──────────────── */
+        <ScrollView style={{ flex: 1 }}>
+          {STMNT_TYPES.map((sType) => {
+            const filtered = statements.filter((s) => s.statement_type === sType);
+            if (filtered.length === 0) return null;
+            const meta = STMNT_META[sType];
+            return (
+              <View key={sType}>
+                {/* Category header */}
+                <View style={{
+                  flexDirection: "row", alignItems: "center", gap: 8,
+                  paddingHorizontal: 14, paddingVertical: 10,
+                  backgroundColor: (meta?.color ?? colors.accentPrimary) + "12",
+                  borderBottomWidth: 1, borderBottomColor: colors.borderColor,
+                }}>
+                  <FontAwesome name={meta?.icon ?? "file-text-o"} size={14} color={meta?.color ?? colors.accentPrimary} />
+                  <Text style={{ fontSize: 13, fontWeight: "700", color: meta?.color ?? colors.textPrimary, letterSpacing: 0.3 }}>
+                    {meta?.label ?? sType}
+                  </Text>
+                  <Text style={{ fontSize: 11, color: colors.textMuted }}>({filtered.length} period{filtered.length !== 1 ? "s" : ""})</Text>
+                </View>
+                <StatementsTable stockId={stockId} stockSymbol={stockSymbol} statements={filtered} colors={colors} isDesktop={isDesktop} isFetching={isFetching} onRefresh={refetch} statementType={sType} />
+              </View>
+            );
+          })}
+        </ScrollView>
       ) : (
-        <StatementsTable stockId={stockId} statements={statements} colors={colors} isDesktop={isDesktop} isFetching={isFetching} onRefresh={refetch} statementType={typeFilter} />
+        <StatementsTable stockId={stockId} stockSymbol={stockSymbol} statements={statements} colors={colors} isDesktop={isDesktop} isFetching={isFetching} onRefresh={refetch} statementType={typeFilter} />
       )}
     </View>
   );
@@ -412,27 +718,34 @@ function SavedPdfsList({ pdfs, stockId, colors }: { pdfs: SavedPdf[]; stockId: n
     }
   }, [stockId]);
 
-  const handleDelete = useCallback((pdf: SavedPdf) => {
-    Alert.alert(
-      "Delete PDF",
-      `Delete "${pdf.original_name}"? This cannot be undone.`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              await deleteStockPdf(stockId, pdf.id);
-              queryClient.invalidateQueries({ queryKey: ["stock-pdfs", stockId] });
-            } catch {
-              Alert.alert("Error", "Failed to delete PDF.");
-            }
-          },
-        },
-      ],
-    );
+  const doDelete = useCallback(async (pdf: SavedPdf) => {
+    try {
+      await deleteStockPdf(stockId, pdf.id);
+      queryClient.invalidateQueries({ queryKey: ["stock-pdfs", stockId] });
+      if (Platform.OS === "web") window.alert("PDF deleted successfully.");
+      else Alert.alert("Deleted", "PDF deleted successfully.");
+    } catch {
+      if (Platform.OS === "web") window.alert("Failed to delete PDF.");
+      else Alert.alert("Error", "Failed to delete PDF.");
+    }
   }, [stockId, queryClient]);
+
+  const handleDelete = useCallback((pdf: SavedPdf) => {
+    if (Platform.OS === "web") {
+      if (window.confirm(`Delete "${pdf.original_name}"? This cannot be undone.`)) {
+        doDelete(pdf);
+      }
+    } else {
+      Alert.alert(
+        "Delete PDF",
+        `Delete "${pdf.original_name}"? This cannot be undone.`,
+        [
+          { text: "Cancel", style: "cancel" },
+          { text: "Delete", style: "destructive", onPress: () => doDelete(pdf) },
+        ],
+      );
+    }
+  }, [doDelete]);
 
   const formatFileSize = (bytes: number) => {
     if (bytes < 1024) return `${bytes} B`;
@@ -514,7 +827,7 @@ function SavedPdfsList({ pdfs, stockId, colors }: { pdfs: SavedPdf[]; stockId: n
 
 const EditableCell = React.memo(function EditableCell({
   itemId, value, isTotal, isEdited, colWidth, colors, editingKey,
-  onStartEdit, onSave, onCancel,
+  onStartEdit, onSave, onCancel, cellEditKey, onCreateSave,
 }: {
   itemId: number | null;
   value: number | undefined | null;
@@ -526,19 +839,28 @@ const EditableCell = React.memo(function EditableCell({
   onStartEdit: (id: string, val: string) => void;
   onSave: (id: number, amount: number) => void;
   onCancel: () => void;
+  /** Unique key for dash cells (no itemId) so they can enter edit mode */
+  cellEditKey?: string;
+  /** Called when saving a dash cell — creates a new line item */
+  onCreateSave?: (amount: number) => void;
 }) {
-  const cellKey = itemId != null ? String(itemId) : null;
-  const isEditing = editingKey != null && cellKey === editingKey;
-  const [localValue, setLocalValue] = useState(String(value ?? ""));
+  const actualKey = itemId != null ? String(itemId) : cellEditKey ?? null;
+  const isEditing = editingKey != null && actualKey === editingKey;
+  const [localValue, setLocalValue] = useState(String(value ?? "0"));
 
   useEffect(() => {
-    if (isEditing) setLocalValue(String(value ?? ""));
+    if (isEditing) setLocalValue(String(value ?? "0"));
   }, [isEditing, value]);
 
   const handleSubmit = useCallback(() => {
     const num = parseFloat(localValue);
-    if (!isNaN(num) && itemId != null) onSave(itemId, num);
-  }, [localValue, itemId, onSave]);
+    if (isNaN(num)) return;
+    if (itemId != null) {
+      onSave(itemId, num);
+    } else if (onCreateSave) {
+      onCreateSave(num);
+    }
+  }, [localValue, itemId, onSave, onCreateSave]);
 
   if (isEditing) {
     return (
@@ -571,7 +893,7 @@ const EditableCell = React.memo(function EditableCell({
   return (
     <View style={{ width: colWidth, alignItems: "flex-end", justifyContent: "center" }}>
       <Pressable
-        onPress={() => { if (cellKey) onStartEdit(cellKey, String(value ?? "")); }}
+        onPress={() => { if (actualKey) onStartEdit(actualKey, String(value ?? "0")); }}
         style={{ flexDirection: "row", alignItems: "center" }}
       >
         <Text style={{
@@ -590,13 +912,152 @@ const EditableCell = React.memo(function EditableCell({
 });
 
 /* ═══════════════════════════════════════════════════════════════════ */
+/*  SORTABLE ROW (dnd-kit)                                            */
+/* ═══════════════════════════════════════════════════════════════════ */
+
+type PeriodInfo = {
+  label: string;
+  period: string;
+  statementId: number;
+  items: Record<string, { id: number; amount: number; name: string; isTotal: boolean; edited: boolean }>;
+};
+
+function SortableRow({
+  id, item, rowIdx, periods, colors, COL_NAME_W, COL_VAL_W,
+  editingKey, onStartEdit, onSaveEdit, onCancelEdit, onCreateSave, onDeleteRow,
+  mergeMode, mergeSelected, onToggleMerge,
+}: {
+  id: string;
+  item: { code: string; name: string; isTotal: boolean };
+  rowIdx: number;
+  periods: PeriodInfo[];
+  colors: ThemePalette;
+  COL_NAME_W: number;
+  COL_VAL_W: number;
+  editingKey: string | null;
+  onStartEdit: (id: string, val: string) => void;
+  onSaveEdit: (id: number, amount: number) => void;
+  onCancelEdit: () => void;
+  onCreateSave: (statementId: number, code: string, name: string, orderIdx: number, amount: number) => void;
+  onDeleteRow: (code: string, name: string) => void;
+  mergeMode: boolean;
+  mergeSelected: boolean;
+  onToggleMerge: (code: string) => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition: transition ?? undefined,
+    opacity: isDragging ? 0.5 : 1,
+    display: "flex",
+    flexDirection: "row",
+    alignItems: "center",
+    paddingTop: 8,
+    paddingBottom: 8,
+    paddingLeft: 8,
+    paddingRight: 8,
+    backgroundColor: isDragging
+      ? (colors.accentPrimary + "20")
+      : item.isTotal ? (colors.bgInput + "60") : rowIdx % 2 === 0 ? "transparent" : (colors.bgPrimary + "30"),
+    borderTopWidth: item.isTotal ? 1 : 0,
+    borderTopColor: colors.borderColor,
+    borderTopStyle: item.isTotal ? "solid" as const : undefined,
+    zIndex: isDragging ? 999 : undefined,
+  };
+
+  return (
+    <div ref={setNodeRef} style={{
+      ...style,
+      ...(mergeSelected ? { backgroundColor: colors.accentPrimary + "25", borderLeft: `3px solid ${colors.accentPrimary}` } : {}),
+    }}>
+      {/* Merge checkbox */}
+      {mergeMode && (
+        <Pressable
+          onPress={() => onToggleMerge(item.code)}
+          hitSlop={4}
+          style={{ marginRight: 4, padding: 2 }}
+        >
+          <View style={{
+            width: 18, height: 18, borderRadius: 4, borderWidth: 1.5,
+            borderColor: mergeSelected ? colors.accentPrimary : colors.textMuted,
+            backgroundColor: mergeSelected ? colors.accentPrimary : "transparent",
+            alignItems: "center", justifyContent: "center",
+          }}>
+            {mergeSelected && <FontAwesome name="check" size={10} color="#fff" />}
+          </View>
+        </Pressable>
+      )}
+      {/* Drag handle */}
+      <div
+        {...attributes}
+        {...listeners}
+        style={{
+          cursor: "grab",
+          padding: 2,
+          marginRight: 4,
+          display: "flex",
+          alignItems: "center",
+          touchAction: "none",
+        }}
+      >
+        <Text style={{ fontSize: 12, color: colors.textMuted }}>⠿</Text>
+      </div>
+
+      {/* Row name */}
+      <Text numberOfLines={1} style={{
+        width: COL_NAME_W - 36,
+        fontSize: 12,
+        fontWeight: item.isTotal ? "700" : "400",
+        color: item.isTotal ? colors.textPrimary : colors.textSecondary,
+      }}>
+        {item.name}
+      </Text>
+
+      {/* Delete row button */}
+      <Pressable
+        onPress={() => onDeleteRow(item.code, item.name)}
+        hitSlop={4}
+        style={{ marginRight: 2, padding: 2 }}
+      >
+        <FontAwesome name="trash-o" size={10} color={colors.danger + "80"} />
+      </Pressable>
+
+      {/* Period cells */}
+      {periods.map((p) => {
+        const cell = p.items[item.code];
+        const dashKey = cell?.id == null ? `create_${p.statementId}_${item.code}` : undefined;
+        return (
+          <EditableCell
+            key={p.period}
+            itemId={cell?.id ?? null}
+            value={cell?.amount}
+            isTotal={item.isTotal}
+            isEdited={!!cell?.edited}
+            colWidth={COL_VAL_W}
+            colors={colors}
+            editingKey={editingKey}
+            onStartEdit={onStartEdit}
+            onSave={onSaveEdit}
+            onCancel={onCancelEdit}
+            cellEditKey={dashKey}
+            onCreateSave={dashKey ? (amount: number) => onCreateSave(p.statementId, item.code, item.name, rowIdx + 1, amount) : undefined}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════ */
 /*  STATEMENTS TABLE                                                  */
 /* ═══════════════════════════════════════════════════════════════════ */
 
 function StatementsTable({
-  stockId, statements, colors, isDesktop, isFetching, onRefresh, statementType,
+  stockId, stockSymbol, statements, colors, isDesktop, isFetching, onRefresh, statementType,
 }: {
   stockId: number;
+  stockSymbol: string;
   statements: FinancialStatement[];
   colors: ThemePalette;
   isDesktop: boolean;
@@ -608,6 +1069,83 @@ function StatementsTable({
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [selectedPeriods, setSelectedPeriods] = useState<Set<string>>(new Set());
   const [deleteMode, setDeleteMode] = useState(false);
+  const [rearranging, setRearranging] = useState(false);
+  const [rearrangeResult, setRearrangeResult] = useState<string | null>(null);
+  const [pdfPickerOpen, setPdfPickerOpen] = useState(false);
+  const [stmtPickerOpen, setStmtPickerOpen] = useState(false);
+  const [reconcileType, setReconcileType] = useState<string>("all");
+  const RECONCILE_OPTS = [
+    { key: "all", label: "All Types" },
+    { key: "income", label: "Income Only" },
+    { key: "balance", label: "Balance Sheet Only" },
+    { key: "cashflow", label: "Cash Flow Only" },
+    { key: "equity", label: "Equity Only" },
+  ] as const;
+
+  // ── Merge mode state ────────────────────────────────────────────
+  const [mergeMode, setMergeMode] = useState(false);
+  const [mergeSelection, setMergeSelection] = useState<string[]>([]);
+  const [mergeResult, setMergeResult] = useState<string | null>(null);
+
+  // ── Drag-and-drop state ─────────────────────────────────────────
+  const [localOrder, setLocalOrder] = useState<{ code: string; name: string; isTotal: boolean }[] | null>(null);
+
+  // ── Ref for syncing horizontal scroll between sticky header and body ──
+  const headerScrollRef = useRef<ScrollView>(null);
+
+  // Saved PDFs for AI rearrange PDF picker
+  const { data: tablePdfs = [] } = useQuery({
+    queryKey: ["stock-pdfs", stockId],
+    queryFn: () => listStockPdfs(stockId),
+    staleTime: 30_000,
+  });
+  const [selectedPdfId, setSelectedPdfId] = useState<number | undefined>();
+
+  // Auto-select latest PDF when list loads
+  useEffect(() => {
+    if (tablePdfs.length > 0 && !selectedPdfId) {
+      setSelectedPdfId(tablePdfs[0].id);
+    }
+  }, [tablePdfs, selectedPdfId]);
+
+  const handleRearrange = useCallback(async () => {
+    const targetType = reconcileType === "all" ? statementType : reconcileType;
+    if (!targetType) return;
+    setPdfPickerOpen(false);
+    setStmtPickerOpen(false);
+    setRearranging(true);
+    setRearrangeResult(null);
+    try {
+      const typesToReconcile = reconcileType === "all"
+        ? ["income", "balance", "cashflow", "equity"]
+        : [reconcileType];
+      const messages: string[] = [];
+      let totalCorrections = 0;
+      for (const t of typesToReconcile) {
+        const res = await aiRearrangeStatement(stockId, t, undefined, selectedPdfId);
+        messages.push(res.message);
+        totalCorrections += res.corrections_applied;
+      }
+      const combined = typesToReconcile.length > 1
+        ? `Reconciled ${typesToReconcile.length} statements — ${totalCorrections} total corrections.\n${messages.join("\n")}`
+        : messages[0];
+      setRearrangeResult(combined);
+      if (totalCorrections > 0) {
+        queryClient.invalidateQueries({ queryKey: ["analysis-statements", stockId] });
+      }
+    } catch (err: unknown) {
+      let msg = "AI reconciliation failed";
+      if (err && typeof err === "object" && "response" in err) {
+        const axErr = err as { response?: { data?: { detail?: string } } };
+        msg = axErr.response?.data?.detail || (err instanceof Error ? err.message : msg);
+      } else if (err instanceof Error) {
+        msg = err.message;
+      }
+      setRearrangeResult(`Error: ${msg}`);
+    } finally {
+      setRearranging(false);
+    }
+  }, [stockId, statementType, reconcileType, selectedPdfId, queryClient]);
 
   const updateMut = useMutation({
     mutationFn: ({ itemId, amount }: { itemId: number; amount: number }) => updateLineItem(itemId, amount),
@@ -655,8 +1193,61 @@ function StatementsTable({
 
   const handleCancelEdit = useCallback(() => { setEditingKey(null); }, []);
 
+  // ── Create line item mutation (for dash cells) ──────────────────
+  const createMut = useMutation({
+    mutationFn: (payload: { statement_id: number; line_item_code: string; line_item_name: string; amount: number; order_index?: number }) =>
+      createLineItem(stockId, payload),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["analysis-statements", stockId] }); setEditingKey(null); },
+    onError: (err: Error) => showErrorAlert("Create Failed", err),
+  });
+
+  const handleCreateSave = useCallback((statementId: number, code: string, name: string, orderIdx: number, amount: number) => {
+    createMut.mutate({ statement_id: statementId, line_item_code: code, line_item_name: name, amount, order_index: orderIdx });
+  }, [createMut]);
+
+  // ── Reorder mutation (drag-and-drop) ────────────────────────────
+  const reorderMut = useMutation({
+    mutationFn: (items: Array<{ id: number; order_index: number }>) => reorderLineItems(stockId, items),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["analysis-statements", stockId] }); },
+    onError: (err: Error) => { showErrorAlert("Reorder Failed", err); setLocalOrder(null); },
+  });
+
+  // ── Delete line item mutation ───────────────────────────────────
+  const deleteLineItemMut = useMutation({
+    mutationFn: (itemId: number) => deleteLineItem(itemId),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["analysis-statements", stockId] }); },
+    onError: (err: Error) => showErrorAlert("Delete Failed", err),
+  });
+
+  // ── Merge line items mutation ───────────────────────────────────
+  const mergeMut = useMutation({
+    mutationFn: ({ keepCode, removeCode }: { keepCode: string; removeCode: string }) =>
+      mergeLineItems(stockId, keepCode, removeCode),
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: ["analysis-statements", stockId] });
+      setMergeResult(res.message);
+      setMergeSelection([]);
+      setMergeMode(false);
+    },
+    onError: (err: Error) => { showErrorAlert("Merge Failed", err); },
+  });
+
+  const handleToggleMerge = useCallback((code: string) => {
+    setMergeSelection((prev) => {
+      if (prev.includes(code)) return prev.filter((c) => c !== code);
+      if (prev.length >= 2) return [prev[1], code]; // Replace oldest selection
+      return [...prev, code];
+    });
+  }, []);
+
+  // ── dnd-kit sensors ────────────────────────────────────────────
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor),
+  );
+
   const deleteMut = useMutation({
-    mutationFn: (periods: string[]) => deleteStatementsByPeriod(stockId, periods),
+    mutationFn: (periods: string[]) => deleteStatementsByPeriod(stockId, periods, statementType),
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ["analysis-statements", stockId] });
       setSelectedPeriods(new Set());
@@ -664,6 +1255,16 @@ function StatementsTable({
       Alert.alert("Deleted", res.message);
     },
     onError: (err: Error) => showErrorAlert("Delete Failed", err),
+  });
+
+  const deleteAllMut = useMutation({
+    mutationFn: () => deleteAllStatements(stockId),
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: ["analysis-statements", stockId] });
+      setDeleteMode(false);
+      Alert.alert("Deleted", res.message);
+    },
+    onError: (err: Error) => showErrorAlert("Delete All Failed", err),
   });
 
   const togglePeriod = useCallback((period: string) => {
@@ -681,31 +1282,118 @@ function StatementsTable({
       .map((s) => ({
         label: `FY${s.fiscal_year}${s.fiscal_quarter ? ` Q${s.fiscal_quarter}` : ""}`,
         period: s.period_end_date,
+        statementId: s.id,
         items: Object.fromEntries(
           (s.line_items ?? []).map((li) => [li.line_item_code, { id: li.id, amount: li.amount, name: li.line_item_name, isTotal: li.is_total, edited: li.manually_edited }])
         ),
       })),
   [statements]);
 
-  // Build unified row list — uses canonical codes directly
+  // Build unified row list — aggregate best order_index across ALL statements
   const allCodes = useMemo(() => {
-    const codes: { code: string; name: string; isTotal: boolean }[] = [];
-    const seen = new Set<string>();
+    const map = new Map<string, { name: string; isTotal: boolean; minOrder: number }>();
     for (const s of statements) {
-      for (const li of (s.line_items ?? []).sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0))) {
-        if (!seen.has(li.line_item_code)) {
-          seen.add(li.line_item_code);
-          codes.push({ code: li.line_item_code, name: li.line_item_name, isTotal: li.is_total });
+      for (const li of s.line_items ?? []) {
+        const existing = map.get(li.line_item_code);
+        const idx = li.order_index ?? 9999;
+        if (!existing) {
+          map.set(li.line_item_code, { name: li.line_item_name, isTotal: li.is_total, minOrder: idx });
+        } else if (idx < existing.minOrder) {
+          existing.minOrder = idx;
         }
       }
     }
-    return codes;
+    return [...map.entries()]
+      .sort((a, b) => a[1].minOrder - b[1].minOrder)
+      .map(([code, v]) => ({ code, name: v.name, isTotal: v.isTotal }));
   }, [statements]);
+
+  // Serialise code order so useEffect only fires when the actual order changes
+  const allCodesKey = useMemo(() => allCodes.map((r) => r.code).join(","), [allCodes]);
+
+  // Reset local drag order only when the server-side order genuinely changes
+  useEffect(() => { setLocalOrder(null); }, [allCodesKey]);
+
+  // The rows to actually render (local drag order takes priority)
+  const displayRows = localOrder ?? allCodes;
+
+  const handleMerge = useCallback(() => {
+    if (mergeSelection.length !== 2) return;
+    const [keepCode, removeCode] = mergeSelection;
+    const keepName = displayRows.find((r) => r.code === keepCode)?.name ?? keepCode;
+    const removeName = displayRows.find((r) => r.code === removeCode)?.name ?? removeCode;
+    const msg = `Merge "${removeName}" into "${keepName}"?\n\nValues from "${removeName}" will fill empty cells in "${keepName}", then "${removeName}" row will be deleted.`;
+    const doMerge = () => mergeMut.mutate({ keepCode, removeCode });
+    if (Platform.OS === "web") {
+      if (confirm(msg)) doMerge();
+    } else {
+      Alert.alert("Merge Rows", msg, [
+        { text: "Cancel", style: "cancel" },
+        { text: "Merge", style: "default", onPress: doMerge },
+      ]);
+    }
+  }, [mergeSelection, displayRows, mergeMut]);
+
+  const handleDeleteRow = useCallback((code: string, name: string) => {
+    const ids: number[] = [];
+    for (const p of periods) {
+      const cell = p.items[code];
+      if (cell?.id != null) ids.push(cell.id);
+    }
+    if (ids.length === 0) return;
+    const msg = `Delete row "${name}" from all periods? (${ids.length} item${ids.length > 1 ? "s" : ""})`;
+    const doDelete = () => { ids.forEach((id) => deleteLineItemMut.mutate(id)); };
+    if (Platform.OS === "web") {
+      if (confirm(msg)) doDelete();
+    } else {
+      Alert.alert("Delete Row", msg, [
+        { text: "Cancel", style: "cancel" },
+        { text: "Delete", style: "destructive", onPress: doDelete },
+      ]);
+    }
+  }, [periods, deleteLineItemMut]);
+
+  const handleDragEnd = useCallback((event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const rows = localOrder ?? allCodes;
+    const oldIndex = rows.findIndex((r) => r.code === active.id);
+    const newIndex = rows.findIndex((r) => r.code === over.id);
+    if (oldIndex === -1 || newIndex === -1) return;
+    const newOrder = arrayMove(rows, oldIndex, newIndex);
+    setLocalOrder(newOrder);
+    const reorderItems: Array<{ id: number; order_index: number }> = [];
+    newOrder.forEach((row, idx) => {
+      for (const p of periods) {
+        const cell = p.items[row.code];
+        if (cell?.id != null) {
+          reorderItems.push({ id: cell.id, order_index: idx + 1 });
+        }
+      }
+    });
+    if (reorderItems.length > 0) reorderMut.mutate(reorderItems);
+  }, [localOrder, allCodes, periods, reorderMut]);
+
+  // ── Export data builder ───────────────────────────────────────────
+  const exportTables = useCallback((): TableData[] => {
+    const headers = ["Line Item", ...periods.map((p) => p.label)];
+    const rows = displayRows.map((item) => {
+      const row: (string | number | null)[] = [item.name];
+      for (const p of periods) {
+        const val = p.items[item.code]?.amount;
+        row.push(val ?? null);
+      }
+      return row;
+    });
+    const typeName = STMNT_META[statementType ?? ""]?.label ?? statementType ?? "Statements";
+    return [{ title: typeName, headers, rows }];
+  }, [periods, displayRows, statementType]);
 
   const handleDelete = useCallback(() => {
     if (selectedPeriods.size === 0) return;
     const labels = periods.filter((p) => selectedPeriods.has(p.period)).map((p) => p.label).join(", ");
-    const msg = `Delete ${selectedPeriods.size} period(s)?\n\n${labels}\n\nThis will remove all statement data for these years and cannot be undone.`;
+    const typeName = statementType ? (STMNT_META[statementType]?.label ?? statementType) : "all statement types";
+    const msg = `Delete ${selectedPeriods.size} period(s) for ${typeName}?\n\n${labels}\n\nThis will permanently remove the selected data and cannot be undone.`;
     if (Platform.OS === "web") {
       if (confirm(msg)) deleteMut.mutate(Array.from(selectedPeriods));
     } else {
@@ -714,7 +1402,21 @@ function StatementsTable({
         { text: "Delete", style: "destructive", onPress: () => deleteMut.mutate(Array.from(selectedPeriods)) },
       ]);
     }
-  }, [selectedPeriods, periods, deleteMut]);
+  }, [selectedPeriods, periods, deleteMut, statementType]);
+
+  const handleDeleteAll = useCallback(() => {
+    const total = periods.length;
+    if (total === 0) return;
+    const msg = `Delete ALL ${total} statement(s) for this stock?\n\nThis will permanently remove every statement and line item and cannot be undone.`;
+    if (Platform.OS === "web") {
+      if (confirm(msg)) deleteAllMut.mutate();
+    } else {
+      Alert.alert("Delete All Statements", msg, [
+        { text: "Cancel", style: "cancel" },
+        { text: "Delete All", style: "destructive", onPress: () => deleteAllMut.mutate() },
+      ]);
+    }
+  }, [periods, deleteAllMut]);
 
   if (periods.length === 0) {
     return (
@@ -732,9 +1434,132 @@ function StatementsTable({
   const COL_VAL_W = isDesktop ? 120 : 105;
 
   return (
-    <ScrollView refreshControl={<RefreshControl refreshing={isFetching} onRefresh={onRefresh} tintColor={colors.accentPrimary} />}>
-      {/* Delete mode toolbar */}
-      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "flex-end", paddingHorizontal: 12, paddingTop: 6, gap: 8 }}>
+    <View style={{ flex: 1 }}>
+      {/* Toolbar: AI Rearrange + Delete mode — FROZEN at top */}
+      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "flex-end", paddingHorizontal: 12, paddingTop: 6, gap: 8, flexWrap: "wrap", zIndex: stmtPickerOpen || pdfPickerOpen ? 1000 : 1 }}>
+        {/* AI Rearrange */}
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 6, zIndex: stmtPickerOpen || pdfPickerOpen ? 1000 : 1 }}>
+          {tablePdfs.length > 0 && (
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 4, flexWrap: "wrap", zIndex: stmtPickerOpen || pdfPickerOpen ? 1000 : 1 }}>
+              {/* Statement type picker */}
+              <View style={{ position: "relative" as const, zIndex: stmtPickerOpen ? 1001 : 1 }}>
+                <Pressable
+                  onPress={() => { setStmtPickerOpen((v) => !v); setPdfPickerOpen(false); }}
+                  style={{ flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, backgroundColor: colors.bgInput, borderWidth: 1, borderColor: reconcileType !== "all" ? colors.accentPrimary : colors.borderColor }}
+                >
+                  <FontAwesome name="file-text-o" size={10} color={reconcileType !== "all" ? colors.accentPrimary : colors.textMuted} />
+                  <Text numberOfLines={1} style={{ fontSize: 10, color: reconcileType !== "all" ? colors.accentPrimary : colors.textMuted }}>
+                    {RECONCILE_OPTS.find((o) => o.key === reconcileType)?.label ?? "All"}
+                  </Text>
+                  <FontAwesome name={stmtPickerOpen ? "caret-up" : "caret-down"} size={10} color={colors.textMuted} />
+                </Pressable>
+                {stmtPickerOpen && (
+                  <View style={{ position: "absolute" as const, top: "100%", left: 0, zIndex: 1000, minWidth: 170, marginTop: 4, backgroundColor: colors.bgPrimary, borderRadius: 8, borderWidth: 1, borderColor: colors.borderColor, shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.15, shadowRadius: 8, elevation: 5, overflow: "hidden" as const }}>
+                    {RECONCILE_OPTS.map((opt) => (
+                      <Pressable
+                        key={opt.key}
+                        onPress={() => { setReconcileType(opt.key); setStmtPickerOpen(false); }}
+                        style={({ pressed }) => [{ flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 10, paddingVertical: 8, backgroundColor: opt.key === reconcileType ? colors.accentPrimary + "15" : pressed ? colors.bgInput : "transparent" }]}
+                      >
+                        <Text style={{ flex: 1, fontSize: 11, color: opt.key === reconcileType ? colors.accentPrimary : colors.textPrimary, fontWeight: opt.key === reconcileType ? "600" : "400" }}>
+                          {opt.label}
+                        </Text>
+                        {opt.key === reconcileType && <FontAwesome name="check" size={10} color={colors.accentPrimary} />}
+                      </Pressable>
+                    ))}
+                  </View>
+                )}
+              </View>
+              {/* PDF picker */}
+              <Text style={{ fontSize: 11, color: colors.textMuted }}>PDF:</Text>
+              <View style={{ position: "relative" as const, zIndex: pdfPickerOpen ? 1001 : 1 }}>
+                <Pressable
+                  onPress={() => { setPdfPickerOpen((v) => !v); setStmtPickerOpen(false); }}
+                  style={{ flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, backgroundColor: selectedPdfId ? colors.accentPrimary + "20" : colors.bgInput, borderWidth: 1, borderColor: selectedPdfId ? colors.accentPrimary : colors.borderColor }}
+                >
+                  <Text numberOfLines={1} style={{ fontSize: 10, color: selectedPdfId ? colors.accentPrimary : colors.textMuted, maxWidth: 140 }}>
+                    {selectedPdfId ? tablePdfs.find((p) => p.id === selectedPdfId)?.original_name?.slice(0, 22) ?? "PDF" : "Select PDF"}
+                  </Text>
+                  <FontAwesome name={pdfPickerOpen ? "caret-up" : "caret-down"} size={10} color={selectedPdfId ? colors.accentPrimary : colors.textMuted} />
+                </Pressable>
+                {pdfPickerOpen && (
+                  <View style={{ position: "absolute" as const, top: "100%", left: 0, zIndex: 999, minWidth: 200, marginTop: 4, backgroundColor: colors.bgPrimary, borderRadius: 8, borderWidth: 1, borderColor: colors.borderColor, shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.15, shadowRadius: 8, elevation: 5, overflow: "hidden" as const }}>
+                    {tablePdfs.map((pdf) => (
+                      <Pressable
+                        key={pdf.id}
+                        onPress={() => { setSelectedPdfId(pdf.id); setPdfPickerOpen(false); }}
+                        style={({ pressed }) => [{ flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 10, paddingVertical: 8, backgroundColor: pdf.id === selectedPdfId ? colors.accentPrimary + "15" : pressed ? colors.bgInput : "transparent" }]}
+                      >
+                        <FontAwesome name="file-pdf-o" size={12} color={pdf.id === selectedPdfId ? colors.accentPrimary : colors.textMuted} />
+                        <Text numberOfLines={1} style={{ flex: 1, fontSize: 11, color: pdf.id === selectedPdfId ? colors.accentPrimary : colors.textPrimary, fontWeight: pdf.id === selectedPdfId ? "600" : "400" }}>
+                          {pdf.original_name}
+                        </Text>
+                        {pdf.id === selectedPdfId && <FontAwesome name="check" size={10} color={colors.accentPrimary} />}
+                      </Pressable>
+                    ))}
+                  </View>
+                )}
+              </View>
+            </View>
+          )}
+          <Pressable
+            onPress={handleRearrange}
+            disabled={rearranging || !selectedPdfId}
+            style={({ pressed }) => [{
+              flexDirection: "row", alignItems: "center", gap: 5,
+              paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8,
+              backgroundColor: !selectedPdfId ? colors.bgInput : colors.accentPrimary + "15",
+              borderWidth: 1, borderColor: !selectedPdfId ? colors.borderColor : colors.accentPrimary,
+              opacity: pressed ? 0.8 : (!selectedPdfId ? 0.5 : 1),
+            }]}
+          >
+            {rearranging ? (
+              <ActivityIndicator size="small" color={colors.accentPrimary} />
+            ) : (
+              <FontAwesome name="random" size={12} color={!selectedPdfId ? colors.textMuted : colors.accentPrimary} />
+            )}
+            <Text style={{ fontSize: 12, fontWeight: "600", color: !selectedPdfId ? colors.textMuted : colors.accentPrimary }}>
+              {rearranging ? "Auditing..." : "AI Reconcile"}
+            </Text>
+          </Pressable>
+        </View>
+
+        {/* Merge mode */}
+        {mergeMode && mergeSelection.length === 2 && (
+          <Pressable
+            onPress={handleMerge}
+            disabled={mergeMut.isPending}
+            style={({ pressed }) => [{
+              flexDirection: "row", alignItems: "center", gap: 5,
+              paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8,
+              backgroundColor: colors.accentPrimary, opacity: pressed ? 0.8 : 1,
+            }]}
+          >
+            {mergeMut.isPending ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <FontAwesome name="compress" size={12} color="#fff" />
+            )}
+            <Text style={{ color: "#fff", fontSize: 12, fontWeight: "700" }}>Merge ({mergeSelection.length})</Text>
+          </Pressable>
+        )}
+        <Pressable
+          onPress={() => { setMergeMode((v) => !v); setMergeSelection([]); }}
+          style={({ pressed }) => [{
+            flexDirection: "row", alignItems: "center", gap: 5,
+            paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8,
+            backgroundColor: mergeMode ? colors.accentPrimary + "15" : colors.bgInput,
+            borderWidth: 1, borderColor: mergeMode ? colors.accentPrimary : colors.borderColor,
+            opacity: pressed ? 0.8 : 1,
+          }]}
+        >
+          <FontAwesome name={mergeMode ? "times" : "compress"} size={12} color={mergeMode ? colors.accentPrimary : colors.textMuted} />
+          <Text style={{ fontSize: 12, fontWeight: "600", color: mergeMode ? colors.accentPrimary : colors.textMuted }}>
+            {mergeMode ? "Cancel Merge" : "Merge Rows"}
+          </Text>
+        </Pressable>
+
+        {/* Delete mode */}
         {deleteMode && selectedPeriods.size > 0 && (
           <Pressable
             onPress={handleDelete}
@@ -750,7 +1575,26 @@ function StatementsTable({
             ) : (
               <FontAwesome name="trash" size={12} color="#fff" />
             )}
-            <Text style={{ color: "#fff", fontSize: 12, fontWeight: "700" }}>Delete ({selectedPeriods.size})</Text>
+            <Text style={{ color: "#fff", fontSize: 12, fontWeight: "700" }}>Delete Selected ({selectedPeriods.size})</Text>
+          </Pressable>
+        )}
+        {deleteMode && (
+          <Pressable
+            onPress={handleDeleteAll}
+            disabled={deleteAllMut.isPending}
+            style={({ pressed }) => [{
+              flexDirection: "row", alignItems: "center", gap: 5,
+              paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8,
+              backgroundColor: colors.danger, opacity: pressed ? 0.8 : 1,
+              borderWidth: 1, borderColor: "#fff3",
+            }]}
+          >
+            {deleteAllMut.isPending ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <FontAwesome name="trash" size={12} color="#fff" />
+            )}
+            <Text style={{ color: "#fff", fontSize: 12, fontWeight: "700" }}>Delete All</Text>
           </Pressable>
         )}
         <Pressable
@@ -768,118 +1612,187 @@ function StatementsTable({
             {deleteMode ? "Cancel" : "Select Years"}
           </Text>
         </Pressable>
+
+        <View style={{ flex: 1 }} />
+        <ExportBar
+          onExport={async (fmt) => {
+            const t = exportTables();
+            if (fmt === "xlsx") await exportExcel(t, stockSymbol, "Statements");
+            else if (fmt === "csv") await exportCSV(t, stockSymbol, "Statements");
+            else await exportPDF(t, stockSymbol, "Statements");
+          }}
+          colors={colors}
+          disabled={periods.length === 0}
+        />
       </View>
 
-      <ScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={{ paddingHorizontal: 8, paddingTop: 4, paddingBottom: 80 }}>
-        <View>
-          {/* Header row */}
-          <View style={{
-            flexDirection: "row", alignItems: "center", paddingVertical: 10, paddingHorizontal: 8,
-            borderBottomWidth: 2, borderBottomColor: colors.accentPrimary, backgroundColor: colors.bgCard,
-          }}>
-            <Text style={{ width: COL_NAME_W, fontSize: 12, fontWeight: "800", color: colors.textPrimary }} numberOfLines={1}>
-              Line Item
-            </Text>
-            {periods.map((p) => (
-              <Pressable
-                key={p.period}
-                disabled={!deleteMode}
-                onPress={() => togglePeriod(p.period)}
-                style={{ width: COL_VAL_W, alignItems: "center", flexDirection: "row", justifyContent: "flex-end", gap: 4 }}
-              >
-                {deleteMode && (
-                  <View style={{
-                    width: 16, height: 16, borderRadius: 4, borderWidth: 1.5,
-                    borderColor: selectedPeriods.has(p.period) ? colors.danger : colors.textMuted,
-                    backgroundColor: selectedPeriods.has(p.period) ? colors.danger : "transparent",
-                    alignItems: "center", justifyContent: "center",
-                  }}>
-                    {selectedPeriods.has(p.period) && <FontAwesome name="check" size={10} color="#fff" />}
-                  </View>
-                )}
-                <Text style={{ fontSize: 12, fontWeight: "800", color: selectedPeriods.has(p.period) ? colors.danger : colors.textPrimary, textAlign: "right" }}>
-                  {p.label}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
+      {/* AI Rearrange result banner */}
+      {rearrangeResult && (
+        <View style={{
+          flexDirection: "row", alignItems: "center", marginHorizontal: 12, marginTop: 4,
+          paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8,
+          backgroundColor: rearrangeResult.startsWith("Error") ? colors.danger + "15" : colors.success + "15",
+          gap: 6,
+        }}>
+          <FontAwesome
+            name={rearrangeResult.startsWith("Error") ? "exclamation-circle" : "check-circle"}
+            size={13}
+            color={rearrangeResult.startsWith("Error") ? colors.danger : colors.success}
+          />
+          <Text style={{ flex: 1, fontSize: 11, color: rearrangeResult.startsWith("Error") ? colors.danger : colors.success }}>
+            {rearrangeResult}
+          </Text>
+          <Pressable onPress={() => setRearrangeResult(null)} hitSlop={8}>
+            <FontAwesome name="times" size={12} color={colors.textMuted} />
+          </Pressable>
+        </View>
+      )}
 
-          {/* Data rows */}
-          {allCodes.map((item, rowIdx) => (
-            <View
-              key={item.code}
-              style={{
-                flexDirection: "row", alignItems: "center", paddingVertical: 8, paddingHorizontal: 8,
-                backgroundColor: item.isTotal ? colors.bgInput + "60" : rowIdx % 2 === 0 ? "transparent" : colors.bgPrimary + "30",
-                borderTopWidth: item.isTotal ? 1 : 0, borderTopColor: colors.borderColor,
-              }}
-            >
-              <Text numberOfLines={1} style={{
-                width: COL_NAME_W, fontSize: 12,
-                fontWeight: item.isTotal ? "700" : "400",
-                color: item.isTotal ? colors.textPrimary : colors.textSecondary, paddingRight: 8,
-              }}>
-                {item.name}
+      {/* Merge result banner */}
+      {mergeResult && (
+        <View style={{
+          flexDirection: "row", alignItems: "center", marginHorizontal: 12, marginTop: 4,
+          paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8,
+          backgroundColor: mergeResult.startsWith("Error") ? colors.danger + "15" : colors.success + "15",
+          gap: 6,
+        }}>
+          <FontAwesome
+            name={mergeResult.startsWith("Error") ? "exclamation-circle" : "check-circle"}
+            size={13}
+            color={mergeResult.startsWith("Error") ? colors.danger : colors.success}
+          />
+          <Text style={{ flex: 1, fontSize: 11, color: mergeResult.startsWith("Error") ? colors.danger : colors.success }}>
+            {mergeResult}
+          </Text>
+          <Pressable onPress={() => setMergeResult(null)} hitSlop={8}>
+            <FontAwesome name="times" size={12} color={colors.textMuted} />
+          </Pressable>
+        </View>
+      )}
+
+      {/* ── Scrollable table with sticky year header ───────────────── */}
+      <ScrollView
+        refreshControl={<RefreshControl refreshing={isFetching} onRefresh={onRefresh} tintColor={colors.accentPrimary} />}
+        style={{ flex: 1 }}
+        stickyHeaderIndices={[0]}
+      >
+        {/* Child 0 — sticky year column header (synced horizontally) */}
+        <View style={{ backgroundColor: colors.bgCard, zIndex: 10 }}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            ref={headerScrollRef}
+            scrollEnabled={false}
+          >
+            <View style={{
+              flexDirection: "row", alignItems: "center", paddingVertical: 10, paddingHorizontal: 16,
+              borderBottomWidth: 2, borderBottomColor: colors.accentPrimary, backgroundColor: colors.bgCard,
+            }}>
+              <Text style={{ width: COL_NAME_W, fontSize: 12, fontWeight: "800", color: colors.textPrimary }} numberOfLines={1}>
+                Line Item
               </Text>
+              {periods.map((p) => (
+                <Pressable
+                  key={p.period}
+                  disabled={!deleteMode}
+                  onPress={() => togglePeriod(p.period)}
+                  style={{ width: COL_VAL_W, alignItems: "center", flexDirection: "row", justifyContent: "flex-end", gap: 4 }}
+                >
+                  {deleteMode && (
+                    <View style={{
+                      width: 16, height: 16, borderRadius: 4, borderWidth: 1.5,
+                      borderColor: selectedPeriods.has(p.period) ? colors.danger : colors.textMuted,
+                      backgroundColor: selectedPeriods.has(p.period) ? colors.danger : "transparent",
+                      alignItems: "center", justifyContent: "center",
+                    }}>
+                      {selectedPeriods.has(p.period) && <FontAwesome name="check" size={10} color="#fff" />}
+                    </View>
+                  )}
+                  <Text style={{ fontSize: 12, fontWeight: "800", color: selectedPeriods.has(p.period) ? colors.danger : colors.textPrimary, textAlign: "right" }}>
+                    {p.label}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          </ScrollView>
+        </View>
 
-              {periods.map((p) => {
-                const cell = p.items[item.code];
-                return (
-                  <EditableCell
-                    key={p.period}
-                    itemId={cell?.id ?? null}
-                    value={cell?.amount}
-                    isTotal={item.isTotal}
-                    isEdited={!!cell?.edited}
-                    colWidth={COL_VAL_W}
+        {/* Child 1 — scrollable data body (horizontal scroll syncs header) */}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator
+          onScroll={(e) => {
+            headerScrollRef.current?.scrollTo({ x: e.nativeEvent.contentOffset.x, animated: false });
+          }}
+          scrollEventThrottle={16}
+          contentContainerStyle={{ paddingHorizontal: 8, paddingBottom: 80 }}
+        >
+          <View>
+            {/* Sortable data rows */}
+            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+              <SortableContext items={displayRows.map((r) => r.code)} strategy={verticalListSortingStrategy}>
+                {displayRows.map((item, rowIdx) => (
+                  <SortableRow
+                    key={item.code}
+                    id={item.code}
+                    item={item}
+                    rowIdx={rowIdx}
+                    periods={periods}
                     colors={colors}
+                    COL_NAME_W={COL_NAME_W}
+                    COL_VAL_W={COL_VAL_W}
                     editingKey={editingKey}
                     onStartEdit={handleStartEdit}
-                    onSave={handleSaveEdit}
-                    onCancel={handleCancelEdit}
+                    onSaveEdit={handleSaveEdit}
+                    onCancelEdit={handleCancelEdit}
+                    onCreateSave={handleCreateSave}
+                    onDeleteRow={handleDeleteRow}
+                    mergeMode={mergeMode}
+                    mergeSelected={mergeSelection.includes(item.code)}
+                    onToggleMerge={handleToggleMerge}
                   />
-                );
-              })}
-            </View>
-          ))}
-
-          {/* Balance Sheet Integrity Row — display aid for manual verification */}
-          {statementType === "balance" && periods.length > 0 && (() => {
-            const diffs = periods.map((p) => {
-              const assets = p.items["assets"]?.amount ?? p.items["total_assets"]?.amount;
-              const liabilities = p.items["liabilities"]?.amount ?? p.items["total_liabilities"]?.amount;
-              const equity = p.items["equity"]?.amount ?? p.items["total_equity"]?.amount;
-              if (assets == null || liabilities == null || equity == null) return null;
-              return assets - (liabilities + equity);
-            });
-            const hasData = diffs.some((d) => d != null);
-            if (!hasData) return null;
-            return (
-              <View style={{
-                flexDirection: "row", alignItems: "center", paddingVertical: 8, paddingHorizontal: 8,
-                borderTopWidth: 2, borderTopColor: colors.borderColor, backgroundColor: colors.bgInput + "40",
-              }}>
-                <Text numberOfLines={1} style={{
-                  width: COL_NAME_W, fontSize: 11, fontWeight: "700",
-                  color: colors.textPrimary, paddingRight: 8, fontStyle: "italic",
-                }}>
-                  ✔ A = L + E Check
-                </Text>
-                {diffs.map((diff, i) => (
-                  <View key={periods[i].period} style={{ width: COL_VAL_W, alignItems: "flex-end", justifyContent: "center" }}>
-                    <Text style={{
-                      fontSize: 11, fontWeight: "700", fontVariant: ["tabular-nums"],
-                      color: diff == null ? colors.textMuted : Math.abs(diff) < 0.01 ? colors.success : colors.danger,
-                    }}>
-                      {diff == null ? "—" : Math.abs(diff) < 0.01 ? "✓ Balanced" : formatNumber(diff)}
-                    </Text>
-                  </View>
                 ))}
-              </View>
-            );
-          })()}
-        </View>
+              </SortableContext>
+            </DndContext>
+
+            {/* Balance Sheet Integrity Row — display aid for manual verification */}
+            {statementType === "balance" && periods.length > 0 && (() => {
+              const diffs = periods.map((p) => {
+                const assets = p.items["assets"]?.amount ?? p.items["total_assets"]?.amount;
+                const liabilities = p.items["liabilities"]?.amount ?? p.items["total_liabilities"]?.amount;
+                const equity = p.items["equity"]?.amount ?? p.items["total_equity"]?.amount;
+                if (assets == null || liabilities == null || equity == null) return null;
+                return assets - (liabilities + equity);
+              });
+              const hasData = diffs.some((d) => d != null);
+              if (!hasData) return null;
+              return (
+                <View style={{
+                  flexDirection: "row", alignItems: "center", paddingVertical: 8, paddingHorizontal: 8,
+                  borderTopWidth: 2, borderTopColor: colors.borderColor, backgroundColor: colors.bgInput + "40",
+                }}>
+                  <Text numberOfLines={1} style={{
+                    width: COL_NAME_W, fontSize: 11, fontWeight: "700",
+                    color: colors.textPrimary, paddingRight: 8, fontStyle: "italic",
+                  }}>
+                    ✔ A = L + E Check
+                  </Text>
+                  {diffs.map((diff, i) => (
+                    <View key={periods[i].period} style={{ width: COL_VAL_W, alignItems: "flex-end", justifyContent: "center" }}>
+                      <Text style={{
+                        fontSize: 11, fontWeight: "700", fontVariant: ["tabular-nums"],
+                        color: diff == null ? colors.textMuted : Math.abs(diff) < 0.01 ? colors.success : colors.danger,
+                      }}>
+                        {diff == null ? "—" : Math.abs(diff) < 0.01 ? "✓ Balanced" : formatNumber(diff)}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              );
+            })()}
+          </View>
+        </ScrollView>
       </ScrollView>
-    </ScrollView>
+    </View>
   );
 }

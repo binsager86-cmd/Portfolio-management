@@ -46,15 +46,103 @@ function tablesToCsv(tables: TableData[]): string {
   return lines.join("\n");
 }
 
-// ── Excel (xlsx) ─────────────────────────────────────────────────────
+// ── Excel (xlsx) — professional formatting ───────────────────────
 
 async function tablesToXlsx(tables: TableData[]): Promise<Uint8Array> {
-  const XLSX = await import("xlsx");
+  const XLSX = await import("xlsx-js-style");
   const wb = XLSX.utils.book_new();
+
+  // Style palette (mirrors the PDF header/primary colours)
+  const headerFill = { fgColor: { rgb: "0F172A" } };
+  const titleFill = { fgColor: { rgb: "6366F1" } };
+  const altRowFill = { fgColor: { rgb: "F1F5F9" } };
+  const totalFill = { fgColor: { rgb: "E0E7FF" } };
+  const whiteFill = { fgColor: { rgb: "FFFFFF" } };
+  const whiteFont = { color: { rgb: "FFFFFF" }, bold: true, sz: 12 };
+  const headerFont = { color: { rgb: "FFFFFF" }, bold: true, sz: 10 };
+  const bodyFont = { color: { rgb: "1E293B" }, sz: 10 };
+  const totalFont = { color: { rgb: "1E293B" }, bold: true, sz: 10 };
+  const thinBorder = { style: "thin", color: { rgb: "CBD5E1" } };
+  const borders = { top: thinBorder, bottom: thinBorder, left: thinBorder, right: thinBorder };
+  const numFmt = "#,##0";
+
   for (const table of tables) {
     const sheetName = table.title.slice(0, 31).replace(/[\\/*?[\]:]/g, "_");
-    const aoa = [table.headers, ...table.rows.map((r) => r.map((v) => (v ?? "")))];
+    const colCount = table.headers.length;
+
+    // Row 0: Title bar (merged)
+    const aoa: unknown[][] = [[table.title, ...Array(colCount - 1).fill("")]];
+    // Row 1: Column headers
+    aoa.push(table.headers);
+    // Row 2+: Data rows
+    for (const r of table.rows) aoa.push(r.map((v) => (v ?? "")));
+
     const ws = XLSX.utils.aoa_to_sheet(aoa);
+
+    // Merge title row across all columns
+    ws["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: colCount - 1 } }];
+
+    // Apply styles cell-by-cell
+    const totalRows = aoa.length;
+    for (let R = 0; R < totalRows; R++) {
+      for (let C = 0; C < colCount; C++) {
+        const addr = XLSX.utils.encode_cell({ r: R, c: C });
+        if (!ws[addr]) ws[addr] = { v: "", t: "s" };
+        const cell = ws[addr];
+
+        if (R === 0) {
+          // Title row
+          cell.s = { fill: titleFill, font: whiteFont, alignment: { horizontal: "center", vertical: "center" }, border: borders };
+        } else if (R === 1) {
+          // Header row
+          cell.s = { fill: headerFill, font: headerFont, alignment: { horizontal: C === 0 ? "left" : "center", vertical: "center", wrapText: true }, border: borders };
+        } else {
+          // Data row — detect totals by checking if the label text contains "total" or "net"
+          const label = String(aoa[R][0] ?? "").toLowerCase();
+          const isTotal = label.includes("total") || label.startsWith("net ");
+          const isAlt = (R - 2) % 2 === 1;
+
+          const fill = isTotal ? totalFill : isAlt ? altRowFill : whiteFill;
+          const font = isTotal ? totalFont : bodyFont;
+
+          if (C === 0) {
+            // Label column — left aligned
+            cell.s = { fill, font, alignment: { horizontal: "left", vertical: "center" }, border: borders };
+          } else {
+            // Value column — right aligned with number format
+            const isNum = typeof cell.v === "number" || (typeof cell.v === "string" && /^-?\d[\d,]*(\.\d+)?$/.test(cell.v));
+            if (isNum && typeof cell.v === "string") {
+              cell.v = parseFloat(cell.v.replace(/,/g, ""));
+              cell.t = "n";
+            }
+            cell.s = {
+              fill, font,
+              alignment: { horizontal: "right", vertical: "center" },
+              border: borders,
+              ...(cell.t === "n" ? { numFmt } : {}),
+            };
+          }
+        }
+      }
+    }
+
+    // Auto column widths (min 12, max 28)
+    ws["!cols"] = table.headers.map((h, ci) => {
+      let maxLen = h.length;
+      for (const row of table.rows) {
+        const val = row[ci];
+        const len = val != null ? String(val).length : 0;
+        if (len > maxLen) maxLen = len;
+      }
+      return { wch: Math.max(12, Math.min(maxLen + 4, 28)) };
+    });
+
+    // First column (line item names) wider
+    ws["!cols"][0] = { wch: Math.max(ws["!cols"][0].wch, 30) };
+
+    // Row heights: title=28, header=22
+    ws["!rows"] = [{ hpt: 28 }, { hpt: 22 }];
+
     XLSX.utils.book_append_sheet(wb, ws, sheetName);
   }
   const buf: Uint8Array = XLSX.write(wb, { type: "array", bookType: "xlsx" });
@@ -164,8 +252,11 @@ function webDownloadBlob(blob: Blob, filename: string) {
   const a = document.createElement("a");
   a.href = url;
   a.download = filename;
+  a.style.display = "none";
+  document.body.appendChild(a);
   a.click();
-  URL.revokeObjectURL(url);
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 // ── Public API ──────────────────────────────────────────────────────
