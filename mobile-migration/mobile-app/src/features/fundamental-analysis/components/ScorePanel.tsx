@@ -5,12 +5,12 @@
 
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import { FlashList } from "@shopify/flash-list";
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import { Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
 
-import { LoadingScreen } from "@/components/ui/LoadingScreen";
+import { FAPanelSkeleton } from "@/components/ui/PageSkeletons";
 import type { ThemePalette } from "@/constants/theme";
-import { useScoreHistory, useStockScore } from "@/hooks/queries";
+import { useScoreHistory, useStockScore, useValuations } from "@/hooks/queries";
 import { exportCSV, exportExcel, exportPDF, TableData } from "@/lib/exportAnalysis";
 import type { CategoryBreakdown } from "@/services/api";
 import { st } from "../styles";
@@ -21,9 +21,23 @@ import { Card, ExportBar, FadeIn, NetworkErrorState, SectionHeader } from "./sha
 export const ScorePanel = React.memo(function ScorePanel({ stockId, stockSymbol, colors, isDesktop }: PanelWithSymbolProps) {
   const { data, isLoading, isError, error, refetch, isFetching } = useStockScore(stockId);
   const historyQ = useScoreHistory(stockId);
+  const valuationsQ = useValuations(stockId);
 
   const score = data;
   const scoreHistory = historyQ.data?.scores ?? [];
+  const valuations = valuationsQ.data?.valuations ?? [];
+
+  // Average IV across latest per-model valuations (same logic as Valuation Summary)
+  const avgIV = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const v of valuations) {
+      if (v.intrinsic_value != null && !map[v.model_type]) {
+        map[v.model_type] = v.intrinsic_value;
+      }
+    }
+    const models = Object.values(map);
+    return models.length > 0 ? models.reduce((s, x) => s + x, 0) / models.length : null;
+  }, [valuations]);
 
   const VIRTUALIZE_THRESHOLD = 20;
 
@@ -33,11 +47,11 @@ export const ScorePanel = React.memo(function ScorePanel({ stockId, stockSymbol,
       <Text style={[st.scoreHistCell, { width: 52, fontWeight: "800", color: scoreColor(sh.overall_score ?? 0, colors) }]}>
         {sh.overall_score?.toFixed(0) ?? "–"}
       </Text>
-      <Text style={[st.scoreHistCell, { width: 34, color: colors.textMuted }]}>{sh.fundamental_score?.toFixed(0) ?? "–"}</Text>
-      <Text style={[st.scoreHistCell, { width: 34, color: colors.textMuted }]}>{sh.valuation_score?.toFixed(0) ?? "–"}</Text>
-      <Text style={[st.scoreHistCell, { width: 34, color: colors.textMuted }]}>{sh.growth_score?.toFixed(0) ?? "–"}</Text>
-      <Text style={[st.scoreHistCell, { width: 34, color: colors.textMuted }]}>{sh.quality_score?.toFixed(0) ?? "–"}</Text>
-      <Text style={[st.scoreHistCell, { width: 34, color: colors.textMuted }]}>{sh.risk_score?.toFixed(0) ?? "–"}</Text>
+      <Text style={[st.scoreHistCell, { width: 38, color: colors.textMuted }]}>{sh.fundamental_score?.toFixed(0) ?? "–"}</Text>
+      <Text style={[st.scoreHistCell, { width: 38, color: colors.textMuted }]}>{sh.valuation_score?.toFixed(0) ?? "–"}</Text>
+      <Text style={[st.scoreHistCell, { width: 38, color: colors.textMuted }]}>{sh.growth_score?.toFixed(0) ?? "–"}</Text>
+      <Text style={[st.scoreHistCell, { width: 38, color: colors.textMuted }]}>{sh.quality_score?.toFixed(0) ?? "–"}</Text>
+      <Text style={[st.scoreHistCell, { width: 38, color: colors.textMuted }]}>{sh.risk_score?.toFixed(0) ?? "–"}</Text>
     </View>
   ), [colors]);
 
@@ -53,7 +67,7 @@ export const ScorePanel = React.memo(function ScorePanel({ stockId, stockSymbol,
           ["Quality", SCORE_WEIGHTS.QUALITY.label, score.quality_score?.toFixed(0) ?? "–"],
           ["Growth", SCORE_WEIGHTS.GROWTH.label, score.growth_score?.toFixed(0) ?? "–"],
           ["Valuation", SCORE_WEIGHTS.VALUATION.label, score.valuation_score?.toFixed(0) ?? "–"],
-          ["Risk", SCORE_WEIGHTS.RISK.label, score.risk_score?.toFixed(0) ?? "–"],
+          ["Risk (penalty)", SCORE_WEIGHTS.RISK.label, score.risk_penalty_pct != null ? `−${score.risk_penalty_pct.toFixed(1)}%` : (score.risk_score?.toFixed(0) ?? "–")],
         ],
       });
     }
@@ -92,7 +106,7 @@ export const ScorePanel = React.memo(function ScorePanel({ stockId, stockSymbol,
       refreshControl={<RefreshControl refreshing={isFetching && !isLoading} onRefresh={refetch} tintColor={colors.accentPrimary} />}
     >
       {isLoading ? (
-        <LoadingScreen />
+        <FAPanelSkeleton />
       ) : isError ? (
         <NetworkErrorState error={error} onRetry={refetch} colors={colors} />
       ) : !score || score.overall_score == null ? (
@@ -122,19 +136,19 @@ export const ScorePanel = React.memo(function ScorePanel({ stockId, stockSymbol,
           {/* Overall Score */}
           <FadeIn>
             <Card colors={colors} style={{ alignItems: "center", paddingVertical: 28, marginBottom: 16 }}>
-              <View style={[st.scoreRing, { borderColor: scoreColor(score.overall_score!, colors) }]}>
-                <View style={[st.scoreRingInner, { backgroundColor: scoreColor(score.overall_score!, colors) + "10" }]}>
-                  <Text style={[st.scoreNum, { color: scoreColor(score.overall_score!, colors) }]}>
-                    {score.overall_score!.toFixed(0)}
+              <View style={[st.scoreRing, { borderColor: scoreColor(score.overall_score ?? 0, colors) }]}>
+                <View style={[st.scoreRingInner, { backgroundColor: scoreColor(score.overall_score ?? 0, colors) + "10" }]}>
+                  <Text style={[st.scoreNum, { color: scoreColor(score.overall_score ?? 0, colors) }]}>
+                    {(score.overall_score ?? 0).toFixed(0)}
                   </Text>
                 </View>
               </View>
               <Text style={{ color: colors.textPrimary, fontSize: 18, fontWeight: "800", marginTop: 14 }}>
-                {scoreLabel(score.overall_score!)}
+                {scoreLabel(score.overall_score ?? 0)}
               </Text>
-              <Text style={{ color: colors.textMuted, fontSize: 11, marginTop: 6, textAlign: "center", lineHeight: 16 }}>
+              <Text style={{ color: colors.textMuted, fontSize: 13, marginTop: 6, textAlign: "center", lineHeight: 18 }}>
                 CFA-Based Composite Score{"\n"}
-                Fundamentals {SCORE_WEIGHTS.FUNDAMENTAL.label} · Quality {SCORE_WEIGHTS.QUALITY.label} · Growth {SCORE_WEIGHTS.GROWTH.label} · Valuation {SCORE_WEIGHTS.VALUATION.label} · Risk {SCORE_WEIGHTS.RISK.label}
+                Fundamentals {SCORE_WEIGHTS.FUNDAMENTAL.label} · Quality {SCORE_WEIGHTS.QUALITY.label} · Growth {SCORE_WEIGHTS.GROWTH.label} · Valuation {SCORE_WEIGHTS.VALUATION.label}{"\n"}Risk penalty up to {SCORE_WEIGHTS.RISK.label}
               </Text>
 
               {/* Sector Percentile (when available from API) */}
@@ -143,22 +157,68 @@ export const ScorePanel = React.memo(function ScorePanel({ stockId, stockSymbol,
                   <Text style={{ color: colors.accentSecondary, fontSize: 13, fontWeight: "700" }}>
                     Top {Math.max(1, 100 - Math.round(score.sector_percentile))}% in {score.sector_name ?? "Sector"}
                   </Text>
-                  <Text style={{ color: colors.textMuted, fontSize: 10, marginTop: 2 }}>Peer-relative ranking</Text>
+                  <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: 2 }}>Peer-relative ranking</Text>
                 </View>
               )}
 
               {/* Risk disclaimer */}
-              <Text style={{ color: colors.textMuted, fontSize: 10, marginTop: 10, textAlign: "center", lineHeight: 14 }}>
+              <Text style={{ color: colors.textMuted, fontSize: 11, marginTop: 10, textAlign: "center", lineHeight: 16 }}>
                 * Fundamental score only. Not risk-adjusted.{"\n"}
                 Past performance ≠ future results.
               </Text>
             </Card>
           </FadeIn>
 
+          {/* Intrinsic Value vs Current Price (from Valuation Summary avg) */}
+          {(() => {
+            const iv = avgIV;
+            const cp = score.details?.["Current Price"];
+            if (iv == null || cp == null || iv <= 0 || cp <= 0) return null;
+            const disc = ((iv - cp) / iv) * 100;
+            const isUndervalued = disc > 0;
+            const absDisc = Math.abs(disc);
+            const verdictColor = disc > 10 ? colors.success : disc < -10 ? colors.danger : colors.warning;
+            const verdict = disc > 20 ? "Undervalued" : disc > 10 ? "Slightly Undervalued" : disc > -10 ? "Fairly Valued" : disc > -20 ? "Slightly Overvalued" : "Overvalued";
+            return (
+              <FadeIn delay={40}>
+                <Card colors={colors} style={{ marginBottom: 16, paddingVertical: 18, paddingHorizontal: 18 }}>
+                  <Text style={{ color: colors.textPrimary, fontSize: 14, fontWeight: "700", marginBottom: 14 }}>
+                    Intrinsic Value vs Current Price
+                  </Text>
+                  <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 12 }}>
+                    <View style={{ alignItems: "center", flex: 1 }}>
+                      <Text style={{ color: colors.textMuted, fontSize: 12, marginBottom: 4 }}>Intrinsic Value</Text>
+                      <Text style={{ color: colors.accentPrimary, fontSize: 20, fontWeight: "800", fontVariant: ["tabular-nums"] }}>
+                        ${iv.toFixed(2)}
+                      </Text>
+                    </View>
+                    <View style={{ alignItems: "center", justifyContent: "center", paddingHorizontal: 8 }}>
+                      <Text style={{ color: colors.textMuted, fontSize: 16 }}>vs</Text>
+                    </View>
+                    <View style={{ alignItems: "center", flex: 1 }}>
+                      <Text style={{ color: colors.textMuted, fontSize: 12, marginBottom: 4 }}>Current Price</Text>
+                      <Text style={{ color: colors.textSecondary, fontSize: 20, fontWeight: "800", fontVariant: ["tabular-nums"] }}>
+                        ${cp.toFixed(2)}
+                      </Text>
+                    </View>
+                  </View>
+                  <View style={{ alignItems: "center", backgroundColor: verdictColor + "14", borderRadius: 10, paddingVertical: 10 }}>
+                    <Text style={{ color: verdictColor, fontSize: 18, fontWeight: "800" }}>
+                      {isUndervalued ? "▼" : "▲"} {absDisc.toFixed(1)}% {isUndervalued ? "Discount" : "Premium"}
+                    </Text>
+                    <Text style={{ color: verdictColor, fontSize: 13, fontWeight: "600", marginTop: 2 }}>
+                      {verdict}
+                    </Text>
+                  </View>
+                </Card>
+              </FadeIn>
+            );
+          })()}
+
           {/* Interpretation Scale */}
           <FadeIn delay={50}>
             <Card colors={colors} style={{ marginBottom: 16, paddingVertical: 14, paddingHorizontal: 16 }}>
-              <Text style={{ color: colors.textPrimary, fontSize: 13, fontWeight: "700", marginBottom: 10 }}>
+              <Text style={{ color: colors.textPrimary, fontSize: 14, fontWeight: "700", marginBottom: 10 }}>
                 Interpretation Scale
               </Text>
               {INTERPRETATION_SCALE.map((tier) => {
@@ -177,10 +237,10 @@ export const ScorePanel = React.memo(function ScorePanel({ stockId, stockSymbol,
                     }}
                   >
                     <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: tier.color, marginRight: 10 }} />
-                    <Text style={{ color: isActive ? tier.color : colors.textMuted, fontSize: 12, fontWeight: isActive ? "800" : "500", width: 52 }}>
+                    <Text style={{ color: isActive ? tier.color : colors.textMuted, fontSize: 13, fontWeight: isActive ? "800" : "500", width: 56 }}>
                       {tier.min}–{tier.max}
                     </Text>
-                    <Text style={{ color: isActive ? tier.color : colors.textMuted, fontSize: 12, fontWeight: isActive ? "700" : "400", flex: 1 }}>
+                    <Text style={{ color: isActive ? tier.color : colors.textMuted, fontSize: 13, fontWeight: isActive ? "700" : "400", flex: 1 }}>
                       {tier.label}
                     </Text>
                     {isActive && (
@@ -200,7 +260,7 @@ export const ScorePanel = React.memo(function ScorePanel({ stockId, stockSymbol,
               <ScoreBarPremium label="Quality" weight={SCORE_WEIGHTS.QUALITY.label} value={score.quality_score} colors={colors} iconColor={SCORE_WEIGHTS.QUALITY.iconColor} breakdown={score.score_breakdown?.quality} />
               <ScoreBarPremium label="Growth" weight={SCORE_WEIGHTS.GROWTH.label} value={score.growth_score} colors={colors} iconColor={SCORE_WEIGHTS.GROWTH.iconColor} breakdown={score.score_breakdown?.growth} />
               <ScoreBarPremium label="Valuation" weight={SCORE_WEIGHTS.VALUATION.label} value={score.valuation_score} colors={colors} iconColor={SCORE_WEIGHTS.VALUATION.iconColor} breakdown={score.score_breakdown?.valuation} />
-              <ScoreBarPremium label="Risk" weight={SCORE_WEIGHTS.RISK.label} value={score.risk_score} colors={colors} iconColor={SCORE_WEIGHTS.RISK.iconColor} breakdown={score.score_breakdown?.risk} />
+              <ScoreBarPremium label="Risk" weight={SCORE_WEIGHTS.RISK.label} value={score.risk_score} colors={colors} iconColor={SCORE_WEIGHTS.RISK.iconColor} breakdown={score.score_breakdown?.risk} penaltyPct={score.risk_penalty_pct} />
             </Card>
           </FadeIn>
 
@@ -213,11 +273,11 @@ export const ScorePanel = React.memo(function ScorePanel({ stockId, stockSymbol,
                 <View style={[st.scoreHistRow, { borderBottomWidth: 1, borderBottomColor: colors.borderColor, backgroundColor: colors.bgInput + "40" }]}>
                   <Text style={[st.scoreHistCell, { flex: 1, fontWeight: "800", color: colors.textPrimary }]}>Date</Text>
                   <Text style={[st.scoreHistCell, { width: 52, fontWeight: "800", color: colors.textPrimary }]}>Score</Text>
-                  <Text style={[st.scoreHistCell, { width: 34, color: colors.textMuted }]}>F</Text>
-                  <Text style={[st.scoreHistCell, { width: 34, color: colors.textMuted }]}>V</Text>
-                  <Text style={[st.scoreHistCell, { width: 34, color: colors.textMuted }]}>G</Text>
-                  <Text style={[st.scoreHistCell, { width: 34, color: colors.textMuted }]}>Q</Text>
-                  <Text style={[st.scoreHistCell, { width: 34, color: colors.textMuted }]}>R</Text>
+                  <Text style={[st.scoreHistCell, { width: 38, color: colors.textMuted }]}>F</Text>
+                  <Text style={[st.scoreHistCell, { width: 38, color: colors.textMuted }]}>V</Text>
+                  <Text style={[st.scoreHistCell, { width: 38, color: colors.textMuted }]}>G</Text>
+                  <Text style={[st.scoreHistCell, { width: 38, color: colors.textMuted }]}>Q</Text>
+                  <Text style={[st.scoreHistCell, { width: 38, color: colors.textMuted }]}>R</Text>
                 </View>
                 {scoreHistory.length > VIRTUALIZE_THRESHOLD ? (
                   <View style={{ height: Math.min(scoreHistory.length * 36, 400) }}>
@@ -242,9 +302,9 @@ export const ScorePanel = React.memo(function ScorePanel({ stockId, stockSymbol,
               <Card colors={colors}>
                 {Object.entries(score.details).map(([name, val], idx, arr) => (
                   <View key={name} style={[st.metricRow, idx < arr.length - 1 && { borderBottomWidth: 1, borderBottomColor: colors.borderColor + "30" }]}>
-                    <Text style={{ flex: 1, color: colors.textSecondary, fontSize: 12 }}>{name}</Text>
+                    <Text style={{ flex: 1, color: colors.textSecondary, fontSize: 13 }}>{name}</Text>
                     <Text
-                      style={{ color: colors.textPrimary, fontSize: 12, fontWeight: "700", fontVariant: ["tabular-nums"] }}
+                      style={{ color: colors.textPrimary, fontSize: 13, fontWeight: "700", fontVariant: ["tabular-nums"] }}
                       accessibilityLabel={`${name}: ${safeFormatMetric(name, val)}`}
                     >
                       {safeFormatMetric(name, val)}
@@ -269,14 +329,16 @@ interface ScoreBarPremiumProps {
   colors: ThemePalette;
   iconColor: string;
   breakdown?: CategoryBreakdown;
+  penaltyPct?: number | null;
 }
 
 const ScoreBarPremium = React.memo(function ScoreBarPremium({
-  label, weight, value, colors, iconColor, breakdown,
+  label, weight, value, colors, iconColor, breakdown, penaltyPct,
 }: ScoreBarPremiumProps) {
   const [expanded, setExpanded] = useState(false);
   const v = value ?? 0;
   const barColor = scoreColor(v, colors);
+  const isRiskPenalty = penaltyPct != null;
   return (
     <View style={{ marginBottom: 14 }} accessibilityRole="summary">
       <Pressable onPress={() => breakdown && setExpanded((p) => !p)} style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1 })}>
@@ -285,8 +347,8 @@ const ScoreBarPremium = React.memo(function ScoreBarPremium({
             <View style={[st.sectionIcon, { backgroundColor: iconColor + "18", width: 22, height: 22 }]}>
               <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: iconColor }} />
             </View>
-            <Text style={{ color: colors.textSecondary, fontSize: 13, fontWeight: "500", marginLeft: 8 }}>{label}</Text>
-            <Text style={{ color: colors.textMuted, fontSize: 10, marginLeft: 4 }}>({weight})</Text>
+            <Text style={{ color: colors.textSecondary, fontSize: 14, fontWeight: "500", marginLeft: 8 }}>{label}</Text>
+            <Text style={{ color: colors.textMuted, fontSize: 12, marginLeft: 4 }}>({weight})</Text>
             {breakdown && (
               <FontAwesome
                 name={expanded ? "chevron-up" : "chevron-down"}
@@ -296,12 +358,19 @@ const ScoreBarPremium = React.memo(function ScoreBarPremium({
               />
             )}
           </View>
-          <Text
-            style={{ color: barColor, fontSize: 14, fontWeight: "800", fontVariant: ["tabular-nums"] }}
-            accessibilityLabel={`${label} score: ${v.toFixed(0)} out of 100`}
-          >
-            {v.toFixed(0)}
-          </Text>
+          <View style={{ alignItems: "flex-end" }}>
+            <Text
+              style={{ color: barColor, fontSize: 15, fontWeight: "800", fontVariant: ["tabular-nums"] }}
+              accessibilityLabel={`${label} score: ${v.toFixed(0)} out of 100`}
+            >
+              {v.toFixed(0)}
+            </Text>
+            {isRiskPenalty && (
+              <Text style={{ color: colors.danger, fontSize: 11, fontWeight: "700", marginTop: 1 }}>
+                −{(penaltyPct ?? 0).toFixed(1)}%
+              </Text>
+            )}
+          </View>
         </View>
         <View style={[st.scoreBarTrack, { backgroundColor: colors.borderColor + "50" }]}>
           <View
@@ -315,20 +384,20 @@ const ScoreBarPremium = React.memo(function ScoreBarPremium({
       {/* Expanded metric breakdown */}
       {expanded && breakdown && (
         <View style={{ marginTop: 8, marginLeft: 30, paddingLeft: 10, borderLeftWidth: 2, borderLeftColor: iconColor + "40" }}>
-          <Text style={{ color: colors.textMuted, fontSize: 10, marginBottom: 6 }}>Base: {breakdown.base} pts</Text>
+          <Text style={{ color: colors.textMuted, fontSize: 12, marginBottom: 6 }}>Base: {breakdown.base} pts</Text>
           {breakdown.metrics.map((m) => {
             const ptsColor = m.points > 0 ? colors.success : m.points < 0 ? colors.danger : colors.textMuted;
             const ptsLabel = m.points > 0 ? `+${m.points}` : String(m.points);
             return (
               <View key={m.metric} style={{ flexDirection: "row", alignItems: "center", marginBottom: 5, minHeight: 22 }}>
                 <View style={{ flex: 1 }}>
-                  <Text style={{ color: colors.textSecondary, fontSize: 12, fontWeight: "600" }}>{m.metric}</Text>
-                  <Text style={{ color: colors.textMuted, fontSize: 10, marginTop: 1 }}>
+                  <Text style={{ color: colors.textSecondary, fontSize: 13, fontWeight: "600" }}>{m.metric}</Text>
+                  <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: 1 }}>
                     {m.value != null ? safeFormatMetric(m.metric, m.value) : "—"} · {m.reason}
                   </Text>
                 </View>
                 <View style={{ backgroundColor: ptsColor + "18", borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2, marginLeft: 8 }}>
-                  <Text style={{ color: ptsColor, fontSize: 12, fontWeight: "800", fontVariant: ["tabular-nums"] }}>
+                  <Text style={{ color: ptsColor, fontSize: 13, fontWeight: "800", fontVariant: ["tabular-nums"] }}>
                     {ptsLabel}
                   </Text>
                 </View>
@@ -336,8 +405,8 @@ const ScoreBarPremium = React.memo(function ScoreBarPremium({
             );
           })}
           <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 4, paddingTop: 4, borderTopWidth: 1, borderTopColor: colors.borderColor + "30" }}>
-            <Text style={{ color: colors.textMuted, fontSize: 10 }}>Final (clamped 0–100)</Text>
-            <Text style={{ color: barColor, fontSize: 12, fontWeight: "800" }}>{v.toFixed(0)}</Text>
+            <Text style={{ color: colors.textMuted, fontSize: 12 }}>Final (clamped 0–100)</Text>
+            <Text style={{ color: barColor, fontSize: 13, fontWeight: "800" }}>{v.toFixed(0)}</Text>
           </View>
         </View>
       )}

@@ -6,34 +6,34 @@
  * the user is auto-logged-in — no redirect-to-login needed.
  */
 
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useRouter } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { Controller, useForm } from "react-hook-form";
 import {
-  View,
-  StyleSheet,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  Text,
+    KeyboardAvoidingView,
+    Platform,
+    ScrollView,
+    StyleSheet,
+    Text,
+    View,
 } from "react-native";
 import {
-  TextInput,
-  Button,
-  Card,
-  HelperText,
-  IconButton,
-  Divider,
+    Button,
+    Card,
+    Divider,
+    HelperText,
+    IconButton,
+    TextInput,
 } from "react-native-paper";
-import { useRouter } from "expo-router";
-import { useForm, Controller } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
 
-import { useAuthStore } from "@/services/authStore";
-import { useThemeStore } from "@/services/themeStore";
-import { useResponsive } from "@/hooks/useResponsive";
-import { registerSchema, type RegisterFormData } from "@/lib/validationSchemas";
 import { useGoogleSignIn } from "@/hooks/useGoogleSignIn";
+import { useResponsive } from "@/hooks/useResponsive";
 import { analytics } from "@/lib/analytics";
 import { validateEnv } from "@/lib/env";
+import { registerSchema, type RegisterFormData } from "@/lib/validationSchemas";
+import { useAuthStore } from "@/services/authStore";
+import { useThemeStore } from "@/services/themeStore";
 
 // ── Password strength helper ────────────────────────────────────────
 
@@ -142,7 +142,7 @@ export default function RegisterScreen() {
       if (ok) {
         analytics.logEvent("registration_completed", { method: "email" });
         try {
-          router.replace("/(tabs)");
+          router.replace("/");
         } catch (navErr) {
           // Fallback: reset form to prevent duplicate submit if nav fails
           reset();
@@ -168,17 +168,17 @@ export default function RegisterScreen() {
         const ok = await googleSignIn(result.token);
         if (ok) {
           analytics.logEvent("registration_completed", { method: "google" });
-          router.replace("/(tabs)");
+          router.replace("/");
         }
       } else if (!result.cancelled) {
         useAuthStore.setState({
           error: result.error || "Google Sign-In failed. Please try again.",
         });
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("[Register] Google Sign-In error:", err);
       useAuthStore.setState({
-        error: err?.message || "Google Sign-In failed unexpectedly.",
+        error: err instanceof Error ? err.message : "Google Sign-In failed unexpectedly.",
       });
     }
   }, [googlePrompt, googleSignIn, router]);

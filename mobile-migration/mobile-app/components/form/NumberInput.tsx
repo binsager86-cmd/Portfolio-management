@@ -3,10 +3,10 @@
  * suffix allows displaying "KWD", "USD", etc.
  */
 
-import React from "react";
-import { View, Text, StyleSheet } from "react-native";
-import { TextInput } from "./TextInput";
 import { useThemeStore } from "@/services/themeStore";
+import React from "react";
+import { StyleSheet, Text, View } from "react-native";
+import { TextInput } from "./TextInput";
 
 interface NumberInputProps {
   value: string;
@@ -14,6 +14,14 @@ interface NumberInputProps {
   placeholder?: string;
   hasError?: boolean;
   suffix?: string;
+}
+
+/** Format a numeric string with thousand separators for display. */
+function formatDisplay(raw: string): string {
+  if (!raw || raw === "-") return raw;
+  const parts = raw.split(".");
+  const intPart = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return parts.length > 1 ? `${intPart}.${parts[1]}` : intPart;
 }
 
 export function NumberInput({
@@ -26,17 +34,19 @@ export function NumberInput({
   const { colors } = useThemeStore();
 
   const handleChange = (text: string) => {
-    // Allow only digits, single decimal point, and minus at start
+    // Strip formatting chars, keep digits, single decimal, leading minus
     const cleaned = text.replace(/[^0-9.\-]/g, "");
     onChangeText(cleaned);
   };
+
+  const displayed = formatDisplay(value);
 
   if (suffix) {
     return (
       <View style={styles.row}>
         <View style={{ flex: 1 }}>
           <TextInput
-            value={value}
+            value={displayed}
             onChangeText={handleChange}
             placeholder={placeholder ?? "0.00"}
             keyboardType="decimal-pad"
@@ -56,7 +66,7 @@ export function NumberInput({
 
   return (
     <TextInput
-      value={value}
+      value={displayed}
       onChangeText={handleChange}
       placeholder={placeholder ?? "0"}
       keyboardType="decimal-pad"

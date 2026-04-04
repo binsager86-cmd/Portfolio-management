@@ -7,33 +7,35 @@
  * • Empty state
  */
 
-import React, { useMemo, useState, useCallback } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  Pressable,
-  RefreshControl,
-  ActivityIndicator,
-  Platform,
-  Alert,
-} from "react-native";
-import { FlashList } from "@shopify/flash-list";
-import { useRouter } from "expo-router";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
+import { FlashList } from "@shopify/flash-list";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useRouter } from "expo-router";
+import React, { useCallback, useMemo, useState } from "react";
+import {
+    ActivityIndicator,
+    Alert,
+    Platform,
+    Pressable,
+    RefreshControl,
+    StyleSheet,
+    Text,
+    View,
+} from "react-native";
 import { FAB } from "react-native-paper";
 
-import { useDeposits } from "@/hooks/queries";
-import { deleteDeposit, exportDepositsExcel, importDepositsExcel, downloadDepositsTemplate, CashDepositRecord } from "@/services/api";
-import { useThemeStore } from "@/services/themeStore";
-import { useResponsive } from "@/hooks/useResponsive";
-import { formatCurrency } from "@/lib/currency";
-import { LoadingScreen } from "@/components/ui/LoadingScreen";
 import { ErrorScreen } from "@/components/ui/ErrorScreen";
 import { FilterChip } from "@/components/ui/FilterChip";
-import { todayISO } from "@/lib/dateUtils";
+import { DepositsSkeleton } from "@/components/ui/PageSkeletons";
+import { useToast } from "@/components/ui/ToastProvider";
 import type { ThemePalette } from "@/constants/theme";
+import { useDeposits } from "@/hooks/queries";
+import { useResponsive } from "@/hooks/useResponsive";
+import { formatCurrency } from "@/lib/currency";
+import { todayISO } from "@/lib/dateUtils";
+import { showErrorAlert } from "@/lib/errorHandling";
+import { CashDepositRecord, deleteDeposit, downloadDepositsTemplate, exportDepositsExcel, importDepositsExcel } from "@/services/api";
+import { useThemeStore } from "@/services/themeStore";
 
 const PAGE_SIZE = 25;
 
@@ -136,6 +138,7 @@ export default function DepositsScreen() {
   const { colors } = useThemeStore();
   const { isDesktop } = useResponsive();
   const queryClient = useQueryClient();
+  const toast = useToast();
   const [page, setPage] = useState(1);
   const [portfolioFilter, setPortfolioFilter] = useState<string | undefined>(undefined);
   const [sourceFilter, setSourceFilter] = useState<string | undefined>(undefined);
@@ -197,7 +200,7 @@ export default function DepositsScreen() {
   const [exporting, setExporting] = useState(false);
   const handleExportExcel = useCallback(async () => {
     if (Platform.OS !== "web") {
-      Alert.alert("Export", "Excel export is available on the web version.");
+      toast.info("Excel export is available on the web version.");
       return;
     }
     try {
@@ -212,7 +215,7 @@ export default function DepositsScreen() {
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
     } catch (e: any) {
-      Alert.alert("Export Failed", e?.message ?? "Unknown error");
+      toast.error(e?.message ?? "Export failed");
     } finally {
       setExporting(false);
     }
@@ -231,7 +234,7 @@ export default function DepositsScreen() {
 
   const handleDownloadTemplate = useCallback(async () => {
     if (Platform.OS !== "web") {
-      Alert.alert("Template", "Template download is available on the web version.");
+      toast.info("Template download is available on the web version.");
       return;
     }
     try {
@@ -245,13 +248,13 @@ export default function DepositsScreen() {
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
     } catch (e: any) {
-      Alert.alert("Error", e?.message ?? "Failed to download template");
+      toast.error(e?.message ?? "Failed to download template");
     }
   }, []);
 
   const handleUploadFile = useCallback(async () => {
     if (Platform.OS !== "web") {
-      Alert.alert("Upload", "Excel upload is available on the web version.");
+      toast.info("Excel upload is available on the web version.");
       return;
     }
 
@@ -292,19 +295,18 @@ export default function DepositsScreen() {
         ]);
 
         if (result.imported > 0) {
-          Alert.alert(
-            "Import Complete",
+          toast.success(
             `Imported ${result.imported} deposits.` +
               (result.skipped > 0 ? ` Skipped ${result.skipped}.` : "") +
               (result.errors.length > 0
-                ? `\n${result.errors.length} error(s).`
+                ? ` ${result.errors.length} error(s).`
                 : "")
           );
         } else {
-          Alert.alert("No Data", "No deposits were imported. Check your file format.");
+          toast.info("No deposits were imported. Check your file format.");
         }
-      } catch (err: any) {
-        Alert.alert("Upload Failed", err?.message ?? "Unknown error");
+      } catch (err: unknown) {
+        showErrorAlert("Upload Failed", err);
       } finally {
         setUploading(false);
       }
@@ -559,7 +561,7 @@ export default function DepositsScreen() {
   // ── Loading / Error ─────────────────────────────────────────────
 
   if (isLoading) {
-    return <LoadingScreen />;
+    return <DepositsSkeleton />;
   }
 
   if (isError) {

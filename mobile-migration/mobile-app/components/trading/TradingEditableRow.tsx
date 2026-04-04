@@ -5,19 +5,20 @@
  * `EditableTableRow` component used by TradingScreen’s edit view.
  */
 
-import React, { useState, useMemo } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  Pressable,
-  TextInput,
-  Platform,
-} from "react-native";
-import FontAwesome from "@expo/vector-icons/FontAwesome";
-import type { StockRecord } from "@/services/api";
 import type { ThemePalette } from "@/constants/theme";
+import { useStockList } from "@/hooks/queries/useStockQueries";
+import FontAwesome from "@expo/vector-icons/FontAwesome";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import ReactDOM from "react-dom";
+import {
+    Platform,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    View,
+} from "react-native";
 import { ts } from "./TradingTable";
 
 // ── Edit row data type ──────────────────────────────────────────────
@@ -77,7 +78,7 @@ export const EDIT_COLUMNS = [
   { key: "select", label: "🗑️", width: 40 },
   { key: "id", label: "ID", width: 60 },
   { key: "date", label: "Date", width: 130 },
-  { key: "symbol", label: "Symbol", width: 100 },
+  { key: "symbol", label: "Symbol", width: 170 },
   { key: "portfolio", label: "Portfolio", width: 110 },
   { key: "type", label: "Type", width: 80 },
   { key: "quantity", label: "Qty", width: 90 },
@@ -92,21 +93,54 @@ const PORTFOLIO_OPTIONS = ["KFH", "BBYN", "USA"];
 
 // ── Stock Picker Dropdown ───────────────────────────────────────────
 
+/** Web-only portal: renders children into document.body so the dropdown
+ *  escapes any overflow:hidden ancestor (ScrollView, tableOuter, etc.). */
+function WebPortal({ children }: { children: React.ReactNode }) {
+  const [container] = useState(() => {
+    if (Platform.OS !== "web") return null;
+    const el = document.createElement("div");
+    el.style.position = "fixed";
+    el.style.top = "0";
+    el.style.left = "0";
+    el.style.width = "0";
+    el.style.height = "0";
+    el.style.zIndex = "9999";
+    el.style.overflow = "visible";
+    return el;
+  });
+
+  useEffect(() => {
+    if (!container) return;
+    document.body.appendChild(container);
+    return () => { document.body.removeChild(container); };
+  }, [container]);
+
+  if (!container) return <>{children}</>;
+  return ReactDOM.createPortal(children, container);
+}
+
 function StockPickerDropdown({
   value,
   onChange,
   colors,
   width,
-  stocks,
+  portfolio,
 }: {
   value: string;
   onChange: (symbol: string) => void;
   colors: ThemePalette;
   width: number;
-  stocks: StockRecord[];
+  portfolio: string;
 }) {
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState("");
+  const triggerRef = useRef<View>(null);
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const [pos, setPos] = useState({ top: 0, left: 0 });
+
+  const market = portfolio === "USA" ? "us" : "kuwait";
+  const { data: refData } = useStockList(market);
+  const stocks = refData?.stocks ?? [];
 
   const filtered = useMemo(() => {
     if (!filter.trim()) return stocks;
@@ -118,118 +152,212 @@ function StockPickerDropdown({
     );
   }, [stocks, filter]);
 
-  if (Platform.OS === "web") {
-    return (
-      <View style={[editStyles.editCell, { width, zIndex: open ? 200 : 1 }]}>
-        <Pressable
-          onPress={() => { setOpen(!open); setFilter(""); }}
-          style={[editStyles.dropdownBtn, { borderColor: colors.borderColor, backgroundColor: colors.bgInput }]}
-        >
-          <Text style={[editStyles.dropdownText, { color: colors.textPrimary }]} numberOfLines={1}>
-            {value || "Select…"}
-          </Text>
-          <FontAwesome name={open ? "caret-up" : "caret-down"} size={10} color={colors.textMuted} />
-        </Pressable>
-        {open && (
-          <View
-            style={[editStyles.dropdownList, {
-              backgroundColor: colors.bgCard, borderColor: colors.borderColor,
-              maxHeight: 220, width: Math.max(width, 200),
-            }]}
-          >
-            <View style={{ padding: 4 }}>
-              <input
-                type="text"
-                placeholder="Search stocks…"
-                value={filter}
-                onChange={(e: any) => setFilter(e.target.value)}
-                autoFocus
-                style={{
-                  fontSize: 12, color: colors.textPrimary, background: colors.bgInput,
-                  border: `1px solid ${colors.borderColor}`, borderRadius: 4,
-                  padding: "4px 6px", fontFamily: "inherit", width: "100%",
-                  boxSizing: "border-box", outline: "none",
-                } as any}
-              />
-            </View>
-            <ScrollView style={{ maxHeight: 180 }}>
-              {filtered.length === 0 ? (
-                <Text style={{ padding: 8, color: colors.textMuted, fontSize: 12, textAlign: "center" }}>No stocks found</Text>
-              ) : (
-                filtered.map((s) => (
-                  <Pressable
-                    key={s.id}
-                    onPress={() => { onChange(s.symbol); setOpen(false); setFilter(""); }}
-                    style={[editStyles.dropdownItem, s.symbol === value && { backgroundColor: colors.accentPrimary + "20" }]}
-                  >
-                    <Text
-                      style={[editStyles.dropdownItemText, { color: s.symbol === value ? colors.accentPrimary : colors.textPrimary }]}
-                      numberOfLines={1}
-                    >
-                      {s.symbol}{s.name ? ` — ${s.name}` : ""}
-                    </Text>
-                  </Pressable>
-                ))
-              )}
-            </ScrollView>
-          </View>
+  const close = useCallback(() => { setOpen(false); setFilter(""); }, []);
+
+  // Measure trigger position when opening
+  const handleOpen = useCallback(() => {
+    if (open) { close(); return; }
+    if (Platform.OS === "web" && triggerRef.current) {
+      const node = triggerRef.current as unknown as HTMLElement;
+      const rect = node.getBoundingClientRect();
+      setPos({ top: rect.bottom + 4, left: rect.left });
+    }
+    setOpen(true);
+    setFilter("");
+  }, [open, close]);
+
+  // Close on click outside (web)
+  useEffect(() => {
+    if (!open || Platform.OS !== "web") return;
+    const handler = (e: MouseEvent) => {
+      const trigger = triggerRef.current as unknown as HTMLElement | null;
+      const list = listRef.current;
+      if (trigger && trigger.contains(e.target as Node)) return;
+      if (list && list.contains(e.target as Node)) return;
+      close();
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open, close]);
+
+  const matchLabel = useMemo(() => {
+    if (!value) return null;
+    const s = stocks.find((st) => st.symbol === value);
+    return s?.name ?? null;
+  }, [value, stocks]);
+
+  const DROPDOWN_W = Math.max(width, 260);
+
+  const renderList = () => (
+    <>
+      {/* Search bar */}
+      <View style={spk.searchWrap}>
+        <FontAwesome name="search" size={12} color={colors.textMuted} style={spk.searchIcon} />
+        {Platform.OS === "web" ? (
+          <input
+            type="text"
+            placeholder="Type to search…"
+            value={filter}
+            onChange={(e: any) => setFilter(e.target.value)}
+            autoFocus
+            style={{
+              flex: 1, fontSize: 12, color: colors.textPrimary,
+              background: "transparent", border: "none", outline: "none",
+              fontFamily: "inherit", padding: 0, width: "100%",
+            } as any}
+          />
+        ) : (
+          <TextInput
+            placeholder="Type to search…"
+            placeholderTextColor={colors.textMuted}
+            value={filter}
+            onChangeText={setFilter}
+            autoFocus
+            style={{ flex: 1, fontSize: 12, color: colors.textPrimary, padding: 0 }}
+          />
         )}
       </View>
-    );
-  }
+
+      {/* Divider */}
+      <View style={{ height: 1, backgroundColor: colors.borderColor }} />
+
+      {/* Items */}
+      <ScrollView style={{ maxHeight: 200 }} keyboardShouldPersistTaps="handled">
+        {filtered.length === 0 ? (
+          <View style={spk.emptyWrap}>
+            <FontAwesome name="inbox" size={20} color={colors.textMuted} />
+            <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: 4 }}>No matching stocks</Text>
+          </View>
+        ) : (
+          filtered.map((s) => {
+            const selected = s.symbol === value;
+            return (
+              <Pressable
+                key={s.symbol}
+                onPress={() => { onChange(s.symbol); close(); }}
+                style={({ pressed, hovered }: any) => [
+                  spk.item,
+                  selected && { backgroundColor: colors.accentPrimary + "14" },
+                  (hovered && !selected) && { backgroundColor: colors.bgCardHover },
+                  pressed && { opacity: 0.7 },
+                ]}
+              >
+                <View style={spk.itemLeft}>
+                  <Text style={[spk.itemSymbol, { color: selected ? colors.accentPrimary : colors.textPrimary }]}>
+                    {s.symbol}
+                  </Text>
+                  {s.name ? (
+                    <Text style={[spk.itemName, { color: colors.textMuted }]} numberOfLines={1}>
+                      {s.name}
+                    </Text>
+                  ) : null}
+                </View>
+                {selected && (
+                  <FontAwesome name="check" size={12} color={colors.accentPrimary} />
+                )}
+              </Pressable>
+            );
+          })
+        )}
+      </ScrollView>
+    </>
+  );
 
   return (
     <View style={[editStyles.editCell, { width, zIndex: open ? 200 : 1 }]}>
       <Pressable
-        onPress={() => { setOpen(!open); setFilter(""); }}
-        style={[editStyles.dropdownBtn, { borderColor: colors.borderColor, backgroundColor: colors.bgInput }]}
+        ref={triggerRef}
+        onPress={handleOpen}
+        style={({ hovered }: any) => [
+          spk.trigger,
+          {
+            borderColor: open ? colors.accentPrimary : colors.borderColor,
+            backgroundColor: hovered ? colors.bgCardHover : colors.bgInput,
+          },
+        ]}
       >
-        <Text style={[editStyles.dropdownText, { color: colors.textPrimary }]} numberOfLines={1}>
-          {value || "Select…"}
-        </Text>
-        <FontAwesome name={open ? "caret-up" : "caret-down"} size={10} color={colors.textMuted} />
+        <View style={spk.triggerContent}>
+          <Text style={[spk.triggerSymbol, { color: value ? colors.textPrimary : colors.textMuted }]} numberOfLines={1}>
+            {value || "Select…"}
+          </Text>
+          {matchLabel && !open ? (
+            <Text style={[spk.triggerName, { color: colors.textMuted }]} numberOfLines={1}>
+              {matchLabel}
+            </Text>
+          ) : null}
+        </View>
+        <FontAwesome name={open ? "caret-up" : "caret-down"} size={11} color={colors.textMuted} />
       </Pressable>
-      {open && (
-        <View style={[editStyles.dropdownList, { backgroundColor: colors.bgCard, borderColor: colors.borderColor, maxHeight: 220, width: Math.max(width, 200) }]}>
-          <View style={{ padding: 4 }}>
-            <TextInput
-              placeholder="Search stocks…"
-              placeholderTextColor={colors.textMuted}
-              value={filter}
-              onChangeText={setFilter}
-              autoFocus
-              style={{
-                fontSize: 12, color: colors.textPrimary, borderWidth: 1,
-                borderColor: colors.borderColor, borderRadius: 4,
-                paddingHorizontal: 6, paddingVertical: 4, backgroundColor: colors.bgInput,
-              }}
-            />
-          </View>
-          <ScrollView style={{ maxHeight: 180 }}>
-            {filtered.length === 0 ? (
-              <Text style={{ padding: 8, color: colors.textMuted, fontSize: 12, textAlign: "center" }}>No stocks found</Text>
-            ) : (
-              filtered.map((s) => (
-                <Pressable
-                  key={s.id}
-                  onPress={() => { onChange(s.symbol); setOpen(false); setFilter(""); }}
-                  style={[editStyles.dropdownItem, s.symbol === value && { backgroundColor: colors.accentPrimary + "20" }]}
-                >
-                  <Text
-                    style={[editStyles.dropdownItemText, { color: s.symbol === value ? colors.accentPrimary : colors.textPrimary }]}
-                    numberOfLines={1}
-                  >
-                    {s.symbol}{s.name ? ` — ${s.name}` : ""}
-                  </Text>
-                </Pressable>
-              ))
-            )}
-          </ScrollView>
+
+      {open && Platform.OS === "web" && (
+        <WebPortal>
+          <div
+            ref={listRef}
+            style={{
+              position: "fixed",
+              top: pos.top,
+              left: pos.left,
+              width: DROPDOWN_W,
+              backgroundColor: colors.bgCard,
+              border: `1px solid ${colors.borderColor}`,
+              borderRadius: 8,
+              boxShadow: "0 4px 20px rgba(0,0,0,0.3)",
+              overflow: "hidden",
+              zIndex: 9999,
+            }}
+          >
+            {renderList()}
+          </div>
+        </WebPortal>
+      )}
+
+      {open && Platform.OS !== "web" && (
+        <View
+          style={[
+            spk.listContainer,
+            {
+              width: DROPDOWN_W,
+              backgroundColor: colors.bgCard,
+              borderColor: colors.borderColor,
+            },
+          ]}
+        >
+          {renderList()}
         </View>
       )}
     </View>
   );
 }
+
+const spk = StyleSheet.create({
+  trigger: {
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+    borderWidth: 1, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4,
+    gap: 4,
+  },
+  triggerContent: { flex: 1, flexDirection: "column" },
+  triggerSymbol: { fontSize: 12, fontWeight: "700" },
+  triggerName: { fontSize: 10, marginTop: 1 },
+  listContainer: {
+    position: "absolute", top: 38, left: 0,
+    borderWidth: 1, borderRadius: 8, zIndex: 300, elevation: 8,
+    shadowColor: "#000", shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25, shadowRadius: 12,
+    overflow: "hidden",
+  },
+  searchWrap: {
+    flexDirection: "row", alignItems: "center", paddingHorizontal: 10, paddingVertical: 8, gap: 8,
+  },
+  searchIcon: { width: 14 },
+  emptyWrap: { alignItems: "center", paddingVertical: 20 },
+  item: {
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+    paddingHorizontal: 12, paddingVertical: 8, gap: 8,
+  },
+  itemLeft: { flex: 1, flexDirection: "row", alignItems: "center", gap: 8 },
+  itemSymbol: { fontSize: 12, fontWeight: "700", minWidth: 60 },
+  itemName: { fontSize: 11, flex: 1 },
+});
 
 // ── Portfolio Dropdown ──────────────────────────────────────────────
 
@@ -305,7 +433,6 @@ export function EditableTableRow({
   onUpdateField,
   colors,
   isEven,
-  stocks,
 }: {
   row: EditRowData;
   isSelected: boolean;
@@ -313,7 +440,6 @@ export function EditableTableRow({
   onUpdateField: (id: number, field: keyof EditRowData, value: string) => void;
   colors: ThemePalette;
   isEven: boolean;
-  stocks: StockRecord[];
 }) {
   const rowBg = isSelected
     ? colors.danger + "15"
@@ -361,7 +487,7 @@ export function EditableTableRow({
         )}
       </View>
 
-      <StockPickerDropdown value={row.symbol} onChange={(v) => onUpdateField(row.id, "symbol", v)} colors={colors} width={100} stocks={stocks} />
+      <StockPickerDropdown value={row.symbol} onChange={(v) => onUpdateField(row.id, "symbol", v)} colors={colors} width={170} portfolio={row.portfolio} />
       <PortfolioDropdown value={row.portfolio} onChange={(v) => onUpdateField(row.id, "portfolio", v)} colors={colors} width={110} />
 
       <View style={[editStyles.editCell, { width: 80 }]}>

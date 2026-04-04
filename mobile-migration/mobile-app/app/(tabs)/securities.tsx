@@ -4,25 +4,25 @@
  * Mirrors Streamlit's Securities Master section.
  */
 
+import FontAwesome from "@expo/vector-icons/FontAwesome";
+import { FlashList } from "@shopify/flash-list";
 import React, { useState } from "react";
 import {
-  View,
-  Text,
-  StyleSheet,
-  Pressable,
-  TextInput,
-  RefreshControl,
+    Pressable,
+    RefreshControl,
+    StyleSheet,
+    Text,
+    TextInput,
+    View,
 } from "react-native";
-import { FlashList } from "@shopify/flash-list";
-import FontAwesome from "@expo/vector-icons/FontAwesome";
 
-import { useStocks, useSecurities } from "@/hooks/queries";
-import { useThemeStore } from "@/services/themeStore";
+import { FilterChip } from "@/components/ui/FilterChip";
+import { SecuritiesSkeleton } from "@/components/ui/PageSkeletons";
+import { useSecurities, useStocks } from "@/hooks/queries";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { useResponsive } from "@/hooks/useResponsive";
 import { useScreenStyles } from "@/hooks/useScreenStyles";
-import { LoadingScreen } from "@/components/ui/LoadingScreen";
-import { FilterChip } from "@/components/ui/FilterChip";
+import { useThemeStore } from "@/services/themeStore";
 
 type Tab = "stocks" | "securities";
 
@@ -114,7 +114,7 @@ export default function SecuritiesMasterScreen() {
       {/* Stocks List */}
       {tab === "stocks" ? (
         stocksLoading ? (
-          <LoadingScreen />
+          <SecuritiesSkeleton />
         ) : (
           <FlashList
             data={stocks}
@@ -153,7 +153,7 @@ export default function SecuritiesMasterScreen() {
           />
         )
       ) : securitiesLoading ? (
-        <LoadingScreen />
+        <SecuritiesSkeleton />
       ) : (
         <FlashList
           data={securities}

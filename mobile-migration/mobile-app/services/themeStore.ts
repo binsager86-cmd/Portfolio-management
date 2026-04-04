@@ -24,7 +24,9 @@ async function loadMode(): Promise<"light" | "dark"> {
       const v = await SecureStore.getItemAsync(STORAGE_KEY);
       if (v === "light" || v === "dark") return v;
     }
-  } catch {}
+  } catch (err) {
+    if (__DEV__) console.warn("[ThemeStore] Failed to load theme preference:", err);
+  }
   return "dark"; // default
 }
 
@@ -36,7 +38,9 @@ async function saveMode(mode: "light" | "dark"): Promise<void> {
       const SecureStore = await import("expo-secure-store");
       await SecureStore.setItemAsync(STORAGE_KEY, mode);
     }
-  } catch {}
+  } catch (err) {
+    if (__DEV__) console.warn("[ThemeStore] Failed to persist theme preference:", err);
+  }
 }
 
 // ── Store ───────────────────────────────────────────────────────────

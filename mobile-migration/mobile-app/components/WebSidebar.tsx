@@ -30,22 +30,24 @@ export interface NavItem {
   path: string;
   /** Group separator label shown above this item */
   section?: string;
+  /** Only show to admin users */
+  adminOnly?: boolean;
 }
 
 export const NAV_ITEMS: NavItem[] = [
   { label: "Overview", icon: "line-chart", path: "/(tabs)", section: "Dashboard" },
   { label: "Holdings", icon: "briefcase", path: "/(tabs)/portfolio-analysis" },
-  { label: "Transactions", icon: "exchange", path: "/(tabs)/transactions" },
-  { label: "Deposits", icon: "bank", path: "/(tabs)/deposits" },
   { label: "Trading", icon: "bar-chart-o", path: "/(tabs)/trading", section: "Analysis" },
   { label: "Fundamentals", icon: "flask", path: "/(tabs)/fundamental-analysis" },
   { label: "Tracker", icon: "camera", path: "/(tabs)/portfolio-tracker" },
   { label: "Dividends", icon: "money", path: "/(tabs)/dividends" },
-  { label: "Add Stock", icon: "plus-square", path: "/(tabs)/add-stock", section: "Management" },
+  { label: "Transactions", icon: "exchange", path: "/(tabs)/transactions", section: "Management" },
+  { label: "Deposits", icon: "bank", path: "/(tabs)/deposits" },
   { label: "Planner", icon: "calculator", path: "/(tabs)/planner" },
   { label: "Integrity", icon: "stethoscope", path: "/(tabs)/integrity", section: "System" },
   { label: "Backup", icon: "cloud-download", path: "/(tabs)/backup" },
   { label: "Settings", icon: "cog", path: "/(tabs)/settings" },
+  { label: "Admin", icon: "shield", path: "/(tabs)/admin", section: "Admin", adminOnly: true },
 ];
 
 // ── Widths ───────────────────────────────────────────────────────────
@@ -65,8 +67,13 @@ export default function WebSidebar({ collapsed: collapsedProp, onToggleCollapse 
   const router = useRouter();
   const pathname = usePathname();
   const logout = useAuthStore((s) => s.logout);
+  const isAdmin = useAuthStore((s) => s.isAdmin);
   const { colors, toggle, mode } = useThemeStore();
   const { isTablet } = useResponsive();
+
+  const navItems = isAdmin
+    ? NAV_ITEMS.filter((item) => item.adminOnly)
+    : NAV_ITEMS.filter((item) => !item.adminOnly);
 
   // Auto-collapse on tablet unless prop overrides
   const isCollapsed = collapsedProp ?? isTablet;
@@ -112,7 +119,7 @@ export default function WebSidebar({ collapsed: collapsedProp, onToggleCollapse 
 
       {/* ── Scrollable Nav Links ── */}
       <ScrollView style={s.navScroll} showsVerticalScrollIndicator={false}>
-        {NAV_ITEMS.map((item) => {
+        {navItems.map((item) => {
           const active = isActive(item.path);
           return (
             <React.Fragment key={item.path}>

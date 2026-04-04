@@ -11,60 +11,62 @@
  *   7. Realized Profit details
  */
 
-import React, { useState, useMemo, useCallback } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  Pressable,
-  RefreshControl,
-  Platform,
-  Alert,
-} from "react-native";
-import { useQueryClient } from "@tanstack/react-query";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
+import { useQueryClient } from "@tanstack/react-query";
+import React, { useCallback, useMemo, useState } from "react";
+import {
+    Alert,
+    Platform,
+    Pressable,
+    RefreshControl,
+    ScrollView,
+    StyleSheet,
+    Text,
+    View,
+} from "react-native";
 
-import { usePriceRefresh } from "@/hooks/usePriceRefresh";
-import {
-  useHoldings,
-  usePerformance,
-  useRiskMetrics,
-  useRealizedProfit,
-  useCashBalances,
-  useDepositTotals,
-} from "@/hooks/queries";
-import {
-  exportHoldingsExcel,
-} from "@/services/api";
-import { useThemeStore } from "@/services/themeStore";
-import { useResponsive } from "@/hooks/useResponsive";
-import { LoadingScreen } from "@/components/ui/LoadingScreen";
-import { ErrorScreen } from "@/components/ui/ErrorScreen";
 import { AllocationDonut, AllocationSlice } from "@/components/charts/AllocationDonut";
+import { withErrorBoundary } from "@/components/ui/ErrorBoundary";
+import { ErrorScreen } from "@/components/ui/ErrorScreen";
+import { PortfolioAnalysisSkeleton } from "@/components/ui/PageSkeletons";
+import {
+    useCashBalances,
+    useDepositTotals,
+    useHoldings,
+    usePerformance,
+    useRealizedProfit,
+    useRiskMetrics,
+} from "@/hooks/queries";
+import { usePriceRefresh } from "@/hooks/usePriceRefresh";
+import { useResponsive } from "@/hooks/useResponsive";
 import { formatCurrency } from "@/lib/currency";
 import { todayISO } from "@/lib/dateUtils";
+import {
+    exportHoldingsExcel,
+} from "@/services/api";
+import { useThemeStore } from "@/services/themeStore";
 
 // Extracted components
-import {
-  TABLE_COLUMNS,
-  TOTAL_TABLE_WIDTH,
-  sortHoldings,
-  computeTotals,
-  setHoldingsContext,
-  HeaderCell,
-  HoldingRow,
-  TotalCell,
-  htStyles,
-} from "@/components/portfolio/HoldingsTablePA";
-import type { SortDir } from "@/components/portfolio/HoldingsTablePA";
 import { CashBalancesSection } from "@/components/portfolio/CashBalancesSection";
+import type { SortDir } from "@/components/portfolio/HoldingsTablePA";
+import {
+    HeaderCell,
+    HoldingRow,
+    TABLE_COLUMNS,
+    TOTAL_TABLE_WIDTH,
+    TotalCell,
+    computeTotals,
+    htStyles,
+    setHoldingsContext,
+    sortHoldings,
+} from "@/components/portfolio/HoldingsTablePA";
 import { KpiCard } from "@/components/portfolio/KpiWidgets";
 import { FilterChip } from "@/components/ui/FilterChip";
+import { GLOSSARY, InfoTip } from "@/components/ui/InfoTip";
 
 const PORTFOLIOS = ["All", "KFH", "BBYN", "USA"] as const;
 
-export default function PortfolioAnalysisScreen() {
+function PortfolioAnalysisScreen() {
   const { colors } = useThemeStore();
   const { isDesktop, spacing } = useResponsive();
   const queryClient = useQueryClient();
@@ -183,10 +185,10 @@ export default function PortfolioAnalysisScreen() {
 
   // ── Loading / Error ─────────────────────────────────────────────
 
-  if (holdingsLoading) return <LoadingScreen message="Loading portfolio\u2026" />;
-  if (holdingsError) return <ErrorScreen message={(holdingsErr as any)?.message ?? "Failed to load holdings"} onRetry={() => refetchHoldings()} />;
+  if (holdingsLoading) return <PortfolioAnalysisSkeleton />;
+  if (holdingsError) return <ErrorScreen message={(holdingsErr as Error)?.message ?? "Failed to load holdings"} onRetry={() => refetchHoldings()} />;
 
-  const resp = holdingsResp!;
+  const resp = holdingsResp;
 
   // ── Render ──────────────────────────────────────────────────────
 
@@ -321,7 +323,9 @@ export default function PortfolioAnalysisScreen() {
             </Text>
             <View style={s.kpiGrid}>
               <KpiCard label="Sharpe Ratio" value={riskData.sharpe_ratio.toFixed(3)} colors={colors} />
+              <InfoTip term="Sharpe Ratio" definition={GLOSSARY["Sharpe Ratio"]} />
               <KpiCard label="Sortino Ratio" value={riskData.sortino_ratio.toFixed(3)} colors={colors} />
+              <InfoTip term="Sortino Ratio" definition={GLOSSARY["Sortino Ratio"]} />
             </View>
           </View>
         )}
@@ -377,3 +381,5 @@ const s = StyleSheet.create({
   detailRow: { flexDirection: "row", paddingVertical: 10, paddingHorizontal: 12, borderBottomWidth: StyleSheet.hairlineWidth },
   detailCell: { flex: 1, fontSize: 13 },
 });
+
+export default withErrorBoundary(PortfolioAnalysisScreen, "Unable to load Holdings. Please try again.");

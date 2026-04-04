@@ -14,36 +14,36 @@
  * Built with react-native-svg + react-native-reanimated.
  */
 
-import React, { useState, useMemo, useCallback, useEffect } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  View,
-  Text,
-  StyleSheet,
-  Platform,
-  LayoutChangeEvent,
-  GestureResponderEvent,
+    GestureResponderEvent,
+    LayoutChangeEvent,
+    Platform,
+    StyleSheet,
+    Text,
+    View,
 } from "react-native";
-import Svg, {
-  Path,
-  Circle,
-  Defs,
-  LinearGradient,
-  Stop,
-  Line as SvgLine,
-  Text as SvgText,
-  G,
-} from "react-native-svg";
 import Animated, {
-  useSharedValue,
-  useAnimatedStyle,
-  withTiming,
-  withDelay,
-  Easing,
+    Easing,
+    useAnimatedStyle,
+    useSharedValue,
+    withDelay,
+    withTiming,
 } from "react-native-reanimated";
+import Svg, {
+    Circle,
+    Defs,
+    G,
+    LinearGradient,
+    Path,
+    Stop,
+    Line as SvgLine,
+    Text as SvgText,
+} from "react-native-svg";
 
-import type { ThemePalette } from "@/constants/theme";
 import { CHART_WIDE_LABEL_MIN } from "@/constants/layout";
-import { formatShortDate, formatFullDate } from "@/lib/dateUtils";
+import type { ThemePalette } from "@/constants/theme";
+import { formatFullDate, formatShortDate } from "@/lib/dateUtils";
 import { fmtAxisVal } from "@/lib/formatting";
 
 // ── Public types ────────────────────────────────────────────────────
@@ -196,7 +196,13 @@ export default React.memo(function SnapshotLineChart({
 
   const [containerWidth, setContainerWidth] = useState(widthProp ?? 0);
   const [activeIdx, setActiveIdx] = useState<number | null>(null);
+  const [dataVersion, setDataVersion] = useState(0);
   const fmt = formatValue ?? fmtAxisVal;
+
+  // Bump version whenever data reference/content changes
+  useEffect(() => {
+    if (data && data.length > 0) setDataVersion((v) => v + 1);
+  }, [data]);
 
   // ── Entrance animation ──────────────────────────────────────────
 
@@ -216,7 +222,7 @@ export default React.memo(function SnapshotLineChart({
         withTiming(1, { duration: 500, easing: Easing.in(Easing.quad) })
       );
     }
-  }, [containerWidth, data?.length]);
+  }, [containerWidth, data?.length, dataVersion]);
 
   const chartAnimStyle = useAnimatedStyle(() => ({
     opacity: progress.value,
@@ -391,7 +397,12 @@ export default React.memo(function SnapshotLineChart({
             {...responders}
             {...webMouse}
           >
-            <Svg width={containerWidth} height={height}>
+            <Svg
+              width={containerWidth}
+              height={height}
+              accessibilityRole="image"
+              accessibilityLabel={`${title} chart with ${data.length} data points`}
+            >
               <Defs>
                 {/* Area gradient (primary top → secondary bottom, fading out) */}
                 <LinearGradient id={areaGradId} x1="0" y1="0" x2="0" y2="1">

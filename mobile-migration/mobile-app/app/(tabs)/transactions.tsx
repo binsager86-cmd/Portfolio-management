@@ -5,29 +5,31 @@
  * Uses React Query for data fetching and pull-to-refresh.
  */
 
-import React, { useState, useCallback } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  Pressable,
-  RefreshControl,
-  Platform,
-  Alert,
-} from "react-native";
-import { FlashList } from "@shopify/flash-list";
-import { useRouter } from "expo-router";
-import FontAwesome from "@expo/vector-icons/FontAwesome";
-import { useTransactions } from "@/hooks/queries";
-import { TransactionRecord } from "@/services/api";
-import { useDeleteTransaction } from "@/hooks/useTransactionMutations";
-import { useThemeStore } from "@/services/themeStore";
-import { useResponsive } from "@/hooks/useResponsive";
-import { LoadingScreen } from "@/components/ui/LoadingScreen";
+import KfhTradeImportButton from "@/components/trading/KfhTradeImportButton";
+import { withErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { ErrorScreen } from "@/components/ui/ErrorScreen";
 import { FilterChip } from "@/components/ui/FilterChip";
-import { formatCurrency } from "@/lib/currency";
+import { TransactionsSkeleton } from "@/components/ui/PageSkeletons";
 import type { ThemePalette } from "@/constants/theme";
+import { useTransactions } from "@/hooks/queries";
+import { useResponsive } from "@/hooks/useResponsive";
+import { useDeleteTransaction } from "@/hooks/useTransactionMutations";
+import { formatCurrency } from "@/lib/currency";
+import { TransactionRecord } from "@/services/api";
+import { useThemeStore } from "@/services/themeStore";
+import FontAwesome from "@expo/vector-icons/FontAwesome";
+import { FlashList } from "@shopify/flash-list";
+import { useRouter } from "expo-router";
+import React, { useCallback, useState } from "react";
+import {
+    Alert,
+    Platform,
+    Pressable,
+    RefreshControl,
+    StyleSheet,
+    Text,
+    View,
+} from "react-native";
 
 // ── Transaction Row ─────────────────────────────────────────────────
 
@@ -117,7 +119,7 @@ const TxnRow = React.memo(function TxnRow({
 
 // ── Main Screen ─────────────────────────────────────────────────────
 
-export default function TransactionsScreen() {
+function TransactionsScreen() {
   const { colors } = useThemeStore();
   const { isDesktop } = useResponsive();
   const router = useRouter();
@@ -160,7 +162,7 @@ export default function TransactionsScreen() {
     refetch();
   }, [refetch]);
 
-  if (isLoading) return <LoadingScreen />;
+  if (isLoading) return <TransactionsSkeleton />;
   if (isError)
     return (
       <ErrorScreen
@@ -184,12 +186,15 @@ export default function TransactionsScreen() {
           },
         ]}
       >
-        <Text style={[styles.title, { color: colors.textPrimary }]}>
-          Transactions
-        </Text>
-        <Text style={[styles.count, { color: colors.textSecondary }]}>
-          {data?.count ?? 0} total
-        </Text>
+        <View>
+          <Text style={[styles.title, { color: colors.textPrimary }]}>
+            Transactions
+          </Text>
+          <Text style={[styles.count, { color: colors.textSecondary }]}>
+            {data?.count ?? 0} total
+          </Text>
+        </View>
+        <KfhTradeImportButton portfolio="KFH" onImportComplete={() => refetch()} />
       </View>
 
       {/* Filters */}
@@ -220,6 +225,7 @@ export default function TransactionsScreen() {
       <FlashList
         data={transactions}
         keyExtractor={(item) => String(item.id)}
+        estimatedItemSize={80}
         renderItem={({ item }) => <TxnRow txn={item} colors={colors} onEdit={handleEdit} onDelete={handleDelete} />}
         contentContainerStyle={[
           styles.list,
@@ -244,6 +250,12 @@ export default function TransactionsScreen() {
             >
               No transactions yet
             </Text>
+            <Pressable
+              onPress={() => router.push("/(tabs)/add-transaction" as any)}
+              style={[{ backgroundColor: colors.accentPrimary, paddingHorizontal: 18, paddingVertical: 8, borderRadius: 8, marginTop: 12 }, Platform.OS === "web" ? ({ cursor: "pointer" } as any) : undefined]}
+            >
+              <Text style={{ color: "#fff", fontWeight: "600", fontSize: 13 }}>Add Transaction</Text>
+            </Pressable>
           </View>
         }
         ListFooterComponent={
@@ -320,7 +332,7 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
     borderBottomWidth: 1,
     flexDirection: "row",
-    alignItems: "baseline",
+    alignItems: "center",
     justifyContent: "space-between",
   },
   title: { fontSize: 24, fontWeight: "700" },
@@ -394,3 +406,5 @@ const styles = StyleSheet.create({
     elevation: 6,
   },
 });
+
+export default withErrorBoundary(TransactionsScreen, "Unable to load Transactions. Please try again.");

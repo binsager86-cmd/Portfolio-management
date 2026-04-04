@@ -15,39 +15,39 @@
  * maximum cross-platform compatibility.
  */
 
-import React, { useState, useMemo, useCallback, useEffect } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  View,
-  Text,
-  StyleSheet,
-  ViewStyle,
-  Platform,
-  LayoutChangeEvent,
-  GestureResponderEvent,
+    GestureResponderEvent,
+    LayoutChangeEvent,
+    Platform,
+    StyleSheet,
+    Text,
+    View,
+    ViewStyle,
 } from "react-native";
-import Svg, {
-  Path,
-  Defs,
-  LinearGradient,
-  Stop,
-  Circle,
-  Line as SvgLine,
-  G,
-  Text as SvgText,
-} from "react-native-svg";
 import Animated, {
-  useSharedValue,
-  useAnimatedStyle,
-  withTiming,
-  withDelay,
-  Easing,
+    Easing,
+    useAnimatedStyle,
+    useSharedValue,
+    withDelay,
+    withTiming,
 } from "react-native-reanimated";
+import Svg, {
+    Circle,
+    Defs,
+    G,
+    LinearGradient,
+    Path,
+    Stop,
+    Line as SvgLine,
+    Text as SvgText,
+} from "react-native-svg";
 
 import { CHART_WIDE_LABEL_MIN } from "@/constants/layout";
-import { useThemeStore } from "@/services/themeStore";
-import { formatShortDate, formatFullDate } from "@/lib/dateUtils";
 import { formatCurrency } from "@/lib/currency";
+import { formatFullDate, formatShortDate } from "@/lib/dateUtils";
 import { fmtAxisVal } from "@/lib/formatting";
+import { useThemeStore } from "@/services/themeStore";
 
 // ── Public types ────────────────────────────────────────────────────
 
@@ -187,6 +187,12 @@ export const PortfolioChart = React.memo(function PortfolioChart({
   const pal = isDark ? GRAD_DARK : GRAD_LIGHT;
   const [containerWidth, setContainerWidth] = useState(0);
   const [activeIdx, setActiveIdx] = useState<number | null>(null);
+  const [dataVersion, setDataVersion] = useState(0);
+
+  // Bump version whenever data reference/content changes
+  useEffect(() => {
+    if (data && data.length > 0) setDataVersion((v) => v + 1);
+  }, [data]);
 
   // ── Entrance animation ──────────────────────────────────────────
 
@@ -206,7 +212,7 @@ export const PortfolioChart = React.memo(function PortfolioChart({
         withTiming(1, { duration: 500, easing: Easing.in(Easing.quad) })
       );
     }
-  }, [containerWidth, data?.length]);
+  }, [containerWidth, data?.length, dataVersion]);
 
   const chartAnimStyle = useAnimatedStyle(() => ({
     opacity: progress.value,
@@ -381,7 +387,12 @@ export const PortfolioChart = React.memo(function PortfolioChart({
             {...responders}
             {...webMouse}
           >
-            <Svg width={containerWidth} height={height}>
+            <Svg
+              width={containerWidth}
+              height={height}
+              accessibilityRole="image"
+              accessibilityLabel={`Portfolio value chart with ${data.length} data points`}
+            >
               <Defs>
                 {/* Area gradient (Purple top → Blue bottom, fading out) */}
                 <LinearGradient id="aFill" x1="0" y1="0" x2="0" y2="1">

@@ -49,14 +49,25 @@ api.interceptors.request.use(async (config: InternalAxiosRequestConfig) => {
 // ── Response interceptor: silent refresh on 401 ─────────────────────
 
 let isRefreshing = false;
-let refreshSubscribers: Array<(token: string) => void> = [];
+let refreshSubscribers: Array<{
+  resolve: (token: string) => void;
+  reject: (error: unknown) => void;
+}> = [];
 
-function subscribeTokenRefresh(cb: (token: string) => void) {
-  refreshSubscribers.push(cb);
+function subscribeTokenRefresh(
+  resolve: (token: string) => void,
+  reject: (error: unknown) => void,
+) {
+  refreshSubscribers.push({ resolve, reject });
 }
 
 function onTokenRefreshed(newToken: string) {
-  refreshSubscribers.forEach((cb) => cb(newToken));
+  refreshSubscribers.forEach((s) => s.resolve(newToken));
+  refreshSubscribers = [];
+}
+
+function onTokenRefreshFailed(error: unknown) {
+  refreshSubscribers.forEach((s) => s.reject(error));
   refreshSubscribers = [];
 }
 
@@ -111,7 +122,7 @@ api.interceptors.response.use(
         await removeToken();
         await removeRefreshToken();
         useAuthStore.getState().logout();
-        refreshSubscribers = [];
+        onTokenRefreshFailed(error);
         return Promise.reject(error);
       } finally {
         isRefreshing = false;
@@ -119,13 +130,18 @@ api.interceptors.response.use(
     }
 
     // Another request is already refreshing — queue and wait
-    return new Promise<AxiosResponse>((resolve) => {
-      subscribeTokenRefresh((newToken: string) => {
-        if (originalRequest.headers) {
-          originalRequest.headers.Authorization = `Bearer ${newToken}`;
-        }
-        resolve(api(originalRequest));
-      });
+    return new Promise<AxiosResponse>((resolve, reject) => {
+      subscribeTokenRefresh(
+        (newToken: string) => {
+          if (originalRequest.headers) {
+            originalRequest.headers.Authorization = `Bearer ${newToken}`;
+          }
+          resolve(api(originalRequest));
+        },
+        (err: unknown) => {
+          reject(err);
+        },
+      );
     });
   }
 );
@@ -140,6 +156,7 @@ export interface LoginResponse {
   user_id: number;
   username: string;
   name?: string;
+  is_admin?: boolean;
 }
 
 export interface RefreshResponse {
@@ -270,6 +287,43 @@ const changePasswordInputSchema = z.object({
   currentPassword: z.string().min(1).max(128),
   newPassword: z.string().min(6).max(128),
 });
+
+// ── Password Reset ─────────────────────────────────────────────────
+
+/** Request a password reset OTP code via email. */
+export async function forgotPassword(email: string): Promise<{ message: string }> {
+  const validated = z.string().min(1).max(200).trim().parse(email);
+  const { data } = await api.post<{ status: string; message: string }>(
+    "/api/v1/auth/forgot-password",
+    { email: validated },
+  );
+  return { message: data.message };
+}
+
+/** Verify an OTP code (pre-check before setting new password). */
+export async function verifyOtp(
+  email: string,
+  otpCode: string,
+): Promise<{ message: string }> {
+  const { data } = await api.post<{ status: string; message: string }>(
+    "/api/v1/auth/verify-otp",
+    { email: email.trim(), otp_code: otpCode.trim() },
+  );
+  return { message: data.message };
+}
+
+/** Reset password using a verified OTP code. */
+export async function resetPassword(
+  email: string,
+  otpCode: string,
+  newPassword: string,
+): Promise<{ message: string }> {
+  const { data } = await api.post<{ status: string; message: string }>(
+    "/api/v1/auth/reset-password",
+    { email: email.trim(), otp_code: otpCode.trim(), new_password: newPassword },
+  );
+  return { message: data.message };
+}
 
 /** Login using JSON body (v1). Returns JWT access + refresh tokens + user info. */
 export async function login(
@@ -1398,6 +1452,7 @@ export interface StockScoreSummary {
   growth_score: number | null;
   quality_score: number | null;
   risk_score: number | null;
+  risk_penalty_pct?: number | null;
   scoring_date?: string;
   sector_percentile?: number | null;
   sector_name?: string | null;
@@ -1516,6 +1571,7 @@ export async function updateAnalysisStock(
     sector: string;
     industry: string;
     outstanding_shares: number;
+    summary_margin_of_safety: number;
   }>,
 ): Promise<{ message: string }> {
   const { data } = await api.put<{ status: string; data: { message: string } }>(
@@ -1646,6 +1702,17 @@ export async function mergeLineItems(
     `/api/v1/fundamental/stocks/${stockId}/merge-line-items`,
     { keep_code: keepCode, remove_code: removeCode },
   );
+  return data.data;
+}
+
+/** Fetch financial statements online (Kuwait via stockanalysis.com, US via macrotrends.net). */
+export async function fetchStatementsOnline(
+  stockId: number,
+): Promise<{ message: string; summary: Array<{ statement_type: string; periods_saved: number }>; source: string }> {
+  const { data } = await api.post<{
+    status: string;
+    data: { message: string; summary: Array<{ statement_type: string; periods_saved: number }>; source: string };
+  }>(`/api/v1/fundamental/stocks/${stockId}/fetch-statements-online`);
   return data.data;
 }
 
@@ -1897,6 +1964,18 @@ export interface ValuationDefaults {
   eps_history: { year: number; eps: number | null }[];
   current_price: number | null;
   bond_yield: number | null;
+  summary_margin_of_safety: number | null;
+  exchange: string;
+  // WACC components
+  wacc: number | null;
+  wacc_risk_free_rate: number | null;
+  wacc_beta: number | null;
+  wacc_equity_risk_premium: number | null;
+  wacc_cost_of_equity: number | null;
+  wacc_cost_of_debt: number | null;
+  wacc_tax_rate: number | null;
+  wacc_weight_equity: number | null;
+  wacc_weight_debt: number | null;
 }
 
 /** Get auto-computed valuation defaults for a stock. */
@@ -1953,6 +2032,15 @@ export async function runDCFValuation(
     shares_outstanding?: number;
     cash?: number;
     debt?: number;
+    wacc_used?: boolean;
+    wacc_risk_free_rate?: number;
+    wacc_beta?: number;
+    wacc_equity_risk_premium?: number;
+    wacc_cost_of_equity?: number;
+    wacc_cost_of_debt?: number;
+    wacc_tax_rate?: number;
+    wacc_weight_equity?: number;
+    wacc_weight_debt?: number;
   },
 ): Promise<ValuationRunResult> {
   const { data } = await api.post<{ status: string; data: ValuationRunResult }>(
@@ -2007,12 +2095,42 @@ export interface PeerMultiple {
   ps: number | null;
   pcf: number | null;
   ev_ebitda: number | null;
+  eps: number | null;
+  price: number | null;
 }
 
 /** Fetch valuation multiples for all user's analysis stocks. */
 export async function getPeerMultiples(stockId: number): Promise<{ peers: PeerMultiple[]; count: number }> {
   const { data } = await api.get<{ status: string; data: { peers: PeerMultiple[]; count: number } }>(
     `/api/v1/fundamental/stocks/${stockId}/peer-multiples`,
+  );
+  return data.data;
+}
+
+/** Fetch sector peers from yfinance for a given stock. */
+export async function fetchSectorPeers(stockId: number): Promise<{ peers: PeerMultiple[]; count: number }> {
+  const { data } = await api.post<{ status: string; data: { peers: PeerMultiple[]; count: number } }>(
+    `/api/v1/fundamental/stocks/${stockId}/peer-multiples/fetch`,
+  );
+  return data.data;
+}
+
+/** Delete a peer company from the multiples list. */
+export async function deletePeerCompany(
+  stockId: number,
+  peerStockId: number,
+): Promise<void> {
+  await api.delete(`/api/v1/fundamental/stocks/${stockId}/peer-multiples/${peerStockId}`);
+}
+
+/** Add a single peer company by symbol — fetches its multiples from yfinance. */
+export async function addPeerCompany(
+  stockId: number,
+  symbol: string,
+): Promise<{ peers: PeerMultiple[]; count: number }> {
+  const { data } = await api.post<{ status: string; data: { peers: PeerMultiple[]; count: number } }>(
+    `/api/v1/fundamental/stocks/${stockId}/peer-multiples/add`,
+    { symbol },
   );
   return data.data;
 }
@@ -2205,6 +2323,104 @@ export async function importTransactions(
     }
   );
   return data.data;
+}
+
+// ── Admin API ───────────────────────────────────────────────────────
+
+export interface AdminUser {
+  id: number;
+  username: string;
+  name: string | null;
+  created_at: number | null;
+  last_login: number | null;
+  stocks_value: number;
+  cash_balance: number;
+  total_value: number;
+  portfolio_value: number;
+  growth_value: number;
+  transaction_count: number;
+}
+
+export interface AdminUsersResponse {
+  status: string;
+  count: number;
+  users: AdminUser[];
+}
+
+export interface AdminActivity {
+  id: number;
+  user_id: number;
+  username: string;
+  txn_date: string | null;
+  txn_type: string;
+  stock_symbol: string;
+  portfolio: string;
+  shares: number;
+  value: number;
+  price: number;
+  created_at: number | null;
+}
+
+export interface AdminActivitiesResponse {
+  status: string;
+  count: number;
+  total: number;
+  activities: AdminActivity[];
+}
+
+export async function fetchAdminUsers(): Promise<AdminUsersResponse> {
+  const { data } = await api.get<AdminUsersResponse>("/api/v1/admin/users");
+  return data;
+}
+
+export async function fetchAdminActivities(params?: {
+  page?: number;
+  per_page?: number;
+  user_id?: number;
+  txn_type?: string;
+  stock_symbol?: string;
+  date_from?: string;
+  date_to?: string;
+}): Promise<AdminActivitiesResponse> {
+  const { data } = await api.get<AdminActivitiesResponse>(
+    "/api/v1/admin/activities",
+    { params },
+  );
+  return data;
+}
+
+// ── Admin user management ───────────────────────────────────────────
+
+export async function adminCreateUser(body: {
+  username: string;
+  password: string;
+  name?: string;
+}): Promise<{ status: string; message: string }> {
+  const { data } = await api.post("/api/v1/admin/users", body);
+  return data;
+}
+
+export async function adminUpdateUsername(
+  userId: number,
+  username: string,
+): Promise<{ status: string; message: string }> {
+  const { data } = await api.put(`/api/v1/admin/users/${userId}/username`, { username });
+  return data;
+}
+
+export async function adminUpdatePassword(
+  userId: number,
+  password: string,
+): Promise<{ status: string; message: string }> {
+  const { data } = await api.put(`/api/v1/admin/users/${userId}/password`, { password });
+  return data;
+}
+
+export async function adminDeleteUser(
+  userId: number,
+): Promise<{ status: string; message: string }> {
+  const { data } = await api.delete(`/api/v1/admin/users/${userId}`);
+  return data;
 }
 
 export default api;

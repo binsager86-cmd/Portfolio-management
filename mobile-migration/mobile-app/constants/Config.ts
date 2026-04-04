@@ -53,6 +53,10 @@ export const API_TIMEOUT = 60_000;
 /**
  * Google OAuth Web Client ID.
  *
+ * NOTE: OAuth client IDs are intentionally public (they appear in redirect
+ * URLs). The client *secret* must never be in client code — it lives only
+ * on the backend which performs the token exchange.
+ *
  * Create one at https://console.cloud.google.com → APIs & Services → Credentials.
  * Type: "Web application". Add your redirect URIs (localhost + production).
  * Must be set via EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID env var.
@@ -64,3 +68,9 @@ const ENV_GOOGLE_CLIENT_ID =
     : undefined;
 
 export const GOOGLE_WEB_CLIENT_ID: string = ENV_GOOGLE_CLIENT_ID ?? "";
+
+if (__DEV__ && !GOOGLE_WEB_CLIENT_ID) {
+  console.warn(
+    "[Config] EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID is not set. Google Sign-In will be disabled.",
+  );
+}

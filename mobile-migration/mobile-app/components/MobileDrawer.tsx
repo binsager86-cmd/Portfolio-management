@@ -6,21 +6,21 @@
  * smooth slide animation, and a dimmed backdrop for dismissal.
  */
 
-import React, { useEffect, useRef } from "react";
-import {
-  View,
-  Text,
-  Pressable,
-  StyleSheet,
-  ScrollView,
-  Animated,
-  Platform,
-} from "react-native";
-import FontAwesome from "@expo/vector-icons/FontAwesome";
-import { useRouter, usePathname } from "expo-router";
+import { NAV_ITEMS } from "@/components/WebSidebar";
 import { useAuthStore } from "@/services/authStore";
 import { useThemeStore } from "@/services/themeStore";
-import { NAV_ITEMS } from "@/components/WebSidebar";
+import FontAwesome from "@expo/vector-icons/FontAwesome";
+import { usePathname, useRouter } from "expo-router";
+import React, { useEffect, useMemo, useRef } from "react";
+import {
+    Animated,
+    Platform,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Text,
+    View,
+} from "react-native";
 
 const DRAWER_WIDTH = 280;
 
@@ -33,7 +33,15 @@ export function MobileDrawer({ visible, onClose }: MobileDrawerProps) {
   const router = useRouter();
   const pathname = usePathname();
   const logout = useAuthStore((s) => s.logout);
+  const isAdmin = useAuthStore((s) => s.isAdmin);
   const { colors, toggle, mode } = useThemeStore();
+
+  const navItems = useMemo(
+    () => isAdmin
+      ? NAV_ITEMS.filter((item) => item.adminOnly)
+      : NAV_ITEMS.filter((item) => !item.adminOnly),
+    [isAdmin],
+  );
 
   const slideAnim = useRef(new Animated.Value(-DRAWER_WIDTH)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -91,7 +99,7 @@ export function MobileDrawer({ visible, onClose }: MobileDrawerProps) {
     <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
       {/* Backdrop */}
       <Animated.View style={[s.backdrop, { opacity: fadeAnim }]}>
-        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
+        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityRole="button" accessibilityLabel="Close menu" />
       </Animated.View>
 
       {/* Drawer */}
@@ -122,7 +130,7 @@ export function MobileDrawer({ visible, onClose }: MobileDrawerProps) {
 
         {/* Nav Links */}
         <ScrollView style={s.navScroll} showsVerticalScrollIndicator={false}>
-          {NAV_ITEMS.map((item) => {
+          {navItems.map((item) => {
             const active = isActive(item.path);
             return (
               <React.Fragment key={item.path}>
@@ -133,6 +141,9 @@ export function MobileDrawer({ visible, onClose }: MobileDrawerProps) {
                 )}
                 <Pressable
                   onPress={() => handleNav(item.path)}
+                  accessibilityRole="menuitem"
+                  accessibilityLabel={item.label}
+                  accessibilityState={{ selected: active }}
                   style={({ pressed }) => [
                     s.navItem,
                     {
@@ -171,6 +182,9 @@ export function MobileDrawer({ visible, onClose }: MobileDrawerProps) {
         <View style={[s.bottomSection, { borderTopColor: colors.borderColor }]}>
           <Pressable
             onPress={() => { toggle(); }}
+            accessibilityRole="switch"
+            accessibilityLabel={mode === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+            accessibilityState={{ checked: mode === "dark" }}
             style={({ pressed }) => [
               s.actionBtn,
               { backgroundColor: pressed ? colors.bgCardHover : "transparent" },
@@ -189,6 +203,8 @@ export function MobileDrawer({ visible, onClose }: MobileDrawerProps) {
 
           <Pressable
             onPress={handleLogout}
+            accessibilityRole="button"
+            accessibilityLabel="Sign out"
             style={({ pressed }) => [
               s.actionBtn,
               { backgroundColor: pressed ? colors.bgCardHover : "transparent" },

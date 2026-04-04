@@ -8,26 +8,27 @@
  *   - Works on Web (localStorage) and Native (expo-secure-store)
  */
 
-import { create } from "zustand";
+import { API_BASE_URL } from "@/constants/Config";
 import {
-  getToken,
-  setToken,
-  removeToken,
-  getRefreshToken,
-  setRefreshToken,
-  removeRefreshToken,
-} from "@/services/tokenStorage";
-import {
-  login as apiLogin,
-  register as apiRegister,
-  LoginResponse,
+    login as apiLogin,
+    register as apiRegister,
+    LoginResponse,
 } from "@/services/api";
 import {
-  mapAuthError,
-  logAuthError,
-  type AuthError,
+    logAuthError,
+    mapAuthError,
+    type AuthError,
 } from "@/services/authErrors";
-import { API_BASE_URL } from "@/constants/Config";
+import {
+    getRefreshToken,
+    getToken,
+    isTokenExpired,
+    removeRefreshToken,
+    removeToken,
+    setRefreshToken,
+    setToken,
+} from "@/services/tokenStorage";
+import { create } from "zustand";
 
 // ── State shape ─────────────────────────────────────────────────────
 
@@ -42,6 +43,8 @@ interface AuthState {
   userId: number | null;
   username: string | null;
   name: string | null;
+  /** Whether the user has admin privileges. */
+  isAdmin: boolean;
   /** True while any auth operation is in progress. */
   isLoading: boolean;
   /** User-facing error message (null = no error). */
@@ -87,6 +90,7 @@ async function persistAndSetSession(
     userId: res.user_id ?? null,
     username: res.username ?? null,
     name: res.name ?? null,
+    isAdmin: res.is_admin ?? false,
     isLoading: false,
     error: null,
     lastAuthError: null,
@@ -102,6 +106,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   userId: null,
   username: null,
   name: null,
+  isAdmin: false,
   isLoading: true, // start true — wait for hydration before navigating
   error: null,
   lastAuthError: null,
@@ -119,6 +124,13 @@ export const useAuthStore = create<AuthState>((set) => ({
       ]);
       if (__DEV__) console.log("[hydrate] stored token:", stored ? `${stored.substring(0, 20)}...` : "null");
       if (stored) {
+        // If the access token is expired, skip /me and go straight to refresh
+        const tokenExpired = isTokenExpired(stored, 0);
+        if (tokenExpired && storedRefresh) {
+          if (__DEV__) console.log("[hydrate] Access token expired, skipping /me — refreshing directly");
+        }
+
+        if (!tokenExpired) {
         // Validate the stored token with a direct fetch to /me
         // (avoids circular dependency with api.ts)
         try {
@@ -137,11 +149,102 @@ export const useAuthStore = create<AuthState>((set) => ({
             userId: me.user_id,
             username: me.username,
             name: me.name ?? null,
+            isAdmin: me.is_admin ?? false,
             isLoading: false,
           });
         } catch (err) {
-          if (__DEV__) console.log("[hydrate] Token invalid, clearing:", err);
-          // Token invalid — clear everything and force login
+          if (__DEV__) console.log("[hydrate] Access token invalid, attempting refresh:", err);
+
+          // Access token expired — try silent refresh before logging out
+          if (storedRefresh) {
+            try {
+              const refreshResp = await fetch(`${API_BASE_URL}/api/v1/auth/refresh`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ refresh_token: storedRefresh }),
+              });
+              if (!refreshResp.ok) throw new Error(`Refresh failed (${refreshResp.status})`);
+              const refreshJson = await refreshResp.json();
+              const newAccess: string = refreshJson.access_token;
+              const newRefresh: string | undefined = refreshJson.refresh_token;
+
+              // Persist new tokens
+              await setToken(newAccess);
+              if (newRefresh) await setRefreshToken(newRefresh);
+
+              // Validate the new access token
+              const meResp = await fetch(`${API_BASE_URL}/api/v1/auth/me`, {
+                headers: { Authorization: `Bearer ${newAccess}` },
+              });
+              if (!meResp.ok) throw new Error(`New token invalid (${meResp.status})`);
+              const meJson = await meResp.json();
+              const me = meJson.data ?? meJson;
+              if (__DEV__) console.log("[hydrate] Refresh succeeded, user:", me.username);
+              set({
+                token: newAccess,
+                refreshToken: newRefresh ?? storedRefresh,
+                userId: me.user_id,
+                username: me.username,
+                name: me.name ?? null,
+                isAdmin: me.is_admin ?? false,
+                isLoading: false,
+              });
+              return; // Success — don't fall through to logout
+            } catch (refreshErr) {
+              if (__DEV__) console.log("[hydrate] Refresh also failed:", refreshErr);
+            }
+          }
+
+          // Both access and refresh tokens are invalid — force login
+          await Promise.all([removeToken(), removeRefreshToken()]);
+          set({
+            token: null,
+            refreshToken: null,
+            userId: null,
+            username: null,
+            name: null,
+            isLoading: false,
+          });
+        }
+        } // end if (!tokenExpired)
+
+        // ── Token was already expired — skip /me, go straight to refresh ──
+        if (tokenExpired) {
+          if (storedRefresh) {
+            try {
+              const refreshResp = await fetch(`${API_BASE_URL}/api/v1/auth/refresh`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ refresh_token: storedRefresh }),
+              });
+              if (!refreshResp.ok) throw new Error(`Refresh failed (${refreshResp.status})`);
+              const refreshJson = await refreshResp.json();
+              const newAccess: string = refreshJson.access_token;
+              const newRefresh: string | undefined = refreshJson.refresh_token;
+              await setToken(newAccess);
+              if (newRefresh) await setRefreshToken(newRefresh);
+              const meResp = await fetch(`${API_BASE_URL}/api/v1/auth/me`, {
+                headers: { Authorization: `Bearer ${newAccess}` },
+              });
+              if (!meResp.ok) throw new Error(`New token invalid (${meResp.status})`);
+              const meJson = await meResp.json();
+              const me = meJson.data ?? meJson;
+              if (__DEV__) console.log("[hydrate] Refresh succeeded (expired token path), user:", me.username);
+              set({
+                token: newAccess,
+                refreshToken: newRefresh ?? storedRefresh,
+                userId: me.user_id,
+                username: me.username,
+                name: me.name ?? null,
+                isAdmin: me.is_admin ?? false,
+                isLoading: false,
+              });
+              return;
+            } catch (refreshErr) {
+              if (__DEV__) console.log("[hydrate] Refresh failed (expired token path):", refreshErr);
+            }
+          }
+          // Expired token + no refresh or refresh failed — force login
           await Promise.all([removeToken(), removeRefreshToken()]);
           set({
             token: null,
@@ -243,6 +346,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       userId: null,
       username: null,
       name: null,
+      isAdmin: false,
       error: null,
       lastAuthError: null,
     });

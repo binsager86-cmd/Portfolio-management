@@ -38,25 +38,29 @@ export const portfolioKeys = {
 
 // ── Hooks ───────────────────────────────────────────────────────────
 
-/** Portfolio overview — always fresh on mount, stale immediately. */
+/** Portfolio overview — cached 30 s, refetches on mount & focus. */
 export function usePortfolioOverview(userId?: number) {
   return useQuery<OverviewData>({
     queryKey: portfolioKeys.overview(userId),
     queryFn: getOverview,
-    staleTime: 0,
-    refetchOnMount: "always",
+    staleTime: 30_000,
+    refetchOnMount: true,
     refetchOnWindowFocus: true,
+    retry: 2,
+    retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 30_000),
   });
 }
 
-/** Holdings with optional portfolio filter. */
+/** Holdings with optional portfolio filter — cached 30 s. */
 export function useHoldings(portfolio?: string) {
   return useQuery<HoldingsResponse>({
     queryKey: portfolioKeys.holdings(portfolio),
     queryFn: () => getHoldings(portfolio),
-    staleTime: 0,
-    refetchOnMount: "always",
+    staleTime: 30_000,
+    refetchOnMount: true,
     refetchOnWindowFocus: true,
+    retry: 2,
+    retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 30_000),
   });
 }
 

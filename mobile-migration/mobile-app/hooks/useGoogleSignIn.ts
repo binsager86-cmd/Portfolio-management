@@ -12,9 +12,9 @@
  *       The login completion is handled by _layout.tsx's hash-detection effect.
  */
 
+import { GOOGLE_WEB_CLIENT_ID } from "@/constants/Config";
 import { useCallback, useState } from "react";
 import { Platform } from "react-native";
-import { GOOGLE_WEB_CLIENT_ID } from "@/constants/Config";
 
 // ── Result type ─────────────────────────────────────────────────────
 
@@ -45,12 +45,12 @@ export function useGoogleSignIn() {
         return { success: false, cancelled: false, error: "Redirecting to Google…" };
       }
       return await signInNative();
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("[useGoogleSignIn] Error:", err);
       return {
         success: false,
         cancelled: false,
-        error: err?.message || "Google Sign-In failed unexpectedly.",
+        error: err instanceof Error ? err.message : "Google Sign-In failed unexpectedly.",
       };
     } finally {
       setIsLoading(false);

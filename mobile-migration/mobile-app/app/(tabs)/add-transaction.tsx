@@ -17,6 +17,7 @@ import {
     TextInput,
 } from "@/components/form";
 import { FormScreen } from "@/components/screens";
+import { useToast } from "@/components/ui/ToastProvider";
 import { useStockList, useStocks, useTransaction } from "@/hooks/queries";
 import { TXN_DEPENDENT_QUERY_KEYS, useCreateTransaction, useUpdateTransaction } from "@/hooks/useTransactionMutations";
 import { todayISO } from "@/lib/dateUtils";
@@ -61,6 +62,8 @@ function txnTypeToApi(label: TxnTypeLabel): "Buy" | "Sell" | "DIVIDEND_ONLY" {
   return label;
 }
 
+const MAX_FINANCIAL_VALUE = 1_000_000_000; // 1 billion — sane upper bound
+
 const txnSchema = z
   .object({
     portfolio: z.enum(PORTFOLIOS),
@@ -71,25 +74,28 @@ const txnSchema = z
       .transform((v) => v.toUpperCase().trim()),
     txn_date: z
       .string()
-      .regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be YYYY-MM-DD"),
+      .regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be YYYY-MM-DD")
+      .refine((v) => !isNaN(new Date(v).getTime()), "Invalid date")
+      .refine((v) => new Date(v) <= new Date(), "Date cannot be in the future"),
     txn_type: z.enum(TXN_TYPES),
     shares: z.coerce
       .number({ invalid_type_error: "Enter a number" })
       .nonnegative("Shares must be >= 0")
+      .max(MAX_FINANCIAL_VALUE, "Shares exceed maximum")
       .optional()
       .or(z.literal("")),
-    purchase_cost: z.coerce.number().nonnegative().optional().or(z.literal("")),
-    sell_value: z.coerce.number().nonnegative().optional().or(z.literal("")),
+    purchase_cost: z.coerce.number().nonnegative().max(MAX_FINANCIAL_VALUE, "Cost exceeds maximum").optional().or(z.literal("")),
+    sell_value: z.coerce.number().nonnegative().max(MAX_FINANCIAL_VALUE, "Value exceeds maximum").optional().or(z.literal("")),
     // Financial fields
-    bonus_shares: z.coerce.number().nonnegative().optional().or(z.literal("")),
-    cash_dividend: z.coerce.number().nonnegative().optional().or(z.literal("")),
-    reinvested_dividend: z.coerce.number().nonnegative().optional().or(z.literal("")),
-    fees: z.coerce.number().nonnegative().optional().or(z.literal("")),
-    price_override: z.coerce.number().nonnegative().optional().or(z.literal("")),
-    planned_cum_shares: z.coerce.number().nonnegative().optional().or(z.literal("")),
+    bonus_shares: z.coerce.number().nonnegative().max(MAX_FINANCIAL_VALUE, "Shares exceed maximum").optional().or(z.literal("")),
+    cash_dividend: z.coerce.number().nonnegative().max(MAX_FINANCIAL_VALUE, "Amount exceeds maximum").optional().or(z.literal("")),
+    reinvested_dividend: z.coerce.number().nonnegative().max(MAX_FINANCIAL_VALUE, "Amount exceeds maximum").optional().or(z.literal("")),
+    fees: z.coerce.number().nonnegative().max(MAX_FINANCIAL_VALUE, "Fees exceed maximum").optional().or(z.literal("")),
+    price_override: z.coerce.number().nonnegative().max(MAX_FINANCIAL_VALUE, "Price exceeds maximum").optional().or(z.literal("")),
+    planned_cum_shares: z.coerce.number().nonnegative().max(MAX_FINANCIAL_VALUE, "Shares exceed maximum").optional().or(z.literal("")),
     broker: z.string().max(100).optional(),
     reference: z.string().max(100).optional(),
-    notes: z.string().optional(),
+    notes: z.string().max(1000, "Notes cannot exceed 1000 characters").optional(),
   })
   .superRefine((data, ctx) => {
     if (data.txn_type === "Buy") {
@@ -179,6 +185,7 @@ export default function AddTransactionScreen() {
   const { colors } = useThemeStore();
   const router = useRouter();
   const queryClient = useQueryClient();
+  const toast = useToast();
   const params = useLocalSearchParams<{ symbol?: string; portfolio?: string; editId?: string }>();
   const isEditMode = !!params.editId;
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -347,8 +354,7 @@ export default function AddTransactionScreen() {
         )
       );
       const msg = `Imported ${result?.imported ?? 0} transactions (${uploadMode} mode)`;
-      if (Platform.OS === "web") window.alert(msg);
-      else Alert.alert("Import Complete", msg);
+      toast.success(msg);
     },
     onError: (err) => showErrorAlert("Import Error", err, "Upload failed"),
   });
@@ -363,8 +369,7 @@ export default function AddTransactionScreen() {
         )
       );
       const msg = result?.message ?? `Deleted ${result?.deleted_count ?? 0} transactions`;
-      if (Platform.OS === "web") window.alert(msg);
-      else Alert.alert("Deleted", msg);
+      toast.info(msg);
     },
     onError: (err) => showErrorAlert("Error", err, "Delete failed"),
   });

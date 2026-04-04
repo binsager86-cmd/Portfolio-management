@@ -6,19 +6,19 @@
  * by the TradingScreen.
  */
 
-import React, { useState, useCallback } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  Pressable,
-  TextInput,
-  Platform,
-} from "react-native";
-import FontAwesome from "@expo/vector-icons/FontAwesome";
-import type { TradingTransaction } from "@/services/api";
 import type { ThemePalette } from "@/constants/theme";
 import { fmtNum } from "@/lib/currency";
+import type { TradingTransaction } from "@/services/api";
+import FontAwesome from "@expo/vector-icons/FontAwesome";
+import React, { useCallback, useState } from "react";
+import {
+    Platform,
+    Pressable,
+    StyleSheet,
+    Text,
+    TextInput,
+    View,
+} from "react-native";
 
 // ── Column types ────────────────────────────────────────────────────
 
@@ -317,8 +317,12 @@ function EditableCompanyCell({
           ]}
           returnKeyType="done"
         />
-        <Pressable onPress={handleCancel} hitSlop={6}>
-          <FontAwesome name="times" size={10} color={colors.danger} />
+        <Pressable
+          onPress={handleCancel}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          style={{ minHeight: 44, minWidth: 44, justifyContent: "center", alignItems: "center" }}
+        >
+          <FontAwesome name="times" size={14} color={colors.danger} />
         </Pressable>
       </View>
     );
@@ -392,10 +396,10 @@ export const ts = StyleSheet.create({
     borderRadius: 10, borderWidth: 1, overflow: "hidden", marginBottom: 12,
   },
   headerRow: { flexDirection: "row", borderBottomWidth: 2 },
-  headerCell: { paddingHorizontal: 6, paddingVertical: 10, justifyContent: "center" },
+  headerCell: { paddingHorizontal: 6, paddingVertical: 10, justifyContent: "center", minHeight: 44 },
   headerText: { fontSize: 11, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.3 },
   dataRow: { flexDirection: "row", borderBottomWidth: StyleSheet.hairlineWidth },
-  dataCell: { paddingHorizontal: 6, paddingVertical: 8, justifyContent: "center" },
+  dataCell: { paddingHorizontal: 6, paddingVertical: 8, justifyContent: "center", minHeight: 44 },
   cellText: { fontSize: 12 },
   badge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6, alignSelf: "flex-start" },
   badgeText: { fontSize: 11, fontWeight: "700" },

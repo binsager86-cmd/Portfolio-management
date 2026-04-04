@@ -17,7 +17,7 @@ import {
     View,
 } from "react-native";
 
-import { LoadingScreen } from "@/components/ui/LoadingScreen";
+import { FAPanelSkeleton } from "@/components/ui/PageSkeletons";
 import { useGrowthAnalysis } from "@/hooks/queries";
 import { exportCSV, exportExcel, TableData } from "@/lib/exportAnalysis";
 import { exportGrowthPdf } from "@/lib/exportGrowthPdf";
@@ -59,7 +59,7 @@ function SummaryHero({
   selectedLabel: string | null;
   onSelect: (label: string) => void;
 }) {
-  // Compute latest growth per metric
+  // Compute latest growth per metric + average
   const summaries = useMemo(() => {
     return labels.map((label, idx) => {
       const entries = growth[label] ?? [];
@@ -69,7 +69,10 @@ function SummaryHero({
       const prevPct = prev ? prev.growth * 100 : null;
       const improving = prevPct != null ? pct > prevPct : null;
       const color = METRIC_PALETTE[idx % METRIC_PALETTE.length];
-      return { label, pct, prevPct, improving, positive: pct >= 0, color, period: latest?.period ?? "" };
+      const avgPct = entries.length > 0
+        ? (entries.reduce((sum, e) => sum + e.growth, 0) / entries.length) * 100
+        : 0;
+      return { label, pct, prevPct, improving, positive: pct >= 0, color, period: latest?.period ?? "", avgPct };
     });
   }, [labels, growth]);
 
@@ -172,6 +175,13 @@ function SummaryHero({
                       </View>
                     )}
                   </View>
+                  {/* Average growth */}
+                  <Text style={{
+                    color: colors.textMuted, fontSize: 10, fontWeight: "600",
+                    marginTop: 2, fontVariant: ["tabular-nums"],
+                  }}>
+                    Avg: {s.avgPct >= 0 ? "+" : ""}{s.avgPct.toFixed(1)}%
+                  </Text>
                 </View>
               </Pressable>
             );
@@ -334,7 +344,7 @@ export function GrowthPanel({ stockId, stockSymbol, colors, isDesktop }: PanelWi
       refreshControl={<RefreshControl refreshing={isFetching && !isLoading} onRefresh={refetch} tintColor={colors.accentPrimary} />}
     >
       {isLoading ? (
-        <LoadingScreen />
+        <FAPanelSkeleton />
       ) : labels.length === 0 ? (
         <View style={st.empty}>
           <View style={[st.emptyIcon, { backgroundColor: colors.success + "10" }]}>
@@ -470,6 +480,16 @@ export function GrowthPanel({ stockId, stockSymbol, colors, isDesktop }: PanelWi
                     }]}>
                       <Text style={{ color: mColor, fontSize: 11, fontWeight: "700" }}>{entries.length}</Text>
                     </View>
+                    {entries.length > 0 && (
+                      <View style={[st.badge, {
+                        backgroundColor: isDark ? colors.textMuted + "20" : colors.textMuted + "12",
+                        marginLeft: 6,
+                      }]}>
+                        <Text style={{ color: colors.textMuted, fontSize: 10, fontWeight: "700", fontVariant: ["tabular-nums"] }}>
+                          Avg: {(() => { const avg = (entries.reduce((s, e) => s + e.growth, 0) / entries.length) * 100; return (avg >= 0 ? "+" : "") + avg.toFixed(1) + "%"; })()}
+                        </Text>
+                      </View>
+                    )}
                   </View>
 
                   <Card colors={colors} style={{ marginBottom: 16 }}>
@@ -560,15 +580,22 @@ export function GrowthPanel({ stockId, stockSymbol, colors, isDesktop }: PanelWi
                           backgroundColor: positive ? mColor + (isDark ? "70" : "50") : colors.danger + (isDark ? "70" : "50"),
                         }} />
                       </View>
-                      {/* Value */}
-                      <Text style={{
-                        minWidth: 60, textAlign: "right",
-                        color: positive ? colors.success : colors.danger,
-                        fontSize: 12, fontWeight: "800",
-                        fontVariant: ["tabular-nums"],
-                      }}>
-                        {positive ? "+" : ""}{pct.toFixed(1)}%
-                      </Text>
+                      {/* Value + Avg */}
+                      <View style={{ alignItems: "flex-end", minWidth: 72 }}>
+                        <Text style={{
+                          color: positive ? colors.success : colors.danger,
+                          fontSize: 12, fontWeight: "800",
+                          fontVariant: ["tabular-nums"],
+                        }}>
+                          {positive ? "+" : ""}{pct.toFixed(1)}%
+                        </Text>
+                        <Text style={{
+                          color: colors.textMuted, fontSize: 9, fontWeight: "600",
+                          fontVariant: ["tabular-nums"], marginTop: 1,
+                        }}>
+                          Avg: {(() => { const avg = entries.length > 0 ? (entries.reduce((s, e) => s + e.growth, 0) / entries.length) * 100 : 0; return (avg >= 0 ? "+" : "") + avg.toFixed(1) + "%"; })()}
+                        </Text>
+                      </View>
                     </Pressable>
                   );
                 })}

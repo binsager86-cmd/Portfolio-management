@@ -19,7 +19,7 @@ import {
     View,
 } from "react-native";
 
-import { LoadingScreen } from "@/components/ui/LoadingScreen";
+import { FAPanelSkeleton } from "@/components/ui/PageSkeletons";
 import type { ThemePalette } from "@/constants/theme";
 import { useAnalysisStocks, useStockList } from "@/hooks/queries";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
@@ -94,7 +94,7 @@ export function StocksPanel({
       </View>
 
       {isLoading ? (
-        <LoadingScreen />
+        <FAPanelSkeleton />
       ) : (
         <FlashList
           data={stocks}
@@ -220,7 +220,7 @@ function StockFormModal({ stock, colors, onClose }: { stock?: AnalysisStock; col
             company_name: companyName.trim(), exchange, currency,
             sector: sector || undefined,
           }),
-    onSuccess: () => {
+    onSuccess: (result: any) => {
       queryClient.invalidateQueries({ queryKey: ["analysis-stocks"] });
       onClose();
     },
@@ -235,7 +235,7 @@ function StockFormModal({ stock, colors, onClose }: { stock?: AnalysisStock; col
         <Pressable style={[st.modalBox, { backgroundColor: colors.bgCard, borderColor: colors.borderColor, maxHeight: "85%" }]} onPress={() => {}}>
           <View style={[st.rowBetween, { marginBottom: 16 }]}>
             <Text style={[st.modalTitle, { color: colors.textPrimary }]}>
-              {isEdit ? `Edit ${stock!.symbol}` : "Add Analysis Stock"}
+              {isEdit ? `Edit ${stock?.symbol ?? "Stock"}` : "Add Analysis Stock"}
             </Text>
             <Pressable onPress={onClose} hitSlop={12} style={[st.iconBtn, { backgroundColor: colors.bgInput }]}>
               <FontAwesome name="times" size={14} color={colors.textMuted} />

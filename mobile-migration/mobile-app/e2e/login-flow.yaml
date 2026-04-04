@@ -1,0 +1,27 @@
+appId: com.portfolio.mobileapp
+---
+# Login Flow — E2E test
+# Verifies complete login journey from the auth screen to the dashboard.
+
+- launchApp
+
+# Should start on the login screen (redirected from index)
+- assertVisible: "Sign In"
+
+# Enter credentials
+- tapOn:
+    id: "login-email"
+- inputText: "test@example.com"
+
+- tapOn:
+    id: "login-password"
+- inputText: "TestPass1!"
+
+# Submit login
+- tapOn:
+    id: "login-button"
+
+# Should navigate to the dashboard / overview tab
+- assertVisible:
+    text: "Overview"
+    timeout: 10000

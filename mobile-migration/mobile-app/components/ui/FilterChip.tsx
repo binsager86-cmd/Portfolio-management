@@ -1,6 +1,6 @@
-import React from "react";
-import { Text, Pressable, StyleSheet } from "react-native";
 import type { ThemePalette } from "@/constants/theme";
+import React from "react";
+import { Platform, Pressable, StyleSheet, Text } from "react-native";
 
 export const FilterChip = React.memo(function FilterChip({
   label,
@@ -19,7 +19,7 @@ export const FilterChip = React.memo(function FilterChip({
   return (
     <Pressable
       onPress={onPress}
-      style={[styles.chip, { backgroundColor: bg, borderColor: colors.borderColor }]}
+      style={[styles.chip, { backgroundColor: bg, borderColor: colors.borderColor }, Platform.OS === "web" ? ({ cursor: "pointer" } as any) : undefined]}
     >
       <Text style={[styles.chipText, { color: active ? "#fff" : colors.textSecondary }]}>
         {label}

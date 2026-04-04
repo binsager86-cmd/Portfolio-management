@@ -12,64 +12,65 @@
  * GET /api/v1/portfolio/trading-summary
  */
 
-import React, { useState, useCallback, useMemo } from "react";
+import { withErrorBoundary } from "@/components/ui/ErrorBoundary";
+import { ErrorScreen } from "@/components/ui/ErrorScreen";
+import { TradingSkeleton } from "@/components/ui/PageSkeletons";
+import { useTradingSummary } from "@/hooks/queries";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import { useResponsive } from "@/hooks/useResponsive";
+import { fmtNum } from "@/lib/currency";
+import { todayISO } from "@/lib/dateUtils";
+import { extractErrorMessage, showErrorAlert } from "@/lib/errorHandling";
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  Pressable,
-  RefreshControl,
-  TextInput,
-  Platform,
-  Alert,
-  ActivityIndicator,
-} from "react-native";
-import { useQueryClient, useMutation } from "@tanstack/react-query";
-import FontAwesome from "@expo/vector-icons/FontAwesome";
-import { useTradingSummary, useStocks } from "@/hooks/queries";
-import {
-  recalculateWAC,
-  exportTradingExcel,
-  renameStockBySymbol,
-  updateTransaction,
-  deleteTransaction,
-  TradingTransaction,
+    deleteTransaction,
+    exportTradingExcel,
+    recalculateWAC,
+    renameStockBySymbol,
+    TradingTransaction,
+    updateTransaction,
 } from "@/services/api";
 import { useThemeStore } from "@/services/themeStore";
-import { useResponsive } from "@/hooks/useResponsive";
-import { useDebouncedValue } from "@/hooks/useDebouncedValue";
-import { LoadingScreen } from "@/components/ui/LoadingScreen";
-import { ErrorScreen } from "@/components/ui/ErrorScreen";
-import { todayISO } from "@/lib/dateUtils";
-import { fmtNum } from "@/lib/currency";
-import { showErrorAlert } from "@/lib/errorHandling";
+import FontAwesome from "@expo/vector-icons/FontAwesome";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import React, { useCallback, useMemo, useState } from "react";
+import {
+    ActivityIndicator,
+    Alert,
+    Platform,
+    Pressable,
+    RefreshControl,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    View,
+} from "react-native";
 
 // Extracted components
-import { TradingSummaryCards } from "@/components/trading/TradingSummary";
 import {
-  TABLE_COLUMNS,
-  TOTAL_TABLE_WIDTH,
-  sortTransactions,
-  HeaderCell,
-  TableRow,
-  ts,
-} from "@/components/trading/TradingTable";
-import type { SortDir } from "@/components/trading/TradingTable";
-import { FilterChip, PORTFOLIOS, TXN_TYPES } from "@/components/trading/TradingFilters";
-import {
-  EditRowData,
-  txnToEditRow,
-  editRowChanged,
-  EDIT_COLUMNS,
-  EDIT_TABLE_WIDTH,
-  EditableTableRow,
-  editStyles,
+    EDIT_COLUMNS,
+    EDIT_TABLE_WIDTH,
+    EditableTableRow,
+    editRowChanged,
+    EditRowData,
+    editStyles,
+    txnToEditRow,
 } from "@/components/trading/TradingEditableRow";
+import { FilterChip, PORTFOLIOS, TXN_TYPES } from "@/components/trading/TradingFilters";
+import { TradingSummaryCards } from "@/components/trading/TradingSummary";
+import type { SortDir } from "@/components/trading/TradingTable";
+import {
+    HeaderCell,
+    sortTransactions,
+    TABLE_COLUMNS,
+    TableRow,
+    TOTAL_TABLE_WIDTH,
+    ts,
+} from "@/components/trading/TradingTable";
 
 // ── Main Screen ─────────────────────────────────────────────────────
 
-export default function TradingScreen() {
+function TradingScreen() {
   const { colors } = useThemeStore();
   const { isDesktop, fonts } = useResponsive();
   const queryClient = useQueryClient();
@@ -120,10 +121,6 @@ export default function TradingScreen() {
     onError: (err) => showErrorAlert("Error", err, "Failed to recalculate"),
   });
 
-  // Fetch cached stocks for the stock picker in edit mode
-  const { data: stocksData } = useStocks();
-  const allStocks = useMemo(() => stocksData?.stocks ?? [], [stocksData]);
-
   // Rename stock mutation (inline edit on company name)
   const renameMutation = useMutation({
     mutationFn: ({ symbol, name }: { symbol: string; name: string }) =>
@@ -158,8 +155,8 @@ export default function TradingScreen() {
       } else {
         Alert.alert("Export", "Excel export is available on the web version.");
       }
-    } catch (err: any) {
-      Alert.alert("Export Error", err?.message ?? "Failed to export");
+    } catch (err: unknown) {
+      showErrorAlert("Export Error", err, "Failed to export");
     }
   }, []);
 
@@ -308,8 +305,8 @@ export default function TradingScreen() {
             ...(sell_value != null ? { sell_value } : {}),
           });
           changes++;
-        } catch (err: any) {
-          errors.push(`ID ${id}: ${err?.message ?? "Failed"}`);
+        } catch (err: unknown) {
+          errors.push(`ID ${id}: ${extractErrorMessage(err, "Failed")}`);
         }
       }
 
@@ -329,8 +326,8 @@ export default function TradingScreen() {
         Alert.alert("No Changes", "No modifications detected.");
       }
       exitEditMode();
-    } catch (err: any) {
-      Alert.alert("Save Error", err?.message ?? "Failed to save changes");
+    } catch (err: unknown) {
+      showErrorAlert("Save Error", err, "Failed to save changes");
     } finally {
       setIsSaving(false);
     }
@@ -346,8 +343,8 @@ export default function TradingScreen() {
         try {
           await deleteTransaction(id);
           deleted++;
-        } catch (err: any) {
-          errors.push(`ID ${id}: ${err?.message ?? "Failed"}`);
+        } catch (err: unknown) {
+          errors.push(`ID ${id}: ${extractErrorMessage(err, "Failed")}`);
         }
       }
       if (deleted > 0) {
@@ -363,15 +360,15 @@ export default function TradingScreen() {
         Alert.alert("Errors", errors.join("\n"));
       }
       exitEditMode();
-    } catch (err: any) {
-      Alert.alert("Delete Error", err?.message ?? "Failed to delete");
+    } catch (err: unknown) {
+      showErrorAlert("Delete Error", err, "Failed to delete");
     } finally {
       setIsDeleting(false);
       setDeleteConfirmPending(false);
     }
   }, [selectedIds, queryClient, exitEditMode]);
 
-  if (isLoading && !data) return <LoadingScreen />;
+  if (isLoading && !data) return <TradingSkeleton />;
   if (isError && !data)
     return <ErrorScreen message={error?.message ?? "Failed to load"} onRetry={refetch} />;
 
@@ -384,16 +381,16 @@ export default function TradingScreen() {
       {/* Title */}
       <View style={[s.headerCard, { backgroundColor: colors.bgCard, borderColor: colors.borderColor }]}>
         <Text style={[s.title, { color: colors.textPrimary, fontSize: fonts.title }]}>
-          ًں“ˆ Trading Section
+          📈 Trading Section
         </Text>
         <Text style={[s.subtitle, { color: colors.textSecondary }]}>
-          All transactions آ· Real-time P&L آ· CFA-compliant cost basis
+          All transactions · Real-time P&L · CFA-compliant cost basis
         </Text>
       </View>
 
       {/* Info card */}
       <View style={[s.infoCard, { backgroundColor: colors.bgCard, borderColor: colors.borderColor }]}>
-        <Text style={[s.infoTitle, { color: colors.textPrimary }]}>ًں“‹ All your saved transactions</Text>
+        <Text style={[s.infoTitle, { color: colors.textPrimary }]}>📋 All your saved transactions</Text>
         <Text style={[s.infoBody, { color: colors.textSecondary }]}>
           Buy/Sell trades, Cash Deposits/Withdrawals, Dividends, Bonus Shares — all in one view.
           {"\n"}P&L calculated using CFA-compliant Weighted Average Cost method per portfolio.
@@ -549,11 +546,11 @@ export default function TradingScreen() {
       <View style={s.resultsRow}>
         <Text style={[s.resultsText, { color: colors.textSecondary }]}>
           {data?.pagination?.total_items ?? 0} transactions
-          {portfolios.length ? ` آ· ${portfolios.join(", ")}` : ""}
-          {txnTypes.length ? ` آ· ${txnTypes.join(", ")}` : ""}
-          {dateFrom ? ` آ· from ${dateFrom}` : ""}
-          {dateTo ? ` آ· to ${dateTo}` : ""}
-          {search ? ` آ· "${search}"` : ""}
+          {portfolios.length ? ` · ${portfolios.join(", ")}` : ""}
+          {txnTypes.length ? ` · ${txnTypes.join(", ")}` : ""}
+          {dateFrom ? ` · from ${dateFrom}` : ""}
+          {dateTo ? ` · to ${dateTo}` : ""}
+          {search ? ` · "${search}"` : ""}
         </Text>
       </View>
 
@@ -817,7 +814,6 @@ export default function TradingScreen() {
                       onUpdateField={handleUpdateField}
                       colors={colors}
                       isEven={idx % 2 === 0}
-                      stocks={allStocks}
                     />
                   );
                 })}
@@ -1093,3 +1089,5 @@ const s = StyleSheet.create({
   footerLabel: { fontSize: 10, marginTop: 1 },
   footerDivider: { width: 1, height: 24 },
 });
+
+export default withErrorBoundary(TradingScreen, "Unable to load Trading. Please try again.");

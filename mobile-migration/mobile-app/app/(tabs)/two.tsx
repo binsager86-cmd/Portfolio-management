@@ -9,7 +9,7 @@
 import HoldingsTable from "@/components/HoldingsTable";
 import { ErrorScreen } from "@/components/ui/ErrorScreen";
 import { FilterChip } from "@/components/ui/FilterChip";
-import { LoadingScreen } from "@/components/ui/LoadingScreen";
+import { HoldingsSkeleton } from "@/components/ui/PageSkeletons";
 import type { ThemePalette } from "@/constants/theme";
 import { useAccounts, useHoldings } from "@/hooks/queries";
 import { useResponsive } from "@/hooks/useResponsive";
@@ -179,7 +179,7 @@ export default function HoldingsScreen() {
 
   // ── Loading ──
   if (isLoading && !isFetching) {
-    return <LoadingScreen message="Loading holdings…" />;
+    return <HoldingsSkeleton />;
   }
 
   // ── Error ──

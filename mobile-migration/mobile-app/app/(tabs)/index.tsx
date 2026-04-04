@@ -14,12 +14,14 @@
  */
 
 import { PortfolioChart } from "@/components/charts/PortfolioChart";
+import { FirstTimeSetup } from "@/components/onboarding/FirstTimeSetup";
 import { AIFinancialIntelligence } from "@/components/overview/AIFinancialIntelligence";
 import { RealizedTradesSection } from "@/components/overview/RealizedTradesSection";
 import { PortfolioCard } from "@/components/portfolio/PortfolioCard";
+import { withErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { ErrorScreen } from "@/components/ui/ErrorScreen";
-import { LoadingScreen } from "@/components/ui/LoadingScreen";
 import { MetricCard } from "@/components/ui/MetricCard";
+import { OverviewSkeleton } from "@/components/ui/OverviewSkeleton";
 import {
     useAiStatus,
     useOverviewDependentQueries,
@@ -47,7 +49,7 @@ import FontAwesome from "@expo/vector-icons/FontAwesome";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { isAxiosError } from "axios";
 
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
     ActivityIndicator,
     Alert,
@@ -63,7 +65,7 @@ import {
 
 // ── Main Screen ─────────────────────────────────────────────────────
 
-export default function OverviewScreen() {
+function OverviewScreen() {
   const { user } = useAuth();
   const { colors } = useThemeStore();
   const { metricCols, isDesktop, isPhone, spacing, fonts, maxContentWidth } = useResponsive();
@@ -71,6 +73,38 @@ export default function OverviewScreen() {
   const queryClient = useQueryClient();
   const [refreshing, setRefreshing] = useState(false);
   const [savingSnapshot, setSavingSnapshot] = useState(false);
+
+  // First-time setup wizard for new authenticated users
+  const [showSetup, setShowSetup] = useState(false);
+  useEffect(() => {
+    async function checkSetup() {
+      try {
+        let completed: boolean;
+        if (Platform.OS === "web") {
+          completed = localStorage.getItem("onboarding_complete") === "1";
+        } else {
+          const SecureStore = await import("expo-secure-store");
+          completed = (await SecureStore.getItemAsync("onboarding_complete")) === "1";
+        }
+        if (!completed) setShowSetup(true);
+      } catch {
+        // ignore — don't block the overview
+      }
+    }
+    checkSetup();
+  }, []);
+
+  const handleSetupComplete = useCallback(async () => {
+    try {
+      if (Platform.OS === "web") {
+        localStorage.setItem("onboarding_complete", "1");
+      } else {
+        const SecureStore = await import("expo-secure-store");
+        await SecureStore.setItemAsync("onboarding_complete", "1");
+      }
+    } catch {}
+    setShowSetup(false);
+  }, []);
 
   // AI state
   const [aiPrompt, setAiPrompt] = useState("");
@@ -270,7 +304,7 @@ export default function OverviewScreen() {
 
   // ── Loading state ──
   if (isLoading) {
-    return <LoadingScreen message="Loading portfolio…" />;
+    return <OverviewSkeleton />;
   }
 
   // ── Error state ──
@@ -294,6 +328,7 @@ export default function OverviewScreen() {
         : "48%";
 
   return (
+    <>
     <ScrollView
       style={[styles.container, { backgroundColor: colors.bgPrimary }]}
       contentContainerStyle={[
@@ -357,6 +392,9 @@ export default function OverviewScreen() {
           <Pressable
             onPress={onRefresh}
             disabled={refreshing || savingSnapshot}
+            accessibilityRole="button"
+            accessibilityLabel={refreshing ? "Refreshing prices" : "Refresh prices"}
+            accessibilityState={{ disabled: refreshing || savingSnapshot }}
             style={({ pressed }) => ({
               flexDirection: "row" as const,
               alignItems: "center" as const,
@@ -382,6 +420,9 @@ export default function OverviewScreen() {
           <Pressable
             onPress={onSaveSnapshot}
             disabled={savingSnapshot || refreshing}
+            accessibilityRole="button"
+            accessibilityLabel={savingSnapshot ? "Saving snapshot" : "Save snapshot"}
+            accessibilityState={{ disabled: savingSnapshot || refreshing }}
             style={({ pressed }) => ({
               flexDirection: "row" as const,
               alignItems: "center" as const,
@@ -710,6 +751,9 @@ export default function OverviewScreen() {
         USD/KWD Rate: {data.usd_kwd_rate?.toFixed(6) ?? "—"}
       </Text>
     </ScrollView>
+
+    <FirstTimeSetup visible={showSetup} onComplete={handleSetupComplete} />
+    </>
   );
 }
 
@@ -806,3 +850,5 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
 });
+
+export default withErrorBoundary(OverviewScreen, "Unable to load the Overview dashboard. Please try again.");

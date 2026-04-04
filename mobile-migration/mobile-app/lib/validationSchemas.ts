@@ -27,13 +27,11 @@ export const loginSchema = z.object({
   email: z
     .string()
     .min(1, "Email is required")
-    .email("Please enter a valid email address")
     .max(200, "Email cannot exceed 200 characters")
     .trim(),
   password: z
     .string()
-    .min(1, "Password is required")
-    .pipe(strongPassword),
+    .min(1, "Password is required"),
 });
 
 export type LoginFormData = z.infer<typeof loginSchema>;

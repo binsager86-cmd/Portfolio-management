@@ -14,8 +14,44 @@
  *   catch (err) { logError("SaveSnapshot", err); }
  */
 
-import { Platform, Alert } from "react-native";
 import { isAxiosError } from "axios";
+import { Alert, Platform } from "react-native";
+
+// ── User-friendly error message mapping ─────────────────────────────
+
+/** Maps technical error codes/patterns to user-friendly messages. */
+const FRIENDLY_MESSAGES: Record<string, string> = {
+  "400": "The request was invalid. Please check your input and try again.",
+  "401": "Your session has expired. Please sign in again.",
+  "403": "You don't have permission to perform this action.",
+  "404": "The requested resource was not found.",
+  "408": "The request timed out. Please try again.",
+  "409": "This conflicts with an existing record. Please review and try again.",
+  "422": "The data you entered is invalid. Please check and try again.",
+  "429": "Too many requests. Please wait a moment and try again.",
+  "500": "Something went wrong on the server. Please try again later.",
+  "502": "The server is temporarily unavailable. Please try again later.",
+  "503": "The service is temporarily unavailable. Please try again later.",
+  "ECONNREFUSED": "Cannot connect to server. Please check your internet connection.",
+  "ECONNABORTED": "The connection was interrupted. Please try again.",
+  "ETIMEDOUT": "Request took too long. Please try again.",
+  "ERR_NETWORK": "No internet connection. Please check your network and try again.",
+  "ERR_CANCELED": "The request was cancelled.",
+  "timeout": "Request took too long. Please try again.",
+};
+
+/**
+ * Try to match a friendly message from the error's HTTP status or Axios code.
+ * Returns undefined if no match is found.
+ */
+function matchFriendlyMessage(err: unknown): string | undefined {
+  if (isAxiosError(err)) {
+    const status = err.response?.status?.toString();
+    if (status && FRIENDLY_MESSAGES[status]) return FRIENDLY_MESSAGES[status];
+    if (err.code && FRIENDLY_MESSAGES[err.code]) return FRIENDLY_MESSAGES[err.code];
+  }
+  return undefined;
+}
 
 /**
  * Extract a user-friendly message from any error shape.
@@ -23,9 +59,10 @@ import { isAxiosError } from "axios";
  * Priority:
  *   1. Axios `response.data.detail` (string or array of validation errors)
  *   2. Axios `response.data.message`
- *   3. Error `.message`
- *   4. Stringified error
- *   5. Fallback
+ *   3. Friendly message based on HTTP status / Axios error code
+ *   4. Error `.message`
+ *   5. Stringified error
+ *   6. Fallback
  */
 export function extractErrorMessage(
   err: unknown,
@@ -45,6 +82,10 @@ export function extractErrorMessage(
     }
     if (typeof data.message === "string") return data.message;
   }
+
+  // Map technical HTTP/network errors to user-friendly messages
+  const friendly = matchFriendlyMessage(err);
+  if (friendly) return friendly;
 
   if (err instanceof Error && err.message) return err.message;
   if (typeof err === "string" && err.length > 0) return err;
