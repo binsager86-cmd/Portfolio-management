@@ -5,30 +5,30 @@
  * Mirrors Streamlit's Personal Finance section with its 4 tabs.
  */
 
-import React, { useState, useCallback, useMemo } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  Pressable,
-  Platform,
-  Alert,
-} from "react-native";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
-
-import { usePfmSnapshots, usePfmSnapshot } from "@/hooks/queries";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import React, { useCallback, useMemo, useState } from "react";
 import {
-  deletePfmSnapshot,
-  PfmSnapshotSummary,
-} from "@/services/api";
-import { useThemeStore } from "@/services/themeStore";
+    Alert,
+    Platform,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Text,
+    View,
+} from "react-native";
+
+import { ErrorScreen } from "@/components/ui/ErrorScreen";
+import { PfmSkeleton } from "@/components/ui/PageSkeletons";
+import { usePfmSnapshot, usePfmSnapshots } from "@/hooks/queries";
 import { useResponsive } from "@/hooks/useResponsive";
 import { useScreenStyles } from "@/hooks/useScreenStyles";
-import { LoadingScreen } from "@/components/ui/LoadingScreen";
-import { ErrorScreen } from "@/components/ui/ErrorScreen";
 import { formatCurrency } from "@/lib/currency";
+import {
+    deletePfmSnapshot,
+    PfmSnapshotSummary,
+} from "@/services/api";
+import { useThemeStore } from "@/services/themeStore";
 
 type Tab = "snapshots" | "balance" | "income" | "ratios";
 
@@ -67,7 +67,7 @@ export default function PfmScreen() {
     }
   }, [deleteMutation]);
 
-  if (isLoading) return <LoadingScreen />;
+  if (isLoading) return <PfmSkeleton />;
   if (isError) return <ErrorScreen message={error?.message ?? "Failed to load PFM data"} onRetry={refetch} />;
 
   const snapshots = listData?.snapshots ?? [];

@@ -207,7 +207,8 @@ export async function exportMetricsPdf(
   totalMetrics: number,
 ) {
   const { jsPDF: JsPDF } = await import("jspdf");
-  const doc = new JsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+  let doc: jsPDF | null = new JsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+  try {
   const W = 210;
   const H = 297;
   const mx = PAGE_MX;
@@ -476,5 +477,8 @@ export async function exportMetricsPdf(
         dialogTitle: "Export Metrics Report",
       });
     }
+  }
+  } finally {
+    doc = null;
   }
 }

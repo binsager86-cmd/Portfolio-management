@@ -9,18 +9,18 @@
  * Used by: holdings, portfolio overview, analytics, etc.
  */
 
+import { ErrorScreen } from "@/components/ui/ErrorScreen";
+import { LoadingScreen } from "@/components/ui/LoadingScreen";
+import { useResponsive } from "@/hooks/useResponsive";
+import { useThemeStore } from "@/services/themeStore";
 import React, { ReactNode } from "react";
 import {
-  View,
-  ScrollView,
-  RefreshControl,
-  StyleSheet,
-  ViewStyle,
+    RefreshControl,
+    ScrollView,
+    StyleSheet,
+    View,
+    ViewStyle,
 } from "react-native";
-import { useThemeStore } from "@/services/themeStore";
-import { useResponsive } from "@/hooks/useResponsive";
-import { LoadingScreen } from "@/components/ui/LoadingScreen";
-import { ErrorScreen } from "@/components/ui/ErrorScreen";
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -33,6 +33,8 @@ export interface DataScreenProps {
   onRetry?: () => void;
   /** Loading message (passed to LoadingScreen) */
   loadingMessage?: string;
+  /** Custom loading skeleton to render instead of the default LoadingScreen */
+  loadingSkeleton?: ReactNode;
 
   // ── Pull-to-refresh ───────────────────────────────────────────
   /** Enable pull-to-refresh (requires onRetry) */
@@ -58,6 +60,7 @@ export function DataScreen({
   error,
   onRetry,
   loadingMessage,
+  loadingSkeleton,
   refreshable = false,
   isRefreshing = false,
   children,
@@ -70,7 +73,7 @@ export function DataScreen({
 
   // ── Loading state ─────────────────────────────────────────────
   if (loading && !isRefreshing) {
-    return <LoadingScreen message={loadingMessage} />;
+    return <>{loadingSkeleton ?? <LoadingScreen message={loadingMessage} />}</>;
   }
 
   // ── Error state ───────────────────────────────────────────────

@@ -14,6 +14,7 @@ import { AllocationDonut, AllocationSlice } from "@/components/charts/Allocation
 import { KpiCard } from "@/components/portfolio/KpiWidgets";
 import { DataScreen } from "@/components/screens";
 import { FilterChip } from "@/components/ui/FilterChip";
+import { HoldingsTableSkeleton } from "@/components/ui/PageSkeletons";
 import type { ThemePalette } from "@/constants/theme";
 import {
     useAllStocksForMerge,
@@ -37,6 +38,7 @@ import { useThemeStore } from "@/services/themeStore";
 import { getApiErrorMessage } from "@/src/features/fundamental-analysis/types";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useRouter } from "expo-router";
 import React, { useCallback, useMemo, useState } from "react";
 import {
     ActivityIndicator,
@@ -307,6 +309,8 @@ function HeaderCell({
   return (
     <Pressable
       onPress={() => onSort(col.key)}
+      accessibilityRole="button"
+      accessibilityLabel={`Sort by ${col.label}`}
       style={[
         ts.headerCell,
         {
@@ -450,6 +454,8 @@ function HoldingRow({
           <Pressable
             key={col.key}
             onPress={() => onCompanyPress(holding)}
+            accessibilityRole="link"
+            accessibilityLabel={`View details for ${holding.company}`}
             style={({ pressed }) => [
               ts.dataCell,
               { width: col.width, opacity: pressed ? 0.6 : 1 },
@@ -561,7 +567,7 @@ function StockMergeModal({
 
   return (
     <Modal transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable style={mergeStyles.overlay} onPress={onClose}>
+      <Pressable style={mergeStyles.overlay} onPress={onClose} accessibilityRole="button" accessibilityLabel="Close dialog">
         <Pressable
           style={[
             mergeStyles.box,
@@ -574,7 +580,7 @@ function StockMergeModal({
             <Text style={[mergeStyles.title, { color: colors.textPrimary }]}>
               {holding.company}
             </Text>
-            <Pressable onPress={onClose} hitSlop={12} style={{ padding: 6 }}>
+            <Pressable onPress={onClose} hitSlop={12} style={{ padding: 6 }} accessibilityRole="button" accessibilityLabel="Close">
               <FontAwesome name="times" size={16} color={colors.textMuted} />
             </Pressable>
           </View>
@@ -708,6 +714,7 @@ export default function HoldingsScreen() {
   const { colors } = useThemeStore();
   const { spacing } = useResponsive();
   const queryClient = useQueryClient();
+  const router = useRouter();
 
   const [filter, setFilter] = useState<string | undefined>(undefined);
   const [sortCol, setSortCol] = useState<string | null>(null);
@@ -793,7 +800,7 @@ export default function HoldingsScreen() {
       loading={isLoading}
       error={isError ? getApiErrorMessage(error, "Failed to load holdings") : null}
       onRetry={() => refetch()}
-      loadingMessage="Loading holdings…"
+      loadingSkeleton={<HoldingsTableSkeleton />}
       bare
     >
     <View style={[s.container, { backgroundColor: colors.bgPrimary }]}>
@@ -965,9 +972,16 @@ export default function HoldingsScreen() {
               {/* Empty state */}
               {sortedHoldings.length === 0 && (
                 <View style={ts.emptyRow}>
-                  <Text style={{ color: colors.textMuted, fontSize: 14 }}>
+                  <FontAwesome name="briefcase" size={36} color={colors.textMuted} style={{ marginBottom: 8 }} />
+                  <Text style={{ color: colors.textMuted, fontSize: 14, marginBottom: 12 }}>
                     No active holdings found.
                   </Text>
+                  <Pressable
+                    onPress={() => router.push("/(tabs)/add-stock" as any)}
+                    style={[{ backgroundColor: colors.accentPrimary, paddingHorizontal: 18, paddingVertical: 8, borderRadius: 8 }, Platform.OS === "web" ? ({ cursor: "pointer" } as any) : undefined]}
+                  >
+                    <Text style={{ color: "#fff", fontWeight: "600", fontSize: 13 }}>Add Your First Stock</Text>
+                  </Pressable>
                 </View>
               )}
             </View>

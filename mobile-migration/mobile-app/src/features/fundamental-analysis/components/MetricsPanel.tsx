@@ -8,7 +8,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import React, { useCallback, useMemo, useState } from "react";
 import { RefreshControl, ScrollView, Text, View } from "react-native";
 
-import { LoadingScreen } from "@/components/ui/LoadingScreen";
+import { FAPanelSkeleton } from "@/components/ui/PageSkeletons";
 import { useStatements, useStockMetrics } from "@/hooks/queries";
 import { showErrorAlert } from "@/lib/errorHandling";
 import { exportCSV, exportExcel, TableData } from "@/lib/exportAnalysis";
@@ -16,7 +16,7 @@ import { exportMetricsPdf, type MetricsCategoryData } from "@/lib/exportMetricsP
 import { calculateMetrics, StockMetric } from "@/services/api";
 import { st } from "../styles";
 import { CATEGORY_LABELS, type PanelWithSymbolProps } from "../types";
-import { buildHistoricalMetrics, formatMetricValue } from "../utils";
+import { buildHistoricalMetrics, enrichMetricsWithFallbacks, formatMetricValue } from "../utils";
 import { ActionButton, Card, Chip, ExportBar, FadeIn, SectionHeader } from "./shared";
 
 export function MetricsPanel({ stockId, stockSymbol, colors, isDesktop }: PanelWithSymbolProps) {
@@ -62,8 +62,28 @@ export function MetricsPanel({ stockId, stockSymbol, colors, isDesktop }: PanelW
     setCalcAllRunning(false);
   };
 
-  const grouped = data?.grouped ?? {};
-  const allMetrics = data?.metrics ?? [];
+  const serverGrouped = data?.grouped ?? {};
+  const rawMetrics = data?.metrics ?? [];
+  const statements = stmtQ.data?.statements ?? [];
+
+  // Enrich with CFA-level fallback calculations for missing valuation metrics
+  const allMetrics = useMemo(
+    () => enrichMetricsWithFallbacks(rawMetrics, statements),
+    [rawMetrics, statements],
+  );
+
+  // Rebuild grouped map to include computed fallback metrics
+  const grouped = useMemo(() => {
+    const g: Record<string, StockMetric[]> = { ...serverGrouped };
+    for (const m of allMetrics) {
+      if (m.id < 0) { // synthetic / computed
+        if (!g[m.metric_type]) g[m.metric_type] = [];
+        g[m.metric_type] = [...(g[m.metric_type] ?? []), m];
+      }
+    }
+    return g;
+  }, [serverGrouped, allMetrics]);
+
   const categories = Object.keys(grouped);
   const historicalCategories = useMemo(() => buildHistoricalMetrics(allMetrics), [allMetrics]);
 
@@ -141,7 +161,7 @@ export function MetricsPanel({ stockId, stockSymbol, colors, isDesktop }: PanelW
       </FadeIn>
 
       {isLoading ? (
-        <LoadingScreen />
+        <FAPanelSkeleton />
       ) : categories.length === 0 ? (
         <View style={st.empty}>
           <View style={[st.emptyIcon, { backgroundColor: colors.accentPrimary + "10" }]}>

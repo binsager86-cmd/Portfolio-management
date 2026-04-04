@@ -23,7 +23,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Alert, Platform, Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
 
-import { LoadingScreen } from "@/components/ui/LoadingScreen";
+import { FAPanelSkeleton } from "@/components/ui/PageSkeletons";
 import type { ThemePalette } from "@/constants/theme";
 import { useStatements } from "@/hooks/queries";
 import { showErrorAlert } from "@/lib/errorHandling";
@@ -182,7 +182,7 @@ export function ComparisonPanel({ stockId, stockSymbol, colors, isDesktop: _isDe
       <StatementTabBar value={typeFilter} onChange={(v) => setTypeFilter(v ?? "income")} colors={colors} />
 
       {isLoading ? (
-        <LoadingScreen />
+        <FAPanelSkeleton />
       ) : periods.length < 2 ? (
         <View style={st.empty}>
           <View style={[st.emptyIcon, { backgroundColor: colors.warning + "10" }]}>

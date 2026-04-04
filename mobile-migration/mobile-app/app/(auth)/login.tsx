@@ -5,34 +5,34 @@
  * Error messages are structured via authErrors.ts for Sentry/Flipper.
  */
 
-import React, { useEffect, useState, useCallback, useRef } from "react";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useRouter } from "expo-router";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { Controller, useForm } from "react-hook-form";
 import {
-  View,
-  StyleSheet,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  Text,
-  Animated,
-  Pressable,
+    Animated,
+    KeyboardAvoidingView,
+    Platform,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Text,
+    View,
 } from "react-native";
 import {
-  TextInput,
-  Button,
-  Card,
-  HelperText,
-  IconButton,
-  Divider,
+    Button,
+    Card,
+    Divider,
+    HelperText,
+    IconButton,
+    TextInput,
 } from "react-native-paper";
-import { useRouter } from "expo-router";
-import { useForm, Controller } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
 
-import { useAuthStore } from "@/services/authStore";
-import { useThemeStore } from "@/services/themeStore";
+import { useGoogleSignIn } from "@/hooks/useGoogleSignIn";
 import { useResponsive } from "@/hooks/useResponsive";
 import { loginSchema, type LoginFormData } from "@/lib/validationSchemas";
-import { useGoogleSignIn } from "@/hooks/useGoogleSignIn";
+import { useAuthStore } from "@/services/authStore";
+import { useThemeStore } from "@/services/themeStore";
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -136,10 +136,10 @@ export default function LoginScreen() {
           error: result.error || "Google Sign-In failed. Please try again.",
         });
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("[Login] Google Sign-In error:", err);
       useAuthStore.setState({
-        error: err?.message || "Google Sign-In failed unexpectedly.",
+        error: err instanceof Error ? err.message : "Google Sign-In failed unexpectedly.",
       });
     }
   };
@@ -350,6 +350,17 @@ export default function LoginScreen() {
               Sign In
             </Button>
 
+            {/* Forgot Password */}
+            <Button
+              mode="text"
+              onPress={() => router.push("/(auth)/forgot-password")}
+              disabled={isLoading}
+              style={styles.forgotButton}
+              labelStyle={[styles.forgotLabel, { color: colors.textSecondary }]}
+            >
+              Forgot Password?
+            </Button>
+
             {/* Divider */}
             <View style={styles.dividerRow}>
               <Divider style={[styles.dividerLine, { backgroundColor: colors.borderColor }]} />
@@ -469,6 +480,8 @@ const styles = StyleSheet.create({
   button: { marginTop: 12, borderRadius: 10 },
   buttonContent: { paddingVertical: 8 },
   buttonLabel: { fontSize: 16, fontWeight: "700", letterSpacing: 0.5 },
+  forgotButton: { marginTop: 4, alignSelf: "center" },
+  forgotLabel: { fontSize: 13, fontWeight: "500" },
   dividerRow: {
     flexDirection: "row",
     alignItems: "center",

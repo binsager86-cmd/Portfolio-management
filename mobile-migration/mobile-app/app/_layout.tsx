@@ -12,8 +12,10 @@ import { useEffect } from "react";
 import { Platform } from "react-native";
 import { MD3DarkTheme, MD3LightTheme, PaperProvider } from "react-native-paper";
 import "react-native-reanimated";
+import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { AppErrorBoundary } from "@/components/ui/ErrorBoundary";
+import { ToastProvider } from "@/components/ui/ToastProvider";
 import { queryClient } from "@/lib/queryClient";
 import { getStockList } from "@/services/api";
 import { useAuthStore } from "@/services/authStore";
@@ -174,19 +176,24 @@ function RootLayoutNav() {
         };
 
   return (
+    <SafeAreaProvider>
     <QueryClientProvider client={queryClient}>
       <PaperProvider theme={paperTheme}>
         <ThemeProvider value={buildNavTheme(themeMode)}>
           <AppErrorBoundary>
-            <Stack>
-              <Stack.Screen name="index" options={{ headerShown: false }} />
-              <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-              <Stack.Screen name="(auth)" options={{ headerShown: false }} />
-              <Stack.Screen name="modal" options={{ presentation: "modal" }} />
-            </Stack>
+            <ToastProvider>
+              <Stack>
+                <Stack.Screen name="index" options={{ headerShown: false }} />
+                <Stack.Screen name="(onboarding)" options={{ headerShown: false }} />
+                <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+                <Stack.Screen name="(auth)" options={{ headerShown: false }} />
+                <Stack.Screen name="modal" options={{ presentation: "modal" }} />
+              </Stack>
+            </ToastProvider>
           </AppErrorBoundary>
         </ThemeProvider>
       </PaperProvider>
     </QueryClientProvider>
+    </SafeAreaProvider>
   );
 }

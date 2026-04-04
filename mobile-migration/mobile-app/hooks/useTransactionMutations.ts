@@ -5,22 +5,23 @@
  * Every transaction CRUD (create / update / delete / restore) returns
  * cash_balance + total_value from the backend. These hooks:
  *   1. Invalidate all dependent query caches in parallel
- *   2. Surface a user-facing success message with the updated cash balance
+ *   2. Surface a non-blocking toast with the updated cash balance
+ *   3. Trigger haptic feedback on native for tactile confirmation
  */
 
-import { Platform, Alert } from "react-native";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { showErrorAlert } from "@/lib/errorHandling";
-import { ALERT_DEFER_MS } from "@/constants/layout";
-import {
-  createTransaction,
-  updateTransaction,
-  deleteTransaction,
-  restoreTransaction,
-  TransactionCreate,
-  TransactionMutationResponse,
-} from "@/services/api";
+import { useToast } from "@/components/ui/ToastProvider";
 import { formatCurrency } from "@/lib/currency";
+import { showErrorAlert } from "@/lib/errorHandling";
+import {
+    createTransaction,
+    deleteTransaction,
+    restoreTransaction,
+    TransactionCreate,
+    TransactionMutationResponse,
+    updateTransaction,
+} from "@/services/api";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { Platform } from "react-native";
 
 // ── Query keys invalidated after any transaction mutation ──────────
 
@@ -56,25 +57,29 @@ async function invalidateTransactionCaches(
 
 // ── User feedback helper ────────────────────────────────────────────
 
-function showCashAlert(
-  title: string,
+function buildCashMessage(
   message: string,
-  cashBalance: number | null | undefined
-) {
+  cashBalance: number | null | undefined,
+): string {
   const cashLine =
     cashBalance != null
-      ? `\nCash Balance: ${formatCurrency(cashBalance, "KWD")}`
+      ? ` · Cash: ${formatCurrency(cashBalance, "KWD")}`
       : "";
-  const fullMsg = `${message}${cashLine}`;
-
-  if (Platform.OS === "web") {
-    window.alert(fullMsg);
-  } else {
-    Alert.alert(title, fullMsg);
-  }
+  return `${message}${cashLine}`;
 }
 
-// Error display now handled by @/lib/errorHandling
+/** Fire haptic feedback on native (no-op on web). */
+async function hapticSuccess(): Promise<void> {
+  if (Platform.OS === "web") return;
+  try {
+    const Haptics = await import("expo-haptics");
+    await Haptics.notificationAsync(
+      Haptics.NotificationFeedbackType.Success,
+    );
+  } catch {
+    // Haptics unavailable — swallow silently
+  }
+}
 
 // ── Hooks ───────────────────────────────────────────────────────────
 
@@ -85,23 +90,17 @@ function showCashAlert(
  */
 export function useCreateTransaction(onSuccessCallback?: () => void) {
   const queryClient = useQueryClient();
+  const toast = useToast();
 
   return useMutation<TransactionMutationResponse, Error, TransactionCreate>({
     mutationFn: createTransaction,
     onSuccess: async (result) => {
       await invalidateTransactionCaches(queryClient);
-
-      // Fire optional callback first (e.g. navigation)
       onSuccessCallback?.();
-
-      // Deferred feedback so it doesn't block navigation
-      setTimeout(() => {
-        showCashAlert(
-          "Success",
-          "Transaction added successfully!",
-          result.cash_balance
-        );
-      }, ALERT_DEFER_MS);
+      toast.success(
+        buildCashMessage("Transaction added successfully!", result.cash_balance),
+      );
+      hapticSuccess();
     },
     onError: (err) => showErrorAlert("Error", err),
   });
@@ -112,6 +111,7 @@ export function useCreateTransaction(onSuccessCallback?: () => void) {
  */
 export function useUpdateTransaction(onSuccessCallback?: () => void) {
   const queryClient = useQueryClient();
+  const toast = useToast();
 
   return useMutation<
     TransactionMutationResponse,
@@ -122,13 +122,10 @@ export function useUpdateTransaction(onSuccessCallback?: () => void) {
     onSuccess: async (result) => {
       await invalidateTransactionCaches(queryClient);
       onSuccessCallback?.();
-      setTimeout(() => {
-        showCashAlert(
-          "Updated",
-          "Transaction updated.",
-          result.cash_balance
-        );
-      }, ALERT_DEFER_MS);
+      toast.success(
+        buildCashMessage("Transaction updated.", result.cash_balance),
+      );
+      hapticSuccess();
     },
     onError: (err) => showErrorAlert("Error", err),
   });
@@ -139,19 +136,54 @@ export function useUpdateTransaction(onSuccessCallback?: () => void) {
  */
 export function useDeleteTransaction(onSuccessCallback?: () => void) {
   const queryClient = useQueryClient();
+  const toast = useToast();
 
   return useMutation<TransactionMutationResponse, Error, number>({
     mutationFn: deleteTransaction,
+    onMutate: async (txnId) => {
+      // Cancel in-flight fetches so they don't overwrite our optimistic update
+      await queryClient.cancelQueries({ queryKey: ["transactions"] });
+
+      // Snapshot all transaction list caches (paginated, so multiple entries)
+      const previousCaches = queryClient.getQueriesData<{
+        transactions: { id: number }[];
+        count: number;
+        pagination: { total_items: number };
+      }>({ queryKey: ["transactions"] });
+
+      // Optimistically remove the transaction from every cached page
+      for (const [key, data] of previousCaches) {
+        if (data?.transactions) {
+          queryClient.setQueryData(key, {
+            ...data,
+            transactions: data.transactions.filter((t) => t.id !== txnId),
+            count: Math.max(0, (data.count ?? 0) - 1),
+            pagination: data.pagination
+              ? { ...data.pagination, total_items: Math.max(0, data.pagination.total_items - 1) }
+              : data.pagination,
+          });
+        }
+      }
+      return { previousCaches };
+    },
     onSuccess: async (result) => {
       await invalidateTransactionCaches(queryClient);
       onSuccessCallback?.();
-      showCashAlert(
-        "Deleted",
-        "Transaction deleted.",
-        result.cash_balance
+      toast.info(
+        buildCashMessage("Transaction deleted.", result.cash_balance),
       );
+      hapticSuccess();
     },
-    onError: (err) => showErrorAlert("Error", err),
+    onError: (err, _txnId, context) => {
+      // Revert optimistic removal on failure
+      if (context?.previousCaches) {
+        for (const [key, data] of context.previousCaches) {
+          queryClient.setQueryData(key, data);
+        }
+      }
+      toast.error("Failed to delete, reverted changes");
+      showErrorAlert("Error", err);
+    },
   });
 }
 
@@ -160,17 +192,17 @@ export function useDeleteTransaction(onSuccessCallback?: () => void) {
  */
 export function useRestoreTransaction(onSuccessCallback?: () => void) {
   const queryClient = useQueryClient();
+  const toast = useToast();
 
   return useMutation<TransactionMutationResponse, Error, number>({
     mutationFn: restoreTransaction,
     onSuccess: async (result) => {
       await invalidateTransactionCaches(queryClient);
       onSuccessCallback?.();
-      showCashAlert(
-        "Restored",
-        "Transaction restored.",
-        result.cash_balance
+      toast.success(
+        buildCashMessage("Transaction restored.", result.cash_balance),
       );
+      hapticSuccess();
     },
     onError: (err) => showErrorAlert("Error", err),
   });

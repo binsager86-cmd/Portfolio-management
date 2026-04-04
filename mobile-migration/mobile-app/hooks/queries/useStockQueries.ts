@@ -3,13 +3,19 @@
  * and securities master.
  */
 
-import { useQuery } from "@tanstack/react-query";
 import {
-  getStocks,
-  getStockList,
-  getSecurities,
-  type StockListEntry,
+    getSecurities,
+    getStockList,
+    getStocks
 } from "@/services/api";
+import { useQuery } from "@tanstack/react-query";
+import { useMemo } from "react";
+
+/** Strip non-alphanumeric chars (except spaces, hyphens, dots) and cap length. */
+function sanitizeSearch(raw?: string): string | undefined {
+  if (!raw) return undefined;
+  return raw.replace(/[^a-zA-Z0-9\s.\-]/g, "").slice(0, 100).trim() || undefined;
+}
 
 // ── Query key constants ─────────────────────────────────────────────
 
@@ -29,12 +35,14 @@ export const stockKeys = {
  * Stable 60 s cache for dropdown / picker use.
  */
 export function useStocks(params?: { portfolio?: string; search?: string }) {
+  const search = useMemo(() => sanitizeSearch(params?.search), [params?.search]);
+
   return useQuery({
-    queryKey: stockKeys.list(params?.portfolio, params?.search),
+    queryKey: stockKeys.list(params?.portfolio, search),
     queryFn: () =>
       getStocks({
         portfolio: params?.portfolio,
-        search: params?.search || undefined,
+        search,
       }),
     staleTime: 60_000,
   });
@@ -64,9 +72,11 @@ export function useStockList(market: string, enabled = true) {
 
 /** Securities master list with optional search. */
 export function useSecurities(search?: string, enabled = true) {
+  const cleanSearch = useMemo(() => sanitizeSearch(search), [search]);
+
   return useQuery({
-    queryKey: stockKeys.securities(search),
-    queryFn: () => getSecurities({ search: search || undefined }),
+    queryKey: stockKeys.securities(cleanSearch),
+    queryFn: () => getSecurities({ search: cleanSearch }),
     enabled,
   });
 }

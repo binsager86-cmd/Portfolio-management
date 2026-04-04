@@ -200,7 +200,8 @@ export async function exportGrowthPdf(
   stockSymbol: string,
 ) {
   const { jsPDF: JsPDF } = await import("jspdf");
-  const doc = new JsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+  let doc: jsPDF | null = new JsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+  try {
   const W = 210;
   const H = 297;
   const mx = PAGE_MX;
@@ -426,5 +427,8 @@ export async function exportGrowthPdf(
     if (await Sharing.isAvailableAsync()) {
       await Sharing.shareAsync(file.uri, { mimeType: "application/pdf", dialogTitle: "Export Growth Report" });
     }
+  }
+  } finally {
+    doc = null;
   }
 }

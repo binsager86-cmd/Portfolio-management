@@ -127,12 +127,12 @@ async function performWebGoogleSignIn(): Promise<GoogleAuthResult> {
       cancelled: false,
       error: `Google Sign-In returned unexpected result: ${result.type}`,
     };
-  } catch (err: any) {
+  } catch (err: unknown) {
     if (__DEV__) console.error("[GoogleAuth Web] ❌ Exception:", err);
     return {
       success: false,
       cancelled: false,
-      error: err?.message || "Google Sign-In failed unexpectedly.",
+      error: err instanceof Error ? err.message : "Google Sign-In failed unexpectedly.",
     };
   }
 }
@@ -201,12 +201,12 @@ export async function performNativeGoogleSignIn(): Promise<GoogleAuthResult> {
       cancelled: false,
       error: `Google Sign-In returned unexpected result: ${result.type}`,
     };
-  } catch (err: any) {
+  } catch (err: unknown) {
     if (__DEV__) console.error("[GoogleAuth Native] ❌ Error:", err);
     return {
       success: false,
       cancelled: false,
-      error: err?.message || "Google Sign-In failed on this device.",
+      error: err instanceof Error ? err.message : "Google Sign-In failed on this device.",
     };
   }
 }

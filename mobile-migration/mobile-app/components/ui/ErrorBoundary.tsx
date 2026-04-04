@@ -7,10 +7,12 @@
  */
 
 import React, { Component } from "react";
-import { View, Text, StyleSheet, Pressable } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 
 interface Props {
   children: React.ReactNode;
+  /** Optional context-specific message shown below the title. */
+  fallbackMessage?: string;
 }
 
 interface State {
@@ -42,7 +44,9 @@ export class AppErrorBoundary extends Component<Props, State> {
           <Text style={styles.emoji}>💥</Text>
           <Text style={styles.title}>Something went wrong</Text>
           <Text style={styles.message}>
-            {this.state.error?.message ?? "An unexpected error occurred."}
+            {this.props.fallbackMessage ??
+              this.state.error?.message ??
+              "An unexpected error occurred."}
           </Text>
           <Pressable onPress={this.handleReset} style={styles.button}>
             <Text style={styles.buttonText}>Try Again</Text>
@@ -89,3 +93,21 @@ const styles = StyleSheet.create({
     fontSize: 15,
   },
 });
+
+/**
+ * HOC that wraps a screen component in an AppErrorBoundary.
+ * Works with expo-router's declarative Tabs.Screen (which doesn't
+ * support render-function children).
+ */
+export function withErrorBoundary<P extends object>(
+  ScreenComponent: React.ComponentType<P>,
+  fallbackMessage?: string,
+) {
+  const Wrapped = (props: P) => (
+    <AppErrorBoundary fallbackMessage={fallbackMessage}>
+      <ScreenComponent {...props} />
+    </AppErrorBoundary>
+  );
+  Wrapped.displayName = `withErrorBoundary(${ScreenComponent.displayName || ScreenComponent.name || "Component"})`;
+  return Wrapped;
+}

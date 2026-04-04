@@ -53,7 +53,7 @@ export const LightTheme: ThemePalette = {
 
   textPrimary: "#1e293b",
   textSecondary: "#64748b",
-  textMuted: "#94a3b8",
+  textMuted: "#64748b",
 
   accentPrimary: "#6366f1",
   accentSecondary: "#3b82f6",

@@ -37,7 +37,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 
-import { LoadingScreen } from "@/components/ui/LoadingScreen";
+import { FAPanelSkeleton } from "@/components/ui/PageSkeletons";
 import type { ThemePalette } from "@/constants/theme";
 import { useStatements } from "@/hooks/queries";
 import { showErrorAlert } from "@/lib/errorHandling";
@@ -48,6 +48,7 @@ import {
     deleteAllStatements,
     deleteLineItem,
     deleteStatementsByPeriod,
+    fetchStatementsOnline,
     FinancialStatement,
     mergeLineItems,
     reorderLineItems,
@@ -95,6 +96,10 @@ export function StatementsPanel({ stockId, stockSymbol, colors, isDesktop }: Pan
   // Excel import state
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<string | null>(null);
+
+  // Online fetch state (stockanalysis.com)
+  const [fetchingOnline, setFetchingOnline] = useState(false);
+  const [onlineResult, setOnlineResult] = useState<string | null>(null);
 
   /** Detect statement type from sheet/tab name */
   const detectStatementType = useCallback((sheetName: string): string | null => {
@@ -373,6 +378,70 @@ export function StatementsPanel({ stockId, stockSymbol, colors, isDesktop }: Pan
               {importResult}
             </Text>
             <Pressable onPress={() => setImportResult(null)} hitSlop={8}>
+              <FontAwesome name="times" size={12} color={colors.textMuted} />
+            </Pressable>
+          </View>
+        )}
+
+        {/* ── Get Statements Online (stockanalysis.com) ────────────── */}
+        <Pressable
+          onPress={async () => {
+            setFetchingOnline(true);
+            setOnlineResult(null);
+            try {
+              const res = await fetchStatementsOnline(stockId);
+              setOnlineResult(res.message);
+              queryClient.invalidateQueries({ queryKey: ["analysis-statements", stockId] });
+              refetch();
+            } catch (err: unknown) {
+              setOnlineResult("Error: " + (err instanceof Error ? err.message : "Failed to fetch statements"));
+            } finally {
+              setFetchingOnline(false);
+            }
+          }}
+          disabled={fetchingOnline || uploading}
+          style={({ pressed }) => [
+            {
+              flexDirection: "row", alignItems: "center", justifyContent: "center",
+              paddingVertical: 10, paddingHorizontal: 16, marginTop: 10,
+              borderRadius: 10, borderWidth: 1.5,
+              borderColor: fetchingOnline ? colors.textMuted : colors.accentPrimary,
+              backgroundColor: fetchingOnline ? colors.bgInput : colors.accentPrimary + "08",
+              gap: 8,
+            },
+            pressed && !fetchingOnline && { backgroundColor: colors.accentPrimary + "15", transform: [{ scale: 0.98 }] },
+          ]}
+        >
+          {fetchingOnline ? (
+            <ActivityIndicator size="small" color={colors.accentPrimary} />
+          ) : (
+            <FontAwesome name="globe" size={16} color={colors.accentPrimary} />
+          )}
+          <Text style={{ color: fetchingOnline ? colors.textMuted : colors.textPrimary, fontSize: 13, fontWeight: "600" }}>
+            {fetchingOnline ? "Fetching..." : "Get Statements"}
+          </Text>
+          <Text style={{ color: colors.textMuted, fontSize: 10 }}>
+            from stockanalysis.com
+          </Text>
+        </Pressable>
+
+        {/* Online fetch result banner */}
+        {onlineResult && (
+          <View style={{
+            flexDirection: "row", alignItems: "center", marginTop: 8,
+            paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8,
+            backgroundColor: onlineResult.startsWith("Error") ? colors.danger + "15" : colors.success + "15",
+            gap: 6,
+          }}>
+            <FontAwesome
+              name={onlineResult.startsWith("Error") ? "exclamation-circle" : "check-circle"}
+              size={13}
+              color={onlineResult.startsWith("Error") ? colors.danger : colors.success}
+            />
+            <Text style={{ flex: 1, fontSize: 11, color: onlineResult.startsWith("Error") ? colors.danger : colors.success }}>
+              {onlineResult}
+            </Text>
+            <Pressable onPress={() => setOnlineResult(null)} hitSlop={8}>
               <FontAwesome name="times" size={12} color={colors.textMuted} />
             </Pressable>
           </View>
@@ -663,7 +732,7 @@ export function StatementsPanel({ stockId, stockSymbol, colors, isDesktop }: Pan
       <StatementTabBar value={typeFilter} onChange={setTypeFilter} colors={colors} showAll={true} />
 
       {isLoading ? (
-        <LoadingScreen />
+        <FAPanelSkeleton />
       ) : typeFilter == null ? (
         /* ── "All" view: grouped by statement type ──────────────── */
         <ScrollView style={{ flex: 1 }}>

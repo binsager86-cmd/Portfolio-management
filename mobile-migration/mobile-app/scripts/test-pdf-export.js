@@ -55,7 +55,7 @@ const categories = {
   growth: {
     label: "Growth Rates",
     color: "#f97316",
-    metricNames: ["Revenue Growth", "Net Income Growth", "EPS Growth", "Total Assets Growth", "CFO Growth"],
+    metricNames: ["Revenue Growth", "Net Income Growth", "EPS Growth", "Total Assets Growth", "Operating Cash Flow Growth", "FCF Growth"],
     years,
     yearData: {},
   },

@@ -1,0 +1,57 @@
+appId: com.portfolio.mobileapp
+---
+# Full User Journey — E2E test
+# Verifies: Login → View Overview → Navigate to Holdings → View Transactions
+
+- launchApp
+
+# ── Step 1: Login ────────────────────────────────────────────────
+
+- assertVisible: "Sign In"
+
+- tapOn:
+    id: "login-email"
+- inputText: "test@example.com"
+
+- tapOn:
+    id: "login-password"
+- inputText: "TestPass1!"
+
+- tapOn:
+    id: "login-button"
+
+# ── Step 2: Overview Screen ──────────────────────────────────────
+
+- assertVisible:
+    text: "Overview"
+    timeout: 10000
+
+# Verify key portfolio data is visible
+- assertVisible: "Portfolio Value"
+
+# ── Step 3: Navigate to Holdings ─────────────────────────────────
+
+- tapOn:
+    id: "tab-holdings"
+
+- assertVisible:
+    text: "Holdings"
+    timeout: 5000
+
+# ── Step 4: Navigate to Transactions ─────────────────────────────
+
+- tapOn:
+    id: "tab-trading"
+
+- assertVisible:
+    text: "Transactions"
+    timeout: 5000
+
+# ── Step 5: Navigate back to Overview ────────────────────────────
+
+- tapOn:
+    id: "tab-overview"
+
+- assertVisible:
+    text: "Overview"
+    timeout: 5000

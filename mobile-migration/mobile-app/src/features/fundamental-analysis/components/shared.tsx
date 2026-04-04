@@ -298,11 +298,11 @@ export function Card({ colors, children, style, noPadding }: { colors: ThemePale
 /* ── LabeledInput ──────────────────────────────────────────────── */
 
 export function LabeledInput({
-  label, value, onChangeText, colors, keyboardType, placeholder, autoCapitalize, flex, helperText,
+  label, value, onChangeText, colors, keyboardType, placeholder, autoCapitalize, flex, helperText, editable = true,
 }: {
   label: string; value: string; onChangeText: (v: string) => void; colors: ThemePalette;
   keyboardType?: "numeric" | "default"; placeholder?: string; autoCapitalize?: "characters" | "none"; flex?: number;
-  helperText?: string;
+  helperText?: string; editable?: boolean;
 }) {
   const [showHelper, setShowHelper] = useState(false);
   return (
@@ -343,7 +343,8 @@ export function LabeledInput({
         onChangeText={onChangeText}
         keyboardType={keyboardType}
         autoCapitalize={autoCapitalize}
-        style={[st.input, { color: colors.textPrimary, borderColor: colors.borderColor, backgroundColor: colors.bgInput }]}
+        editable={editable}
+        style={[st.input, { color: colors.textPrimary, borderColor: colors.borderColor, backgroundColor: editable ? colors.bgInput : colors.bgInput + "60", opacity: editable ? 1 : 0.6 }]}
       />
     </View>
   );

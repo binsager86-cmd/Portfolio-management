@@ -11,41 +11,41 @@
  * - Color-coded numeric cells (green positive, red negative)
  */
 
+import FontAwesome from "@expo/vector-icons/FontAwesome";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import React, { useCallback, useMemo, useState } from "react";
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  Pressable,
-  RefreshControl,
-  Platform,
-  Alert,
-  LayoutChangeEvent,
+    Alert,
+    LayoutChangeEvent,
+    Platform,
+    Pressable,
+    RefreshControl,
+    ScrollView,
+    StyleSheet,
+    Text,
+    View,
 } from "react-native";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import FontAwesome from "@expo/vector-icons/FontAwesome";
 
+import SnapshotLineChart, {
+    ChartDataPoint,
+    ChartPalette,
+} from "@/components/charts/SnapshotLineChart";
+import { ErrorScreen } from "@/components/ui/ErrorScreen";
+import { PortfolioTrackerSkeleton } from "@/components/ui/PageSkeletons";
+import type { ThemePalette } from "@/constants/theme";
 import { useSnapshots } from "@/hooks/queries";
+import { useResponsive } from "@/hooks/useResponsive";
+import { fmtNum, formatPercent } from "@/lib/currency";
+import { logError, showErrorAlert } from "@/lib/errorHandling";
 import {
-  saveSnapshot,
-  deleteSnapshot,
-  deleteAllSnapshots,
-  recalculateSnapshots,
-  updatePrices,
-  SnapshotRecord,
+    deleteAllSnapshots,
+    deleteSnapshot,
+    recalculateSnapshots,
+    saveSnapshot,
+    SnapshotRecord,
+    updatePrices,
 } from "@/services/api";
 import { useThemeStore } from "@/services/themeStore";
-import { useResponsive } from "@/hooks/useResponsive";
-import { LoadingScreen } from "@/components/ui/LoadingScreen";
-import { ErrorScreen } from "@/components/ui/ErrorScreen";
-import SnapshotLineChart, {
-  ChartDataPoint,
-  ChartPalette,
-} from "@/components/charts/SnapshotLineChart";
-import type { ThemePalette } from "@/constants/theme";
-import { fmtNum, formatPercent } from "@/lib/currency";
-import { showErrorAlert, logError } from "@/lib/errorHandling";
 
 // ── Chart color constants (matching Streamlit Plotly) ────────────────
 
@@ -313,7 +313,7 @@ export default function PortfolioTrackerScreen() {
 
   // ── Loading / Error ──────────────────────────────────────────────
 
-  if (isLoading) return <LoadingScreen />;
+  if (isLoading) return <PortfolioTrackerSkeleton />;
   if (isError) return <ErrorScreen message={error?.message ?? "Failed to load snapshots"} onRetry={refetch} />;
 
   return (

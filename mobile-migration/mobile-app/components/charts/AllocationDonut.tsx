@@ -14,16 +14,16 @@
  * Uses react-native-svg + react-native-reanimated for cross-platform rendering.
  */
 
-import React, { useMemo, useEffect } from "react";
-import { View, Text, StyleSheet, ScrollView } from "react-native";
-import Svg, { G, Path, Text as SvgText, Defs, LinearGradient, Stop } from "react-native-svg";
-import Animated, {
-  useSharedValue,
-  useAnimatedStyle,
-  withTiming,
-  Easing,
-} from "react-native-reanimated";
 import type { ThemePalette } from "@/constants/theme";
+import React, { useEffect, useMemo } from "react";
+import { ScrollView, StyleSheet, Text, View } from "react-native";
+import Animated, {
+    Easing,
+    useAnimatedStyle,
+    useSharedValue,
+    withTiming,
+} from "react-native-reanimated";
+import Svg, { Defs, G, LinearGradient, Path, Stop, Text as SvgText } from "react-native-svg";
 
 // ── Gradient slice palettes (matches PortfolioChart purple→blue language) ──
 
@@ -123,10 +123,14 @@ export const AllocationDonut = React.memo(function AllocationDonut({
   const progress = useSharedValue(0);
 
   useEffect(() => {
-    progress.value = 0;
-    progress.value = withTiming(1, {
-      duration: ANIM_MS,
-      easing: Easing.out(Easing.cubic),
+    // Fade out briefly, then re-enter with new data
+    progress.value = withTiming(0, { duration: 180 }, (finished) => {
+      if (finished) {
+        progress.value = withTiming(1, {
+          duration: ANIM_MS,
+          easing: Easing.out(Easing.cubic),
+        });
+      }
     });
   }, [data]);
 
@@ -201,7 +205,13 @@ export const AllocationDonut = React.memo(function AllocationDonut({
         <View style={styles.chartRow}>
           {/* Donut */}
           <View style={styles.chartContainer}>
-            <Svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+            <Svg
+              width={size}
+              height={size}
+              viewBox={`0 0 ${size} ${size}`}
+              accessibilityRole="image"
+              accessibilityLabel={`Portfolio allocation donut chart with ${arcs.length} holdings`}
+            >
               <Defs>
                 {arcs.map((arc, i) => (
                   <LinearGradient key={`grad-${i}`} id={`sliceGrad${i}`} x1="0" y1="0" x2="1" y2="1">

@@ -5,32 +5,33 @@
  * Mirrors Streamlit's "Dividends Tracker" section with 4 tabs.
  */
 
-import React, { useState, useMemo } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  Pressable,
-  RefreshControl,
-  Alert,
-  Platform,
-  TextInput,
-} from "react-native";
+import FontAwesome from "@expo/vector-icons/FontAwesome";
 import { FlashList } from "@shopify/flash-list";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import FontAwesome from "@expo/vector-icons/FontAwesome";
+import React, { useMemo, useState } from "react";
+import {
+    Alert,
+    Platform,
+    Pressable,
+    RefreshControl,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    View,
+} from "react-native";
 
-import { useDividends, useDividendsByStock, useBonusShares } from "@/hooks/queries";
-import { deleteDividend } from "@/services/api";
-import { useThemeStore } from "@/services/themeStore";
-import { showErrorAlert } from "@/lib/errorHandling";
+import DividendYearlyChart, { type YearlyDividendData } from "@/components/charts/DividendYearlyChart";
+import { ErrorScreen } from "@/components/ui/ErrorScreen";
+import { DividendsSkeleton } from "@/components/ui/PageSkeletons";
+import { useAllDividends, useBonusShares, useDividends, useDividendsByStock } from "@/hooks/queries";
 import { useResponsive } from "@/hooks/useResponsive";
 import { useScreenStyles } from "@/hooks/useScreenStyles";
-import { LoadingScreen } from "@/components/ui/LoadingScreen";
-import { ErrorScreen } from "@/components/ui/ErrorScreen";
 import { formatCurrency } from "@/lib/currency";
+import { showErrorAlert } from "@/lib/errorHandling";
 import { exportYieldCalcPdf } from "@/lib/exportYieldPdf";
+import { deleteDividend } from "@/services/api";
+import { useThemeStore } from "@/services/themeStore";
 
 type TabKey = "all" | "by-stock" | "bonus" | "calculator";
 
@@ -64,6 +65,23 @@ export default function DividendsScreen() {
   const { data: byStockData } = useDividendsByStock();
 
   const { data: bonusData } = useBonusShares(tab === "bonus");
+
+  // All dividends for the yearly chart
+  const { data: allDivData } = useAllDividends();
+
+  const yearlyChartData = useMemo<YearlyDividendData[]>(() => {
+    const divs = allDivData?.dividends ?? [];
+    if (!divs.length) return [];
+    const byYear: Record<string, number> = {};
+    for (const d of divs) {
+      const year = d.txn_date?.slice(0, 4);
+      if (!year) continue;
+      byYear[year] = (byYear[year] ?? 0) + (d.cash_dividend_kwd ?? 0);
+    }
+    return Object.keys(byYear)
+      .sort()
+      .map((year) => ({ year, amount: byYear[year] }));
+  }, [allDivData]);
 
   const deleteMut = useMutation({
     mutationFn: (id: number) => deleteDividend(id),
@@ -172,7 +190,7 @@ export default function DividendsScreen() {
     };
   }, [calcPurchasePrice, calcShares, calcParValue, calcDivPercent, calcBonusPercent, calcPreExPrice, calcIncludeCashInEx]);
 
-  if (isLoading) return <LoadingScreen />;
+  if (isLoading) return <DividendsSkeleton />;
   if (isError)
     return <ErrorScreen message={error?.message ?? "Failed to load dividends"} onRetry={refetch} />;
 
@@ -215,6 +233,13 @@ export default function DividendsScreen() {
             <Text style={[s.totalLabel, { color: colors.textSecondary }]}>Stocks</Text>
             <Text style={[s.totalValue, { color: colors.textPrimary }]}>{totals.unique_stocks}</Text>
           </View>
+        </View>
+      )}
+
+      {/* Yearly Dividend Chart */}
+      {yearlyChartData.length > 0 && (
+        <View style={[s.chartContainer, { backgroundColor: colors.bgCard, borderColor: colors.borderColor }]}>
+          <DividendYearlyChart data={yearlyChartData} currency="KWD" />
         </View>
       )}
 
@@ -813,5 +838,12 @@ const s = StyleSheet.create({
     fontSize: 15,
     fontWeight: "700",
     letterSpacing: 0.3,
+  },
+  chartContainer: {
+    marginHorizontal: 12,
+    marginVertical: 8,
+    padding: 16,
+    borderRadius: 14,
+    borderWidth: 1,
   },
 });
