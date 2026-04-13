@@ -24,6 +24,7 @@ import {
     Text,
     View,
 } from "react-native";
+import { useTranslation } from "react-i18next";
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
@@ -116,20 +117,22 @@ function IndexCard({
 function SummaryCard({
   summary,
   colors,
+  t,
 }: {
   summary: Record<string, any>;
   colors: any;
+  t: (key: string) => string;
 }) {
   return (
     <View style={[s.summaryCard, { backgroundColor: colors.cardBg, borderColor: colors.borderColor }]}>
-      <Text style={[s.sectionLabel, { color: colors.textSecondary }]}>TODAY'S ACTIVITY</Text>
+      <Text style={[s.sectionLabel, { color: colors.textSecondary }]}>{t("market.todaysActivity")}</Text>
       <View style={s.summaryRow}>
         <View style={s.summaryItem}>
           <FontAwesome name="bar-chart" size={16} color={colors.accentSecondary} style={{ marginBottom: 6 }} />
           <Text style={[s.summaryValue, { color: colors.textPrimary }]}>
             {fmtCompact(summary.volume)}
           </Text>
-          <Text style={[s.summaryLabel, { color: colors.textMuted }]}>Shares Traded</Text>
+          <Text style={[s.summaryLabel, { color: colors.textMuted }]}>{t("market.sharesTraded")}</Text>
         </View>
         <View style={[s.summaryDivider, { backgroundColor: colors.borderColor }]} />
         <View style={s.summaryItem}>
@@ -137,7 +140,7 @@ function SummaryCard({
           <Text style={[s.summaryValue, { color: colors.textPrimary }]}>
             {fmtCompact(summary.value_traded)}
           </Text>
-          <Text style={[s.summaryLabel, { color: colors.textMuted }]}>Value (KWD)</Text>
+          <Text style={[s.summaryLabel, { color: colors.textMuted }]}>{t("market.valueKWD")}</Text>
         </View>
         <View style={[s.summaryDivider, { backgroundColor: colors.borderColor }]} />
         <View style={s.summaryItem}>
@@ -145,7 +148,7 @@ function SummaryCard({
           <Text style={[s.summaryValue, { color: colors.textPrimary }]}>
             {fmtInt(summary.trades)}
           </Text>
-          <Text style={[s.summaryLabel, { color: colors.textMuted }]}>Trades</Text>
+          <Text style={[s.summaryLabel, { color: colors.textMuted }]}>{t("market.trades")}</Text>
         </View>
       </View>
     </View>
@@ -164,6 +167,7 @@ function MarketDetailCard({
   perMarket,
   totalSummary,
   colors,
+  t,
 }: {
   title: string;
   icon: React.ComponentProps<typeof FontAwesome>["name"];
@@ -171,6 +175,7 @@ function MarketDetailCard({
   perMarket: PerMarketSummary;
   totalSummary: Record<string, any>;
   colors: any;
+  t: (key: string) => string;
 }) {
   const chgColor = index ? changeColor(index.changePercent, colors) : colors.textMuted;
   const volPct = pct(perMarket.volume, totalSummary.volume);
@@ -200,7 +205,7 @@ function MarketDetailCard({
       </View>
       <View style={s.detailStats}>
         <View style={s.detailStatItem}>
-          <Text style={[s.detailStatLabel, { color: colors.textMuted }]}>Volume</Text>
+          <Text style={[s.detailStatLabel, { color: colors.textMuted }]}>{t("market.volume")}</Text>
           <Text style={[s.detailStatValue, { color: colors.textPrimary }]}>
             {fmtCompact(perMarket.volume)}
           </Text>
@@ -208,7 +213,7 @@ function MarketDetailCard({
         </View>
         <View style={[s.summaryDivider, { backgroundColor: colors.borderColor }]} />
         <View style={s.detailStatItem}>
-          <Text style={[s.detailStatLabel, { color: colors.textMuted }]}>Value (KWD)</Text>
+          <Text style={[s.detailStatLabel, { color: colors.textMuted }]}>{t("market.valueKWD")}</Text>
           <Text style={[s.detailStatValue, { color: colors.textPrimary }]}>
             {fmtCompact(perMarket.value_traded)}
           </Text>
@@ -216,7 +221,7 @@ function MarketDetailCard({
         </View>
         <View style={[s.summaryDivider, { backgroundColor: colors.borderColor }]} />
         <View style={s.detailStatItem}>
-          <Text style={[s.detailStatLabel, { color: colors.textMuted }]}>Trades</Text>
+          <Text style={[s.detailStatLabel, { color: colors.textMuted }]}>{t("market.trades")}</Text>
           <Text style={[s.detailStatValue, { color: colors.textPrimary }]}>
             {fmtInt(perMarket.trades)}
           </Text>
@@ -226,7 +231,7 @@ function MarketDetailCard({
           <>
             <View style={[s.summaryDivider, { backgroundColor: colors.borderColor }]} />
             <View style={s.detailStatItem}>
-              <Text style={[s.detailStatLabel, { color: colors.textMuted }]}>Market Cap</Text>
+              <Text style={[s.detailStatLabel, { color: colors.textMuted }]}>{t("market.marketCap")}</Text>
               <Text style={[s.detailStatValue, { color: colors.textPrimary }]}>
                 {fmtCompact(perMarket.market_cap)}
               </Text>
@@ -243,11 +248,13 @@ function GainersLosersBar({
   neutral,
   losers,
   colors,
+  t,
 }: {
   gainers: number;
   neutral: number;
   losers: number;
   colors: any;
+  t: (key: string, opts?: any) => string;
 }) {
   const total = gainers + neutral + losers || 1;
   const gPct = Math.round((gainers / total) * 100);
@@ -255,9 +262,9 @@ function GainersLosersBar({
   const nPct = 100 - gPct - lPct;
   return (
     <View style={[s.glCard, { backgroundColor: colors.cardBg, borderColor: colors.borderColor }]}>
-      <Text style={[s.sectionLabel, { color: colors.textSecondary }]}>MARKET MOOD</Text>
+      <Text style={[s.sectionLabel, { color: colors.textSecondary }]}>{t("market.marketMood")}</Text>
       <Text style={[s.glSubtitle, { color: colors.textMuted }]}>
-        How sectors are doing today
+        {t("market.howSectorsDoingToday")}
       </Text>
       <View style={s.glBar}>
         {gainers > 0 && (
@@ -274,19 +281,19 @@ function GainersLosersBar({
         <View style={s.glLabelItem}>
           <View style={[s.glDot, { backgroundColor: "#22c55e" }]} />
           <Text style={[s.glLabelText, { color: "#22c55e" }]}>
-            {gainers} Up ({gPct}%)
+            {gainers} {t("market.up")} ({gPct}%)
           </Text>
         </View>
         <View style={s.glLabelItem}>
           <View style={[s.glDot, { backgroundColor: "#94a3b8" }]} />
           <Text style={[s.glLabelText, { color: colors.textMuted }]}>
-            {neutral} Flat ({nPct}%)
+            {neutral} {t("market.flat")} ({nPct}%)
           </Text>
         </View>
         <View style={s.glLabelItem}>
           <View style={[s.glDot, { backgroundColor: "#ef4444" }]} />
           <Text style={[s.glLabelText, { color: "#ef4444" }]}>
-            {losers} Down ({lPct}%)
+            {losers} {t("market.down")} ({lPct}%)
           </Text>
         </View>
       </View>
@@ -301,6 +308,7 @@ function MoverTable({
   icon,
   accentColor,
   colors,
+  t,
 }: {
   title: string;
   subtitle: string;
@@ -308,6 +316,7 @@ function MoverTable({
   icon: React.ComponentProps<typeof FontAwesome>["name"];
   accentColor: string;
   colors: any;
+  t: (key: string) => string;
 }) {
   if (!movers.length) return null;
   return (
@@ -328,16 +337,16 @@ function MoverTable({
       {/* Header row */}
       <View style={[s.tableRow, s.tableHeaderRow]}>
         <View style={s.colStock}>
-          <Text style={[s.colHeaderText, { color: colors.textMuted }]}>Stock</Text>
+          <Text style={[s.colHeaderText, { color: colors.textMuted }]}>{t("market.stock")}</Text>
         </View>
         <View style={s.colPrice}>
-          <Text style={[s.colHeaderText, { color: colors.textMuted, textAlign: "right" }]}>Price</Text>
+          <Text style={[s.colHeaderText, { color: colors.textMuted, textAlign: "right" }]}>{t("market.price")}</Text>
         </View>
         <View style={s.colChange}>
-          <Text style={[s.colHeaderText, { color: colors.textMuted, textAlign: "right" }]}>Change</Text>
+          <Text style={[s.colHeaderText, { color: colors.textMuted, textAlign: "right" }]}>{t("market.change")}</Text>
         </View>
         <View style={s.colVolume}>
-          <Text style={[s.colHeaderText, { color: colors.textMuted, textAlign: "right" }]}>Volume</Text>
+          <Text style={[s.colHeaderText, { color: colors.textMuted, textAlign: "right" }]}>{t("market.volume")}</Text>
         </View>
       </View>
       {movers.map((m, i) => {
@@ -383,9 +392,11 @@ function MoverTable({
 function SectorTable({
   sectors,
   colors,
+  t,
 }: {
   sectors: SectorIndex[];
   colors: any;
+  t: (key: string) => string;
 }) {
   if (!sectors.length) return null;
   // Sort: biggest gainers first, then losers
@@ -398,23 +409,23 @@ function SectorTable({
         </View>
         <View style={{ flex: 1 }}>
           <Text style={[s.sectionTitle, { color: colors.textPrimary }]}>
-            Sector Performance
+            {t("market.sectorPerformance")}
           </Text>
           <Text style={[s.moverSubtitle, { color: colors.textMuted }]}>
-            How each sector moved today
+            {t("market.sectorSubtitle")}
           </Text>
         </View>
       </View>
       {/* Header */}
       <View style={[s.tableRow, s.tableHeaderRow]}>
         <View style={s.colSector}>
-          <Text style={[s.colHeaderText, { color: colors.textMuted }]}>Sector</Text>
+          <Text style={[s.colHeaderText, { color: colors.textMuted }]}>{t("market.sector")}</Text>
         </View>
         <View style={s.colChange}>
-          <Text style={[s.colHeaderText, { color: colors.textMuted, textAlign: "right" }]}>Change</Text>
+          <Text style={[s.colHeaderText, { color: colors.textMuted, textAlign: "right" }]}>{t("market.change")}</Text>
         </View>
         <View style={s.colIndex}>
-          <Text style={[s.colHeaderText, { color: colors.textMuted, textAlign: "right" }]}>Index</Text>
+          <Text style={[s.colHeaderText, { color: colors.textMuted, textAlign: "right" }]}>{t("market.index")}</Text>
         </View>
       </View>
       {sorted.map((sec, i) => {
@@ -463,6 +474,7 @@ export default function MarketScreen() {
   const { data, isLoading, isError, refetch, isFetching } = useMarketSummary();
   const refreshMarket = useMarketRefresh();
   const [refreshing, setRefreshing] = useState(false);
+  const { t } = useTranslation();
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -478,7 +490,7 @@ export default function MarketScreen() {
     return (
       <View style={[s.center, { backgroundColor: colors.bgPrimary }]}>
         <ActivityIndicator size="large" color={colors.accentPrimary} />
-        <Text style={{ color: colors.textMuted, marginTop: 12 }}>Loading market data…</Text>
+        <Text style={{ color: colors.textMuted, marginTop: 12 }}>{t("market.loadingMarket")}</Text>
       </View>
     );
   }
@@ -488,7 +500,7 @@ export default function MarketScreen() {
       <View style={[s.center, { backgroundColor: colors.bgPrimary }]}>
         <FontAwesome name="exclamation-triangle" size={32} color={colors.textMuted} />
         <Text style={{ color: colors.textMuted, marginTop: 12, textAlign: "center" }}>
-          Market data unavailable.{"\n"}Pull down to retry.
+          {t("market.marketUnavailable")}{"\n"}{t("market.pullToRetry")}
         </Text>
       </View>
     );
@@ -518,12 +530,12 @@ export default function MarketScreen() {
       <View style={s.header}>
         <View style={{ flex: 1 }}>
           <Text style={[s.screenTitle, { color: colors.textPrimary }]}>
-            Boursa Kuwait
+            {t("market.title")}
           </Text>
           <View style={s.headerMeta}>
             <View style={[s.statusDot, { backgroundColor: data.status === "open" ? "#22c55e" : "#ef4444" }]} />
             <Text style={[s.headerDate, { color: colors.textMuted }]}>
-              {data.status === "open" ? "Market Open" : "Market Closed"} · {data.date || "—"}
+              {data.status === "open" ? t("market.marketOpen") : t("market.marketClosed")} · {data.date || "—"}
             </Text>
           </View>
         </View>
@@ -545,7 +557,7 @@ export default function MarketScreen() {
         <View style={[s.staleBanner, { backgroundColor: "#f59e0b20" }]}>
           <FontAwesome name="clock-o" size={14} color="#f59e0b" />
           <Text style={{ color: "#f59e0b", marginLeft: 6, fontSize: 12 }}>
-            Showing last available data — live update failed
+            {t("market.staleData")}
           </Text>
         </View>
       )}
@@ -562,28 +574,30 @@ export default function MarketScreen() {
       </ScrollView>
 
       {/* ── Today's Summary ── */}
-      <SummaryCard summary={summary} colors={colors} />
+      <SummaryCard summary={summary} colors={colors} t={t} />
 
       {/* ── Premier & Main Market Detail Cards ── */}
       <View style={[s.detailRow, isDesktop && { flexDirection: "row", gap: 16 }]}>
         {data.premier_summary && (
           <MarketDetailCard
-            title="Premier Market"
+            title={t("market.premierMarket")}
             icon="diamond"
             index={premierIndex}
             perMarket={data.premier_summary}
             totalSummary={summary}
             colors={colors}
+            t={t}
           />
         )}
         {data.main_summary && (
           <MarketDetailCard
-            title="Main Market"
+            title={t("market.mainMarket")}
             icon="building"
             index={mainIndex}
             perMarket={data.main_summary}
             totalSummary={summary}
             colors={colors}
+            t={t}
           />
         )}
       </View>
@@ -594,40 +608,44 @@ export default function MarketScreen() {
         neutral={summary.neutral ?? 0}
         losers={summary.losers ?? 0}
         colors={colors}
+        t={t}
       />
 
       {/* ── Top movers (side by side on desktop) ── */}
       <View style={[s.moversRow, isDesktop && { flexDirection: "row", gap: 16 }]}>
         <MoverTable
-          title="Top Risers"
-          subtitle="Stocks with biggest gains today"
+          title={t("market.topRisers")}
+          subtitle={t("market.risersSubtitle")}
           movers={data.top_gainers}
           icon="arrow-up"
           accentColor="#22c55e"
           colors={colors}
+          t={t}
         />
         <MoverTable
-          title="Biggest Drops"
-          subtitle="Stocks with biggest losses today"
+          title={t("market.biggestDrops")}
+          subtitle={t("market.dropsSubtitle")}
           movers={data.top_losers}
           icon="arrow-down"
           accentColor="#ef4444"
           colors={colors}
+          t={t}
         />
       </View>
 
       {/* ── Most Traded ── */}
       <MoverTable
-        title="Most Traded"
-        subtitle="Highest value traded today"
+        title={t("market.mostTraded")}
+        subtitle={t("market.tradedSubtitle")}
         movers={data.top_value}
         icon="money"
         accentColor={colors.accentPrimary}
         colors={colors}
+        t={t}
       />
 
       {/* ── Sector Performance ── */}
-      <SectorTable sectors={data.sectors} colors={colors} />
+      <SectorTable sectors={data.sectors} colors={colors} t={t} />
 
       {/* Footer spacing */}
       <View style={{ height: 40 }} />

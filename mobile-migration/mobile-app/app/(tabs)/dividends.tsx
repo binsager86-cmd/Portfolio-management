@@ -92,20 +92,20 @@ export default function DividendsScreen() {
       .map((year) => ({ year, amount: byYear[year] }));
   }, [allDivData]);
 
-  // Dividend projection
+  // Dividend projection (CFA-level: uses per-year transaction history + growth modeling)
   const projection = useMemo<PortfolioProjectionSummary | null>(() => {
     const holdings = holdingsResp?.holdings;
     if (!holdings || holdings.length === 0) return null;
+    const allRecords = allDivData?.dividends;
     const byStockDivs = byStockData?.stocks;
-    return projectPortfolioDividends(holdings, byStockDivs);
-  }, [holdingsResp, byStockData]);
+    return projectPortfolioDividends(holdings, allRecords, byStockDivs);
+  }, [holdingsResp, allDivData, byStockData]);
 
   // Projected chart data — next year as a dashed bar
   const projectedChartData = useMemo<YearlyDividendData[]>(() => {
     if (!projection || projection.totalProjected <= 0) return [];
-    const currentYear = new Date().getFullYear();
-    const nextYear = String(currentYear + 1);
-    return [{ year: nextYear, amount: projection.totalProjected }];
+    const projYear = String(projection.projectionYear);
+    return [{ year: projYear, amount: projection.totalProjected }];
   }, [projection]);
 
   const deleteMut = useMutation({
@@ -840,6 +840,14 @@ export default function DividendsScreen() {
                     <Text style={[s.divMeta, { color: colors.textSecondary }]}>
                       {p.shares.toLocaleString()} {t("dividends.shares")} · {t("dividends.yieldLabel")}: {p.yieldOnCost.toFixed(2)}%
                       {p.hasBonus ? " · 🎁" : ""}
+                    </Text>
+                    <Text style={[s.divMeta, { color: colors.textSecondary, fontSize: 11, marginTop: 2 }]}>
+                      {p.growthRate !== 0
+                        ? `g: ${p.growthRate > 0 ? "+" : ""}${(p.growthRate * 100).toFixed(1)}%`
+                        : "g: flat"
+                      }
+                      {" · "}
+                      {p.method === "cagr" ? `CAGR (${p.yearsOfData}y)` : p.method === "yoy" ? "YoY" : p.method === "flat" ? "1y data" : "est."}
                     </Text>
                   </View>
                   <View style={{ alignItems: "flex-end" }}>

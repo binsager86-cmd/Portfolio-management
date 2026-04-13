@@ -17,6 +17,7 @@ import {
   Pressable,
 } from "react-native";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
+import { useTranslation } from "react-i18next";
 
 import { useThemeStore } from "@/services/themeStore";
 import { useResponsive } from "@/hooks/useResponsive";
@@ -79,6 +80,7 @@ export default function PlannerScreen() {
   const { colors } = useThemeStore();
   const ss = useScreenStyles();
   const { isDesktop } = useResponsive();
+  const { t } = useTranslation();
 
   const [mode, setMode] = useState<CalcMode>("fv");
   const [pv, setPv] = useState("10000");
@@ -104,12 +106,12 @@ export default function PlannerScreen() {
       const fvAnnuity = pmtNum > 0 ? pmtNum * ((Math.pow(1 + rateNum, yearsNum) - 1) / rateNum) : 0;
       return {
         main: fvLump + fvAnnuity,
-        label: "Future Value",
+        label: t("planner.futureValue"),
         details: [
-          { l: "Lump Sum FV", v: fvLump },
-          { l: "Annuity FV", v: fvAnnuity },
-          { l: "Total Invested", v: pvNum + pmtNum * yearsNum },
-          { l: "Total Interest", v: fvLump + fvAnnuity - pvNum - pmtNum * yearsNum },
+          { l: t("planner.lumpSumFV"), v: fvLump },
+          { l: t("planner.annuityFV"), v: fvAnnuity },
+          { l: t("planner.totalInvested"), v: pvNum + pmtNum * yearsNum },
+          { l: t("planner.totalInterest"), v: fvLump + fvAnnuity - pvNum - pmtNum * yearsNum },
         ],
       };
     }
@@ -118,10 +120,10 @@ export default function PlannerScreen() {
       const pvCalc = pvNum / Math.pow(1 + rateNum, yearsNum);
       return {
         main: pvCalc,
-        label: "Present Value",
+        label: t("planner.presentValue"),
         details: [
-          { l: "Future Amount", v: pvNum },
-          { l: "Discount", v: pvNum - pvCalc },
+          { l: t("planner.futureAmount"), v: pvNum },
+          { l: t("planner.discount"), v: pvNum - pvCalc },
         ],
       };
     }
@@ -137,11 +139,11 @@ export default function PlannerScreen() {
       }
       return {
         main: bal,
-        label: "Projected Balance",
+        label: t("planner.projectedBalance"),
         rows,
         details: [
-          { l: "Total Contributions", v: pvNum + pmtNum * 12 * yearsNum },
-          { l: "Total Interest Earned", v: bal - pvNum - pmtNum * 12 * yearsNum },
+          { l: t("planner.totalContributions"), v: pvNum + pmtNum * 12 * yearsNum },
+          { l: t("planner.totalInterestEarned"), v: bal - pvNum - pmtNum * 12 * yearsNum },
         ],
       };
     }
@@ -176,14 +178,14 @@ export default function PlannerScreen() {
       });
       return {
         main: requiredPmt,
-        label: `Required ${FREQ_MAP[contribFreq].label} Payment`,
+        label: t("planner.requiredPayment", { freq: FREQ_MAP[contribFreq].label }),
         details: [
-          { l: "Target Future Value", v: targetFvNum },
-          { l: "PV Growth (lump sum)", v: pvGrowth },
-          { l: "Funding Gap", v: Math.max(gap, 0) },
-          { l: "Annual Contribution", v: annualContrib },
-          { l: "Total Contributions", v: totalContributed },
-          { l: "Total Interest Earned", v: totalInterest },
+          { l: t("planner.targetFutureValue"), v: targetFvNum },
+          { l: t("planner.pvGrowth"), v: pvGrowth },
+          { l: t("planner.fundingGap"), v: Math.max(gap, 0) },
+          { l: t("planner.annualContribution"), v: annualContrib },
+          { l: t("planner.totalContributions"), v: totalContributed },
+          { l: t("planner.totalInterestEarned"), v: totalInterest },
         ],
         rows,
         goalMeta: { wealthMultiple, realRate, realFV, pvGrowth, hasInflation: inflNum > 0, sensitivity, milestones, alreadyMet: gap <= 0 },
@@ -191,21 +193,21 @@ export default function PlannerScreen() {
     }
 
     // ── Loan Amortization ──
-    if (rateNum === 0 || yearsNum === 0) return { main: 0, label: "Monthly Payment", details: [] };
+    if (rateNum === 0 || yearsNum === 0) return { main: 0, label: t("planner.monthlyPayment"), details: [] };
     const monthRate = rateNum / 12;
     const nMonths = yearsNum * 12;
     const monthlyPmt = pvNum * (monthRate * Math.pow(1 + monthRate, nMonths)) / (Math.pow(1 + monthRate, nMonths) - 1);
     const totalPaid = monthlyPmt * nMonths;
     return {
       main: monthlyPmt,
-      label: "Monthly Payment",
+      label: t("planner.monthlyPayment"),
       details: [
-        { l: "Loan Amount", v: pvNum },
+        { l: t("planner.loanAmount"), v: pvNum },
         { l: "Total Paid", v: totalPaid },
-        { l: "Total Interest", v: totalPaid - pvNum },
+        { l: t("planner.totalInterest"), v: totalPaid - pvNum },
       ],
     };
-  }, [mode, pvNum, rateNum, yearsNum, pmtNum, targetFvNum, contribFreq, inflNum]);
+  }, [mode, pvNum, rateNum, yearsNum, pmtNum, targetFvNum, contribFreq, inflNum, t]);
 
   const projectionRows = (result as any).rows as ProjectionRow[] | undefined;
   const goalMeta = (result as any).goalMeta as {
@@ -218,16 +220,16 @@ export default function PlannerScreen() {
       style={ss.container}
       contentContainerStyle={[ss.content, isDesktop && { maxWidth: 700, alignSelf: "center", width: "100%" }]}
     >
-      <Text style={[ss.title, { marginBottom: 12 }]}>Financial Planner</Text>
+      <Text style={[ss.title, { marginBottom: 12 }]}>{t("planner.title")}</Text>
 
       {/* Mode Tabs */}
       <View style={s.modeRow}>
         {([
-          { key: "fv", label: "Future Value", icon: "arrow-up" as const },
-          { key: "pv", label: "Present Value", icon: "arrow-down" as const },
-          { key: "savings", label: "Savings", icon: "line-chart" as const },
-          { key: "goal", label: "Goal", icon: "bullseye" as const },
-          { key: "loan", label: "Loan", icon: "home" as const },
+          { key: "fv", label: t("planner.futureValue"), icon: "arrow-up" as const },
+          { key: "pv", label: t("planner.presentValue"), icon: "arrow-down" as const },
+          { key: "savings", label: t("planner.savings"), icon: "line-chart" as const },
+          { key: "goal", label: t("planner.goal"), icon: "bullseye" as const },
+          { key: "loan", label: t("planner.loan"), icon: "home" as const },
         ]).map((m) => (
           <Pressable
             key={m.key}
@@ -253,7 +255,7 @@ export default function PlannerScreen() {
         {/* Goal: Target FV first */}
         {mode === "goal" && (
           <View style={s.inputRow}>
-            <Text style={[s.inputLabel, { color: colors.textSecondary }]}>Target Future Value</Text>
+            <Text style={[s.inputLabel, { color: colors.textSecondary }]}>{t("planner.targetFutureValue")}</Text>
             <TextInput
               value={targetFv}
               onChangeText={setTargetFv}
@@ -266,7 +268,7 @@ export default function PlannerScreen() {
         )}
         <View style={s.inputRow}>
           <Text style={[s.inputLabel, { color: colors.textSecondary }]}>
-            {mode === "loan" ? "Loan Amount" : mode === "pv" ? "Future Amount" : "Initial Investment"}
+            {mode === "loan" ? t("planner.loanAmount") : mode === "pv" ? t("planner.futureAmount") : t("planner.initialInvestment")}
           </Text>
           <TextInput
             value={pv}
@@ -277,7 +279,7 @@ export default function PlannerScreen() {
         </View>
         <View style={s.inputRow}>
           <Text style={[s.inputLabel, { color: colors.textSecondary }]}>
-            {mode === "goal" ? "Expected Annual Return (%)" : "Annual Rate (%)"}
+            {mode === "goal" ? t("planner.expectedAnnualReturn") : t("planner.annualRate")}
           </Text>
           <TextInput
             value={rate}
@@ -288,7 +290,7 @@ export default function PlannerScreen() {
         </View>
         <View style={s.inputRow}>
           <Text style={[s.inputLabel, { color: colors.textSecondary }]}>
-            {mode === "goal" ? "Investment Horizon (Years)" : "Years"}
+            {mode === "goal" ? t("planner.investmentHorizon") : t("planner.years")}
           </Text>
           <TextInput
             value={years}
@@ -300,7 +302,7 @@ export default function PlannerScreen() {
         {(mode === "fv" || mode === "savings") && (
           <View style={s.inputRow}>
             <Text style={[s.inputLabel, { color: colors.textSecondary }]}>
-              {mode === "savings" ? "Monthly Contribution" : "Annual Payment (PMT)"}
+              {mode === "savings" ? t("planner.savingsMonthlyContrib") : t("planner.annualPayment")}
             </Text>
             <TextInput
               value={pmt}
@@ -314,7 +316,7 @@ export default function PlannerScreen() {
         {mode === "goal" && (
           <>
             <View style={s.inputRow}>
-              <Text style={[s.inputLabel, { color: colors.textSecondary }]}>Inflation Rate (%)</Text>
+              <Text style={[s.inputLabel, { color: colors.textSecondary }]}>{t("planner.inflationRate")}</Text>
               <TextInput
                 value={inflation}
                 onChangeText={setInflation}
@@ -325,7 +327,7 @@ export default function PlannerScreen() {
               />
             </View>
             <View style={s.inputRow}>
-              <Text style={[s.inputLabel, { color: colors.textSecondary }]}>Contribution Frequency</Text>
+              <Text style={[s.inputLabel, { color: colors.textSecondary }]}>{t("planner.contributionFrequency")}</Text>
               <View style={s.freqRow}>
                 {(["monthly", "quarterly", "annual"] as const).map((f) => (
                   <Pressable
@@ -340,7 +342,7 @@ export default function PlannerScreen() {
                     ]}
                   >
                     <Text style={{ color: contribFreq === f ? "#fff" : colors.textSecondary, fontSize: 12, fontWeight: "600" }}>
-                      {FREQ_MAP[f].label}
+                      {t("planner." + f)}
                     </Text>
                   </Pressable>
                 ))}
@@ -355,9 +357,9 @@ export default function PlannerScreen() {
         {goalMeta?.alreadyMet ? (
           <>
             <FontAwesome name="check-circle" size={28} color={colors.success} style={{ marginBottom: 4 }} />
-            <Text style={[s.resultLabel, { color: colors.success }]}>Target Already Met!</Text>
+            <Text style={[s.resultLabel, { color: colors.success }]}>{t("planner.targetAlreadyMet")}</Text>
             <Text style={{ color: colors.textSecondary, fontSize: 13, textAlign: "center", marginTop: 4 }}>
-              Your initial investment of {formatCurrency(pvNum, "KWD")} compounding at {rate}% exceeds the target in {years} years.
+              {t("planner.alreadyMetDesc", { amount: formatCurrency(pvNum, "KWD"), rate, years })}
             </Text>
           </>
         ) : (
@@ -368,7 +370,7 @@ export default function PlannerScreen() {
             </Text>
             {mode === "goal" && (
               <Text style={{ color: colors.textMuted, fontSize: 11, marginTop: 2 }}>
-                {FREQ_MAP[contribFreq].adj} for {years} years
+                {t("planner.forYears", { adj: FREQ_MAP[contribFreq].adj, years })}
               </Text>
             )}
           </>
@@ -390,18 +392,18 @@ export default function PlannerScreen() {
       {/* ── Goal: Key Metrics ─────────────────────────────────────── */}
       {goalMeta && !goalMeta.alreadyMet && (
         <View style={[s.metricsCard, { backgroundColor: colors.bgCard, borderColor: colors.borderColor }]}>
-          <Text style={[s.chartTitle, { color: colors.textPrimary }]}>Key Metrics</Text>
+          <Text style={[s.chartTitle, { color: colors.textPrimary }]}>{t("planner.keyMetrics")}</Text>
           <View style={s.metricsGrid}>
-            <MetricBadge icon="line-chart" label="Wealth Multiple" value={`${goalMeta.wealthMultiple.toFixed(2)}x`}
-              sub="FV / Total Invested" colors={colors} accent={colors.accentPrimary} />
-            <MetricBadge icon="percent" label="Real Return" value={`${(goalMeta.realRate * 100).toFixed(2)}%`}
-              sub={goalMeta.hasInflation ? "Fisher-adjusted" : "No inflation adj."} colors={colors} accent={colors.success} />
+            <MetricBadge icon="line-chart" label={t("planner.wealthMultiple")} value={`${goalMeta.wealthMultiple.toFixed(2)}x`}
+              sub={t("planner.fvTotalInvested")} colors={colors} accent={colors.accentPrimary} />
+            <MetricBadge icon="percent" label={t("planner.realReturn")} value={`${(goalMeta.realRate * 100).toFixed(2)}%`}
+              sub={goalMeta.hasInflation ? t("planner.fisherAdjusted") : t("planner.noInflationAdj")} colors={colors} accent={colors.success} />
             {goalMeta.hasInflation && (
-              <MetricBadge icon="money" label="FV (Today's $)" value={formatCurrency(goalMeta.realFV, "KWD")}
-                sub="Purchasing power" colors={colors} accent={"#f59e0b"} />
+              <MetricBadge icon="money" label={t("planner.fvToday")} value={formatCurrency(goalMeta.realFV, "KWD")}
+                sub={t("planner.purchasingPower")} colors={colors} accent={"#f59e0b"} />
             )}
-            <MetricBadge icon="arrow-circle-up" label="PV Growth" value={formatCurrency(goalMeta.pvGrowth, "KWD")}
-              sub="Initial inv. compounded" colors={colors} accent={"#8b5cf6"} />
+            <MetricBadge icon="arrow-circle-up" label={t("planner.pvGrowth")} value={formatCurrency(goalMeta.pvGrowth, "KWD")}
+              sub={t("planner.initialInvCompounded")} colors={colors} accent={"#8b5cf6"} />
           </View>
         </View>
       )}
@@ -409,16 +411,16 @@ export default function PlannerScreen() {
       {/* ── Goal: Sensitivity Analysis ────────────────────────────── */}
       {goalMeta && !goalMeta.alreadyMet && goalMeta.sensitivity.length > 0 && (
         <View style={[s.sensCard, { backgroundColor: colors.bgCard, borderColor: colors.borderColor }]}>
-          <Text style={[s.chartTitle, { color: colors.textPrimary }]}>Sensitivity Analysis</Text>
+          <Text style={[s.chartTitle, { color: colors.textPrimary }]}>{t("planner.sensitivityAnalysis")}</Text>
           <Text style={{ color: colors.textMuted, fontSize: 11, marginBottom: 10 }}>
-            How required payment changes with different return assumptions
+            {t("planner.sensitivityDescFull")}
           </Text>
           <View style={[s.sensHeaderRow, { borderBottomColor: colors.borderColor }]}>
             <Text style={[s.sensCell, { color: colors.textMuted, fontWeight: "700" }]}>Return</Text>
             <Text style={[s.sensCell, { color: colors.textMuted, fontWeight: "700", textAlign: "right" }]}>
-              {FREQ_MAP[contribFreq].label} PMT
+              {t("planner.freqPMT", { freq: FREQ_MAP[contribFreq].label })}
             </Text>
-            <Text style={[s.sensCell, { color: colors.textMuted, fontWeight: "700", textAlign: "right" }]}>vs Base</Text>
+            <Text style={[s.sensCell, { color: colors.textMuted, fontWeight: "700", textAlign: "right" }]}>{t("planner.vsBase")}</Text>
           </View>
           {goalMeta.sensitivity.map((row) => {
             const basePmt = goalMeta.sensitivity.find((r) => r.delta === 0)?.pmt ?? 0;
@@ -427,7 +429,7 @@ export default function PlannerScreen() {
             return (
               <View key={row.rateLabel} style={[s.sensRow, { borderBottomColor: colors.borderColor }, isBase && { backgroundColor: colors.accentPrimary + "10" }]}>
                 <Text style={[s.sensCell, { color: isBase ? colors.accentPrimary : colors.textPrimary, fontWeight: isBase ? "700" : "400" }]}>
-                  {row.rateLabel}{isBase ? " (base)" : ""}
+                  {row.rateLabel}{isBase ? " " + t("planner.base") : ""}
                 </Text>
                 <Text style={[s.sensCell, { textAlign: "right", color: colors.textPrimary, fontWeight: isBase ? "700" : "500", fontVariant: ["tabular-nums"] }]}>
                   {formatCurrency(Math.max(row.pmt, 0), "KWD")}
@@ -444,7 +446,7 @@ export default function PlannerScreen() {
       {/* ── Goal: Milestone Tracker ───────────────────────────────── */}
       {goalMeta && !goalMeta.alreadyMet && (
         <View style={[s.metricsCard, { backgroundColor: colors.bgCard, borderColor: colors.borderColor }]}>
-          <Text style={[s.chartTitle, { color: colors.textPrimary }]}>Milestone Tracker</Text>
+          <Text style={[s.chartTitle, { color: colors.textPrimary }]}>{t("planner.milestoneTracker")}</Text>
           <View style={{ gap: 10 }}>
             {goalMeta.milestones.map((m) => {
               const barPct = m.year && yearsNum > 0 ? (m.year / yearsNum) * 100 : 0;
@@ -461,7 +463,7 @@ export default function PlannerScreen() {
                     </View>
                   </View>
                   <Text style={{ color: m.year ? colors.textPrimary : colors.textMuted, fontSize: 13, fontWeight: "600", minWidth: 52, textAlign: "right" }}>
-                    {m.year ? `Year ${m.year}` : "N/A"}
+                    {m.year ? t("planner.yearN", { n: m.year }) : t("planner.na")}
                   </Text>
                 </View>
               );
@@ -507,7 +509,7 @@ export default function PlannerScreen() {
           return (
             <View style={[s.chartCard, { backgroundColor: colors.bgCard, borderColor: colors.borderColor }]}>
               <Text style={[s.chartTitle, { color: colors.textPrimary }]}>
-                {mode === "loan" ? "Payment Breakdown" : "Growth Breakdown"}
+                {mode === "loan" ? t("planner.paymentBreakdown") : t("planner.growthBreakdown")}
               </Text>
 
               {/* Stacked horizontal bar */}
@@ -534,7 +536,7 @@ export default function PlannerScreen() {
                   <View style={[s.legendDot, { backgroundColor: principalColor }]} />
                   <View>
                     <Text style={[s.legendLabel, { color: colors.textSecondary }]}>
-                      {mode === "loan" ? "Principal" : "Total Invested"}
+                      {mode === "loan" ? t("planner.principal") : t("planner.totalInvested")}
                     </Text>
                     <Text style={[s.legendValue, { color: colors.textPrimary }]}>
                       {formatCurrency(principal, "KWD")} ({principalPct.toFixed(1)}%)
@@ -545,7 +547,7 @@ export default function PlannerScreen() {
                   <View style={[s.legendDot, { backgroundColor: interestColor }]} />
                   <View>
                     <Text style={[s.legendLabel, { color: colors.textSecondary }]}>
-                      {mode === "loan" ? "Total Interest" : "Interest Earned"}
+                      {mode === "loan" ? t("planner.totalInterest") : t("planner.interestEarned")}
                     </Text>
                     <Text style={[s.legendValue, { color: colors.textPrimary }]}>
                       {formatCurrency(interest, "KWD")} ({interestPct.toFixed(1)}%)
@@ -562,16 +564,16 @@ export default function PlannerScreen() {
       {/* Projection Table */}
       {projectionRows && projectionRows.length > 0 && (
         <>
-          <Text style={[s.sectionTitle, { color: colors.textPrimary }]}>Year-by-Year Projection</Text>
+          <Text style={[s.sectionTitle, { color: colors.textPrimary }]}>{t("planner.yearByYear")}</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator>
             <View style={[s.table, { borderColor: colors.borderColor }]}>
               <View style={[s.tableRow, { backgroundColor: colors.bgSecondary, borderBottomColor: colors.borderColor }]}>
-                <Text style={[s.th, { color: colors.textSecondary }]}>Year</Text>
-                <Text style={[s.th, { color: colors.textSecondary }]}>Start</Text>
-                <Text style={[s.th, { color: colors.textSecondary }]}>Added</Text>
-                <Text style={[s.th, { color: colors.textSecondary }]}>Interest</Text>
-                <Text style={[s.th, { color: colors.textSecondary }]}>End</Text>
-                {mode === "goal" && <Text style={[s.th, { color: colors.textSecondary }]}>% of Goal</Text>}
+                <Text style={[s.th, { color: colors.textSecondary }]}>{t("planner.yearCol")}</Text>
+                <Text style={[s.th, { color: colors.textSecondary }]}>{t("planner.startCol")}</Text>
+                <Text style={[s.th, { color: colors.textSecondary }]}>{t("planner.addedCol")}</Text>
+                <Text style={[s.th, { color: colors.textSecondary }]}>{t("planner.interestCol")}</Text>
+                <Text style={[s.th, { color: colors.textSecondary }]}>{t("planner.endCol")}</Text>
+                {mode === "goal" && <Text style={[s.th, { color: colors.textSecondary }]}>{t("planner.pctOfGoal")}</Text>}
               </View>
               {projectionRows.map((row) => {
                 const pctOfGoal = mode === "goal" && targetFvNum > 0 ? (row.endBalance / targetFvNum) * 100 : null;

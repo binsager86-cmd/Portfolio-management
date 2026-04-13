@@ -214,7 +214,7 @@ function OverviewScreen() {
       const result = await saveSnapshot();
       await queryClient.invalidateQueries({ queryKey: ["portfolio-overview"] });
       await queryClient.invalidateQueries({ queryKey: ["snapshots"] });
-      const msg = `Snapshot ${result.action}: ${result.message}\nPortfolio Value: ${formatCurrency(result.portfolio_value)} KWD`;
+      const msg = t('dashboard.snapshotMsg', { action: result.action, message: result.message, value: formatCurrency(result.portfolio_value) });
       if (Platform.OS === "web") window.alert(msg);
       else Alert.alert(t('dashboard.snapshotSaved'), msg);
     } catch (e: any) {
@@ -605,7 +605,7 @@ function OverviewScreen() {
         <MetricCard
           label={t('dashboard.totalProfit')}
           value={formatSignedCurrency(metrics.totalProfit)}
-          subline={`Incl. ${formatCurrency(metrics.totalDividends)} dividends`}
+          subline={t('dashboard.inclDividends', { amount: formatCurrency(metrics.totalDividends) })}
           trend={metrics.totalProfit >= 0 ? "up" : "down"}
           icon="trophy"
           accentColor={colors.accentTertiary}
@@ -629,7 +629,7 @@ function OverviewScreen() {
           width={isPhone ? "48%" : "24%"}
         />
         <MetricCard
-          label="MWRR (IRR)"
+          label={t('dashboard.mwrr')}
           value={formatPercent(data?.mwrr_percent ?? perfData?.mwrr_percent ?? null)}
           subline={t('dashboard.moneyWeightedReturn')}
           icon="line-chart"
@@ -637,9 +637,9 @@ function OverviewScreen() {
           width={isPhone ? "48%" : "24%"}
         />
         <MetricCard
-          label="Sharpe Ratio"
+          label={t('dashboard.sharpeRatio')}
           value={riskData?.sharpe_ratio != null ? riskData.sharpe_ratio.toFixed(2) : "—"}
-          subline={customRfRate != null ? `Rf: ${customRfRate.toFixed(2)}%` : "Set Rf rate →"}
+          subline={customRfRate != null ? t('dashboard.rfRate', { rate: customRfRate.toFixed(2) }) : t('dashboard.setRfRate')}
           icon="balance-scale"
           accentColor="#06b6d4"
           width={isPhone ? "48%" : "24%"}
@@ -714,7 +714,7 @@ function OverviewScreen() {
 
       <View style={[styles.grid, { gap: spacing.gridGap, marginBottom: spacing.sectionGap }]}>
         <MetricCard
-          label="Sortino Ratio"
+          label={t('dashboard.sortinoRatio')}
           value={riskData?.sortino_ratio != null ? riskData.sortino_ratio.toFixed(2) : "—"}
           subline={t('dashboard.downsideRiskAdjusted')}
           icon="shield"
@@ -722,7 +722,7 @@ function OverviewScreen() {
           width={isPhone ? "48%" : "24%"}
         />
         <MetricCard
-          label="CAGR"
+          label={t('dashboard.cagr')}
           value={formatPercent(metrics.cagr)}
           subline={t('dashboard.compoundAnnualGrowth')}
           icon="line-chart"
@@ -730,25 +730,25 @@ function OverviewScreen() {
           width={isPhone ? "48%" : "24%"}
         />
         <MetricCard
-          label="Win Rate"
+          label={t('dashboard.winRate')}
           value={`${metrics.winRate.toFixed(1)}%`}
-          subline={`${metrics.profitableTrades}/${metrics.totalTrades} trades`}
+          subline={t('dashboard.winRateSubline', { profitable: metrics.profitableTrades, total: metrics.totalTrades })}
           icon="trophy"
           accentColor={metrics.winRate >= 50 ? colors.success : colors.danger}
           width={isPhone ? "48%" : "24%"}
         />
         <MetricCard
-          label="Profit Factor"
+          label={t('dashboard.profitFactor')}
           value={metrics.profitFactor === Infinity ? "∞" : metrics.profitFactor.toFixed(2)}
-          subline={`Gain: ${formatCurrency(metrics.grossProfit)} / Loss: ${formatCurrency(metrics.grossLoss)}`}
+          subline={t('dashboard.profitFactorSubline', { gain: formatCurrency(metrics.grossProfit), loss: formatCurrency(metrics.grossLoss) })}
           icon="balance-scale"
           accentColor={metrics.profitFactor >= 1 ? colors.success : colors.danger}
           width={isPhone ? "48%" : "24%"}
         />
         <MetricCard
-          label="Cash Yield Div"
+          label={t('dashboard.cashYieldDiv')}
           value={formatPercent(metrics.cashYieldDiv)}
-          subline={`Divs: ${formatCurrency(metrics.totalDividends)}`}
+          subline={t('dashboard.divsSubline', { amount: formatCurrency(metrics.totalDividends) })}
           icon="money"
           accentColor="#8b5cf6"
           width={isPhone ? "48%" : "24%"}
@@ -760,7 +760,7 @@ function OverviewScreen() {
       {expertiseLevel !== "normal" && (
         <PortfolioChart
           data={chartData}
-          title="Total Portfolio Value Over Time"
+          title={t('dashboard.totalPortfolioOverTime')}
           style={{ marginTop: 8, marginBottom: 24 }}
           height={300}
         />
@@ -768,31 +768,31 @@ function OverviewScreen() {
 
       {/* ── Dividends Summary ── */}
       <Text style={[styles.sectionTitle, { color: dividendFocus ? colors.accentPrimary : colors.textSecondary, fontSize: Math.max(fonts.caption, 13) }]}>
-        {dividendFocus ? "💰 " : ""}Dividend Income
+        {dividendFocus ? "💰 " : ""}{t('dashboard.dividendIncome')}
       </Text>
       <View style={[styles.grid, { gap: spacing.gridGap, marginBottom: spacing.sectionGap }]}>
         <MetricCard
           emoji="💰"
-          label="Cash Dividends"
+          label={t('dashboard.cashDividends')}
           value={formatCurrency(metrics.totalDividends)}
-          subline={`Yield: ${formatPercent(metrics.cashYieldDiv)}`}
+          subline={t('dashboard.yieldSubline', { yield: formatPercent(metrics.cashYieldDiv) })}
           accentColor={colors.success}
           width={dividendFocus ? (isPhone ? "100%" : "32%") : (isPhone ? "48%" : "48%")}
         />
         <MetricCard
           emoji="📈"
-          label="Net Income"
+          label={t('dashboard.netIncome')}
           value={formatSignedCurrency(metrics.totalDividends - (data.total_fees ?? 0))}
-          subline="Dividends − Fees"
+          subline={t('dashboard.dividendsMinusFees')}
           trend={(metrics.totalDividends - (data.total_fees ?? 0)) >= 0 ? "up" : "down"}
           width={dividendFocus ? (isPhone ? "48%" : "32%") : (isPhone ? "48%" : "48%")}
         />
         {dividendFocus && (
           <MetricCard
             emoji="📊"
-            label="Yield on Cost"
+            label={t('dashboard.yieldOnCost')}
             value={formatPercent(metrics.cashYieldDiv)}
-            subline={`Deposits: ${formatCurrency(metrics.totalDeposits)}`}
+            subline={t('dashboard.depositsSubline', { amount: formatCurrency(metrics.totalDeposits) })}
             accentColor="#8b5cf6"
             width={isPhone ? "48%" : "32%"}
           />
@@ -816,7 +816,7 @@ function OverviewScreen() {
             <Text
               style={[styles.sectionTitle, { color: colors.textSecondary, fontSize: Math.max(fonts.caption, 13) }]}
             >
-              By Portfolio
+              {t('dashboard.byPortfolio')}
             </Text>
             <View
               style={[
@@ -882,7 +882,7 @@ function OverviewScreen() {
 
       {/* ── FX Footer ── */}
       <Text style={[styles.fxNote, { color: colors.textMuted }]}>
-        USD/KWD Rate: {data.usd_kwd_rate?.toFixed(6) ?? "—"}
+        {t('dashboard.fxRate', { rate: data.usd_kwd_rate?.toFixed(6) ?? "—" })}
       </Text>
     </>)}
     </ScrollView>

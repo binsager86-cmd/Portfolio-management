@@ -50,27 +50,29 @@ const alertConditions: AlertCondition[] = [
   "portfolio-value-below",
 ];
 
-const alertFormSchema = z
-  .object({
-    condition: z.enum(alertConditions as [AlertCondition, ...AlertCondition[]]),
-    symbol: z.string().optional(),
-    threshold: z
-      .string()
-      .min(1, "Threshold is required")
-      .refine((v) => !isNaN(parseFloat(v)) && parseFloat(v) > 0, "Must be a positive number"),
-    label: z.string().optional(),
-  })
-  .refine(
-    (data) => {
-      const isPortfolio =
-        data.condition === "portfolio-value-above" ||
-        data.condition === "portfolio-value-below";
-      return isPortfolio || (data.symbol && data.symbol.trim().length > 0);
-    },
-    { message: "Stock symbol is required", path: ["symbol"] },
-  );
+function createAlertFormSchema(t: (key: string) => string) {
+  return z
+    .object({
+      condition: z.enum(alertConditions as [AlertCondition, ...AlertCondition[]]),
+      symbol: z.string().optional(),
+      threshold: z
+        .string()
+        .min(1, t("alerts.thresholdRequired"))
+        .refine((v) => !isNaN(parseFloat(v)) && parseFloat(v) > 0, t("alerts.mustBePositive")),
+      label: z.string().optional(),
+    })
+    .refine(
+      (data) => {
+        const isPortfolio =
+          data.condition === "portfolio-value-above" ||
+          data.condition === "portfolio-value-below";
+        return isPortfolio || (data.symbol && data.symbol.trim().length > 0);
+      },
+      { message: t("alerts.stockSymbolRequired"), path: ["symbol"] },
+    );
+}
 
-type AlertFormData = z.infer<typeof alertFormSchema>;
+type AlertFormData = z.infer<ReturnType<typeof createAlertFormSchema>>;
 
 // ── Condition config ─────────────────────────────────────────────────
 
@@ -160,7 +162,7 @@ export default function AlertsScreen() {
         {/* ── Active Alerts ── */}
         {loading ? (
           <Text style={{ color: colors.textMuted, textAlign: "center", padding: 20 }}>
-            Loading…
+            {t("app.loading")}
           </Text>
         ) : rules.length === 0 ? (
           <View
@@ -193,7 +195,7 @@ export default function AlertsScreen() {
               <View style={st.ruleTop}>
                 <View style={{ flex: 1 }}>
                   <Text style={[st.ruleSymbol, { color: colors.accentSecondary }]}>
-                    {rule.symbol ?? "Portfolio"}
+                    {rule.symbol ?? t("alerts.portfolio")}
                   </Text>
                   <Text style={[st.ruleCondition, { color: colors.textSecondary }]}>
                     {conditionLabel(rule.condition)}: {rule.threshold}
@@ -264,6 +266,7 @@ function AddAlertModal({
   colors: any;
 }) {
   const { t } = useTranslation();
+  const alertFormSchema = useMemo(() => createAlertFormSchema(t), [t]);
   const {
     control,
     handleSubmit,
@@ -376,7 +379,7 @@ function AddAlertModal({
             {!isPortfolio && (
               <>
                 <Text style={[st.fieldLabel, { color: colors.textSecondary }]}>
-                  Stock Symbol
+                  {t("alerts.stockSymbol")}
                 </Text>
                 <Controller
                   control={control}
@@ -446,7 +449,7 @@ function AddAlertModal({
                             </ScrollView>
                           ) : (
                             <Text style={{ color: colors.textMuted, fontSize: 12, textAlign: "center", paddingVertical: 12 }}>
-                              No stocks found. Type symbol manually below.
+                              {t("alerts.noStocksFound")}
                             </Text>
                           )}
 
@@ -455,7 +458,7 @@ function AddAlertModal({
                             <TextInput
                               value={value}
                               onChangeText={(t) => onChange(t.toUpperCase().trim())}
-                              placeholder="Or type symbol manually"
+                              placeholder={t("alerts.orTypeManually")}
                               placeholderTextColor={colors.textMuted}
                               autoCapitalize="characters"
                               style={[st.input, { backgroundColor: colors.bgSecondary, color: colors.textPrimary, borderColor: colors.borderColor, flex: 1 }]}
@@ -477,8 +480,8 @@ function AddAlertModal({
             {/* Threshold */}
             <Text style={[st.fieldLabel, { color: colors.textSecondary }]}>
               {watchCondition === "daily-change-pct"
-                ? "Change % Threshold"
-                : "Price / Value"}
+                ? t("alerts.changePctThreshold")
+                : t("alerts.priceValue")}
             </Text>
             <Controller
               control={control}
@@ -499,7 +502,7 @@ function AddAlertModal({
                   onChangeText={onChange}
                   onBlur={onBlur}
                   placeholder={
-                    watchCondition === "daily-change-pct" ? "e.g. 5" : "e.g. 0.350"
+                    watchCondition === "daily-change-pct" ? t("alerts.placeholderThresholdPct") : t("alerts.placeholderThresholdPrice")
                   }
                   placeholderTextColor={colors.textMuted}
                   keyboardType="decimal-pad"
@@ -514,7 +517,7 @@ function AddAlertModal({
 
             {/* Label */}
             <Text style={[st.fieldLabel, { color: colors.textSecondary }]}>
-              Label (optional)
+              {t("alerts.labelOptional")}
             </Text>
             <Controller
               control={control}
@@ -532,7 +535,7 @@ function AddAlertModal({
                   value={value}
                   onChangeText={onChange}
                   onBlur={onBlur}
-                  placeholder="e.g. KIPCO target reached"
+                  placeholder={t("alerts.placeholderLabel")}
                   placeholderTextColor={colors.textMuted}
                 />
               )}
@@ -582,7 +585,7 @@ function AddAlertModal({
                 ]}
               >
                 <Text style={[st.actionBtnText, { color: colors.textSecondary }]}>
-                  Cancel
+                  {t("app.cancel")}
                 </Text>
               </Pressable>
               <Pressable
@@ -595,7 +598,7 @@ function AddAlertModal({
                   color="#fff"
                   style={{ marginRight: 6 }}
                 />
-                <Text style={[st.actionBtnText, { color: "#fff" }]}>Save Alert</Text>
+                <Text style={[st.actionBtnText, { color: "#fff" }]}>{t("alerts.saveAlert")}</Text>
               </Pressable>
             </View>
           </ScrollView>

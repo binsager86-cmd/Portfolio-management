@@ -22,6 +22,7 @@ import { useResponsive } from "@/hooks/useResponsive";
 import { useAuthStore } from "@/services/authStore";
 import { useThemeStore } from "@/services/themeStore";
 import { ExpertiseLevel, useUserPrefsStore } from "@/src/store/userPrefsStore";
+import { useTranslation } from "react-i18next";
 
 // ── Shared icon helper ──────────────────────────────────────────────
 
@@ -42,6 +43,7 @@ export default function TabLayout() {
   const isAdmin = useAuthStore((s) => s.isAdmin);
   const { colors, toggle, mode } = useThemeStore();
   const { showSidebar, showHamburger, fonts } = useResponsive();
+  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
 
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -153,7 +155,7 @@ export default function TabLayout() {
           <Tabs.Screen
             name="index"
             options={{
-              title: "Overview",
+              title: t("nav.overview"),
               href: isAdmin ? null : undefined,
               tabBarIcon: ({ color }) => (
                 <TabBarIcon name="line-chart" color={color} />
@@ -163,7 +165,7 @@ export default function TabLayout() {
           <Tabs.Screen
             name="news"
             options={{
-              title: "News & Announcements",
+              title: t("nav.news"),
               href: isAdmin ? null : undefined,
               tabBarIcon: ({ color }) => (
                 <TabBarIcon name="newspaper-o" color={color} />
@@ -173,7 +175,7 @@ export default function TabLayout() {
           <Tabs.Screen
             name="market"
             options={{
-              title: "Market",
+              title: t("nav.market"),
               href: isAdmin ? null : undefined,
               tabBarIcon: ({ color }) => (
                 <TabBarIcon name="globe" color={color} />
@@ -183,7 +185,7 @@ export default function TabLayout() {
           <Tabs.Screen
             name="portfolio-analysis"
             options={{
-              title: "Holdings",
+              title: t("nav.holdings"),
               href: isAdmin ? null : undefined,
               tabBarIcon: ({ color }) => (
                 <TabBarIcon name="briefcase" color={color} />
@@ -194,7 +196,7 @@ export default function TabLayout() {
           <Tabs.Screen
             name="transactions"
             options={{
-              title: "Transactions",
+              title: t("nav.transactions"),
               href: isAdmin || !showSidebar ? null : undefined,
               tabBarIcon: ({ color }) => (
                 <TabBarIcon name="exchange" color={color} />
@@ -204,7 +206,7 @@ export default function TabLayout() {
           <Tabs.Screen
             name="deposits"
             options={{
-              title: "Deposits",
+              title: t("nav.deposits"),
               href: isAdmin || !showSidebar ? null : undefined,
               tabBarIcon: ({ color }) => (
                 <TabBarIcon name="bank" color={color} />
@@ -214,7 +216,7 @@ export default function TabLayout() {
           <Tabs.Screen
             name="trading"
             options={{
-              title: "Trading",
+              title: t("nav.trading"),
               href: isAdmin || !showSidebar ? null : (tabVisible("intermediate") ? undefined : null),
               tabBarIcon: ({ color }) => <TabBarIcon name="bar-chart-o" color={color} />,
             }}
@@ -222,7 +224,7 @@ export default function TabLayout() {
           <Tabs.Screen
             name="fundamental-analysis"
             options={{
-              title: "Analysis",
+              title: t("tabs.analysis"),
               href: isAdmin || !showSidebar ? null : (tabVisible("intermediate") ? undefined : null),
               tabBarIcon: ({ color }) => (
                 <TabBarIcon name="flask" color={color} />
@@ -233,7 +235,7 @@ export default function TabLayout() {
           <Tabs.Screen
             name="portfolio-tracker"
             options={{
-              title: "Tracker",
+              title: t("nav.tracker"),
               href: isAdmin || !showSidebar ? null : undefined,
               tabBarIcon: ({ color }) => <TabBarIcon name="camera" color={color} />,
             }}
@@ -241,7 +243,7 @@ export default function TabLayout() {
           <Tabs.Screen
             name="dividends"
             options={{
-              title: "Dividends",
+              title: t("nav.dividends"),
               href: isAdmin || !showSidebar ? null : undefined,
               tabBarIcon: ({ color }) => (
                 <TabBarIcon name="money" color={color} />
@@ -251,7 +253,7 @@ export default function TabLayout() {
           <Tabs.Screen
             name="alerts"
             options={{
-              title: "Alerts",
+              title: t("nav.alerts"),
               href: isAdmin || !showSidebar ? null : (tabVisible("intermediate") ? undefined : null),
               tabBarIcon: ({ color }) => (
                 <TabBarIcon name="bell" color={color} />
@@ -261,7 +263,7 @@ export default function TabLayout() {
           <Tabs.Screen
             name="planner"
             options={{
-              title: "Planner",
+              title: t("nav.planner"),
               href: isAdmin || !showSidebar ? null : undefined,
               tabBarIcon: ({ color }) => (
                 <TabBarIcon name="calculator" color={color} />
@@ -271,7 +273,7 @@ export default function TabLayout() {
           <Tabs.Screen
             name="pfm"
             options={{
-              title: "PFM",
+              title: t("nav.pfm"),
               href: isAdmin || !showSidebar ? null : (tabVisible("advanced") ? undefined : null),
               tabBarIcon: ({ color }) => <TabBarIcon name="pie-chart" color={color} />,
             }}
@@ -279,7 +281,7 @@ export default function TabLayout() {
           <Tabs.Screen
             name="integrity"
             options={{
-              title: "Integrity",
+              title: t("nav.integrity"),
               href: isAdmin || !showSidebar ? null : (tabVisible("advanced") ? undefined : null),
               tabBarIcon: ({ color }) => <TabBarIcon name="stethoscope" color={color} />,
             }}
@@ -287,7 +289,7 @@ export default function TabLayout() {
           <Tabs.Screen
             name="backup"
             options={{
-              title: "Backup",
+              title: t("nav.backup"),
               href: isAdmin || !showSidebar ? null : (tabVisible("advanced") ? undefined : null),
               tabBarIcon: ({ color }) => <TabBarIcon name="cloud-download" color={color} />,
             }}
@@ -295,7 +297,7 @@ export default function TabLayout() {
           <Tabs.Screen
             name="settings"
             options={{
-              title: "Settings",
+              title: t("nav.settings"),
               href: isAdmin || !showSidebar ? null : undefined,
               tabBarIcon: ({ color }) => <TabBarIcon name="cog" color={color} />
             }}
@@ -307,7 +309,7 @@ export default function TabLayout() {
           <Tabs.Screen
             name="admin"
             options={{
-              title: "Admin",
+              title: t("nav.admin"),
               href: isAdmin ? undefined : null,
               tabBarIcon: ({ color }) => (
                 <TabBarIcon name="shield" color={color} />

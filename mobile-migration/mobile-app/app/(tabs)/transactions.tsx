@@ -59,6 +59,7 @@ const TxnRow = React.memo(function TxnRow({
   onEdit?: (txn: TransactionRecord) => void;
   onDelete?: (txn: TransactionRecord) => void;
 }) {
+  const { t } = useTranslation();
   const isBuy = txn.txn_type === "Buy";
   const isDividend = txn.txn_type === "DIVIDEND_ONLY";
   const amount = isDividend
@@ -67,7 +68,7 @@ const TxnRow = React.memo(function TxnRow({
       ? txn.purchase_cost
       : txn.sell_value;
   const amountColor = isBuy ? colors.danger : colors.success;
-  const typeLabel = isDividend ? "CASH DIVIDEND" : isBuy ? "BUY" : "SELL";
+  const typeLabel = isDividend ? t("transactionsScreen.cashDividend") : isBuy ? t("transactionsScreen.buy") : t("transactionsScreen.sell");
   const icon = isDividend ? "money" : isBuy ? "arrow-down" : "arrow-up";
 
   return (
@@ -102,7 +103,7 @@ const TxnRow = React.memo(function TxnRow({
             {txn.stock_symbol}
           </Text>
           <Text style={[styles.meta, { color: colors.textSecondary }]}>
-            {typeLabel} · {isDividend ? "" : `${txn.shares} shares · `}{txn.txn_date}
+            {typeLabel} · {isDividend ? "" : `${txn.shares} ${t("transactionsScreen.shares")} · `}{txn.txn_date}
           </Text>
         </View>
       </View>
@@ -284,13 +285,13 @@ function TransactionsScreen() {
   }, [router]);
 
   const handleDelete = (txn: TransactionRecord) => {
-    const msg = `Delete ${txn.txn_type} of ${txn.shares} ${txn.stock_symbol}?`;
+    const msg = t("transactionsScreen.deleteConfirm", { type: txn.txn_type, shares: txn.shares, symbol: txn.stock_symbol });
     if (Platform.OS === "web") {
       if (window.confirm(msg)) deleteMutation.mutate(txn.id);
     } else {
-      Alert.alert("Delete Transaction", msg, [
-        { text: "Cancel", style: "cancel" },
-        { text: "Delete", style: "destructive", onPress: () => deleteMutation.mutate(txn.id) },
+      Alert.alert(t("transactionsScreen.deleteTransaction"), msg, [
+        { text: t("app.cancel"), style: "cancel" },
+        { text: t("app.delete"), style: "destructive", onPress: () => deleteMutation.mutate(txn.id) },
       ]);
     }
   };
@@ -410,7 +411,7 @@ function TransactionsScreen() {
   if (isError)
     return (
       <ErrorScreen
-        message={error?.message ?? "Failed to load transactions"}
+        message={error?.message ?? t("transactionsScreen.failedToLoad")}
         onRetry={refetch}
       />
     );
@@ -432,10 +433,10 @@ function TransactionsScreen() {
       >
         <View>
           <Text style={[styles.title, { color: colors.textPrimary }]}>
-            Transactions
+            {t("transactionsScreen.title")}
           </Text>
           <Text style={[styles.count, { color: colors.textSecondary }]}>
-            {data?.count ?? 0} total
+            {t("transactionsScreen.total", { count: data?.count ?? 0 })}
           </Text>
         </View>
         <KfhTradeImportButton portfolio="KFH" onImportComplete={handleImportComplete} />
@@ -446,7 +447,7 @@ function TransactionsScreen() {
         {[undefined, "KFH", "BBYN", "USA"].map((pf) => (
           <FilterChip
             key={pf ?? "all"}
-            label={pf ?? "All"}
+            label={pf ?? t("transactionsScreen.all")}
             active={portfolioFilter === pf}
             onPress={() => { setPortfolioFilter(pf); setPage(1); }}
             colors={colors}
@@ -456,7 +457,7 @@ function TransactionsScreen() {
         {[undefined, "Buy", "Sell", "DIVIDEND_ONLY"].map((tp) => (
           <FilterChip
             key={tp ?? "any"}
-            label={tp === "DIVIDEND_ONLY" ? "Dividend" : tp ?? "All Types"}
+            label={tp === "DIVIDEND_ONLY" ? t("transactionsScreen.dividend") : tp ?? t("transactionsScreen.allTypes")}
             active={typeFilter === tp}
             onPress={() => setTypeFilter(tp)}
             activeColor={tp === "Buy" ? colors.danger : tp === "Sell" ? colors.success : tp === "DIVIDEND_ONLY" ? colors.accentPrimary : undefined}
@@ -513,13 +514,13 @@ function TransactionsScreen() {
             <Text
               style={[styles.emptyText, { color: colors.textSecondary }]}
             >
-              No transactions yet
+              {t("transactionsScreen.noTransactionsYet")}
             </Text>
             <Pressable
               onPress={() => router.push("/(tabs)/add-transaction" as any)}
               style={[{ backgroundColor: colors.accentPrimary, paddingHorizontal: 18, paddingVertical: 8, borderRadius: 8, marginTop: 12 }, Platform.OS === "web" ? ({ cursor: "pointer" } as any) : undefined]}
             >
-              <Text style={{ color: "#fff", fontWeight: "600", fontSize: 13 }}>Add Transaction</Text>
+              <Text style={{ color: "#fff", fontWeight: "600", fontSize: 13 }}>{t("transactionsScreen.addTransaction")}</Text>
             </Pressable>
           </View>
         }
