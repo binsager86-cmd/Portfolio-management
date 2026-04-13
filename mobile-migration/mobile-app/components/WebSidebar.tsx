@@ -116,7 +116,7 @@ export default function WebSidebar({ collapsed: collapsedProp, onToggleCollapse 
         {
           width: sidebarWidth,
           backgroundColor: colors.bgSecondary,
-          borderRightColor: colors.borderColor,
+          borderEndColor: colors.borderColor,
         },
       ]}
     >
@@ -160,7 +160,7 @@ export default function WebSidebar({ collapsed: collapsedProp, onToggleCollapse 
                       : pressed
                       ? colors.bgCardHover
                       : "transparent",
-                    borderLeftColor: active ? colors.accentPrimary : "transparent",
+                    borderStartColor: active ? colors.accentPrimary : "transparent",
                   },
                 ]}
                 accessibilityLabel={t('nav.' + item.label)}
@@ -244,7 +244,7 @@ const SIDEBAR_WIDTH = SIDEBAR_WIDTH_FULL; // backward compat export
 
 const s = StyleSheet.create({
   sidebar: {
-    borderRightWidth: 1,
+    borderEndWidth: 1,
     paddingTop: 24,
     paddingBottom: 16,
   },
@@ -281,19 +281,19 @@ const s = StyleSheet.create({
     alignItems: "center",
     paddingVertical: 11,
     paddingHorizontal: 20,
-    borderLeftWidth: 3,
+    borderStartWidth: 3,
     marginBottom: 1,
     minHeight: 44,
   },
   navItemCollapsed: {
     justifyContent: "center",
     paddingHorizontal: 0,
-    borderLeftWidth: 0,
+    borderStartWidth: 0,
   },
   navIcon: {
     width: 24,
     textAlign: "center",
-    marginRight: 12,
+    marginEnd: 12,
   },
   navLabel: {
     fontSize: 15,

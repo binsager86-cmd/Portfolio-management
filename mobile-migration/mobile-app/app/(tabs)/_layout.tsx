@@ -85,7 +85,7 @@ export default function TabLayout() {
       <View style={ls.content}>
         <Tabs
           tabBar={(props) =>
-            showSidebar || Platform.OS !== "web" ? null : (
+            showSidebar || Platform.OS === "web" ? null : (
               <AnimatedTabBar
                 {...props}
                 colors={colors}
@@ -95,7 +95,7 @@ export default function TabLayout() {
           }
           screenOptions={{
             // Hide default tab bar (we use custom AnimatedTabBar)
-            tabBarStyle: showSidebar ? { display: "none" } : undefined,
+            tabBarStyle: showSidebar || Platform.OS === "web" ? { display: "none" } : undefined,
             tabBarHideOnKeyboard: true,
             lazy: true,
             tabBarActiveTintColor: colors.accentPrimary,
