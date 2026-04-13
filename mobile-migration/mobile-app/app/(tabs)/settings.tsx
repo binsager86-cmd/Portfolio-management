@@ -68,7 +68,7 @@ export default function SettingsScreen() {
     if (!pendingLevel) return;
     setExpertiseLevel(pendingLevel);
     const config = EXPERTISE_LEVELS.find((l) => l.key === pendingLevel);
-    toast.success(t('settingsScreen.switchedToMode', { mode: config?.label ?? pendingLevel }));
+    toast.success(t('settingsScreen.switchedToMode', { mode: t(`settings.${pendingLevel}`) }));
     setPendingLevel(null);
   };
 
@@ -318,10 +318,10 @@ export default function SettingsScreen() {
                       fontWeight: "700",
                     }}
                   >
-                    {level.label}
+                    {t(`settings.${level.key}`)}
                   </Text>
                   <Text style={{ color: colors.textMuted, fontSize: 11, marginTop: 1 }}>
-                    {level.description}
+                    {t(`settings.${level.key}Desc`)}
                   </Text>
                 </View>
                 <View
@@ -762,10 +762,10 @@ export default function SettingsScreen() {
                     <FontAwesome name={config.icon as any} size={28} color={colors.accentPrimary} />
                   </View>
                   <Text style={[s.modalTitle, { color: colors.textPrimary }]}>
-                    {t('settingsScreen.changeTo', { level: config.label })}
+                    {t('settingsScreen.changeTo', { level: t(`settings.${pendingLevel}`) })}
                   </Text>
                   <Text style={{ color: colors.textSecondary, fontSize: 13, textAlign: "center", lineHeight: 19, marginTop: 4 }}>
-                    {config.description}
+                    {t(`settings.${pendingLevel}Desc`)}
                   </Text>
                 </View>
 
@@ -773,14 +773,14 @@ export default function SettingsScreen() {
                   <View style={{ alignItems: "center", flex: 1 }}>
                     <Text style={{ color: colors.textMuted, fontSize: 11 }}>{t('settingsScreen.current')}</Text>
                     <Text style={{ color: colors.textPrimary, fontWeight: "700", fontSize: 14, marginTop: 2 }}>
-                      {current?.label ?? preferences.expertiseLevel}
+                      {t(`settings.${preferences.expertiseLevel}`)}
                     </Text>
                   </View>
                   <FontAwesome name="arrow-right" size={14} color={colors.accentPrimary} />
                   <View style={{ alignItems: "center", flex: 1 }}>
                     <Text style={{ color: colors.textMuted, fontSize: 11 }}>{t('settingsScreen.new')}</Text>
                     <Text style={{ color: colors.accentPrimary, fontWeight: "700", fontSize: 14, marginTop: 2 }}>
-                      {config.label}
+                      {t(`settings.${pendingLevel}`)}
                     </Text>
                   </View>
                 </View>
