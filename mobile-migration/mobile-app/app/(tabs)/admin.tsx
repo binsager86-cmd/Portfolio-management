@@ -20,6 +20,7 @@ import { useAuthStore } from "@/services/authStore";
 import { useThemeStore } from "@/services/themeStore";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import React, { useCallback, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
     ActivityIndicator,
     Modal,
@@ -55,28 +56,30 @@ function formatDateTime(epoch: number | null): string {
   });
 }
 
-function timeAgo(epoch: number | null): string {
-  if (!epoch) return "Never";
+function timeAgo(epoch: number | null, t: (key: string, opts?: any) => string): string {
+  if (!epoch) return t("adminPanel.never");
   const now = Date.now() / 1000;
   const diff = now - epoch;
-  if (diff < 60) return "Just now";
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-  if (diff < 604800) return `${Math.floor(diff / 86400)}d ago`;
+  if (diff < 60) return t("adminPanel.justNow");
+  if (diff < 3600) return t("adminPanel.mAgo", { m: Math.floor(diff / 60) });
+  if (diff < 86400) return t("adminPanel.hAgo", { h: Math.floor(diff / 3600) });
+  if (diff < 604800) return t("adminPanel.dAgo", { d: Math.floor(diff / 86400) });
   return formatDate(epoch);
 }
 
 const TXN_CONFIG: Record<string, { label: string; icon: string; color: string }> = {
-  buy: { label: "Buy", icon: "arrow-up", color: "#3498db" },
-  sell: { label: "Sell", icon: "arrow-down", color: "#e74c3c" },
-  dividend: { label: "Dividend", icon: "gift", color: "#27ae60" },
-  deposit: { label: "Deposit", icon: "plus-circle", color: "#8e44ad" },
-  bonus: { label: "Bonus", icon: "star", color: "#f39c12" },
-  split: { label: "Split", icon: "columns", color: "#1abc9c" },
+  buy: { label: "adminPanel.buy", icon: "arrow-up", color: "#3498db" },
+  sell: { label: "adminPanel.sell", icon: "arrow-down", color: "#e74c3c" },
+  dividend: { label: "adminPanel.dividend", icon: "gift", color: "#27ae60" },
+  deposit: { label: "adminPanel.deposit", icon: "plus-circle", color: "#8e44ad" },
+  bonus: { label: "adminPanel.bonus", icon: "star", color: "#f39c12" },
+  split: { label: "adminPanel.split", icon: "columns", color: "#1abc9c" },
 };
 
-function getTxnConfig(type: string) {
-  return TXN_CONFIG[type] ?? { label: type, icon: "circle", color: "#95a5a6" };
+function getTxnConfig(type: string, t: (key: string) => string) {
+  const entry = TXN_CONFIG[type];
+  if (!entry) return { label: type, icon: "circle", color: "#95a5a6" };
+  return { label: t(entry.label), icon: entry.icon, color: entry.color };
 }
 
 /** Group users by registration day */
@@ -160,10 +163,10 @@ function TableHeader({
 // ── User Table Row ──────────────────────────────────────────────────
 
 function UserTableRow({
-  user, colors, fonts, isPhone, selected, onPress,
+  user, colors, fonts, isPhone, selected, onPress, t,
 }: {
   user: AdminUser; colors: any; fonts: any; isPhone: boolean;
-  selected: boolean; onPress: () => void;
+  selected: boolean; onPress: () => void; t: (key: string, opts?: any) => string;
 }) {
   const growthColor = user.growth_value >= 0 ? "#27ae60" : "#e74c3c";
   const growthSign = user.growth_value >= 0 ? "+" : "";
@@ -195,7 +198,7 @@ function UserTableRow({
               {fmtInt(user.total_value)}
             </Text>
             <Text style={{ color: colors.textMuted, fontSize: 11, marginTop: 1 }}>
-              Stocks: {fmtInt(user.stocks_value)} {"\u00B7"} Cash: {fmtInt(user.cash_balance)}
+              {t("adminPanel.stocks")} {fmtInt(user.stocks_value)} {"\u00B7"} {t("adminPanel.cash")} {fmtInt(user.cash_balance)}
             </Text>
             <Text style={{ color: growthColor, fontSize: fonts.caption, fontWeight: "600", marginTop: 2 }}>
               {growthSign}{fmtInt(user.growth_value)}
@@ -204,10 +207,10 @@ function UserTableRow({
         </View>
         <View style={st.userCardMeta}>
           <Text style={{ color: colors.textMuted, fontSize: 11 }}>
-            Registered {formatDate(user.created_at)}
+            {t("adminPanel.registered")} {formatDate(user.created_at)}
           </Text>
           <Text style={{ color: colors.textMuted, fontSize: 11 }}>
-            Last: {timeAgo(user.last_login)}
+            {t("adminPanel.last")} {timeAgo(user.last_login, t)}
           </Text>
         </View>
       </Pressable>
@@ -237,7 +240,7 @@ function UserTableRow({
         @{user.username}
       </Text>
       <Text style={[st.tableCell, { flex: 1.2, color: colors.textMuted, fontSize: fonts.body, textAlign: "center" }]}>
-        {timeAgo(user.last_login)}
+        {timeAgo(user.last_login, t)}
       </Text>
       <Text style={[st.tableCell, { flex: 1, color: colors.textPrimary, fontSize: fonts.body, textAlign: "center", fontWeight: "600" }]}>
         {fmtInt(user.stocks_value)}
@@ -258,11 +261,12 @@ function UserTableRow({
 // ── Activity Table Row ──────────────────────────────────────────────
 
 function ActivityTableRow({
-  activity, colors, fonts, isPhone,
+  activity, colors, fonts, isPhone, t,
 }: {
   activity: AdminActivity; colors: any; fonts: any; isPhone: boolean;
+  t: (key: string, opts?: any) => string;
 }) {
-  const cfg = getTxnConfig(activity.txn_type);
+  const cfg = getTxnConfig(activity.txn_type, t);
 
   if (isPhone) {
     return (
@@ -287,7 +291,7 @@ function ActivityTableRow({
             </Text>
             {activity.shares > 0 && (
               <Text style={{ color: colors.textMuted, fontSize: 11, marginTop: 1 }}>
-                {activity.shares} shares @ {activity.price > 0 ? formatCurrency(activity.price) : "\u2014"}
+                {t("adminPanel.sharesAt", { shares: activity.shares, price: activity.price > 0 ? formatCurrency(activity.price) : "\u2014" })}
               </Text>
             )}
           </View>
@@ -335,6 +339,7 @@ function AdminDashboardScreen() {
   const { colors } = useThemeStore();
   const { isPhone, fonts } = useResponsive();
   const isAdmin = useAuthStore((s) => s.isAdmin);
+  const { t } = useTranslation();
 
   const [activeSection, setActiveSection] = useState<"users" | "activities" | "manage">("users");
   const [activityPage, setActivityPage] = useState(1);
@@ -428,7 +433,7 @@ function AdminDashboardScreen() {
       <View style={[st.center, { backgroundColor: colors.bgPrimary, flex: 1 }]}>
         <FontAwesome name="lock" size={48} color={colors.textMuted} />
         <Text style={[st.noAccess, { color: colors.textMuted, fontSize: fonts.body }]}>
-          Admin access required
+          {t("adminPanel.adminAccessRequired")}
         </Text>
       </View>
     );
@@ -454,10 +459,10 @@ function AdminDashboardScreen() {
       <View style={st.header}>
         <View>
           <Text style={[st.pageTitle, { color: colors.textPrimary, fontSize: fonts.hero }]}>
-            Admin Dashboard
+            {t("adminPanel.title")}
           </Text>
           <Text style={{ color: colors.textMuted, fontSize: fonts.caption, marginTop: 2 }}>
-            System overview and user management
+            {t("adminPanel.subtitle")}
           </Text>
         </View>
       </View>
@@ -467,9 +472,9 @@ function AdminDashboardScreen() {
         <SummaryCard
           icon="users"
           iconColor="#3498db"
-          title="Registered Users"
+          title={t("adminPanel.registeredUsers")}
           value={userCount}
-          subtitle={newUsersToday > 0 ? `+${newUsersToday} today` : `${dailyRegistrations.length} registration days`}
+          subtitle={newUsersToday > 0 ? t("adminPanel.todayCount", { count: newUsersToday }) : t("adminPanel.registrationDays", { count: dailyRegistrations.length })}
           onPress={() => setActiveSection("users")}
           active={activeSection === "users"}
           colors={colors}
@@ -478,9 +483,9 @@ function AdminDashboardScreen() {
         <SummaryCard
           icon="exchange"
           iconColor="#27ae60"
-          title="Total Activities"
+          title={t("adminPanel.totalActivities")}
           value={totalActivities.toLocaleString()}
-          subtitle={activities.length > 0 ? `Latest: ${activities[0]?.txn_date || "\u2014"}` : "No activity"}
+          subtitle={activities.length > 0 ? t("adminPanel.latest", { time: activities[0]?.txn_date || "\u2014" }) : t("adminPanel.noActivity")}
           onPress={() => setActiveSection("activities")}
           active={activeSection === "activities"}
           colors={colors}
@@ -489,9 +494,9 @@ function AdminDashboardScreen() {
         <SummaryCard
           icon="cog"
           iconColor="#8e44ad"
-          title="Manage Users"
-          value="Manage"
-          subtitle="Add, edit & delete"
+          title={t("adminPanel.manageUsers")}
+          value={t("adminPanel.manage")}
+          subtitle={t("adminPanel.addEditDelete")}
           onPress={() => setActiveSection("manage")}
           active={activeSection === "manage"}
           colors={colors}
@@ -506,7 +511,7 @@ function AdminDashboardScreen() {
             <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
               <FontAwesome name="users" size={16} color="#3498db" />
               <Text style={[st.sectionTitle, { color: colors.textPrimary, fontSize: fonts.title }]}>
-                Users
+                {t("adminPanel.users")}
               </Text>
               <View style={[st.badge, { backgroundColor: "#3498db" }]}>
                 <Text style={st.badgeText}>{userCount}</Text>
@@ -528,7 +533,7 @@ function AdminDashboardScreen() {
           {dailyRegistrations.length > 0 && (
             <View style={[st.dailyBar, { borderBottomColor: colors.borderColor }]}>
               <Text style={{ color: colors.textMuted, fontSize: 11, fontWeight: "600", marginBottom: 6 }}>
-                RECENT REGISTRATIONS
+                {t("adminPanel.recentRegistrations")}
               </Text>
               <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
                 {dailyRegistrations.slice(0, 7).map((d) => (
@@ -547,14 +552,14 @@ function AdminDashboardScreen() {
               colors={colors}
               fonts={fonts}
               columns={[
-                { label: "Registered", flex: 1.2 },
-                { label: "Name", flex: 1.2 },
-                { label: "Username", flex: 1 },
-                { label: "Last Login", flex: 1.2, align: "center" },
-                { label: "Stocks", flex: 1, align: "center" },
-                { label: "Cash", flex: 0.8, align: "center" },
-                { label: "Total", flex: 1, align: "center" },
-                { label: "Growth", flex: 0.8, align: "center" },
+                { label: t("adminPanel.registered"), flex: 1.2 },
+                { label: t("adminPanel.name"), flex: 1.2 },
+                { label: t("adminPanel.username"), flex: 1 },
+                { label: t("adminPanel.lastLoginHeader"), flex: 1.2, align: "center" },
+                { label: t("adminPanel.stocksHeader"), flex: 1, align: "center" },
+                { label: t("adminPanel.cashHeader"), flex: 0.8, align: "center" },
+                { label: t("adminPanel.total"), flex: 1, align: "center" },
+                { label: t("adminPanel.growth"), flex: 0.8, align: "center" },
               ]}
             />
           )}
@@ -571,6 +576,7 @@ function AdminDashboardScreen() {
                 isPhone={isPhone}
                 selected={filterUserId === user.id}
                 onPress={() => handleUserPress(user)}
+                t={t}
               />
             ))
           )}
@@ -584,7 +590,7 @@ function AdminDashboardScreen() {
             <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
               <FontAwesome name="exchange" size={16} color="#27ae60" />
               <Text style={[st.sectionTitle, { color: colors.textPrimary, fontSize: fonts.title }]}>
-                User Activities
+                {t("adminPanel.userActivities")}
               </Text>
               <View style={[st.badge, { backgroundColor: "#27ae60" }]}>
                 <Text style={st.badgeText}>{totalActivities.toLocaleString()}</Text>
@@ -596,7 +602,7 @@ function AdminDashboardScreen() {
                 style={[st.filterChip, { backgroundColor: "#e74c3c" + "18" }]}
               >
                 <Text style={{ color: "#e74c3c", fontSize: fonts.caption, fontWeight: "600" }}>
-                  Clear All {"\u00D7"}
+                  {t("adminPanel.clearAll")} {"\u00D7"}
                 </Text>
               </Pressable>
             )}
@@ -610,7 +616,7 @@ function AdminDashboardScreen() {
                 <FontAwesome name="user" size={12} color={colors.textMuted} style={{ marginRight: 6 }} />
                 <TextInput
                   style={[st.filterInput, { color: colors.textPrimary, borderColor: colors.borderColor, backgroundColor: colors.bgInput ?? colors.bgPrimary }]}
-                  placeholder="Filter by user..."
+                  placeholder={t("adminPanel.filterByUser")}
                   placeholderTextColor={colors.textMuted}
                   value={filterUserName ?? ""}
                   onChangeText={(txt) => {
@@ -634,7 +640,7 @@ function AdminDashboardScreen() {
                 <FontAwesome name="line-chart" size={12} color={colors.textMuted} style={{ marginRight: 6 }} />
                 <TextInput
                   style={[st.filterInput, { color: colors.textPrimary, borderColor: colors.borderColor, backgroundColor: colors.bgInput ?? colors.bgPrimary }]}
-                  placeholder="Filter by stock..."
+                  placeholder={t("adminPanel.filterByStock")}
                   placeholderTextColor={colors.textMuted}
                   value={filterStock}
                   onChangeText={(txt) => { setFilterStock(txt); setActivityPage(1); }}
@@ -649,7 +655,7 @@ function AdminDashboardScreen() {
                 <FontAwesome name="calendar" size={12} color={colors.textMuted} style={{ marginRight: 6 }} />
                 <TextInput
                   style={[st.filterInput, { color: colors.textPrimary, borderColor: colors.borderColor, backgroundColor: colors.bgInput ?? colors.bgPrimary }]}
-                  placeholder="From (YYYY-MM-DD)"
+                  placeholder={t("adminPanel.fromDate")}
                   placeholderTextColor={colors.textMuted}
                   value={filterDateFrom}
                   onChangeText={(txt) => { setFilterDateFrom(txt); setActivityPage(1); }}
@@ -659,7 +665,7 @@ function AdminDashboardScreen() {
                 <FontAwesome name="calendar" size={12} color={colors.textMuted} style={{ marginRight: 6 }} />
                 <TextInput
                   style={[st.filterInput, { color: colors.textPrimary, borderColor: colors.borderColor, backgroundColor: colors.bgInput ?? colors.bgPrimary }]}
-                  placeholder="To (YYYY-MM-DD)"
+                  placeholder={t("adminPanel.toDate")}
                   placeholderTextColor={colors.textMuted}
                   value={filterDateTo}
                   onChangeText={(txt) => { setFilterDateTo(txt); setActivityPage(1); }}
@@ -670,15 +676,15 @@ function AdminDashboardScreen() {
             {/* Row 3: Type filter chips */}
             <View style={st.filterChipRow}>
               {[
-                { key: undefined, label: "All" },
-                { key: "buy", label: "Buy" },
-                { key: "sell", label: "Sell" },
-                { key: "dividend", label: "Dividend" },
-                { key: "deposit", label: "Deposit" },
-                { key: "bonus", label: "Bonus" },
+                { key: undefined, label: t("adminPanel.all") },
+                { key: "buy", label: t("adminPanel.buy") },
+                { key: "sell", label: t("adminPanel.sell") },
+                { key: "dividend", label: t("adminPanel.dividend") },
+                { key: "deposit", label: t("adminPanel.deposit") },
+                { key: "bonus", label: t("adminPanel.bonus") },
               ].map((item) => {
                 const active = filterTxnType === item.key;
-                const cfg = item.key ? getTxnConfig(item.key) : { color: "#27ae60" };
+                const cfg = item.key ? getTxnConfig(item.key, t) : { color: "#27ae60" };
                 return (
                   <Pressable
                     key={item.label}
@@ -708,7 +714,7 @@ function AdminDashboardScreen() {
                     style={[st.filterChip, { backgroundColor: "#3498db" + "18" }]}
                   >
                     <Text style={{ color: "#3498db", fontSize: 11, fontWeight: "600" }}>
-                      User: {filterUserName} {"\u00D7"}
+                      {t("adminPanel.userHeader")}: {filterUserName} {"\u00D7"}
                     </Text>
                   </Pressable>
                 )}
@@ -718,7 +724,7 @@ function AdminDashboardScreen() {
                     style={[st.filterChip, { backgroundColor: "#f39c12" + "18" }]}
                   >
                     <Text style={{ color: "#f39c12", fontSize: 11, fontWeight: "600" }}>
-                      Stock: {filterStock} {"\u00D7"}
+                      {t("adminPanel.stock")}: {filterStock} {"\u00D7"}
                     </Text>
                   </Pressable>
                 )}
@@ -728,7 +734,7 @@ function AdminDashboardScreen() {
                     style={[st.filterChip, { backgroundColor: "#8e44ad" + "18" }]}
                   >
                     <Text style={{ color: "#8e44ad", fontSize: 11, fontWeight: "600" }}>
-                      From: {filterDateFrom} {"\u00D7"}
+                      {t("adminPanel.fromLabel")}: {filterDateFrom} {"\u00D7"}
                     </Text>
                   </Pressable>
                 )}
@@ -738,7 +744,7 @@ function AdminDashboardScreen() {
                     style={[st.filterChip, { backgroundColor: "#8e44ad" + "18" }]}
                   >
                     <Text style={{ color: "#8e44ad", fontSize: 11, fontWeight: "600" }}>
-                      To: {filterDateTo} {"\u00D7"}
+                      {t("adminPanel.toLabel")}: {filterDateTo} {"\u00D7"}
                     </Text>
                   </Pressable>
                 )}
@@ -752,13 +758,13 @@ function AdminDashboardScreen() {
               colors={colors}
               fonts={fonts}
               columns={[
-                { label: "Date", flex: 1 },
-                { label: "User", flex: 0.8 },
-                { label: "Type", flex: 0.8 },
-                { label: "Stock", flex: 1 },
-                { label: "Shares", flex: 0.7, align: "right" },
-                { label: "Price", flex: 0.8, align: "right" },
-                { label: "Value", flex: 1, align: "right" },
+                { label: t("adminPanel.date"), flex: 1 },
+                { label: t("adminPanel.userHeader"), flex: 0.8 },
+                { label: t("adminPanel.type"), flex: 0.8 },
+                { label: t("adminPanel.stock"), flex: 1 },
+                { label: t("adminPanel.sharesHeader"), flex: 0.7, align: "right" },
+                { label: t("adminPanel.priceHeader"), flex: 0.8, align: "right" },
+                { label: t("adminPanel.valueHeader"), flex: 1, align: "right" },
               ]}
             />
           )}
@@ -769,12 +775,12 @@ function AdminDashboardScreen() {
             <View style={st.emptyState}>
               <FontAwesome name="inbox" size={32} color={colors.textMuted} />
               <Text style={{ color: colors.textMuted, fontSize: fonts.body, marginTop: 8 }}>
-                No activities found
+                {t("adminPanel.noActivitiesFound")}
               </Text>
             </View>
           ) : (
             activities.map((act) => (
-              <ActivityTableRow key={act.id} activity={act} colors={colors} fonts={fonts} isPhone={isPhone} />
+              <ActivityTableRow key={act.id} activity={act} colors={colors} fonts={fonts} isPhone={isPhone} t={t} />
             ))
           )}
 
@@ -789,7 +795,7 @@ function AdminDashboardScreen() {
                 <FontAwesome name="chevron-left" size={12} color={colors.textSecondary} />
               </Pressable>
               <Text style={{ color: colors.textSecondary, fontSize: fonts.body, fontWeight: "600" }}>
-                Page {activityPage} of {totalPages}
+                {t("adminPanel.pageOf", { current: activityPage, total: totalPages })}
               </Text>
               <Pressable
                 onPress={() => setActivityPage((p) => Math.min(totalPages, p + 1))}
@@ -810,7 +816,7 @@ function AdminDashboardScreen() {
             <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
               <FontAwesome name="cog" size={16} color="#8e44ad" />
               <Text style={[st.sectionTitle, { color: colors.textPrimary, fontSize: fonts.title }]}>
-                Manage Users
+                {t("adminPanel.manageUsers")}
               </Text>
               <View style={[st.badge, { backgroundColor: "#8e44ad" }]}>
                 <Text style={st.badgeText}>{userCount}</Text>
@@ -827,7 +833,7 @@ function AdminDashboardScreen() {
               style={[st.filterChip, { backgroundColor: "#27ae60" + "18" }]}
             >
               <Text style={{ color: "#27ae60", fontSize: fonts.caption, fontWeight: "600" }}>
-                + Add User
+                {t("adminPanel.addUser")}
               </Text>
             </Pressable>
           </View>
@@ -838,7 +844,7 @@ function AdminDashboardScreen() {
               <FontAwesome name="search" size={12} color={colors.textMuted} style={{ marginRight: 6 }} />
               <TextInput
                 style={[st.filterInput, { color: colors.textPrimary, borderColor: colors.borderColor, backgroundColor: colors.bgInput ?? colors.bgPrimary }]}
-                placeholder="Search by username..."
+                placeholder={t("adminPanel.searchByUsername")}
                 placeholderTextColor={colors.textMuted}
                 value={manageSearch}
                 onChangeText={setManageSearch}
@@ -873,7 +879,7 @@ function AdminDashboardScreen() {
                       @{user.username}
                     </Text>
                     <Text style={{ color: colors.textMuted, fontSize: 11, marginTop: 3 }}>
-                      Last login: {timeAgo(user.last_login)} {"\u00B7"} Registered {formatDate(user.created_at)}
+                      {t("adminPanel.lastLogin")} {timeAgo(user.last_login, t)} {"\u00B7"} {t("adminPanel.registered")} {formatDate(user.created_at)}
                     </Text>
                   </View>
                   <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
@@ -920,35 +926,35 @@ function AdminDashboardScreen() {
         <Pressable style={st.modalOverlay} onPress={() => setShowAddModal(false)}>
           <Pressable style={[st.modalCard, { backgroundColor: colors.bgSecondary }]} onPress={() => {}}>
             <Text style={[st.modalTitle, { color: colors.textPrimary, fontSize: fonts.title }]}>
-              Add New User
+              {t("adminPanel.addNewUser")}
             </Text>
             <Text style={{ color: colors.textMuted, fontSize: fonts.caption, marginBottom: 12 }}>
-              Username
+              {t("adminPanel.username")}
             </Text>
             <TextInput
               style={[st.modalInput, { color: colors.textPrimary, borderColor: colors.borderColor, backgroundColor: colors.bgInput ?? colors.bgPrimary }]}
-              placeholder="Username"
+              placeholder={t("adminPanel.username")}
               placeholderTextColor={colors.textMuted}
               value={newUsername}
               onChangeText={setNewUsername}
               autoCapitalize="none"
             />
             <Text style={{ color: colors.textMuted, fontSize: fonts.caption, marginBottom: 4, marginTop: 10 }}>
-              Display Name (optional)
+              {t("adminPanel.displayName")}
             </Text>
             <TextInput
               style={[st.modalInput, { color: colors.textPrimary, borderColor: colors.borderColor, backgroundColor: colors.bgInput ?? colors.bgPrimary }]}
-              placeholder="Name"
+              placeholder={t("adminPanel.name")}
               placeholderTextColor={colors.textMuted}
               value={newName}
               onChangeText={setNewName}
             />
             <Text style={{ color: colors.textMuted, fontSize: fonts.caption, marginBottom: 4, marginTop: 10 }}>
-              Password (min 8 chars)
+              {t("adminPanel.passwordMin8")}
             </Text>
             <TextInput
               style={[st.modalInput, { color: colors.textPrimary, borderColor: colors.borderColor, backgroundColor: colors.bgInput ?? colors.bgPrimary }]}
-              placeholder="Password"
+              placeholder={t("adminPanel.password")}
               placeholderTextColor={colors.textMuted}
               value={newPassword}
               onChangeText={setNewPassword}
@@ -962,12 +968,12 @@ function AdminDashboardScreen() {
                 onPress={() => setShowAddModal(false)}
                 style={[st.modalBtn, { backgroundColor: colors.bgPrimary }]}
               >
-                <Text style={{ color: colors.textSecondary, fontWeight: "600" }}>Cancel</Text>
+                <Text style={{ color: colors.textSecondary, fontWeight: "600" }}>{t("app.cancel")}</Text>
               </Pressable>
               <Pressable
                 onPress={async () => {
                   if (!newUsername || !newPassword) {
-                    setActionError("Username and password are required");
+                    setActionError(t("adminPanel.usernamePasswordRequired"));
                     return;
                   }
                   try {
@@ -978,7 +984,7 @@ function AdminDashboardScreen() {
                     });
                     setShowAddModal(false);
                   } catch (e: any) {
-                    setActionError(e?.response?.data?.detail || e.message || "Failed to create user");
+                    setActionError(e?.response?.data?.detail || e.message || t("adminPanel.failedToCreateUser"));
                   }
                 }}
                 disabled={createUser.isPending}
@@ -987,7 +993,7 @@ function AdminDashboardScreen() {
                 {createUser.isPending ? (
                   <ActivityIndicator size="small" color="#fff" />
                 ) : (
-                  <Text style={{ color: "#fff", fontWeight: "600" }}>Create</Text>
+                  <Text style={{ color: "#fff", fontWeight: "600" }}>{t("adminPanel.create")}</Text>
                 )}
               </Pressable>
             </View>
@@ -1000,17 +1006,17 @@ function AdminDashboardScreen() {
         <Pressable style={st.modalOverlay} onPress={() => { setEditField(null); setEditUser(null); }}>
           <Pressable style={[st.modalCard, { backgroundColor: colors.bgSecondary }]} onPress={() => {}}>
             <Text style={[st.modalTitle, { color: colors.textPrimary, fontSize: fonts.title }]}>
-              {editField === "username" ? "Change Username" : "Reset Password"}
+              {editField === "username" ? t("adminPanel.changeUsername") : t("adminPanel.resetPassword")}
             </Text>
             <Text style={{ color: colors.textMuted, fontSize: fonts.caption, marginBottom: 4 }}>
-              User: @{editUser?.username}
+              {t("adminPanel.user", { username: editUser?.username })}
             </Text>
             <Text style={{ color: colors.textMuted, fontSize: fonts.caption, marginBottom: 8, marginTop: 8 }}>
-              {editField === "username" ? "New Username" : "New Password (min 8 chars)"}
+              {editField === "username" ? t("adminPanel.newUsername") : t("adminPanel.newPasswordMin8")}
             </Text>
             <TextInput
               style={[st.modalInput, { color: colors.textPrimary, borderColor: colors.borderColor, backgroundColor: colors.bgInput ?? colors.bgPrimary }]}
-              placeholder={editField === "username" ? "New username" : "New password"}
+              placeholder={editField === "username" ? t("adminPanel.newUsernamePlaceholder") : t("adminPanel.newPasswordPlaceholder")}
               placeholderTextColor={colors.textMuted}
               value={formValue}
               onChangeText={setFormValue}
@@ -1025,12 +1031,12 @@ function AdminDashboardScreen() {
                 onPress={() => { setEditField(null); setEditUser(null); }}
                 style={[st.modalBtn, { backgroundColor: colors.bgPrimary }]}
               >
-                <Text style={{ color: colors.textSecondary, fontWeight: "600" }}>Cancel</Text>
+                <Text style={{ color: colors.textSecondary, fontWeight: "600" }}>{t("app.cancel")}</Text>
               </Pressable>
               <Pressable
                 onPress={async () => {
                   if (!formValue) {
-                    setActionError(editField === "username" ? "Username is required" : "Password is required");
+                    setActionError(editField === "username" ? t("adminPanel.usernameRequired") : t("adminPanel.passwordRequired"));
                     return;
                   }
                   try {
@@ -1042,7 +1048,7 @@ function AdminDashboardScreen() {
                     setEditField(null);
                     setEditUser(null);
                   } catch (e: any) {
-                    setActionError(e?.response?.data?.detail || e.message || "Operation failed");
+                    setActionError(e?.response?.data?.detail || e.message || t("adminPanel.operationFailed"));
                   }
                 }}
                 disabled={updateUsername.isPending || updatePassword.isPending}
@@ -1051,7 +1057,7 @@ function AdminDashboardScreen() {
                 {(updateUsername.isPending || updatePassword.isPending) ? (
                   <ActivityIndicator size="small" color="#fff" />
                 ) : (
-                  <Text style={{ color: "#fff", fontWeight: "600" }}>Save</Text>
+                  <Text style={{ color: "#fff", fontWeight: "600" }}>{t("app.save")}</Text>
                 )}
               </Pressable>
             </View>
@@ -1069,17 +1075,13 @@ function AdminDashboardScreen() {
               </View>
             </View>
             <Text style={[st.modalTitle, { color: colors.textPrimary, fontSize: fonts.title, textAlign: "center" }]}>
-              Delete User
+              {t("adminPanel.deleteUser")}
             </Text>
             <Text style={{ color: colors.textMuted, fontSize: fonts.body, textAlign: "center", marginBottom: 4 }}>
-              Are you sure you want to delete{"\n"}
-              <Text style={{ fontWeight: "700", color: colors.textPrimary }}>
-                @{deleteTarget?.username}
-              </Text>
-              ?
+              {t("adminPanel.deleteUserConfirm", { username: deleteTarget?.username })}
             </Text>
             <Text style={{ color: "#e74c3c", fontSize: fonts.caption, textAlign: "center", marginTop: 4 }}>
-              This will permanently remove the user and all their data.
+              {t("adminPanel.deleteUserWarning")}
             </Text>
             {actionError ? (
               <Text style={{ color: "#e74c3c", fontSize: 12, marginTop: 8, textAlign: "center" }}>{actionError}</Text>
@@ -1089,7 +1091,7 @@ function AdminDashboardScreen() {
                 onPress={() => setDeleteTarget(null)}
                 style={[st.modalBtn, { backgroundColor: colors.bgPrimary, flex: 1 }]}
               >
-                <Text style={{ color: colors.textSecondary, fontWeight: "600" }}>Cancel</Text>
+                <Text style={{ color: colors.textSecondary, fontWeight: "600" }}>{t("app.cancel")}</Text>
               </Pressable>
               <Pressable
                 onPress={async () => {
@@ -1097,7 +1099,7 @@ function AdminDashboardScreen() {
                     await deleteUser.mutateAsync(deleteTarget!.id);
                     setDeleteTarget(null);
                   } catch (e: any) {
-                    setActionError(e?.response?.data?.detail || e.message || "Failed to delete user");
+                    setActionError(e?.response?.data?.detail || e.message || t("adminPanel.failedToDeleteUser"));
                   }
                 }}
                 disabled={deleteUser.isPending}
@@ -1106,7 +1108,7 @@ function AdminDashboardScreen() {
                 {deleteUser.isPending ? (
                   <ActivityIndicator size="small" color="#fff" />
                 ) : (
-                  <Text style={{ color: "#fff", fontWeight: "600" }}>Delete</Text>
+                  <Text style={{ color: "#fff", fontWeight: "600" }}>{t("app.delete")}</Text>
                 )}
               </Pressable>
             </View>

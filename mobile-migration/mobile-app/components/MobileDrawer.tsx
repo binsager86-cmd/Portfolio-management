@@ -2,18 +2,19 @@
  * MobileDrawer — full-screen slide-in navigation overlay for phones.
  *
  * Triggered by the hamburger button in the mobile header.
- * Shows the same nav items as WebSidebar, with large 44px touch targets,
- * smooth slide animation, and a dimmed backdrop for dismissal.
+ * Uses Reanimated spring physics for natural feel, with staggered
+ * nav item entrance animations.
  */
 
 import { NAV_ITEMS } from "@/components/WebSidebar";
 import { useAuthStore } from "@/services/authStore";
 import { useThemeStore } from "@/services/themeStore";
+import { ExpertiseLevel, useUserPrefsStore } from "@/src/store/userPrefsStore";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import { usePathname, useRouter } from "expo-router";
-import React, { useEffect, useMemo, useRef } from "react";
+import React, { useCallback, useEffect, useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import {
-    Animated,
     Platform,
     Pressable,
     ScrollView,
@@ -21,60 +22,159 @@ import {
     Text,
     View,
 } from "react-native";
+import Animated, {
+    useAnimatedStyle,
+    useSharedValue,
+    withDelay,
+    withSpring,
+    withTiming,
+} from "react-native-reanimated";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 const DRAWER_WIDTH = 280;
+const SPRING_CONFIG = { damping: 22, stiffness: 200, mass: 0.8 };
 
 interface MobileDrawerProps {
   visible: boolean;
   onClose: () => void;
 }
 
-export function MobileDrawer({ visible, onClose }: MobileDrawerProps) {
-  const router = useRouter();
-  const pathname = usePathname();
-  const logout = useAuthStore((s) => s.logout);
-  const isAdmin = useAuthStore((s) => s.isAdmin);
-  const { colors, toggle, mode } = useThemeStore();
-
-  const navItems = useMemo(
-    () => isAdmin
-      ? NAV_ITEMS.filter((item) => item.adminOnly)
-      : NAV_ITEMS.filter((item) => !item.adminOnly),
-    [isAdmin],
-  );
-
-  const slideAnim = useRef(new Animated.Value(-DRAWER_WIDTH)).current;
-  const fadeAnim = useRef(new Animated.Value(0)).current;
+/** Individual nav item with staggered entrance */
+function DrawerNavItem({
+  item,
+  index,
+  active,
+  colors,
+  onPress,
+  t,
+  visible,
+}: {
+  item: (typeof NAV_ITEMS)[number];
+  index: number;
+  active: boolean;
+  colors: any;
+  onPress: () => void;
+  t: (key: string) => string;
+  visible: boolean;
+}) {
+  const translateX = useSharedValue(-40);
+  const opacity = useSharedValue(0);
+  const pressScale = useSharedValue(1);
 
   useEffect(() => {
     if (visible) {
-      Animated.parallel([
-        Animated.timing(slideAnim, {
-          toValue: 0,
-          duration: 250,
-          useNativeDriver: Platform.OS !== "web",
-        }),
-        Animated.timing(fadeAnim, {
-          toValue: 1,
-          duration: 250,
-          useNativeDriver: Platform.OS !== "web",
-        }),
-      ]).start();
+      const delay = 60 + index * 35;
+      translateX.value = withDelay(delay, withSpring(0, SPRING_CONFIG));
+      opacity.value = withDelay(delay, withTiming(1, { duration: 200 }));
     } else {
-      Animated.parallel([
-        Animated.timing(slideAnim, {
-          toValue: -DRAWER_WIDTH,
-          duration: 200,
-          useNativeDriver: Platform.OS !== "web",
-        }),
-        Animated.timing(fadeAnim, {
-          toValue: 0,
-          duration: 200,
-          useNativeDriver: Platform.OS !== "web",
-        }),
-      ]).start();
+      translateX.value = -40;
+      opacity.value = 0;
     }
   }, [visible]);
+
+  const animStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: translateX.value }, { scale: pressScale.value }],
+    opacity: opacity.value,
+  }));
+
+  const handlePressIn = useCallback(() => {
+    pressScale.value = withSpring(0.97, { damping: 15, stiffness: 300 });
+  }, []);
+  const handlePressOut = useCallback(() => {
+    pressScale.value = withSpring(1, SPRING_CONFIG);
+  }, []);
+
+  return (
+    <Animated.View style={animStyle}>
+      {item.section && (
+        <Text style={[s.sectionLabel, { color: colors.textMuted }]}>
+          {t('nav.' + item.section)}
+        </Text>
+      )}
+      <Pressable
+        onPress={onPress}
+        onPressIn={handlePressIn}
+        onPressOut={handlePressOut}
+        accessibilityRole="menuitem"
+        accessibilityLabel={t('nav.' + item.label)}
+        accessibilityState={{ selected: active }}
+        style={[
+          s.navItem,
+          {
+            backgroundColor: active
+              ? colors.accentPrimary + "18"
+              : "transparent",
+            borderLeftColor: active ? colors.accentPrimary : "transparent",
+            borderLeftWidth: 3,
+          },
+        ]}
+      >
+        <FontAwesome
+          name={item.icon}
+          size={20}
+          color={active ? colors.accentPrimary : colors.textSecondary}
+          style={s.navIcon}
+        />
+        <Text
+          style={[
+            s.navLabel,
+            {
+              color: active ? colors.accentPrimary : colors.textPrimary,
+              fontWeight: active ? "700" : "500",
+            },
+          ]}
+        >
+          {t('nav.' + item.label)}
+        </Text>
+      </Pressable>
+    </Animated.View>
+  );
+}
+
+export function MobileDrawer({ visible, onClose }: MobileDrawerProps) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const { t } = useTranslation();
+  const logout = useAuthStore((s) => s.logout);
+  const isAdmin = useAuthStore((s) => s.isAdmin);
+  const { colors, toggle, mode } = useThemeStore();
+  const insets = useSafeAreaInsets();
+
+  const expertiseLevel = useUserPrefsStore((s) => s.preferences.expertiseLevel);
+  const levelOrder: ExpertiseLevel[] = ["normal", "intermediate", "advanced"];
+
+  const navItems = useMemo(
+    () => (isAdmin
+      ? NAV_ITEMS.filter((item) => item.adminOnly)
+      : NAV_ITEMS.filter((item) => !item.adminOnly)
+    ).filter((item) => {
+      const minLevel = item.minLevel ?? "normal";
+      return levelOrder.indexOf(expertiseLevel) >= levelOrder.indexOf(minLevel);
+    }),
+    [isAdmin, expertiseLevel],
+  );
+
+  // Reanimated shared values
+  const drawerX = useSharedValue(-DRAWER_WIDTH);
+  const backdropOpacity = useSharedValue(0);
+
+  useEffect(() => {
+    if (visible) {
+      drawerX.value = withSpring(0, SPRING_CONFIG);
+      backdropOpacity.value = withTiming(1, { duration: 250 });
+    } else {
+      drawerX.value = withSpring(-DRAWER_WIDTH, { damping: 25, stiffness: 250 });
+      backdropOpacity.value = withTiming(0, { duration: 200 });
+    }
+  }, [visible]);
+
+  const drawerStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: drawerX.value }],
+  }));
+
+  const backdropStyle = useAnimatedStyle(() => ({
+    opacity: backdropOpacity.value,
+  }));
 
   const isActive = (navPath: string) => {
     const clean = navPath.replace("/(tabs)", "");
@@ -98,7 +198,7 @@ export function MobileDrawer({ visible, onClose }: MobileDrawerProps) {
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
       {/* Backdrop */}
-      <Animated.View style={[s.backdrop, { opacity: fadeAnim }]}>
+      <Animated.View style={[s.backdrop, backdropStyle]}>
         <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityRole="button" accessibilityLabel="Close menu" />
       </Animated.View>
 
@@ -109,15 +209,16 @@ export function MobileDrawer({ visible, onClose }: MobileDrawerProps) {
           {
             backgroundColor: colors.bgSecondary,
             borderRightColor: colors.borderColor,
-            transform: [{ translateX: slideAnim }],
+            paddingTop: Platform.OS === "web" ? 0 : insets.top,
           },
+          drawerStyle,
         ]}
       >
         {/* Header */}
         <View style={s.drawerHeader}>
           <View style={s.headerBrand}>
             <FontAwesome name="pie-chart" size={24} color={colors.accentPrimary} />
-            <Text style={[s.headerTitle, { color: colors.textPrimary }]}>Portfolio</Text>
+            <Text style={[s.headerTitle, { color: colors.textPrimary }]}>{t('nav.portfolio')}</Text>
           </View>
           <Pressable
             onPress={onClose}
@@ -128,58 +229,24 @@ export function MobileDrawer({ visible, onClose }: MobileDrawerProps) {
           </Pressable>
         </View>
 
-        {/* Nav Links */}
+        {/* Nav Links — staggered entrance */}
         <ScrollView style={s.navScroll} showsVerticalScrollIndicator={false}>
-          {navItems.map((item) => {
-            const active = isActive(item.path);
-            return (
-              <React.Fragment key={item.path}>
-                {item.section && (
-                  <Text style={[s.sectionLabel, { color: colors.textMuted }]}>
-                    {item.section}
-                  </Text>
-                )}
-                <Pressable
-                  onPress={() => handleNav(item.path)}
-                  accessibilityRole="menuitem"
-                  accessibilityLabel={item.label}
-                  accessibilityState={{ selected: active }}
-                  style={({ pressed }) => [
-                    s.navItem,
-                    {
-                      backgroundColor: active
-                        ? colors.accentPrimary + "18"
-                        : pressed
-                        ? colors.bgCardHover
-                        : "transparent",
-                    },
-                  ]}
-                >
-                  <FontAwesome
-                    name={item.icon}
-                    size={20}
-                    color={active ? colors.accentPrimary : colors.textSecondary}
-                    style={s.navIcon}
-                  />
-                  <Text
-                    style={[
-                      s.navLabel,
-                      {
-                        color: active ? colors.accentPrimary : colors.textPrimary,
-                        fontWeight: active ? "700" : "500",
-                      },
-                    ]}
-                  >
-                    {item.label}
-                  </Text>
-                </Pressable>
-              </React.Fragment>
-            );
-          })}
+          {navItems.map((item, idx) => (
+            <DrawerNavItem
+              key={item.path}
+              item={item}
+              index={idx}
+              active={isActive(item.path)}
+              colors={colors}
+              onPress={() => handleNav(item.path)}
+              t={t}
+              visible={visible}
+            />
+          ))}
         </ScrollView>
 
         {/* Bottom actions */}
-        <View style={[s.bottomSection, { borderTopColor: colors.borderColor }]}>
+        <View style={[s.bottomSection, { borderTopColor: colors.borderColor, paddingBottom: Math.max(16, insets.bottom) }]}>
           <Pressable
             onPress={() => { toggle(); }}
             accessibilityRole="switch"
@@ -197,7 +264,7 @@ export function MobileDrawer({ visible, onClose }: MobileDrawerProps) {
               style={s.navIcon}
             />
             <Text style={[s.navLabel, { color: colors.textSecondary }]}>
-              {mode === "dark" ? "Light Mode" : "Dark Mode"}
+              {mode === "dark" ? t('nav.lightMode') : t('nav.darkMode')}
             </Text>
           </Pressable>
 
@@ -211,7 +278,7 @@ export function MobileDrawer({ visible, onClose }: MobileDrawerProps) {
             ]}
           >
             <FontAwesome name="sign-out" size={20} color={colors.danger} style={s.navIcon} />
-            <Text style={[s.navLabel, { color: colors.danger }]}>Sign Out</Text>
+            <Text style={[s.navLabel, { color: colors.danger }]}>{t('nav.signOut')}</Text>
           </Pressable>
         </View>
       </Animated.View>
@@ -231,7 +298,6 @@ const s = StyleSheet.create({
     bottom: 0,
     width: DRAWER_WIDTH,
     borderRightWidth: 1,
-    paddingTop: Platform.OS === "web" ? 0 : 48,
     zIndex: 100,
   },
   drawerHeader: {

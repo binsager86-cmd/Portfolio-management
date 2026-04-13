@@ -8,6 +8,7 @@
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import React, { useCallback, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
     Alert,
     Platform,
@@ -34,6 +35,7 @@ type Tab = "snapshots" | "balance" | "income" | "ratios";
 
 export default function PfmScreen() {
   const { colors } = useThemeStore();
+  const { t } = useTranslation();
   const ss = useScreenStyles();
   const { isDesktop } = useResponsive();
   const queryClient = useQueryClient();
@@ -56,16 +58,16 @@ export default function PfmScreen() {
   });
 
   const handleDelete = useCallback((snap: PfmSnapshotSummary) => {
-    const msg = `Delete PFM snapshot for ${snap.snapshot_date}?`;
+    const msg = t('pfm.deleteSnapshot', { date: snap.snapshot_date });
     if (Platform.OS === "web") {
       if (window.confirm(msg)) deleteMutation.mutate(snap.id);
     } else {
-      Alert.alert("Delete", msg, [
-        { text: "Cancel", style: "cancel" },
-        { text: "Delete", style: "destructive", onPress: () => deleteMutation.mutate(snap.id) },
+      Alert.alert(t('app.delete'), msg, [
+        { text: t('app.cancel'), style: "cancel" },
+        { text: t('app.delete'), style: "destructive", onPress: () => deleteMutation.mutate(snap.id) },
       ]);
     }
-  }, [deleteMutation]);
+  }, [deleteMutation, t]);
 
   if (isLoading) return <PfmSkeleton />;
   if (isError) return <ErrorScreen message={error?.message ?? "Failed to load PFM data"} onRetry={refetch} />;
@@ -90,25 +92,25 @@ export default function PfmScreen() {
     <View style={ss.container}>
       {/* Header */}
       <View style={ss.header}>
-        <Text style={ss.title}>Personal Finance</Text>
+        <Text style={ss.title}>{t('pfm.title')}</Text>
       </View>
 
       {/* Tabs */}
       <View style={[s.tabRow, { borderBottomColor: colors.borderColor }]}>
         {([
-          { key: "snapshots", label: "Snapshots", icon: "camera" },
-          { key: "balance", label: "Balance Sheet", icon: "balance-scale" },
-          { key: "income", label: "Income & Expenses", icon: "money" },
-          { key: "ratios", label: "Ratios", icon: "calculator" },
-        ] as const).map((t) => (
+          { key: "snapshots", label: t('pfm.snapshots'), icon: "camera" },
+          { key: "balance", label: t('pfm.balanceSheet'), icon: "balance-scale" },
+          { key: "income", label: t('pfm.incomeExpenses'), icon: "money" },
+          { key: "ratios", label: t('pfm.ratios'), icon: "calculator" },
+        ] as const).map((tb) => (
           <Pressable
-            key={t.key}
-            onPress={() => setTab(t.key)}
-            style={[s.tabBtn, tab === t.key && { borderBottomColor: colors.accentPrimary, borderBottomWidth: 2 }]}
+            key={tb.key}
+            onPress={() => setTab(tb.key)}
+            style={[s.tabBtn, tab === tb.key && { borderBottomColor: colors.accentPrimary, borderBottomWidth: 2 }]}
           >
-            <FontAwesome name={t.icon} size={14} color={tab === t.key ? colors.accentPrimary : colors.textMuted} />
-            <Text style={{ color: tab === t.key ? colors.accentPrimary : colors.textSecondary, fontSize: 12, fontWeight: "600" }}>
-              {t.label}
+            <FontAwesome name={tb.icon} size={14} color={tab === tb.key ? colors.accentPrimary : colors.textMuted} />
+            <Text style={{ color: tab === tb.key ? colors.accentPrimary : colors.textSecondary, fontSize: 12, fontWeight: "600" }}>
+              {tb.label}
             </Text>
           </Pressable>
         ))}
@@ -117,12 +119,12 @@ export default function PfmScreen() {
       <ScrollView contentContainerStyle={[s.content, isDesktop && { maxWidth: 900, alignSelf: "center", width: "100%" }]}>
         {tab === "snapshots" && (
           <>
-            <Text style={[s.sectionTitle, { color: colors.textPrimary }]}>PFM Snapshots ({snapshots.length})</Text>
+            <Text style={[s.sectionTitle, { color: colors.textPrimary }]}>{t('pfm.pfmSnapshots')} ({snapshots.length})</Text>
             {snapshots.length === 0 ? (
               <View style={s.empty}>
                 <FontAwesome name="file-text-o" size={48} color={colors.textMuted} />
                 <Text style={[s.emptyText, { color: colors.textSecondary }]}>
-                  No PFM snapshots yet. Create one from the Streamlit app.
+                  {t('pfm.noSnapshots')}
                 </Text>
               </View>
             ) : (
@@ -136,15 +138,15 @@ export default function PfmScreen() {
                     <Text style={[s.snapDate, { color: colors.textPrimary }]}>{snap.snapshot_date}</Text>
                     {snap.notes && <Text style={[s.snapNotes, { color: colors.textSecondary }]}>{snap.notes}</Text>}
                     <View style={{ flexDirection: "row", gap: 12, marginTop: 4 }}>
-                      <Text style={{ fontSize: 12, color: colors.textSecondary }}>Assets: {formatCurrency(snap.total_assets, "KWD")}</Text>
-                      <Text style={{ fontSize: 12, color: colors.textSecondary }}>Liabilities: {formatCurrency(snap.total_liabilities, "KWD")}</Text>
+                      <Text style={{ fontSize: 12, color: colors.textSecondary }}>{t('pfm.assets')}: {formatCurrency(snap.total_assets, "KWD")}</Text>
+                      <Text style={{ fontSize: 12, color: colors.textSecondary }}>{t('pfm.liabilities')}: {formatCurrency(snap.total_liabilities, "KWD")}</Text>
                     </View>
                   </View>
                   <View style={{ alignItems: "flex-end" }}>
                     <Text style={[s.netWorth, { color: snap.net_worth >= 0 ? colors.success : colors.danger }]}>
                       {formatCurrency(snap.net_worth, "KWD")}
                     </Text>
-                    <Text style={{ fontSize: 10, color: colors.textMuted }}>Net Worth</Text>
+                    <Text style={{ fontSize: 10, color: colors.textMuted }}>{t('pfm.netWorth')}</Text>
                     <Pressable onPress={() => handleDelete(snap)} style={{ padding: 4, marginTop: 4 }}>
                       <FontAwesome name="trash-o" size={14} color={colors.danger} />
                     </Pressable>
@@ -158,12 +160,12 @@ export default function PfmScreen() {
         {tab === "balance" && detail && (
           <>
             <Text style={[s.sectionTitle, { color: colors.textPrimary }]}>
-              Balance Sheet — {detail.snapshot_date}
+              {t('pfm.balanceSheet')} — {detail.snapshot_date}
             </Text>
 
             {/* Assets */}
             <Text style={[s.subTitle, { color: colors.success }]}>
-              <FontAwesome name="plus-circle" size={14} /> Assets ({formatCurrency(detail.total_assets, "KWD")})
+              <FontAwesome name="plus-circle" size={14} /> {t('pfm.assets')} ({formatCurrency(detail.total_assets, "KWD")})
             </Text>
             <View style={[s.dataTable, { borderColor: colors.borderColor }]}>
               {detail.assets.map((a, i) => (
@@ -177,16 +179,16 @@ export default function PfmScreen() {
 
             {/* Liabilities */}
             <Text style={[s.subTitle, { color: colors.danger }]}>
-              <FontAwesome name="minus-circle" size={14} /> Liabilities ({formatCurrency(detail.total_liabilities, "KWD")})
+              <FontAwesome name="minus-circle" size={14} /> {t('pfm.liabilities')} ({formatCurrency(detail.total_liabilities, "KWD")})
             </Text>
             <View style={[s.dataTable, { borderColor: colors.borderColor }]}>
               {detail.liabilities.length === 0 ? (
-                <Text style={[{ color: colors.textMuted, padding: 12, fontSize: 13 }]}>No liabilities</Text>
+                <Text style={[{ color: colors.textMuted, padding: 12, fontSize: 13 }]}>{t('pfm.noLiabilities')}</Text>
               ) : (
                 detail.liabilities.map((l, i) => (
                   <View key={i} style={[s.dataRow, { borderBottomColor: colors.borderColor }]}>
                     <Text style={[s.dataCell, { color: colors.textPrimary, flex: 2 }]}>{l.category}</Text>
-                    <Text style={[s.dataCell, { color: colors.textSecondary }]}>{l.is_current ? "Current" : "Long-term"}</Text>
+                    <Text style={[s.dataCell, { color: colors.textSecondary }]}>{l.is_current ? t('pfm.current') : t('pfm.longTerm')}</Text>
                     <Text style={[s.dataCell, { color: colors.danger, textAlign: "right" }]}>{formatCurrency(l.amount_kwd, "KWD")}</Text>
                   </View>
                 ))
@@ -195,7 +197,7 @@ export default function PfmScreen() {
 
             {/* Net Worth */}
             <View style={[s.netWorthBar, { backgroundColor: colors.bgCard, borderColor: colors.borderColor }]}>
-              <Text style={{ fontSize: 16, fontWeight: "700", color: colors.textPrimary }}>Net Worth</Text>
+              <Text style={{ fontSize: 16, fontWeight: "700", color: colors.textPrimary }}>{t('pfm.netWorth')}</Text>
               <Text style={{ fontSize: 20, fontWeight: "800", color: detail.net_worth >= 0 ? colors.success : colors.danger }}>
                 {formatCurrency(detail.net_worth, "KWD")}
               </Text>
@@ -207,7 +209,7 @@ export default function PfmScreen() {
           <View style={s.empty}>
             <FontAwesome name="hand-pointer-o" size={48} color={colors.textMuted} />
             <Text style={[s.emptyText, { color: colors.textSecondary }]}>
-              Select a snapshot from the Snapshots tab to view its balance sheet
+              {t('pfm.selectSnapshot')}
             </Text>
           </View>
         )}
@@ -215,13 +217,13 @@ export default function PfmScreen() {
         {tab === "income" && detail && (
           <>
             <Text style={[s.sectionTitle, { color: colors.textPrimary }]}>
-              Income & Expenses — {detail.snapshot_date}
+              {t('pfm.incomeExpenses')} — {detail.snapshot_date}
             </Text>
             <View style={[s.dataTable, { borderColor: colors.borderColor }]}>
               <View style={[s.dataRow, { backgroundColor: colors.bgSecondary, borderBottomColor: colors.borderColor }]}>
-                <Text style={[s.dataCell, { color: colors.textSecondary, fontWeight: "700", flex: 2 }]}>Category</Text>
-                <Text style={[s.dataCell, { color: colors.textSecondary, fontWeight: "700" }]}>Type</Text>
-                <Text style={[s.dataCell, { color: colors.textSecondary, fontWeight: "700", textAlign: "right" }]}>Monthly</Text>
+                <Text style={[s.dataCell, { color: colors.textSecondary, fontWeight: "700", flex: 2 }]}>{t('pfm.category')}</Text>
+                <Text style={[s.dataCell, { color: colors.textSecondary, fontWeight: "700" }]}>{t('pfm.type')}</Text>
+                <Text style={[s.dataCell, { color: colors.textSecondary, fontWeight: "700", textAlign: "right" }]}>{t('pfm.monthly')}</Text>
               </View>
               {detail.income_expenses.map((ie, i) => (
                 <View key={i} style={[s.dataRow, { borderBottomColor: colors.borderColor }]}>
@@ -238,48 +240,48 @@ export default function PfmScreen() {
 
         {tab === "income" && !detail && (
           <View style={s.empty}>
-            <Text style={[s.emptyText, { color: colors.textSecondary }]}>Select a snapshot first</Text>
+            <Text style={[s.emptyText, { color: colors.textSecondary }]}>{t('pfm.selectSnapshotFirst')}</Text>
           </View>
         )}
 
         {tab === "ratios" && detail && ratios && (
           <>
             <Text style={[s.sectionTitle, { color: colors.textPrimary }]}>
-              Financial Ratios — {detail.snapshot_date}
+              {t('pfm.ratios')} — {detail.snapshot_date}
             </Text>
                 <View style={s.ratiosGrid}>
                   <View style={[s.ratioCard, { backgroundColor: colors.bgCard, borderColor: colors.borderColor }]}>
-                    <Text style={[s.ratioLabel, { color: colors.textSecondary }]}>Net Worth</Text>
+                    <Text style={[s.ratioLabel, { color: colors.textSecondary }]}>{t('pfm.netWorth')}</Text>
                     <Text style={[s.ratioValue, { color: detail.net_worth >= 0 ? colors.success : colors.danger }]}>
                       {formatCurrency(detail.net_worth, "KWD")}
                     </Text>
                   </View>
                   <View style={[s.ratioCard, { backgroundColor: colors.bgCard, borderColor: colors.borderColor }]}>
-                    <Text style={[s.ratioLabel, { color: colors.textSecondary }]}>Savings Rate</Text>
+                    <Text style={[s.ratioLabel, { color: colors.textSecondary }]}>{t('pfm.savingsRate')}</Text>
                     <Text style={[s.ratioValue, { color: ratios.savingsRate >= 0 ? colors.success : colors.danger }]}>
                       {ratios.savingsRate.toFixed(1)}%
                     </Text>
                   </View>
                   <View style={[s.ratioCard, { backgroundColor: colors.bgCard, borderColor: colors.borderColor }]}>
-                    <Text style={[s.ratioLabel, { color: colors.textSecondary }]}>Debt / Assets</Text>
+                    <Text style={[s.ratioLabel, { color: colors.textSecondary }]}>{t('pfm.debtAssets')}</Text>
                     <Text style={[s.ratioValue, { color: ratios.debtToAsset < 50 ? colors.success : colors.danger }]}>
                       {ratios.debtToAsset.toFixed(1)}%
                     </Text>
                   </View>
                   <View style={[s.ratioCard, { backgroundColor: colors.bgCard, borderColor: colors.borderColor }]}>
-                    <Text style={[s.ratioLabel, { color: colors.textSecondary }]}>Monthly Income</Text>
+                    <Text style={[s.ratioLabel, { color: colors.textSecondary }]}>{t('pfm.monthlyIncome')}</Text>
                     <Text style={[s.ratioValue, { color: colors.success }]}>
                       {formatCurrency(ratios.totalIncome, "KWD")}
                     </Text>
                   </View>
                   <View style={[s.ratioCard, { backgroundColor: colors.bgCard, borderColor: colors.borderColor }]}>
-                    <Text style={[s.ratioLabel, { color: colors.textSecondary }]}>Monthly Expenses</Text>
+                    <Text style={[s.ratioLabel, { color: colors.textSecondary }]}>{t('pfm.monthlyExpenses')}</Text>
                     <Text style={[s.ratioValue, { color: colors.danger }]}>
                       {formatCurrency(ratios.totalExpenses, "KWD")}
                     </Text>
                   </View>
                   <View style={[s.ratioCard, { backgroundColor: colors.bgCard, borderColor: colors.borderColor }]}>
-                    <Text style={[s.ratioLabel, { color: colors.textSecondary }]}>Finance Costs</Text>
+                    <Text style={[s.ratioLabel, { color: colors.textSecondary }]}>{t('pfm.financeCosts')}</Text>
                     <Text style={[s.ratioValue, { color: colors.danger }]}>
                       {formatCurrency(ratios.financeCosts, "KWD")}
                     </Text>
@@ -290,7 +292,7 @@ export default function PfmScreen() {
 
         {tab === "ratios" && !detail && (
           <View style={s.empty}>
-            <Text style={[s.emptyText, { color: colors.textSecondary }]}>Select a snapshot first</Text>
+            <Text style={[s.emptyText, { color: colors.textSecondary }]}>{t('pfm.selectSnapshotFirst')}</Text>
           </View>
         )}
 

@@ -7,6 +7,7 @@ import type { KfhImportPreview, KfhImportResult } from "@/lib/kfh/kfhTradeTypes"
 import { useThemeStore } from "@/services/themeStore";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import React, { useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
     ActivityIndicator,
     Modal,
@@ -26,6 +27,7 @@ interface Props {
 
 export default function KfhTradeImportModal({ visible, preview, onClose, onImport }: Props) {
   const { colors } = useThemeStore();
+  const { t } = useTranslation();
   const [importing, setImporting] = useState(false);
   const [result, setResult] = useState<KfhImportResult | null>(null);
   const [progress, setProgress] = useState({ current: 0, total: 0 });
@@ -111,6 +113,29 @@ export default function KfhTradeImportModal({ visible, preview, onClose, onImpor
                       {result.details.slice(0, 5).join("\n")}
                     </Text>
                   )}
+                </View>
+              </View>
+            )}
+
+            {/* Bonus shares reminder — shown after successful import */}
+            {result && result.imported > 0 && (
+              <View
+                style={[
+                  s.bonusNotice,
+                  {
+                    backgroundColor: colors.accentPrimary + "12",
+                    borderColor: colors.accentPrimary + "40",
+                  },
+                ]}
+              >
+                <FontAwesome name="info-circle" size={16} color={colors.accentPrimary} />
+                <View style={{ flex: 1 }}>
+                  <Text style={[s.bonusTitle, { color: colors.textPrimary }]}>
+                    {t("kfhImport.bonusSharesTitle")}
+                  </Text>
+                  <Text style={[s.bonusText, { color: colors.textSecondary }]}>
+                    {t("kfhImport.bonusSharesMessage")}
+                  </Text>
                 </View>
               </View>
             )}
@@ -330,6 +355,17 @@ const s = StyleSheet.create({
   },
   resultText: { fontSize: 13, fontWeight: "600" },
   resultDetail: { fontSize: 11, marginTop: 4, lineHeight: 16 },
+  bonusNotice: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+    padding: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    marginBottom: 16,
+  },
+  bonusTitle: { fontSize: 13, fontWeight: "700", marginBottom: 2 },
+  bonusText: { fontSize: 12, lineHeight: 18 },
   statsBox: { borderWidth: 1, borderRadius: 10, padding: 12, gap: 8, marginBottom: 16 },
   statRow: { flexDirection: "row", justifyContent: "space-between" },
   statLabel: { fontSize: 13 },

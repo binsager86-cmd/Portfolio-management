@@ -64,6 +64,10 @@ export default function Index() {
       if (currentToken) {
         await Promise.all([setFlag(ONBOARDING_KEY), setFlag("onboarding_complete")]);
         setOnboardingSeen(true);
+      } else if (Platform.OS === "web") {
+        // On web, skip pre-auth onboarding — visitors go straight to login.
+        // New users see onboarding AFTER registration (redirected from register screen).
+        setOnboardingSeen(true);
       } else {
         setOnboardingSeen(false);
       }

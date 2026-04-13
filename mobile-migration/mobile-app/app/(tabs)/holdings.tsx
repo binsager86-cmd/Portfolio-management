@@ -11,6 +11,7 @@
  */
 
 import { AllocationDonut, AllocationSlice } from "@/components/charts/AllocationDonut";
+import { CashBalancesSection } from "@/components/portfolio/CashBalancesSection";
 import { KpiCard } from "@/components/portfolio/KpiWidgets";
 import { DataScreen } from "@/components/screens";
 import { FilterChip } from "@/components/ui/FilterChip";
@@ -27,12 +28,9 @@ import { fmtNum } from "@/lib/currency";
 import { todayISO } from "@/lib/dateUtils";
 import { showErrorAlert } from "@/lib/errorHandling";
 import {
-    clearCashOverride,
     exportHoldingsExcel,
     Holding,
-    mergeStocks,
-    PortfolioCashBalance,
-    setCashOverride
+    mergeStocks
 } from "@/services/api";
 import { useThemeStore } from "@/services/themeStore";
 import { getApiErrorMessage } from "@/src/features/fundamental-analysis/types";
@@ -40,6 +38,7 @@ import FontAwesome from "@expo/vector-icons/FontAwesome";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
 import React, { useCallback, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
     ActivityIndicator,
     Alert,
@@ -81,24 +80,24 @@ interface ColDef {
  * 18 columns matching user specification
  */
 const TABLE_COLUMNS: ColDef[] = [
-  { key: "company",                         label: "Company",              fmt: "text_bold",       width: 150, align: "left" },
-  { key: "shares_qty",                      label: "Quantity",             fmt: "quantity",        width: 80,  align: "right", summable: true },
-  { key: "avg_cost",                        label: "Avg Cost/Share",       fmt: "price",           width: 95,  align: "right" },
-  { key: "total_cost",                      label: "Total Cost",           fmt: "money",           width: 105, align: "right", summable: true },
-  { key: "market_price",                    label: "Mkt Price",            fmt: "price",           width: 85,  align: "right" },
-  { key: "market_value",                    label: "Mkt Value",            fmt: "money",           width: 105, align: "right", summable: true },
-  { key: "unrealized_pnl",                  label: "Appreciation",         fmt: "money_colored",   width: 105, align: "right", summable: true },
-  { key: "cash_dividends",                  label: "Cash Div",             fmt: "money",           width: 90,  align: "right", summable: true },
-  { key: "reinvested_dividends",            label: "Reinvested",           fmt: "money",           width: 90,  align: "right", summable: true },
-  { key: "bonus_dividend_shares",           label: "Bonus Shares",         fmt: "quantity",        width: 90,  align: "right", summable: true },
-  { key: "bonus_share_value",               label: "Bonus Value",          fmt: "money",           width: 95,  align: "right", summable: true },
-  { key: "allocation_pct",                  label: "Weight %",             fmt: "percent",         width: 80,  align: "right" },
-  { key: "dividend_yield_on_cost_pct",      label: "Yield %",              fmt: "percent",         width: 75,  align: "right" },
-  { key: "yield_amount",                    label: "Yield Amt",            fmt: "money",           width: 90,  align: "right", summable: true },
-  { key: "weighted_dividend_yield_on_cost", label: "Wt. Yield %",          fmt: "percent",         width: 85,  align: "right" },
-  { key: "current_pnl",                     label: "Current P/L",          fmt: "money_colored",   width: 105, align: "right", summable: true },
-  { key: "current_pnl_pct",                 label: "P/L %",                fmt: "percent_colored", width: 78,  align: "right" },
-  { key: "pe_ratio",                        label: "P/E Ratio",            fmt: "money",           width: 80,  align: "right" },
+  { key: "company",                         label: "holdings.company",              fmt: "text_bold",       width: 150, align: "left" },
+  { key: "shares_qty",                      label: "holdings.quantity",             fmt: "quantity",        width: 80,  align: "right", summable: true },
+  { key: "avg_cost",                        label: "holdings.avgCostShare",         fmt: "price",           width: 95,  align: "right" },
+  { key: "total_cost",                      label: "holdings.totalCost",            fmt: "money",           width: 105, align: "right", summable: true },
+  { key: "market_price",                    label: "holdings.mktPrice",             fmt: "price",           width: 85,  align: "right" },
+  { key: "market_value",                    label: "holdings.mktValue",             fmt: "money",           width: 105, align: "right", summable: true },
+  { key: "unrealized_pnl",                  label: "holdings.appreciation",         fmt: "money_colored",   width: 105, align: "right", summable: true },
+  { key: "cash_dividends",                  label: "holdings.cashDiv",              fmt: "money",           width: 90,  align: "right", summable: true },
+  { key: "reinvested_dividends",            label: "holdings.reinvested",           fmt: "money",           width: 90,  align: "right", summable: true },
+  { key: "bonus_dividend_shares",           label: "holdings.bonusShares",          fmt: "quantity",        width: 90,  align: "right", summable: true },
+  { key: "bonus_share_value",               label: "holdings.bonusValue",           fmt: "money",           width: 95,  align: "right", summable: true },
+  { key: "allocation_pct",                  label: "holdings.weightPct",            fmt: "percent",         width: 80,  align: "right" },
+  { key: "dividend_yield_on_cost_pct",      label: "holdings.yieldPct",             fmt: "percent",         width: 75,  align: "right" },
+  { key: "yield_amount",                    label: "holdings.yieldAmt",             fmt: "money",           width: 90,  align: "right", summable: true },
+  { key: "weighted_dividend_yield_on_cost", label: "holdings.wtYieldPct",            fmt: "percent",         width: 85,  align: "right" },
+  { key: "current_pnl",                     label: "holdingsScreen.currentPL",      fmt: "money_colored",   width: 105, align: "right", summable: true },
+  { key: "current_pnl_pct",                 label: "holdings.pctChange",            fmt: "percent_colored", width: 78,  align: "right" },
+  { key: "pe_ratio",                        label: "holdings.peRatio",              fmt: "money",           width: 80,  align: "right" },
 ];
 
 const TOTAL_TABLE_WIDTH = TABLE_COLUMNS.reduce((s, c) => s + c.width, 0);
@@ -161,10 +160,8 @@ function fmtCell(
       const n = Number(val);
       if (!n && n !== 0) return { text: "—", color: muted, bold: false };
       if (n === 0) return { text: "0.00%", color: muted, bold: false };
-      // pnl_pct comes as decimal (0.05 = 5%), convert to display %
-      const pct = Math.abs(n) < 1 ? n * 100 : n;
-      if (pct > 0) return { text: `+${pct.toFixed(2)}%`, color: pos, bold: true };
-      return { text: `${pct.toFixed(2)}%`, color: neg, bold: true };
+      if (n > 0) return { text: `+${n.toFixed(2)}%`, color: pos, bold: true };
+      return { text: `${n.toFixed(2)}%`, color: neg, bold: true };
     }
 
     default:
@@ -304,13 +301,15 @@ function HeaderCell({
   sortDir: SortDir;
   onSort: (key: string) => void;
 }) {
+  const { t } = useTranslation();
   const isActive = sortCol === col.key;
   const arrow = isActive ? (sortDir === "asc" ? " ↑" : " ↓") : " ⇅";
+  const translatedLabel = t(col.label);
   return (
     <Pressable
       onPress={() => onSort(col.key)}
       accessibilityRole="button"
-      accessibilityLabel={`Sort by ${col.label}`}
+      accessibilityLabel={t('holdingsScreen.sortBy', { label: translatedLabel })}
       style={[
         ts.headerCell,
         {
@@ -329,7 +328,7 @@ function HeaderCell({
         ]}
         numberOfLines={1}
       >
-        {col.label}
+        {translatedLabel}
         <Text style={{ opacity: isActive ? 1 : 0.35, fontSize: 10 }}>
           {arrow}
         </Text>
@@ -390,6 +389,7 @@ function TotalCell({
   totals: Record<string, number>;
   colors: ThemePalette;
 }) {
+  const { t } = useTranslation();
   // First column shows "TOTAL" label
   if (col.key === "company") {
     return (
@@ -397,7 +397,7 @@ function TotalCell({
         <Text
           style={[ts.cellText, { color: colors.accentPrimary, fontWeight: "800" }]}
         >
-          TOTAL
+          {t('holdingsScreen.total')}
         </Text>
       </View>
     );
@@ -441,6 +441,7 @@ function HoldingRow({
   isEven: boolean;
   onCompanyPress?: (holding: Holding) => void;
 }) {
+  const { t } = useTranslation();
   const rowBg = isEven ? "transparent" : colors.bgCardHover + "30";
   return (
     <View
@@ -455,7 +456,7 @@ function HoldingRow({
             key={col.key}
             onPress={() => onCompanyPress(holding)}
             accessibilityRole="link"
-            accessibilityLabel={`View details for ${holding.company}`}
+            accessibilityLabel={t('holdingsScreen.viewDetails', { company: holding.company })}
             style={({ pressed }) => [
               ts.dataCell,
               { width: col.width, opacity: pressed ? 0.6 : 1 },
@@ -502,6 +503,7 @@ function StockMergeModal({
 
   // Fetch all stocks to find the current stock's ID and list merge targets
   const stocksQ = useAllStocksForMerge();
+  const { t } = useTranslation();
 
   const allStocks = stocksQ.data?.stocks ?? [];
 
@@ -533,14 +535,14 @@ function StockMergeModal({
     },
     onSuccess: (result) => {
       Alert.alert(
-        "Stocks Merged",
-        `${result.source_symbol} merged into ${result.target_symbol}\n${result.transactions_moved} transactions moved.`
+        t('holdingsScreen.stocksMerged'),
+        t('holdingsScreen.mergedMessage', { source: result.source_symbol, target: result.target_symbol, count: result.transactions_moved })
       );
       onMerged();
       onClose();
     },
     onError: (err: any) => {
-      showErrorAlert("Merge Failed", err);
+      showErrorAlert(t('holdingsScreen.mergeFailed'), err);
     },
   });
 
@@ -550,16 +552,16 @@ function StockMergeModal({
     const sourceName = sourceStock ? `${sourceStock.symbol} (${sourceStock.name})` : "the selected stock";
 
     if (Platform.OS === "web") {
-      if (window.confirm(`Merge ${sourceName} into ${holding.company}?\n\nAll transactions will be moved to ${holding.symbol}. This cannot be undone.`)) {
+      if (window.confirm(t('holdingsScreen.mergeConfirmMessage', { source: sourceName, target: holding.company, symbol: holding.symbol }))) {
         mergeMutation.mutate();
       }
     } else {
       Alert.alert(
-        "Confirm Merge",
-        `Merge ${sourceName} into ${holding.company}?\n\nAll transactions will be moved to ${holding.symbol}. This cannot be undone.`,
+        t('holdingsScreen.confirmMerge'),
+        t('holdingsScreen.mergeConfirmMessage', { source: sourceName, target: holding.company, symbol: holding.symbol }),
         [
-          { text: "Cancel", style: "cancel" },
-          { text: "Merge", style: "destructive", onPress: () => mergeMutation.mutate() },
+          { text: t('holdingsScreen.cancel'), style: "cancel" },
+          { text: t('holdingsScreen.merge'), style: "destructive", onPress: () => mergeMutation.mutate() },
         ]
       );
     }
@@ -567,7 +569,7 @@ function StockMergeModal({
 
   return (
     <Modal transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable style={mergeStyles.overlay} onPress={onClose} accessibilityRole="button" accessibilityLabel="Close dialog">
+      <Pressable style={mergeStyles.overlay} onPress={onClose} accessibilityRole="button" accessibilityLabel={t('holdingsScreen.closeDialog')}>
         <Pressable
           style={[
             mergeStyles.box,
@@ -580,7 +582,7 @@ function StockMergeModal({
             <Text style={[mergeStyles.title, { color: colors.textPrimary }]}>
               {holding.company}
             </Text>
-            <Pressable onPress={onClose} hitSlop={12} style={{ padding: 6 }} accessibilityRole="button" accessibilityLabel="Close">
+            <Pressable onPress={onClose} hitSlop={12} style={{ padding: 6 }} accessibilityRole="button" accessibilityLabel={t('holdingsScreen.close')}>
               <FontAwesome name="times" size={16} color={colors.textMuted} />
             </Pressable>
           </View>
@@ -588,29 +590,29 @@ function StockMergeModal({
           {/* Stock info */}
           <View style={[mergeStyles.infoCard, { backgroundColor: colors.bgPrimary, borderColor: colors.borderColor }]}>
             <View style={mergeStyles.infoRow}>
-              <Text style={[mergeStyles.infoLabel, { color: colors.textMuted }]}>Symbol</Text>
+              <Text style={[mergeStyles.infoLabel, { color: colors.textMuted }]}>{t('holdingsScreen.symbol')}</Text>
               <Text style={[mergeStyles.infoValue, { color: colors.textPrimary }]}>{holding.symbol}</Text>
             </View>
             <View style={mergeStyles.infoRow}>
-              <Text style={[mergeStyles.infoLabel, { color: colors.textMuted }]}>Quantity</Text>
+              <Text style={[mergeStyles.infoLabel, { color: colors.textMuted }]}>{t('holdingsScreen.quantity')}</Text>
               <Text style={[mergeStyles.infoValue, { color: colors.textPrimary }]}>{fmtNum(holding.shares_qty, 0)}</Text>
             </View>
             <View style={mergeStyles.infoRow}>
-              <Text style={[mergeStyles.infoLabel, { color: colors.textMuted }]}>Market Price</Text>
+              <Text style={[mergeStyles.infoLabel, { color: colors.textMuted }]}>{t('holdingsScreen.marketPrice')}</Text>
               <Text style={[mergeStyles.infoValue, { color: colors.textPrimary }]}>{fmtNum(holding.market_price, 3)}</Text>
             </View>
             <View style={mergeStyles.infoRow}>
-              <Text style={[mergeStyles.infoLabel, { color: colors.textMuted }]}>Currency</Text>
+              <Text style={[mergeStyles.infoLabel, { color: colors.textMuted }]}>{t('holdings.currency')}</Text>
               <Text style={[mergeStyles.infoValue, { color: colors.textPrimary }]}>{holding.currency}</Text>
             </View>
           </View>
 
           {/* Merge section */}
           <Text style={[mergeStyles.sectionLabel, { color: colors.textPrimary }]}>
-            Merge Another Stock Into This One
+            {t('holdingsScreen.mergeAnother')}
           </Text>
           <Text style={[mergeStyles.sectionHint, { color: colors.textMuted }]}>
-            Select a stock to absorb. Its transactions will be moved to {holding.symbol}, then the selected stock will be deleted.
+            {t('holdingsScreen.selectStockToAbsorb', { symbol: holding.symbol })}
           </Text>
 
           <ScrollView style={{ maxHeight: 280 }} showsVerticalScrollIndicator keyboardShouldPersistTaps="handled">
@@ -624,7 +626,7 @@ function StockMergeModal({
                   backgroundColor: colors.bgPrimary,
                 },
               ]}
-              placeholder="Search stocks..."
+              placeholder={t('holdingsScreen.searchStocks')}
               placeholderTextColor={colors.textMuted}
               value={searchText}
               onChangeText={setSearchText}
@@ -634,7 +636,7 @@ function StockMergeModal({
               <ActivityIndicator style={{ padding: 20 }} color={colors.accentPrimary} />
             ) : mergeCandidates.length === 0 ? (
               <Text style={[mergeStyles.emptyText, { color: colors.textMuted }]}>
-                No other stocks found
+                {t('holdingsScreen.noOtherStocks')}
               </Text>
             ) : (
               mergeCandidates.map((stock) => {
@@ -678,7 +680,7 @@ function StockMergeModal({
               onPress={onClose}
               style={[mergeStyles.btn, { backgroundColor: colors.bgPrimary, borderColor: colors.borderColor, borderWidth: 1 }]}
             >
-              <Text style={[mergeStyles.btnText, { color: colors.textSecondary }]}>Cancel</Text>
+              <Text style={[mergeStyles.btnText, { color: colors.textSecondary }]}>{t('holdingsScreen.cancel')}</Text>
             </Pressable>
             <Pressable
               onPress={handleMerge}
@@ -697,7 +699,7 @@ function StockMergeModal({
                 <ActivityIndicator size="small" color="#fff" />
               ) : (
                 <Text style={[mergeStyles.btnText, { color: "#fff", fontWeight: "700" }]}>
-                  Merge Selected
+                  {t('holdingsScreen.mergeSelected')}
                 </Text>
               )}
             </Pressable>
@@ -713,6 +715,7 @@ function StockMergeModal({
 export default function HoldingsScreen() {
   const { colors } = useThemeStore();
   const { spacing } = useResponsive();
+  const { t } = useTranslation();
   const queryClient = useQueryClient();
   const router = useRouter();
 
@@ -798,7 +801,7 @@ export default function HoldingsScreen() {
   return (
     <DataScreen
       loading={isLoading}
-      error={isError ? getApiErrorMessage(error, "Failed to load holdings") : null}
+      error={isError ? getApiErrorMessage(error, t('holdingsScreen.failedToLoad')) : null}
       onRetry={() => refetch()}
       loadingSkeleton={<HoldingsTableSkeleton />}
       bare
@@ -820,11 +823,11 @@ export default function HoldingsScreen() {
       {/* ── Summary KPI Cards ────────────────────────────────────── */}
       {resp && (
         <View style={[s.kpiCardRow, { borderBottomColor: colors.borderColor }]}>
-          <KpiCard label="Holdings" value={String(resp.count)} color={colors.accentPrimary} colors={colors} />
-          <KpiCard label="Market Value" value={`${fmtNum(resp.totals.total_market_value_kwd)} KWD`} colors={colors} />
-          <KpiCard label="Total Cost" value={`${fmtNum(resp.totals.total_cost_kwd)} KWD`} colors={colors} />
+          <KpiCard label={t('holdings.title')} value={String(resp.count)} color={colors.accentPrimary} colors={colors} />
+          <KpiCard label={t('holdings.marketValue')} value={`${fmtNum(resp.totals.total_market_value_kwd)} KWD`} colors={colors} />
+          <KpiCard label={t('holdings.avgCost')} value={`${fmtNum(resp.totals.total_cost_kwd)} KWD`} colors={colors} />
           <KpiCard
-            label="Unrealized P/L"
+            label={t('dashboard.unrealizedPL')}
             value={`${resp.totals.total_unrealized_pnl_kwd >= 0 ? "+" : ""}${fmtNum(resp.totals.total_unrealized_pnl_kwd)} KWD`}
             color={resp.totals.total_unrealized_pnl_kwd > 0 ? colors.success : resp.totals.total_unrealized_pnl_kwd < 0 ? colors.danger : colors.textMuted}
             colors={colors}
@@ -862,13 +865,13 @@ export default function HoldingsScreen() {
             style={[s.holdingsTitle, { color: colors.textPrimary }]}
           >
             <FontAwesome name="briefcase" size={16} color={colors.accentPrimary} />
-            {"  "}Holdings
+            {"  "}{t('holdings.title')}
           </Text>
           <TouchableOpacity
             activeOpacity={0.7}
             onPress={async () => {
               if (Platform.OS !== "web") {
-                Alert.alert("Export", "Excel export is available on the web version.");
+                Alert.alert(t('holdingsScreen.export'), t('holdingsScreen.exportWebOnly'));
                 return;
               }
               try {
@@ -882,14 +885,14 @@ export default function HoldingsScreen() {
                 document.body.removeChild(a);
                 URL.revokeObjectURL(url);
               } catch (e: any) {
-                showErrorAlert("Export Failed", e);
+                showErrorAlert(t('holdingsScreen.exportFailed'), e);
               }
             }}
             style={s.holdingsExportBtn}
           >
             <FontAwesome name="download" size={14} color="#10b981" style={{ marginRight: 8 }} />
             <Text style={s.holdingsExportText}>
-              Export Excel
+              {t('holdingsScreen.exportExcel')}
             </Text>
           </TouchableOpacity>
         </View>
@@ -974,13 +977,13 @@ export default function HoldingsScreen() {
                 <View style={ts.emptyRow}>
                   <FontAwesome name="briefcase" size={36} color={colors.textMuted} style={{ marginBottom: 8 }} />
                   <Text style={{ color: colors.textMuted, fontSize: 14, marginBottom: 12 }}>
-                    No active holdings found.
+                    {t('holdingsScreen.noActiveHoldings')}
                   </Text>
                   <Pressable
                     onPress={() => router.push("/(tabs)/add-stock" as any)}
                     style={[{ backgroundColor: colors.accentPrimary, paddingHorizontal: 18, paddingVertical: 8, borderRadius: 8 }, Platform.OS === "web" ? ({ cursor: "pointer" } as any) : undefined]}
                   >
-                    <Text style={{ color: "#fff", fontWeight: "600", fontSize: 13 }}>Add Your First Stock</Text>
+                    <Text style={{ color: "#fff", fontWeight: "600", fontSize: 13 }}>{t('holdingsScreen.addFirstStock')}</Text>
                   </Pressable>
                 </View>
               )}
@@ -1002,11 +1005,11 @@ export default function HoldingsScreen() {
           >
             <Text style={[donutStyles.sectionLabel, { color: colors.textPrimary }]}>
               <FontAwesome name="pie-chart" size={14} color={colors.accentPrimary} />{" "}
-              Weight by Cost
+              {t('holdingsScreen.weightByCost')}
             </Text>
             <AllocationDonut
               data={allocationData}
-              title="Portfolio Allocation by Weight"
+              title={t('holdingsScreen.portfolioAllocation')}
               colors={colors}
               size={280}
               showLegend={true}
@@ -1033,281 +1036,6 @@ export default function HoldingsScreen() {
     </DataScreen>
   );
 }
-
-// ── Cash Management Section (matches Streamlit Cash Management) ─────
-
-const PORTFOLIO_CCY: Record<string, string> = {
-  KFH: "KWD",
-  BBYN: "KWD",
-  USA: "USD",
-};
-
-const DEFAULT_USD_KWD_RATE = 0.307;
-
-function CashBalancesSection({
-  cashData,
-  depositTotals,
-  colors,
-  spacing,
-  queryClient,
-}: {
-  cashData: Record<string, PortfolioCashBalance>;
-  depositTotals: Record<string, number>;
-  colors: ThemePalette;
-  spacing: { pagePx: number };
-  queryClient: ReturnType<typeof useQueryClient>;
-}) {
-  const [editingPf, setEditingPf] = useState<string | null>(null);
-  const [editValue, setEditValue] = useState("");
-
-  const overrideMutation = useMutation({
-    mutationFn: ({ portfolio, balance, currency }: { portfolio: string; balance: number; currency: string }) =>
-      setCashOverride(portfolio, balance, currency),
-    onSuccess: async () => {
-      await Promise.all([
-        queryClient.refetchQueries({ queryKey: ["cash-balances"] }),
-        queryClient.refetchQueries({ queryKey: ["portfolio-overview"] }),
-      ]);
-      setEditingPf(null);
-      setEditValue("");
-    },
-    onError: (err) => showErrorAlert("Error", err, "Failed to save"),
-  });
-
-  const clearMutation = useMutation({
-    mutationFn: (portfolio: string) => clearCashOverride(portfolio),
-    onSuccess: async () => {
-      await Promise.all([
-        queryClient.refetchQueries({ queryKey: ["cash-balances"] }),
-        queryClient.refetchQueries({ queryKey: ["portfolio-overview"] }),
-      ]);
-    },
-  });
-
-  const handleSaveOverride = (portfolio: string) => {
-    const num = parseFloat(editValue);
-    if (isNaN(num) || num < 0) {
-      if (Platform.OS === "web") window.alert("Enter a valid positive number");
-      else Alert.alert("Invalid", "Enter a valid positive number");
-      return;
-    }
-    const ccy = PORTFOLIO_CCY[portfolio] ?? "KWD";
-    overrideMutation.mutate({ portfolio, balance: num, currency: ccy });
-  };
-
-  const cashPortfolios = ["KFH", "BBYN", "USA"];
-
-  // Calculate Total Free Cash in KWD
-  const totalFreeCashKwd = useMemo(() => {
-    let total = 0;
-    for (const pf of cashPortfolios) {
-      const item = cashData[pf];
-      if (!item) continue;
-      if (item.currency === "USD") {
-        total += item.balance * DEFAULT_USD_KWD_RATE;
-      } else {
-        total += item.balance;
-      }
-    }
-    return total;
-  }, [cashData]);
-
-  return (
-    <View
-      style={[
-        cs.section,
-        {
-          marginHorizontal: spacing.pagePx,
-          backgroundColor: colors.bgCard,
-          borderColor: colors.borderColor,
-        },
-      ]}
-    >
-      {/* Section Header */}
-      <View style={cs.cashHeader}>
-        <Text style={[cs.sectionTitle, { color: colors.textPrimary }]}>
-          <FontAwesome name="money" size={16} color={colors.accentPrimary} />{" "}
-          💵 Cash Management
-        </Text>
-        <Text style={[cs.cashCaption, { color: colors.textMuted }]}>
-          Edit cash balances manually. Tap the pencil to override.
-        </Text>
-      </View>
-
-      {/* Cash table wrapped in horizontal scroll for narrow screens */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={true} contentContainerStyle={{ minWidth: 485 }}>
-        <View style={{ minWidth: 485 }}>
-          {/* Table Header Row */}
-          <View style={[cs.tableHeaderRow, { backgroundColor: colors.bgSecondary, borderBottomColor: colors.borderColor }]}>
-            <Text style={[cs.tableHeaderCell, cs.cellPortfolio, { color: colors.textSecondary }]}>
-              Portfolio
-            </Text>
-            <Text style={[cs.tableHeaderCell, cs.cellCcy, { color: colors.textSecondary }]}>
-              CCY
-            </Text>
-            <Text style={[cs.tableHeaderCell, cs.cellCapital, { color: colors.textSecondary, textAlign: "right" }]}>
-              Total Capital
-            </Text>
-            <Text style={[cs.tableHeaderCell, cs.cellCash, { color: colors.textSecondary, textAlign: "right" }]}>
-              Available Cash
-            </Text>
-            <Text style={[cs.tableHeaderCell, cs.cellActions, { color: colors.textSecondary, textAlign: "center" }]}>
-              {" "}
-            </Text>
-          </View>
-
-      {/* Portfolio cash rows */}
-      {cashPortfolios.map((pf) => {
-        const item = cashData[pf];
-        const balance = item?.balance ?? 0;
-        const ccy = PORTFOLIO_CCY[pf] ?? "KWD";
-        const ccyDisplay = ccy === "USD" ? `USD (${DEFAULT_USD_KWD_RATE.toFixed(3)})` : ccy;
-        const totalDeposited = depositTotals[pf] ?? 0;
-        const isEditing = editingPf === pf;
-        const isManual = item?.manual_override ?? false;
-
-        return (
-          <View
-            key={pf}
-            style={[cs.tableDataRow, { borderBottomColor: colors.borderColor }]}
-          >
-            {/* Portfolio name + manual badge */}
-            <View style={[cs.cellPortfolio, cs.cellInner]}>
-              <Text style={[cs.cellText, { color: colors.textPrimary, fontWeight: "600" }]}>
-                {pf}
-              </Text>
-              {isManual && (
-                <View style={[cs.overrideBadge, { backgroundColor: colors.warning + "22" }]}>
-                  <Text style={{ color: colors.warning, fontSize: 9, fontWeight: "700" }}>MANUAL</Text>
-                </View>
-              )}
-            </View>
-
-            {/* Currency */}
-            <View style={[cs.cellCcy, cs.cellInner]}>
-              <Text style={[cs.cellText, { color: colors.textSecondary, fontSize: 11 }]}>
-                {ccyDisplay}
-              </Text>
-            </View>
-
-            {/* Total Capital (Deposited) — read only */}
-            <View style={[cs.cellCapital, cs.cellInner]}>
-              <Text style={[cs.cellText, { color: colors.textMuted, textAlign: "right" }]}>
-                {fmtNum(totalDeposited, ccy === "KWD" ? 0 : 2)}
-              </Text>
-            </View>
-
-            {/* Available Cash — editable */}
-            {isEditing ? (
-              <View style={[cs.cellCash, cs.editRow]}>
-                <RNTextInput
-                  style={[
-                    cs.editInput,
-                    {
-                      color: colors.textPrimary,
-                      backgroundColor: colors.bgInput,
-                      borderColor: colors.borderColor,
-                    },
-                  ]}
-                  value={editValue}
-                  onChangeText={setEditValue}
-                  keyboardType="decimal-pad"
-                  placeholder="Amount"
-                  placeholderTextColor={colors.textMuted}
-                  autoFocus
-                />
-                <Pressable
-                  onPress={() => handleSaveOverride(pf)}
-                  style={[cs.editBtn, { backgroundColor: colors.success + "22" }]}
-                >
-                  <FontAwesome name="check" size={12} color={colors.success} />
-                </Pressable>
-                <Pressable
-                  onPress={() => { setEditingPf(null); setEditValue(""); }}
-                  style={[cs.editBtn, { backgroundColor: colors.danger + "22" }]}
-                >
-                  <FontAwesome name="times" size={12} color={colors.danger} />
-                </Pressable>
-              </View>
-            ) : (
-              <View style={[cs.cellCash, cs.cellInner]}>
-                <Text style={[cs.cellText, { color: colors.textPrimary, fontWeight: "600", textAlign: "right" }]}>
-                  {fmtNum(balance, ccy === "KWD" ? 3 : 2)}
-                </Text>
-              </View>
-            )}
-
-            {/* Actions */}
-            {!isEditing && (
-              <View style={[cs.cellActions, cs.cellInner, { flexDirection: "row", gap: 8, justifyContent: "center", alignItems: "center" }]}>
-                <Pressable
-                  onPress={() => { setEditingPf(pf); setEditValue(balance.toString()); }}
-                  style={({ pressed }) => [{
-                    width: 32,
-                    height: 32,
-                    borderRadius: 6,
-                    backgroundColor: colors.accentPrimary + "20",
-                    borderWidth: 1,
-                    borderColor: colors.accentPrimary + "44",
-                    justifyContent: "center" as const,
-                    alignItems: "center" as const,
-                    opacity: pressed ? 0.6 : 1,
-                  }]}
-                >
-                  <FontAwesome name="pencil" size={15} color={colors.accentPrimary} />
-                </Pressable>
-
-                {isManual && (
-                  <Pressable
-                    onPress={() => {
-                      const msg = `Clear manual override for ${pf}? Balance will be recalculated automatically.`;
-                      if (Platform.OS === "web") {
-                        if (window.confirm(msg)) clearMutation.mutate(pf);
-                      } else {
-                        Alert.alert("Clear Override", msg, [
-                          { text: "Cancel", style: "cancel" },
-                          { text: "Clear", onPress: () => clearMutation.mutate(pf) },
-                        ]);
-                      }
-                    }}
-                    style={({ pressed }) => [{
-                      width: 32,
-                      height: 32,
-                      borderRadius: 6,
-                      backgroundColor: colors.warning + "20",
-                      borderWidth: 1,
-                      borderColor: colors.warning + "44",
-                      justifyContent: "center" as const,
-                      alignItems: "center" as const,
-                      opacity: pressed ? 0.6 : 1,
-                    }]}
-                  >
-                    <FontAwesome name="undo" size={14} color={colors.warning} />
-                  </Pressable>
-                )}
-              </View>
-            )}
-            {isEditing && <View style={cs.cellActions} />}
-          </View>
-        );
-      })}
-        </View>
-      </ScrollView>
-
-      {/* Total Free Cash KPI */}
-      <View style={[cs.totalCashRow, { borderTopColor: colors.accentPrimary }]}>
-        <Text style={[cs.totalCashLabel, { color: colors.textSecondary }]}>
-          Total Free Cash
-        </Text>
-        <Text style={[cs.totalCashValue, { color: colors.accentPrimary }]}>
-          {fmtNum(totalFreeCashKwd, 3)} KWD
-        </Text>
-      </View>
-    </View>
-  );
-}
-
-// ── Table styles ────────────────────────────────────────────────────
 
 // ── Merge modal styles ──────────────────────────────────────────────
 
@@ -1545,110 +1273,6 @@ const s = StyleSheet.create({
     color: "#10b981",
     fontSize: 13,
     fontWeight: "700" as const,
-  },
-});
-
-// ── Cash section styles (Streamlit-matching table layout) ───────────
-
-const cs = StyleSheet.create({
-  section: {
-    borderRadius: 10,
-    borderWidth: 1,
-    padding: 0,
-    marginBottom: 24,
-    overflow: "hidden",
-  },
-  cashHeader: {
-    padding: 16,
-    paddingBottom: 8,
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: "700",
-    marginBottom: 4,
-  },
-  cashCaption: {
-    fontSize: 11,
-    lineHeight: 16,
-  },
-  // Table header row
-  tableHeaderRow: {
-    flexDirection: "row",
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderBottomWidth: 2,
-  },
-  tableHeaderCell: {
-    fontSize: 10,
-    fontWeight: "700",
-    textTransform: "uppercase",
-    letterSpacing: 0.3,
-  },
-  cellPortfolio: { width: 90 },
-  cellCcy: { width: 85 },
-  cellCapital: { width: 110 },
-  cellCash: { width: 120 },
-  cellActions: { width: 80 },
-  // Data rows
-  tableDataRow: {
-    flexDirection: "row",
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    alignItems: "center",
-  },
-  cellInner: {
-    justifyContent: "center" as const,
-  },
-  cellText: {
-    fontSize: 12,
-  },
-  overrideBadge: {
-    paddingHorizontal: 4,
-    paddingVertical: 1,
-    borderRadius: 3,
-    marginTop: 2,
-  },
-  iconBtn: {
-    padding: 6,
-  },
-  editRow: {
-    flexDirection: "row" as const,
-    alignItems: "center" as const,
-    gap: 4,
-    justifyContent: "flex-end" as const,
-  },
-  editInput: {
-    width: 80,
-    height: 30,
-    borderWidth: 1,
-    borderRadius: 4,
-    paddingHorizontal: 6,
-    fontSize: 12,
-  },
-  editBtn: {
-    width: 26,
-    height: 26,
-    borderRadius: 4,
-    justifyContent: "center" as const,
-    alignItems: "center" as const,
-  },
-  // Total Free Cash row
-  totalCashRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderTopWidth: 2,
-  },
-  totalCashLabel: {
-    fontSize: 13,
-    fontWeight: "600",
-  },
-  totalCashValue: {
-    fontSize: 16,
-    fontWeight: "800",
   },
 });
 

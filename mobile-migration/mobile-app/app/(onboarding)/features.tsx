@@ -1,40 +1,44 @@
 import { markOnboardingSeen } from "@/app/index";
+import { useAuthStore } from "@/services/authStore";
 import { useThemeStore } from "@/services/themeStore";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import { useRouter } from "expo-router";
 import React, { useRef } from "react";
+import { useTranslation } from "react-i18next";
 import { Animated, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 const FEATURES = [
   {
     icon: "upload" as const,
     color: "#34D399",
-    title: "Import Transactions",
-    desc: "Upload an Excel file or add transactions manually to build your portfolio.",
+    titleKey: "onboarding.featureImportTitle",
+    descKey: "onboarding.featureImportDesc",
   },
   {
     icon: "flask" as const,
     color: "#818CF8",
-    title: "AI Fundamental Analysis",
-    desc: "Get detailed growth, valuation, and financial health reports powered by AI.",
+    titleKey: "onboarding.featureAITitle",
+    descKey: "onboarding.featureAIDesc",
   },
   {
     icon: "balance-scale" as const,
     color: "#F59E0B",
-    title: "Valuations & DCF",
-    desc: "See fair-value estimates, margin of safety, and discounted cash flow models.",
+    titleKey: "onboarding.featureDCFTitle",
+    descKey: "onboarding.featureDCFDesc",
   },
   {
     icon: "line-chart" as const,
     color: "#38BDF8",
-    title: "Track & Monitor",
-    desc: "Real-time prices, dividends, allocation charts, and performance metrics.",
+    titleKey: "onboarding.featureTrackTitle",
+    descKey: "onboarding.featureTrackDesc",
   },
 ];
 
 export default function FeaturesScreen() {
   const router = useRouter();
   const { colors } = useThemeStore();
+  const token = useAuthStore((s) => s.token);
+  const { t } = useTranslation();
   const fadeAnims = useRef(FEATURES.map(() => new Animated.Value(0))).current;
   const slideAnims = useRef(FEATURES.map(() => new Animated.Value(40))).current;
 
@@ -63,15 +67,15 @@ export default function FeaturesScreen() {
     <View style={[styles.container, { backgroundColor: colors.bgPrimary }]}>
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         {/* Section Header */}
-        <Text style={[styles.heading, { color: colors.textPrimary }]}>What You Can Do</Text>
+        <Text style={[styles.heading, { color: colors.textPrimary }]}>{t('onboarding.whatYouCanDo')}</Text>
         <Text style={[styles.sub, { color: colors.textSecondary }]}>
-          Everything you need to manage and analyze your investment portfolio.
+          {t('onboarding.everythingYouNeed')}
         </Text>
 
         {/* Feature Cards */}
         {FEATURES.map((f, i) => (
           <Animated.View
-            key={f.title}
+            key={f.titleKey}
             style={[
               styles.card,
               {
@@ -86,8 +90,8 @@ export default function FeaturesScreen() {
               <FontAwesome name={f.icon} size={24} color={f.color} />
             </View>
             <View style={styles.cardText}>
-              <Text style={[styles.cardTitle, { color: colors.textPrimary }]}>{f.title}</Text>
-              <Text style={[styles.cardDesc, { color: colors.textSecondary }]}>{f.desc}</Text>
+              <Text style={[styles.cardTitle, { color: colors.textPrimary }]}>{t(f.titleKey)}</Text>
+              <Text style={[styles.cardDesc, { color: colors.textSecondary }]}>{t(f.descKey)}</Text>
             </View>
           </Animated.View>
         ))}
@@ -99,11 +103,11 @@ export default function FeaturesScreen() {
           onPress={() => router.push("/(onboarding)/get-started")}
           style={[styles.button, { backgroundColor: colors.accentPrimary }]}
         >
-          <Text style={styles.buttonText}>Continue</Text>
+          <Text style={styles.buttonText}>{t('onboarding.continue')}</Text>
           <FontAwesome name="arrow-right" size={16} color="#fff" style={{ marginLeft: 8 }} />
         </Pressable>
-        <Pressable onPress={() => { markOnboardingSeen(); router.replace("/(auth)/login"); }} style={styles.skip}>
-          <Text style={[styles.skipText, { color: colors.textMuted }]}>Skip</Text>
+        <Pressable onPress={() => { markOnboardingSeen(); router.replace(token ? "/(tabs)" : "/(auth)/login"); }} style={styles.skip}>
+          <Text style={[styles.skipText, { color: colors.textMuted }]}>{t('onboarding.skip')}</Text>
         </Pressable>
       </View>
     </View>

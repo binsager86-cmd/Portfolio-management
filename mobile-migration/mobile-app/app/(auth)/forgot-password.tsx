@@ -29,12 +29,13 @@ import { useResponsive } from "@/hooks/useResponsive";
 import { extractErrorMessage } from "@/lib/errorHandling";
 import { forgotPassword, resetPassword, verifyOtp } from "@/services/api";
 import { useThemeStore } from "@/services/themeStore";
+import { useTranslation } from "react-i18next";
 
 type Step = "email" | "otp" | "password";
 
 // ── Password strength helper ────────────────────────────────────────
 
-const STRENGTH_LABELS = ["", "Weak", "Fair", "Good", "Strong"] as const;
+const STRENGTH_LABELS = ["", "weak", "fair", "good", "strong"] as const;
 const STRENGTH_COLORS = ["#d1d5db", "#ef4444", "#f59e0b", "#3b82f6", "#22c55e"];
 
 function getPasswordStrength(pwd: string): number {
@@ -50,6 +51,7 @@ export default function ForgotPasswordScreen() {
   const router = useRouter();
   const { colors } = useThemeStore();
   const { isDesktop } = useResponsive();
+  const { t } = useTranslation();
 
   const [step, setStep] = useState<Step>("email");
   const [email, setEmail] = useState("");
@@ -113,14 +115,14 @@ export default function ForgotPasswordScreen() {
     setSuccess(null);
 
     if (!email.trim()) {
-      setError("Please enter your email address");
+      setError(t('auth.enterEmailPlease'));
       return;
     }
 
     setLoading(true);
     try {
       await forgotPassword(email.trim());
-      setSuccess("A 6-digit code has been sent to your email");
+      setSuccess(t('auth.codeSent'));
       setStep("otp");
       setCountdown(60); // 60s before resend allowed
     } catch (err: unknown) {
@@ -147,7 +149,7 @@ export default function ForgotPasswordScreen() {
     setLoading(true);
     try {
       await forgotPassword(email.trim());
-      setSuccess("A new code has been sent to your email");
+      setSuccess(t('auth.newCodeSent'));
       setCountdown(60);
       setOtpCode("");
     } catch (err: unknown) {
@@ -164,14 +166,14 @@ export default function ForgotPasswordScreen() {
     setSuccess(null);
 
     if (otpCode.length !== 6) {
-      setError("Please enter the 6-digit code");
+      setError(t('auth.enterCodePlease'));
       return;
     }
 
     setLoading(true);
     try {
       await verifyOtp(email.trim(), otpCode.trim());
-      setSuccess("Code verified! Set your new password.");
+      setSuccess(t('auth.codeVerified'));
       setStep("password");
     } catch (err: unknown) {
       setError(extractErrorMessage(err, "Invalid code"));
@@ -187,11 +189,11 @@ export default function ForgotPasswordScreen() {
     setSuccess(null);
 
     if (newPassword.length < 8) {
-      setError("Password must be at least 8 characters");
+      setError(t('auth.passwordMinLength'));
       return;
     }
     if (newPassword !== confirmPassword) {
-      setError("Passwords do not match");
+      setError(t('auth.passwordsDoNotMatch'));
       return;
     }
 
@@ -214,15 +216,15 @@ export default function ForgotPasswordScreen() {
   // ── Render helpers ────────────────────────────────────────────────
 
   const stepTitle = {
-    email: "Forgot Password",
-    otp: "Enter Reset Code",
-    password: "Set New Password",
+    email: t('auth.forgotPasswordTitle'),
+    otp: t('auth.enterResetCode'),
+    password: t('auth.setNewPassword'),
   }[step];
 
   const stepSubtitle = {
-    email: "Enter your email and we'll send you a reset code",
-    otp: `We sent a 6-digit code to ${email}`,
-    password: "Choose a strong new password",
+    email: t('auth.enterEmailReset'),
+    otp: t('auth.codeSentTo', { email }),
+    password: t('auth.chooseStrongPassword'),
   }[step];
 
   const stepIcon = { email: "🔑", otp: "📧", password: "🔒" }[step];
@@ -365,10 +367,10 @@ export default function ForgotPasswordScreen() {
             {step === "email" && (
               <>
                 <TextInput
-                  label="Email"
+                  label={t('auth.emailOnly')}
                   value={email}
-                  onChangeText={(t) => {
-                    setEmail(t);
+                  onChangeText={(tx) => {
+                    setEmail(tx);
                     if (error) setError(null);
                   }}
                   autoCapitalize="none"
@@ -396,7 +398,7 @@ export default function ForgotPasswordScreen() {
                   buttonColor={colors.accentPrimary}
                   textColor="#ffffff"
                 >
-                  Send Reset Code
+                  {t('auth.sendResetCode')}
                 </Button>
               </>
             )}
@@ -405,11 +407,11 @@ export default function ForgotPasswordScreen() {
             {step === "otp" && (
               <>
                 <TextInput
-                  label="6-digit code"
+                  label={t('auth.sixDigitCode')}
                   value={otpCode}
-                  onChangeText={(t) => {
+                  onChangeText={(tx) => {
                     // Only allow digits, max 6
-                    const cleaned = t.replace(/\D/g, "").slice(0, 6);
+                    const cleaned = tx.replace(/\D/g, "").slice(0, 6);
                     setOtpCode(cleaned);
                     if (error) setError(null);
                   }}
@@ -437,7 +439,7 @@ export default function ForgotPasswordScreen() {
                   buttonColor={colors.accentPrimary}
                   textColor="#ffffff"
                 >
-                  Verify Code
+                  {t('auth.verifyCode')}
                 </Button>
 
                 {/* Resend */}
@@ -452,8 +454,8 @@ export default function ForgotPasswordScreen() {
                   ]}
                 >
                   {countdown > 0
-                    ? `Resend code in ${countdown}s`
-                    : "Resend code"}
+                    ? t('auth.resendIn', { countdown })
+                    : t('auth.resendCode')}
                 </Button>
               </>
             )}
@@ -462,10 +464,10 @@ export default function ForgotPasswordScreen() {
             {step === "password" && (
               <>
                 <TextInput
-                  label="New Password"
+                  label={t('auth.newPasswordLabel')}
                   value={newPassword}
-                  onChangeText={(t) => {
-                    setNewPassword(t);
+                  onChangeText={(tx) => {
+                    setNewPassword(tx);
                     if (error) setError(null);
                   }}
                   secureTextEntry={!showPassword}
@@ -509,16 +511,16 @@ export default function ForgotPasswordScreen() {
                         { color: STRENGTH_COLORS[pwdStrength] },
                       ]}
                     >
-                      {STRENGTH_LABELS[pwdStrength]}
+                      {STRENGTH_LABELS[pwdStrength] ? t('auth.' + STRENGTH_LABELS[pwdStrength]) : ''}
                     </Text>
                   </View>
                 )}
 
                 <TextInput
-                  label="Confirm Password"
+                  label={t('auth.confirmPasswordLabel')}
                   value={confirmPassword}
-                  onChangeText={(t) => {
-                    setConfirmPassword(t);
+                  onChangeText={(tx) => {
+                    setConfirmPassword(tx);
                     if (error) setError(null);
                   }}
                   secureTextEntry={!showPassword}
@@ -542,7 +544,7 @@ export default function ForgotPasswordScreen() {
                   visible={!!confirmPassword && confirmPassword !== newPassword}
                   style={{ color: colors.danger }}
                 >
-                  Passwords do not match
+                  {t('auth.passwordsDoNotMatch')}
                 </HelperText>
 
                 <Button
@@ -560,7 +562,7 @@ export default function ForgotPasswordScreen() {
                   buttonColor={colors.accentPrimary}
                   textColor="#ffffff"
                 >
-                  Reset Password
+                  {t('auth.resetPasswordBtn')}
                 </Button>
               </>
             )}
@@ -573,7 +575,7 @@ export default function ForgotPasswordScreen() {
               style={styles.backToLoginButton}
               labelStyle={[styles.backToLoginLabel, { color: colors.accentPrimary }]}
             >
-              Back to Sign In
+              {t('auth.backToSignIn')}
             </Button>
           </Card.Content>
         </Card>

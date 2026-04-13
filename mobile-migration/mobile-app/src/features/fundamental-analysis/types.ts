@@ -6,6 +6,8 @@ import type { ThemePalette } from "@/constants/theme";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import React from "react";
 
+import type { ExpertiseLevel } from "@/src/store/userPrefsStore";
+
 // ── Icon type alias ───────────────────────────────────────────────
 export type IconName = React.ComponentProps<typeof FontAwesome>["name"];
 
@@ -25,16 +27,18 @@ export function getApiErrorMessage(err: unknown, fallback = "Something went wron
 }
 
 // ── Sub-tab navigation ────────────────────────────────────────────
-export type SubTab = "stocks" | "statements" | "comparison" | "metrics" | "growth" | "score" | "valuations";
+export type SubTab = "stocks" | "statements" | "comparison" | "metrics" | "growth" | "score" | "decision" | "valuations" | "news";
 
-export const SUB_TABS: { key: SubTab; label: string; icon: IconName }[] = [
+export const SUB_TABS: { key: SubTab; label: string; icon: IconName; minLevel?: ExpertiseLevel }[] = [
   { key: "stocks",      label: "Stocks",      icon: "th-list" },
-  { key: "statements",  label: "Statements",  icon: "file-text-o" },
-  { key: "comparison",  label: "Compare",     icon: "columns" },
-  { key: "metrics",     label: "Metrics",     icon: "bar-chart" },
-  { key: "growth",      label: "Growth",      icon: "line-chart" },
-  { key: "score",       label: "Score",       icon: "star" },
-  { key: "valuations",  label: "Valuations",  icon: "calculator" },
+  { key: "statements",  label: "Statements",  icon: "file-text-o", minLevel: "advanced" },
+  { key: "comparison",  label: "Compare",     icon: "columns",     minLevel: "intermediate" },
+  { key: "metrics",     label: "Metrics",     icon: "bar-chart",   minLevel: "intermediate" },
+  { key: "growth",      label: "Growth",      icon: "line-chart",  minLevel: "advanced" },
+  { key: "score",       label: "Score",       icon: "star",        minLevel: "intermediate" },
+  { key: "decision",    label: "Decision",    icon: "gavel" },
+  { key: "valuations",  label: "Valuations",  icon: "calculator",  minLevel: "advanced" },
+  { key: "news",        label: "News",        icon: "newspaper-o", minLevel: "intermediate" },
 ];
 
 // ── Statement types ───────────────────────────────────────────────

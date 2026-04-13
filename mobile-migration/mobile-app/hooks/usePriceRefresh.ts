@@ -11,9 +11,10 @@
  *   <RefreshControl refreshing={isRefreshing} onRefresh={refresh} />
  */
 
-import { useCallback, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
 import { updatePrices } from "@/services/api";
+import { sendPriceUpdateNotification } from "@/services/notifications/priceUpdateNotification";
+import { useQueryClient } from "@tanstack/react-query";
+import { useCallback, useState } from "react";
 
 // ── Query keys that depend on live prices ───────────────────────────
 
@@ -43,8 +44,9 @@ export function usePriceRefresh() {
    */
   const refresh = useCallback(async () => {
     setIsRefreshing(true);
+    let result: any;
     try {
-      await updatePrices();
+      result = await updatePrices();
     } catch (e) {
       // Price update is best-effort; stale prices are still usable
       console.warn("Price update failed:", e);
@@ -56,6 +58,14 @@ export function usePriceRefresh() {
         queryClient.invalidateQueries({ queryKey: [key] })
       )
     );
+
+    // Fire push notification for the daily price update
+    if (result) {
+      sendPriceUpdateNotification({
+        updatedCount: result.updated_count ?? result.updatedCount ?? 0,
+        message: result.message,
+      }).catch(() => {});
+    }
 
     setIsRefreshing(false);
   }, [queryClient]);

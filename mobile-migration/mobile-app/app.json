@@ -34,7 +34,9 @@
     },
     "plugins": [
       "expo-router",
-      "expo-secure-store"
+      "expo-secure-store",
+      "expo-localization",
+      "@react-native-firebase/app"
     ],
     "experiments": {
       "typedRoutes": true
@@ -47,4 +49,3 @@
     "owner": "YOUR_EXPO_USERNAME"
   }
 }
-

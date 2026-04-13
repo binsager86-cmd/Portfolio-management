@@ -34,10 +34,11 @@ import { validateEnv } from "@/lib/env";
 import { registerSchema, type RegisterFormData } from "@/lib/validationSchemas";
 import { useAuthStore } from "@/services/authStore";
 import { useThemeStore } from "@/services/themeStore";
+import { useTranslation } from "react-i18next";
 
 // ── Password strength helper ────────────────────────────────────────
 
-const STRENGTH_LABELS = ["", "Weak", "Fair", "Good", "Strong"] as const;
+const STRENGTH_LABELS = ["", "weak", "fair", "good", "strong"] as const;
 const STRENGTH_COLORS = ["#d1d5db", "#ef4444", "#f59e0b", "#3b82f6", "#22c55e"];
 
 function getPasswordStrength(pwd: string): number {
@@ -54,6 +55,7 @@ export default function RegisterScreen() {
   const { register, googleSignIn, isLoading, error, clearError } = useAuthStore();
   const { colors, toggle, mode } = useThemeStore();
   const { isDesktop } = useResponsive();
+  const { t } = useTranslation();
 
   const [showPassword, setShowPassword] = useState(false);
   const isSubmittingRef = useRef(false);
@@ -142,7 +144,9 @@ export default function RegisterScreen() {
       if (ok) {
         analytics.logEvent("registration_completed", { method: "email" });
         try {
-          router.replace("/");
+          // On web, new users see onboarding after registration (not before).
+          // On native, onboarding was already shown pre-auth so go to root.
+          router.replace(Platform.OS === "web" ? "/(onboarding)/welcome" : "/");
         } catch (navErr) {
           // Fallback: reset form to prevent duplicate submit if nav fails
           reset();
@@ -168,17 +172,17 @@ export default function RegisterScreen() {
         const ok = await googleSignIn(result.token);
         if (ok) {
           analytics.logEvent("registration_completed", { method: "google" });
-          router.replace("/");
+          router.replace(Platform.OS === "web" ? "/(onboarding)/welcome" : "/");
         }
       } else if (!result.cancelled) {
         useAuthStore.setState({
-          error: result.error || "Google Sign-In failed. Please try again.",
+          error: result.error || t('auth.googleSignInFailed'),
         });
       }
     } catch (err: unknown) {
       console.error("[Register] Google Sign-In error:", err);
       useAuthStore.setState({
-        error: err instanceof Error ? err.message : "Google Sign-In failed unexpectedly.",
+        error: err instanceof Error ? err.message : t('auth.googleSignInUnexpected'),
       });
     }
   }, [googlePrompt, googleSignIn, router]);
@@ -225,10 +229,10 @@ export default function RegisterScreen() {
         <View style={styles.header}>
           <Text style={styles.icon}>📊</Text>
           <Text style={[styles.title, { color: colors.textPrimary }]}>
-            Create Account
+            {t('auth.createAccount')}
           </Text>
           <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
-            Register a new portfolio account
+            {t('auth.registerSubtitle')}
           </Text>
         </View>
 
@@ -266,10 +270,10 @@ export default function RegisterScreen() {
               render={({ field: { onChange, onBlur, value } }) => (
                 <TextInput
                   testID="register-email-input"
-                  label="Email"
+                  label={t('auth.emailOnly')}
                   value={value}
-                  onChangeText={(t) => {
-                    onChange(t);
+                  onChangeText={(tx) => {
+                    onChange(tx);
                     if (error) clearError();
                   }}
                   onBlur={onBlur}
@@ -310,7 +314,7 @@ export default function RegisterScreen() {
                 <TextInput
                   testID="register-displayname-input"
                   ref={displayNameRef}
-                  label="Display Name (optional)"
+                  label={t('auth.displayName')}
                   value={value}
                   onChangeText={onChange}
                   onBlur={onBlur}
@@ -338,10 +342,10 @@ export default function RegisterScreen() {
                 <TextInput
                   testID="register-password-input"
                   ref={passwordRef}
-                  label="Password"
+                  label={t('auth.password')}
                   value={value}
-                  onChangeText={(t) => {
-                    onChange(t);
+                  onChangeText={(tx) => {
+                    onChange(tx);
                     if (error) clearError();
                   }}
                   onBlur={onBlur}
@@ -402,7 +406,7 @@ export default function RegisterScreen() {
                   ]}
                   accessibilityLabel={`Password strength: ${STRENGTH_LABELS[strengthScore]}`}
                 >
-                  {STRENGTH_LABELS[strengthScore]}
+                  {STRENGTH_LABELS[strengthScore] ? t('auth.' + STRENGTH_LABELS[strengthScore]) : ''}
                 </Text>
               </View>
             ) : null}
@@ -415,10 +419,10 @@ export default function RegisterScreen() {
                 <TextInput
                   testID="register-confirm-password-input"
                   ref={confirmPasswordRef}
-                  label="Confirm Password"
+                  label={t('auth.confirmPasswordLabel')}
                   value={value}
-                  onChangeText={(t) => {
-                    onChange(t);
+                  onChangeText={(tx) => {
+                    onChange(tx);
                     if (error) clearError();
                   }}
                   onBlur={onBlur}
@@ -463,14 +467,14 @@ export default function RegisterScreen() {
               textColor="#ffffff"
               accessibilityLabel="Create account"
             >
-              Create Account
+              {t('auth.createAccount')}
             </Button>
 
             {/* Divider */}
             <View style={styles.dividerRow}>
               <Divider style={[styles.dividerLine, { backgroundColor: colors.borderColor }]} />
               <Text style={[styles.dividerText, { color: colors.textMuted }]}>
-                or
+                {t('auth.or')}
               </Text>
               <Divider style={[styles.dividerLine, { backgroundColor: colors.borderColor }]} />
             </View>
@@ -488,7 +492,7 @@ export default function RegisterScreen() {
               labelStyle={[styles.googleLabel, { color: colors.textPrimary }]}
               accessibilityLabel="Continue with Google"
             >
-              Continue with Google
+              {t('auth.continueWithGoogle')}
             </Button>
 
             {/* Back to Login */}
@@ -499,13 +503,13 @@ export default function RegisterScreen() {
               style={styles.backButton}
               labelStyle={[styles.backLabel, { color: colors.accentPrimary }]}
             >
-              Already have an account? Sign In
+              {t('auth.alreadyHaveAccount')}
             </Button>
           </Card.Content>
         </Card>
 
         <Text style={[styles.footer, { color: colors.textMuted }]}>
-          Portfolio Mobile — Phase 3
+          {t('auth.footerText')}
         </Text>
       </ScrollView>
     </KeyboardAvoidingView>

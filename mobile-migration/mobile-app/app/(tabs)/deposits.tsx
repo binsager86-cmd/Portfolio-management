@@ -12,6 +12,7 @@ import { FlashList } from "@shopify/flash-list";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
 import React, { useCallback, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
     ActivityIndicator,
     Alert,
@@ -52,6 +53,7 @@ const DepositRow = React.memo(function DepositRow({
   onDelete?: (item: CashDepositRecord) => void;
   onEdit?: (item: CashDepositRecord) => void;
 }) {
+  const { t } = useTranslation();
   const isDeposit = (item.source ?? "deposit") === "deposit";
 
   return (
@@ -107,7 +109,7 @@ const DepositRow = React.memo(function DepositRow({
             {formatCurrency(item.amount, item.currency ?? "KWD")}
           </Text>
           <Text style={[s.source, { color: colors.textMuted }]}>
-            {isDeposit ? "Deposit" : "Withdrawal"}
+            {isDeposit ? t('depositsScreen.deposit') : t('depositsScreen.withdrawal')}
           </Text>
         </View>
         {onEdit && (
@@ -134,6 +136,7 @@ const DepositRow = React.memo(function DepositRow({
 // ── Main screen ─────────────────────────────────────────────────────
 
 export default function DepositsScreen() {
+  const { t } = useTranslation();
   const router = useRouter();
   const { colors } = useThemeStore();
   const { isDesktop } = useResponsive();
@@ -185,13 +188,14 @@ export default function DepositsScreen() {
   }, [router]);
 
   const handleDelete = useCallback((item: CashDepositRecord) => {
-    const msg = `Delete ${(item.source ?? "deposit")} of ${formatCurrency(item.amount, item.currency ?? "KWD")} on ${item.deposit_date}?`;
+    const sourceLabel = (item.source ?? "deposit") === "deposit" ? t('depositsScreen.deposit') : t('depositsScreen.withdrawal');
+    const msg = t('depositsScreen.deleteConfirmMsg', { source: sourceLabel, amount: formatCurrency(item.amount, item.currency ?? "KWD"), date: item.deposit_date });
     if (Platform.OS === "web") {
       if (window.confirm(msg)) deleteMutation.mutate(item.id);
     } else {
-      Alert.alert("Delete Deposit", msg, [
-        { text: "Cancel", style: "cancel" },
-        { text: "Delete", style: "destructive", onPress: () => deleteMutation.mutate(item.id) },
+      Alert.alert(t('depositsScreen.deleteDeposit'), msg, [
+        { text: t('app.cancel'), style: "cancel" },
+        { text: t('app.delete'), style: "destructive", onPress: () => deleteMutation.mutate(item.id) },
       ]);
     }
   }, [deleteMutation]);
@@ -200,7 +204,7 @@ export default function DepositsScreen() {
   const [exporting, setExporting] = useState(false);
   const handleExportExcel = useCallback(async () => {
     if (Platform.OS !== "web") {
-      toast.info("Excel export is available on the web version.");
+      toast.info(t('depositsScreen.exportWebOnly'));
       return;
     }
     try {
@@ -215,7 +219,7 @@ export default function DepositsScreen() {
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
     } catch (e: any) {
-      toast.error(e?.message ?? "Export failed");
+      toast.error(e?.message ?? t('depositsScreen.exportFailed'));
     } finally {
       setExporting(false);
     }
@@ -234,7 +238,7 @@ export default function DepositsScreen() {
 
   const handleDownloadTemplate = useCallback(async () => {
     if (Platform.OS !== "web") {
-      toast.info("Template download is available on the web version.");
+      toast.info(t('depositsScreen.templateWebOnly'));
       return;
     }
     try {
@@ -248,13 +252,13 @@ export default function DepositsScreen() {
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
     } catch (e: any) {
-      toast.error(e?.message ?? "Failed to download template");
+      toast.error(e?.message ?? t('depositsScreen.templateFailed'));
     }
   }, []);
 
   const handleUploadFile = useCallback(async () => {
     if (Platform.OS !== "web") {
-      toast.info("Excel upload is available on the web version.");
+      toast.info(t('depositsScreen.uploadWebOnly'));
       return;
     }
 
@@ -269,7 +273,7 @@ export default function DepositsScreen() {
       // Confirm replace mode
       if (uploadMode === "replace") {
         const ok = window.confirm(
-          "⚠️ REPLACE mode will DELETE ALL existing deposits before importing. Continue?"
+          t('depositsScreen.replaceConfirm')
         );
         if (!ok) return;
       }
@@ -296,17 +300,17 @@ export default function DepositsScreen() {
 
         if (result.imported > 0) {
           toast.success(
-            `Imported ${result.imported} deposits.` +
-              (result.skipped > 0 ? ` Skipped ${result.skipped}.` : "") +
+            t('depositsScreen.importedCount', { count: result.imported }) +
+              (result.skipped > 0 ? ` ${t('depositsScreen.skippedCount', { count: result.skipped })}` : "") +
               (result.errors.length > 0
-                ? ` ${result.errors.length} error(s).`
+                ? ` ${t('depositsScreen.errorsCount', { count: result.errors.length })}`
                 : "")
           );
         } else {
-          toast.info("No deposits were imported. Check your file format.");
+          toast.info(t('depositsScreen.noDepositsImported'));
         }
       } catch (err: unknown) {
-        showErrorAlert("Upload Failed", err);
+        showErrorAlert(t('depositsScreen.uploadFailed'), err);
       } finally {
         setUploading(false);
       }
@@ -332,10 +336,10 @@ export default function DepositsScreen() {
       <View style={s.empty}>
         <FontAwesome name="bank" size={48} color={colors.textMuted} />
         <Text style={[s.emptyTitle, { color: colors.textPrimary }]}>
-          No deposits yet
+          {t('depositsScreen.noDeposits')}
         </Text>
         <Text style={[s.emptyBody, { color: colors.textSecondary }]}>
-          Tap the + button to record a cash deposit.
+          {t('depositsScreen.noDepositsHint')}
         </Text>
       </View>
     ),
@@ -368,7 +372,7 @@ export default function DepositsScreen() {
           <FontAwesome name="chevron-left" size={14} color={colors.textSecondary} />
         </Pressable>
         <Text style={[s.pageInfo, { color: colors.textSecondary }]}>
-          Page {pagination.page} of {pagination.total_pages} ({pagination.total_items} total)
+          {t('depositsScreen.pageInfo', { page: pagination.page, pages: pagination.total_pages, total: pagination.total_items })}
         </Text>
         <Pressable
           onPress={() => setPage((p) => Math.min(pagination.total_pages, p + 1))}
@@ -394,12 +398,12 @@ export default function DepositsScreen() {
     <View>
       <View style={[s.header, { borderBottomColor: colors.borderColor }]}>
         <Text style={[s.headerTitle, { color: colors.textPrimary }]}>
-          Cash Deposits
+          {t('depositsScreen.title')}
         </Text>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
           {totalKwd > 0 && (
             <Text style={[s.headerTotal, { color: colors.accentPrimary }]}>
-              Total: {formatCurrency(totalKwd, "KWD")}
+              {t('depositsScreen.total')} {formatCurrency(totalKwd, "KWD")}
             </Text>
           )}
           <Pressable
@@ -413,7 +417,7 @@ export default function DepositsScreen() {
             ]}
           >
             <FontAwesome name="upload" size={13} color="#fff" />
-            <Text style={s.exportBtnText}>Upload</Text>
+            <Text style={s.exportBtnText}>{t('depositsScreen.upload')}</Text>
           </Pressable>
           <Pressable
             onPress={handleExportExcel}
@@ -427,7 +431,7 @@ export default function DepositsScreen() {
             ]}
           >
             <FontAwesome name="file-excel-o" size={13} color="#fff" />
-            <Text style={s.exportBtnText}>{exporting ? "..." : "Export"}</Text>
+            <Text style={s.exportBtnText}>{exporting ? "..." : t('depositsScreen.export')}</Text>
           </Pressable>
         </View>
       </View>
@@ -436,15 +440,15 @@ export default function DepositsScreen() {
       {showUpload && (
         <View style={[s.uploadPanel, { backgroundColor: colors.bgCard, borderColor: colors.borderColor }]}>
           <Text style={[s.uploadTitle, { color: colors.textPrimary }]}>
-            📥 Upload Cash Deposits from Excel
+            📥 {t('depositsScreen.uploadTitle')}
           </Text>
           <Text style={[s.uploadCaption, { color: colors.textSecondary }]}>
-            Upload an Excel file with columns: deposit_date, amount, currency, portfolio, source, bank_name, description, notes
+            {t('depositsScreen.uploadDesc')}
           </Text>
 
           {/* Mode toggle */}
           <View style={s.uploadModeRow}>
-            <Text style={[s.uploadModeLabel, { color: colors.textSecondary }]}>Mode:</Text>
+            <Text style={[s.uploadModeLabel, { color: colors.textSecondary }]}>{t('depositsScreen.mode')}</Text>
             <Pressable
               onPress={() => setUploadMode("merge")}
               style={[
@@ -456,7 +460,7 @@ export default function DepositsScreen() {
               ]}
             >
               <Text style={{ color: uploadMode === "merge" ? "#fff" : colors.textSecondary, fontSize: 12, fontWeight: "600" }}>
-                Merge (Append)
+                {t('depositsScreen.mergeAppend')}
               </Text>
             </Pressable>
             <Pressable
@@ -470,7 +474,7 @@ export default function DepositsScreen() {
               ]}
             >
               <Text style={{ color: uploadMode === "replace" ? "#fff" : colors.textSecondary, fontSize: 12, fontWeight: "600" }}>
-                Replace (Delete All First)
+                {t('depositsScreen.replaceAll')}
               </Text>
             </Pressable>
           </View>
@@ -479,7 +483,7 @@ export default function DepositsScreen() {
             <View style={[s.uploadWarning, { backgroundColor: colors.danger + "15", borderColor: colors.danger + "40" }]}>
               <FontAwesome name="exclamation-triangle" size={12} color={colors.danger} />
               <Text style={{ color: colors.danger, fontSize: 11, flex: 1 }}>
-                Replace mode will DELETE ALL existing deposits before importing.
+                {t('depositsScreen.replaceWarning')}
               </Text>
             </View>
           )}
@@ -492,7 +496,7 @@ export default function DepositsScreen() {
             >
               <FontAwesome name="download" size={12} color={colors.accentPrimary} />
               <Text style={{ color: colors.accentPrimary, fontSize: 12, fontWeight: "600" }}>
-                Template
+                {t('depositsScreen.template')}
               </Text>
             </Pressable>
 
@@ -515,7 +519,7 @@ export default function DepositsScreen() {
                 <FontAwesome name="upload" size={12} color="#fff" />
               )}
               <Text style={{ color: "#fff", fontSize: 13, fontWeight: "700" }}>
-                {uploading ? "Importing..." : "Choose File & Import"}
+                {uploading ? t('depositsScreen.importing') : t('depositsScreen.chooseFileImport')}
               </Text>
             </Pressable>
           </View>
@@ -524,20 +528,20 @@ export default function DepositsScreen() {
           {uploadResult && (
             <View style={[s.uploadResult, { borderColor: uploadResult.imported > 0 ? colors.success + "50" : colors.danger + "50", backgroundColor: uploadResult.imported > 0 ? colors.success + "10" : colors.danger + "10" }]}>
               <Text style={{ color: colors.textPrimary, fontSize: 13, fontWeight: "700", marginBottom: 4 }}>
-                Import Result
+                {t('depositsScreen.importResult')}
               </Text>
               <Text style={{ color: colors.success, fontSize: 12, fontWeight: "600" }}>
-                ✅ {uploadResult.imported} imported
+                ✅ {uploadResult.imported} {t('depositsScreen.imported')}
               </Text>
               {uploadResult.skipped > 0 && (
                 <Text style={{ color: colors.textMuted, fontSize: 12 }}>
-                  ⏭ {uploadResult.skipped} skipped
+                  ⏭ {uploadResult.skipped} {t('depositsScreen.skipped')}
                 </Text>
               )}
               {uploadResult.errors.length > 0 && (
                 <View>
                   <Text style={{ color: colors.danger, fontSize: 12, fontWeight: "600", marginTop: 4 }}>
-                    ❌ {uploadResult.errors.length} error(s):
+                    ❌ {uploadResult.errors.length} {t('depositsScreen.errors')}
                   </Text>
                   {uploadResult.errors.slice(0, 5).map((err, i) => (
                     <Text key={i} style={{ color: colors.textMuted, fontSize: 11 }}>
@@ -553,6 +557,41 @@ export default function DepositsScreen() {
               )}
             </View>
           )}
+
+          {/* Cash position reminder after successful import */}
+          {uploadResult && uploadResult.imported > 0 && (
+            <View style={[s.uploadResult, { borderColor: colors.accentPrimary + "50", backgroundColor: colors.accentPrimary + "10" }]}>
+              <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}>
+                <FontAwesome name="info-circle" size={15} color={colors.accentPrimary} style={{ marginTop: 1 }} />
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: colors.textPrimary, fontSize: 13, fontWeight: "700", marginBottom: 4 }}>
+                    {t("importCash.updateCashTitle")}
+                  </Text>
+                  <Text style={{ color: colors.textSecondary, fontSize: 12, lineHeight: 18 }}>
+                    {t("importCash.updateCashDesc")}
+                  </Text>
+                </View>
+              </View>
+              <Pressable
+                onPress={() => router.push("/(tabs)/holdings" as any)}
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 8,
+                  backgroundColor: colors.accentPrimary,
+                  paddingVertical: 10,
+                  borderRadius: 8,
+                  marginTop: 10,
+                }}
+              >
+                <FontAwesome name="th-list" size={13} color="#fff" />
+                <Text style={{ color: "#fff", fontSize: 13, fontWeight: "700" }}>
+                  {t("importCash.goToHoldings")}
+                </Text>
+              </Pressable>
+            </View>
+          )}
         </View>
       )}
     </View>
@@ -565,7 +604,7 @@ export default function DepositsScreen() {
   }
 
   if (isError) {
-    return <ErrorScreen message={(error as Error)?.message ?? "Failed to load deposits"} onRetry={() => refetch()} />;
+    return <ErrorScreen message={(error as Error)?.message ?? t('depositsScreen.failedToLoad')} onRetry={() => refetch()} />;
   }
 
   // ── Main list ───────────────────────────────────────────────────
@@ -590,7 +629,7 @@ export default function DepositsScreen() {
                 {[undefined, "KFH", "BBYN", "USA"].map((pf) => (
                   <FilterChip
                     key={pf ?? "all"}
-                    label={pf ?? "All"}
+                    label={pf ?? t('depositsScreen.all')}
                     active={portfolioFilter === pf}
                     onPress={() => { setPortfolioFilter(pf); setPage(1); }}
                     colors={colors}
@@ -600,7 +639,7 @@ export default function DepositsScreen() {
                 {[undefined, "deposit", "withdrawal"].map((src) => (
                   <FilterChip
                     key={src ?? "any"}
-                    label={src === "deposit" ? "Deposits" : src === "withdrawal" ? "Withdrawals" : "All Types"}
+                    label={src === "deposit" ? t('depositsScreen.deposits') : src === "withdrawal" ? t('depositsScreen.withdrawals') : t('depositsScreen.allTypes')}
                     active={sourceFilter === src}
                     onPress={() => setSourceFilter(src)}
                     colors={colors}

@@ -39,15 +39,17 @@ export class AppErrorBoundary extends Component<Props, State> {
 
   render() {
     if (this.state.hasError) {
+      const errorMessage = this.state.error?.message ?? "An unexpected error occurred.";
       return (
         <View style={styles.container}>
           <Text style={styles.emoji}>💥</Text>
           <Text style={styles.title}>Something went wrong</Text>
-          <Text style={styles.message}>
-            {this.props.fallbackMessage ??
-              this.state.error?.message ??
-              "An unexpected error occurred."}
-          </Text>
+          <Text style={styles.message}>{errorMessage}</Text>
+          {__DEV__ && this.state.error?.stack ? (
+            <Text style={styles.stack} numberOfLines={8}>
+              {this.state.error.stack}
+            </Text>
+          ) : null}
           <Pressable onPress={this.handleReset} style={styles.button}>
             <Text style={styles.buttonText}>Try Again</Text>
           </Pressable>
@@ -91,6 +93,18 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontWeight: "600",
     fontSize: 15,
+  },
+  stack: {
+    fontSize: 11,
+    color: "#ef4444",
+    fontFamily: "monospace",
+    textAlign: "left",
+    marginBottom: 16,
+    maxWidth: 480,
+    padding: 12,
+    backgroundColor: "#1a1a2e",
+    borderRadius: 6,
+    overflow: "hidden",
   },
 });
 

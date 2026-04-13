@@ -1,9 +1,10 @@
-import React, { useState } from "react";
-import { View, Text, StyleSheet, Modal, Pressable, ScrollView, Alert } from "react-native";
-import FontAwesome from "@expo/vector-icons/FontAwesome";
-import { useRouter } from "expo-router";
 import { useThemeStore } from "@/services/themeStore";
+import FontAwesome from "@expo/vector-icons/FontAwesome";
 import * as DocumentPicker from "expo-document-picker";
+import { useRouter } from "expo-router";
+import React, { useState } from "react";
+import { useTranslation } from "react-i18next";
+import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 interface FirstTimeSetupProps {
   visible: boolean;
@@ -14,6 +15,7 @@ export function FirstTimeSetup({ visible, onComplete }: FirstTimeSetupProps) {
   const router = useRouter();
   const { colors } = useThemeStore();
   const [step, setStep] = useState(1);
+  const { t } = useTranslation();
 
   const handleImportExcel = async () => {
     try {
@@ -31,7 +33,7 @@ export function FirstTimeSetup({ visible, onComplete }: FirstTimeSetupProps) {
         onComplete();
       }
     } catch (err) {
-      Alert.alert("Import Failed", "Please try again with a valid Excel file.");
+      Alert.alert(t("addTransaction.importError"), t("onboarding.importRetry"));
     }
   };
 
@@ -49,17 +51,17 @@ export function FirstTimeSetup({ visible, onComplete }: FirstTimeSetupProps) {
               <FontAwesome name="rocket" size={40} color={colors.accentPrimary} />
             </View>
             <Text style={[styles.stepTitle, { color: colors.textPrimary }]}>
-              Let's Set Up Your Portfolio
+              {t("onboarding.letsSetUp")}
             </Text>
             <Text style={[styles.stepDesc, { color: colors.textSecondary }]}>
-              Add your first transaction to unlock your dashboard and start tracking.
+              {t("onboarding.addFirstTxnDesc")}
             </Text>
 
             {/* Progress */}
             <View style={styles.progress}>
               <View style={[styles.progressFill, { width: "33%", backgroundColor: colors.accentPrimary }]} />
             </View>
-            <Text style={[styles.progressText, { color: colors.textMuted }]}>Step 1 of 3</Text>
+            <Text style={[styles.progressText, { color: colors.textMuted }]}>{t("onboarding.step1of3")}</Text>
 
             {/* Options */}
             <Pressable
@@ -67,9 +69,9 @@ export function FirstTimeSetup({ visible, onComplete }: FirstTimeSetupProps) {
               style={[styles.optionCard, { backgroundColor: colors.bgCard, borderColor: colors.borderColor }]}
             >
               <FontAwesome name="upload" size={24} color={colors.success} />
-              <Text style={[styles.optionTitle, { color: colors.textPrimary }]}>Import from Excel</Text>
+              <Text style={[styles.optionTitle, { color: colors.textPrimary }]}>{t("onboarding.importFromExcel")}</Text>
               <Text style={[styles.optionDesc, { color: colors.textSecondary }]}>
-                Fastest way — upload your broker statement
+                {t("onboarding.fastestWay")}
               </Text>
             </Pressable>
 
@@ -78,9 +80,9 @@ export function FirstTimeSetup({ visible, onComplete }: FirstTimeSetupProps) {
               style={[styles.optionCard, { backgroundColor: colors.bgCard, borderColor: colors.borderColor }]}
             >
               <FontAwesome name="plus-circle" size={24} color={colors.accentPrimary} />
-              <Text style={[styles.optionTitle, { color: colors.textPrimary }]}>Add Manually</Text>
+              <Text style={[styles.optionTitle, { color: colors.textPrimary }]}>{t("onboarding.addManually")}</Text>
               <Text style={[styles.optionDesc, { color: colors.textSecondary }]}>
-                Enter your first transaction by hand
+                {t("onboarding.enterFirstTxn")}
               </Text>
             </Pressable>
           </View>
@@ -93,22 +95,22 @@ export function FirstTimeSetup({ visible, onComplete }: FirstTimeSetupProps) {
               <FontAwesome name="check-circle" size={40} color={colors.success} />
             </View>
             <Text style={[styles.stepTitle, { color: colors.textPrimary }]}>
-              Great Start!
+              {t("onboarding.greatStart")}
             </Text>
             <Text style={[styles.stepDesc, { color: colors.textSecondary }]}>
-              Your transaction has been added. Here's what you can do next:
+              {t("onboarding.txnAddedDesc")}
             </Text>
 
             <View style={styles.nextSteps}>
-              <NextStepItem icon="line-chart" title="View Overview" desc="See your portfolio summary" colors={colors} />
-              <NextStepItem icon="flask" title="Analyze Stocks" desc="Get AI-powered insights" colors={colors} />
-              <NextStepItem icon="calculator" title="Run Valuations" desc="Calculate intrinsic value" colors={colors} />
+              <NextStepItem icon="line-chart" title={t("onboarding.viewOverview")} desc={t("onboarding.seePortfolioSummary")} colors={colors} />
+              <NextStepItem icon="flask" title={t("onboarding.analyzeStocks")} desc={t("onboarding.getAIPoweredInsights")} colors={colors} />
+              <NextStepItem icon="calculator" title={t("onboarding.runValuations")} desc={t("onboarding.calculateIntrinsicValue")} colors={colors} />
             </View>
 
             <View style={styles.progress}>
               <View style={[styles.progressFill, { width: "66%", backgroundColor: colors.success }]} />
             </View>
-            <Text style={[styles.progressText, { color: colors.textMuted }]}>Step 2 of 3</Text>
+            <Text style={[styles.progressText, { color: colors.textMuted }]}>{t("onboarding.step2of3")}</Text>
           </View>
         );
 
@@ -119,32 +121,32 @@ export function FirstTimeSetup({ visible, onComplete }: FirstTimeSetupProps) {
               <FontAwesome name="star" size={40} color={colors.accentSecondary} />
             </View>
             <Text style={[styles.stepTitle, { color: colors.textPrimary }]}>
-              You're All Set!
+              {t("onboarding.youreAllSet")}
             </Text>
             <Text style={[styles.stepDesc, { color: colors.textSecondary }]}>
-              Your portfolio is ready. Explore all features at your own pace.
+              {t("onboarding.portfolioReady")}
             </Text>
 
             {/* Feature Discovery Cards */}
             <ScrollView style={styles.featureScroll} showsVerticalScrollIndicator={false}>
               <FeatureCard
                 icon="bell"
-                title="Portfolio Alerts"
-                desc="Get notified on price changes"
+                title={t("onboarding.portfolioAlerts")}
+                desc={t("onboarding.getNotifiedOnPriceChanges")}
                 color="#f59e0b"
                 colors={colors}
               />
               <FeatureCard
                 icon="refresh"
-                title="Sync Bank Accounts"
-                desc="Auto-import transactions"
+                title={t("onboarding.syncBankAccounts")}
+                desc={t("onboarding.autoImportTransactions")}
                 color="#3b82f6"
                 colors={colors}
               />
               <FeatureCard
                 icon="file-pdf-o"
-                title="Export Reports"
-                desc="Download PDF summaries"
+                title={t("onboarding.exportReports")}
+                desc={t("onboarding.downloadPDFSummaries")}
                 color="#10b981"
                 colors={colors}
               />
@@ -153,13 +155,13 @@ export function FirstTimeSetup({ visible, onComplete }: FirstTimeSetupProps) {
             <View style={styles.progress}>
               <View style={[styles.progressFill, { width: "100%", backgroundColor: colors.accentSecondary }]} />
             </View>
-            <Text style={[styles.progressText, { color: colors.textMuted }]}>Step 3 of 3</Text>
+            <Text style={[styles.progressText, { color: colors.textMuted }]}>{t("onboarding.step3of3")}</Text>
 
             <Pressable
               onPress={onComplete}
               style={[styles.finishButton, { backgroundColor: colors.accentSecondary }]}
             >
-              <Text style={styles.finishButtonText}>Start Using App</Text>
+              <Text style={styles.finishButtonText}>{t("onboarding.startUsingApp")}</Text>
               <FontAwesome name="arrow-right" size={16} color="#fff" style={{ marginLeft: 8 }} />
             </Pressable>
           </View>
@@ -178,7 +180,7 @@ export function FirstTimeSetup({ visible, onComplete }: FirstTimeSetupProps) {
               onPress={() => onComplete()}
               style={styles.skipButton}
             >
-              <Text style={[styles.skipText, { color: colors.textMuted }]}>Skip for now</Text>
+              <Text style={[styles.skipText, { color: colors.textMuted }]}>{t("onboarding.skipForNow")}</Text>
             </Pressable>
           )}
         </View>

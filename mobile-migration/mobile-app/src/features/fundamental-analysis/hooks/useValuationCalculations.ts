@@ -59,22 +59,32 @@ export function useValuationCalculations(stockId: number) {
   const [multipleType, setMultipleType] = useState("P/E");
   const [useWacc, setUseWacc] = useState(false);
   const [waccRf, setWaccRf] = useState(""); // risk-free rate override (in %)
+  const [waccTax, setWaccTax] = useState(""); // tax rate override (in %)
 
-  // ── Derived WACC (recalculated when user edits Rf) ──────────────
+  // ── Derived WACC (recalculated when user edits Rf or Tax Rate) ──
+  // CFA WACC: WACC = (E/V) × Ke + (D/V) × Kd × (1 − T)
+  // where Ke = Rf + β × ERP  (CAPM)
   const waccComputed = useMemo(() => {
     const d = defaults.data;
     if (!d || d.wacc == null) return null;
     const rfOverride = parseFloat(waccRf);
     const rf = !isNaN(rfOverride) ? rfOverride / 100 : d.wacc_risk_free_rate;
     if (rf == null || d.wacc_beta == null || d.wacc_equity_risk_premium == null) return null;
+    // CAPM: Cost of Equity
     const ke = rf + d.wacc_beta * d.wacc_equity_risk_premium;
-    const weq = d.wacc_weight_equity ?? 1;
-    const wdt = d.wacc_weight_debt ?? 0;
+    // Normalize weights to ensure E/V + D/V = 1
+    const rawWeq = d.wacc_weight_equity ?? 1;
+    const rawWdt = d.wacc_weight_debt ?? 0;
+    const wSum = rawWeq + rawWdt;
+    const weq = wSum > 0 ? rawWeq / wSum : 1;
+    const wdt = wSum > 0 ? rawWdt / wSum : 0;
     const kd = d.wacc_cost_of_debt ?? 0;
-    const tax = d.wacc_tax_rate ?? 0;
+    // Tax rate: user override > backend value > 0
+    const taxOverride = parseFloat(waccTax);
+    const tax = !isNaN(taxOverride) ? taxOverride / 100 : (d.wacc_tax_rate ?? 0);
     const wacc = (weq * ke) + (wdt * kd * (1 - tax));
-    return { rf, ke, wacc };
-  }, [defaults.data, waccRf]);
+    return { rf, ke, wacc, weq, wdt, tax };
+  }, [defaults.data, waccRf, waccTax]);
 
   // ── Last calculation result ─────────────────────────────────────
   const [lastResult, setLastResult] = useState<ValuationRunResult | null>(null);
@@ -102,14 +112,21 @@ export function useValuationCalculations(stockId: number) {
     if (d.eps != null) setMv(String(d.eps));
     // WACC risk-free rate
     if (d.wacc_risk_free_rate != null) setWaccRf((d.wacc_risk_free_rate * 100).toFixed(2));
+    // WACC tax rate
+    if (d.wacc_tax_rate != null) setWaccTax((d.wacc_tax_rate * 100).toFixed(2));
   }, [defaults.data]);
 
   // ── Fallback: pull shares from uploaded statements if still "1" ──
   useEffect(() => {
     if (shares !== "1" && shares !== "") return;
     const stmts = stmtQ.data?.statements ?? [];
-    // Find latest annual balance sheet with shares outstanding
-    const SHARE_CODES = ["SHARES_OUTSTANDING_DILUTED", "SHARES_OUTSTANDING_BASIC", "TOTAL_COMMON_SHARES_OUTSTANDING", "FILING_DATE_SHARES_OUTSTANDING"];
+    // Find latest annual statement with shares outstanding (income or balance sheet)
+    const SHARE_CODES = [
+      "SHARES_OUTSTANDING_DILUTED", "SHARES_OUTSTANDING_BASIC",
+      "DILUTED_SHARES_OUTSTANDING", "BASIC_SHARES_OUTSTANDING",
+      "TOTAL_COMMON_SHARES_OUTSTANDING", "FILING_DATE_SHARES_OUTSTANDING",
+      "SHARES_OUTSTANDING", "SHARES_DILUTED",
+    ];
     const upperCodes = new Set(SHARE_CODES.map((c) => c.toUpperCase()));
     let best: { year: number; amount: number } | null = null;
     for (const s of stmts) {
@@ -126,6 +143,34 @@ export function useValuationCalculations(stockId: number) {
       setShares(best.amount.toLocaleString("en-US", { maximumFractionDigits: 0 }));
     }
   }, [stmtQ.data, shares]);
+
+  // ── Override FCF with Unlevered FCF from cash flow statements ──
+  // DCF (enterprise value approach) requires UFCF = FCFF, not levered FCF.
+  // This runs after defaults populate and overrides with UFCF when available.
+  const ufcfPopulated = useRef(false);
+  useEffect(() => {
+    if (ufcfPopulated.current) return;
+    const stmts = stmtQ.data?.statements ?? [];
+    if (stmts.length === 0) return;
+    const UFCF_CODES = ["UNLEVERED_FREE_CASH_FLOW", "UNLEVERED_FCF"];
+    const upperCodes = new Set(UFCF_CODES.map((c) => c.toUpperCase()));
+    let best: { year: number; amount: number } | null = null;
+    for (const s of stmts) {
+      if (s.fiscal_quarter != null) continue;
+      if (s.statement_type !== "cashflow") continue;
+      for (const li of s.line_items ?? []) {
+        if (upperCodes.has(li.line_item_code.toUpperCase()) && li.amount != null) {
+          if (!best || s.fiscal_year > best.year) {
+            best = { year: s.fiscal_year, amount: li.amount };
+          }
+        }
+      }
+    }
+    if (best) {
+      ufcfPopulated.current = true;
+      setFcf(best.amount.toLocaleString("en-US", { maximumFractionDigits: 0 }));
+    }
+  }, [stmtQ.data]);
 
   const onSuccess = (result: ValuationRunResult) => {
     setLastResult(result);
@@ -243,7 +288,7 @@ export function useValuationCalculations(stockId: number) {
     div, setDiv, divGr, setDivGr, rr, setRr,
     mv, setMv, pm, setPm, multipleType, setMultipleType,
     useWacc, setUseWacc,
-    waccRf, setWaccRf, waccComputed,
+    waccRf, setWaccRf, waccTax, setWaccTax, waccComputed,
     grahamMut, dcfMut, ddmMut, multMut,
     valError, lastResult,
     mosGraham, setMosGraham, mosDcf, setMosDcf, mosDdm, setMosDdm, mosMult, setMosMult,

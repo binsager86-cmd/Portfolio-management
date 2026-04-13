@@ -6,30 +6,31 @@
  * • Mutation with React Query cache invalidation
  */
 
-import React, { useRef, useEffect } from "react";
-import {
-  Platform,
-  Alert,
-} from "react-native";
-import { useRouter, useLocalSearchParams } from "expo-router";
-import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-
-import { createDeposit, updateDeposit } from "@/services/api";
-import { showErrorAlert } from "@/lib/errorHandling";
-import { ALERT_DEFER_MS } from "@/constants/layout";
-import { useThemeStore } from "@/services/themeStore";
-import { todayISO } from "@/lib/dateUtils";
-import { FormScreen } from "@/components/screens";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import React, { useEffect, useRef } from "react";
+import { Controller, useForm } from "react-hook-form";
 import {
-  FormField,
-  SegmentedControl,
-  TextInput,
-  NumberInput,
-  DateInput,
+    Alert,
+    Platform,
+} from "react-native";
+import { z } from "zod";
+
+import {
+    DateInput,
+    FormField,
+    NumberInput,
+    SegmentedControl,
+    TextInput,
 } from "@/components/form";
+import { FormScreen } from "@/components/screens";
+import { ALERT_DEFER_MS } from "@/constants/layout";
+import { todayISO } from "@/lib/dateUtils";
+import { showErrorAlert } from "@/lib/errorHandling";
+import { createDeposit, updateDeposit } from "@/services/api";
+import { useThemeStore } from "@/services/themeStore";
+import { useTranslation } from "react-i18next";
 
 // ── Schema ──────────────────────────────────────────────────────────
 
@@ -67,6 +68,7 @@ export default function AddDepositScreen() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { colors } = useThemeStore();
+  const { t } = useTranslation();
 
   // ── Edit mode params ──────────────────────────────────────────
   const params = useLocalSearchParams<{
@@ -145,12 +147,12 @@ export default function AddDepositScreen() {
 
       // Navigate back first, then show non-blocking success message
       router.back();
-      const successMsg = isEditMode ? "Deposit updated successfully!" : "Deposit saved successfully!";
+      const successMsg = isEditMode ? t('addDeposit.depositUpdated') : t('addDeposit.depositSaved');
       timerRef.current = setTimeout(() => {
         if (Platform.OS === "web") {
           window.alert(successMsg);
         } else {
-          Alert.alert("Success", successMsg);
+          Alert.alert(t('addDeposit.success'), successMsg);
         }
       }, ALERT_DEFER_MS);
     },
@@ -161,17 +163,17 @@ export default function AddDepositScreen() {
 
   // ── Submit label / colour logic ────────────────────────────────
   const submitLabel = isEditMode
-    ? "Update Deposit"
+    ? t('addDeposit.updateDeposit')
     : selectedSource === "withdrawal"
-      ? "Record Withdrawal"
-      : "Record Deposit";
+      ? t('addDeposit.recordWithdrawal')
+      : t('addDeposit.recordDeposit');
   const submitColor = selectedSource === "withdrawal" ? colors.danger : undefined;
 
   // ── Render ────────────────────────────────────────────────────
 
   return (
     <FormScreen
-      title={isEditMode ? "Edit Deposit" : "Add Cash Deposit"}
+      title={isEditMode ? t('addDeposit.editDeposit') : t('addDeposit.addCashDeposit')}
       onSubmit={onSubmit}
       isSubmitting={mutation.isPending}
       submitLabel={submitLabel}
@@ -186,7 +188,7 @@ export default function AddDepositScreen() {
               options={["deposit", "withdrawal"]}
               value={value}
               onChange={onChange}
-              labels={{ deposit: "Deposit", withdrawal: "Withdrawal" }}
+              labels={{ deposit: t('addDeposit.deposit'), withdrawal: t('addDeposit.withdrawal') }}
             />
           )}
         />
@@ -197,7 +199,7 @@ export default function AddDepositScreen() {
           name="portfolio"
           render={({ field: { value, onChange } }) => (
             <FormField
-              label="Portfolio"
+              label={t('addDeposit.portfolio')}
               required
               error={errors.portfolio?.message}
             >
@@ -215,7 +217,7 @@ export default function AddDepositScreen() {
           control={control}
           name="deposit_date"
           render={({ field: { value, onChange } }) => (
-            <FormField label="Date" required error={errors.deposit_date?.message}>
+            <FormField label={t('addDeposit.date')} required error={errors.deposit_date?.message}>
               <DateInput
                 value={value}
                 onChangeText={onChange}
@@ -230,7 +232,7 @@ export default function AddDepositScreen() {
           control={control}
           name="amount"
           render={({ field: { value, onChange } }) => (
-            <FormField label="Amount" required error={errors.amount?.message}>
+            <FormField label={t('addDeposit.amount')} required error={errors.amount?.message}>
               <NumberInput
                 value={value}
                 onChangeText={onChange}
@@ -247,7 +249,7 @@ export default function AddDepositScreen() {
           control={control}
           name="currency"
           render={({ field: { value, onChange } }) => (
-            <FormField label="Currency" error={errors.currency?.message}>
+            <FormField label={t('addDeposit.currency')} error={errors.currency?.message}>
               <SegmentedControl
                 options={["KWD", "USD"]}
                 value={value}
@@ -262,11 +264,11 @@ export default function AddDepositScreen() {
           control={control}
           name="bank_name"
           render={({ field: { value, onChange } }) => (
-            <FormField label="Bank Name">
+            <FormField label={t('addDeposit.bankName')}>
               <TextInput
                 value={value ?? ""}
                 onChangeText={onChange}
-                placeholder="e.g. KFH, NBK, Boubyan"
+                placeholder={t('addDeposit.bankPlaceholder')}
               />
             </FormField>
           )}
@@ -277,11 +279,11 @@ export default function AddDepositScreen() {
           control={control}
           name="notes"
           render={({ field: { value, onChange } }) => (
-            <FormField label="Notes">
+            <FormField label={t('addDeposit.notes')}>
               <TextInput
                 value={value ?? ""}
                 onChangeText={onChange}
-                placeholder="Optional notes"
+                placeholder={t('addDeposit.notesPlaceholder')}
                 multiline
                 numberOfLines={3}
               />

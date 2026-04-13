@@ -3,11 +3,12 @@
  * and sub-components for the portfolio-analysis holdings table.
  */
 
-import React from "react";
-import { View, Text, StyleSheet, Pressable } from "react-native";
 import type { ThemePalette } from "@/constants/theme";
-import type { Holding } from "@/services/api";
 import { fmtNum } from "@/lib/currency";
+import type { Holding } from "@/services/api";
+import React from "react";
+import { useTranslation } from "react-i18next";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 
 // ── Column types ────────────────────────────────────────────────────
 
@@ -37,25 +38,25 @@ export type SortDir = "asc" | "desc";
 
 /** Ordered column layout for the portfolio-analysis holdings table. */
 export const TABLE_COLUMNS: ColDef[] = [
-  { key: "company",                         label: "Company",              fmt: "text_bold",       width: 150, align: "left" },
-  { key: "shares_qty",                      label: "Quantity",             fmt: "quantity",        width: 80,  align: "right", summable: true },
-  { key: "avg_cost",                        label: "Avg Cost/Share",       fmt: "price",           width: 95,  align: "right" },
-  { key: "total_cost",                      label: "Total Cost",           fmt: "money",           width: 105, align: "right", summable: true },
-  { key: "market_price",                    label: "Mkt Price",            fmt: "price",           width: 85,  align: "right" },
-  { key: "market_value",                    label: "Mkt Value",            fmt: "money",           width: 105, align: "right", summable: true },
-  { key: "unrealized_pnl",                  label: "Unrealized P/L",       fmt: "money_colored",   width: 105, align: "right", summable: true },
-  { key: "realized_pnl",                    label: "Realized P/L",         fmt: "money_colored",   width: 105, align: "right", summable: true },
-  { key: "cash_dividends",                  label: "Cash Div",             fmt: "money",           width: 90,  align: "right", summable: true },
-  { key: "reinvested_dividends",            label: "Reinvested",           fmt: "money",           width: 90,  align: "right", summable: true },
-  { key: "bonus_dividend_shares",           label: "Bonus Shares",         fmt: "quantity",        width: 90,  align: "right", summable: true },
-  { key: "bonus_share_value",               label: "Bonus Value",          fmt: "money",           width: 95,  align: "right", summable: true },
-  { key: "allocation_pct",                  label: "Allocation %",         fmt: "percent",         width: 90,  align: "right" },
-  { key: "dividend_yield_on_cost_pct",      label: "Yield %",              fmt: "percent",         width: 75,  align: "right" },
-  { key: "yield_amount",                    label: "Yield Amt",            fmt: "money",           width: 90,  align: "right", summable: true },
-  { key: "weighted_dividend_yield",         label: "Wt. Yield %",          fmt: "percent",         width: 85,  align: "right" },
-  { key: "current_pnl",                     label: "Total P/L",            fmt: "money_colored",   width: 105, align: "right", summable: true },
-  { key: "current_pnl_pct",                 label: "P/L %",                fmt: "percent_colored", width: 78,  align: "right" },
-  { key: "pe_ratio",                        label: "P/E Ratio",            fmt: "money",           width: 80,  align: "right" },
+  { key: "company",                         label: "holdings.company",      fmt: "text_bold",       width: 150, align: "left" },
+  { key: "shares_qty",                      label: "holdings.quantity",     fmt: "quantity",        width: 80,  align: "right", summable: true },
+  { key: "avg_cost",                        label: "holdings.avgCostShare", fmt: "price",           width: 95,  align: "right" },
+  { key: "total_cost",                      label: "holdings.totalCost",    fmt: "money",           width: 105, align: "right", summable: true },
+  { key: "market_price",                    label: "holdings.mktPrice",     fmt: "price",           width: 85,  align: "right" },
+  { key: "market_value",                    label: "holdings.mktValue",     fmt: "money",           width: 105, align: "right", summable: true },
+  { key: "unrealized_pnl",                  label: "holdings.unrealPL",     fmt: "money_colored",   width: 105, align: "right", summable: true },
+  { key: "realized_pnl",                    label: "holdings.realPL",       fmt: "money_colored",   width: 105, align: "right", summable: true },
+  { key: "cash_dividends",                  label: "holdings.cashDiv",      fmt: "money",           width: 90,  align: "right", summable: true },
+  { key: "reinvested_dividends",            label: "holdings.reinvested",   fmt: "money",           width: 90,  align: "right", summable: true },
+  { key: "bonus_dividend_shares",           label: "holdings.bonusShares",  fmt: "quantity",        width: 90,  align: "right", summable: true },
+  { key: "bonus_share_value",               label: "holdings.bonusValue",   fmt: "money",           width: 95,  align: "right", summable: true },
+  { key: "allocation_pct",                  label: "holdings.allocationPct",fmt: "percent",         width: 90,  align: "right" },
+  { key: "dividend_yield_on_cost_pct",      label: "holdings.yieldPct",     fmt: "percent",         width: 75,  align: "right" },
+  { key: "yield_amount",                    label: "holdings.yieldAmt",     fmt: "money",           width: 90,  align: "right", summable: true },
+  { key: "weighted_dividend_yield",         label: "holdings.wtYieldPct",   fmt: "percent",         width: 85,  align: "right" },
+  { key: "current_pnl",                     label: "holdings.totalPL",      fmt: "money_colored",   width: 105, align: "right", summable: true },
+  { key: "current_pnl_pct",                 label: "holdings.pctChange",    fmt: "percent_colored", width: 78,  align: "right" },
+  { key: "pe_ratio",                        label: "holdings.peRatio",      fmt: "money",           width: 80,  align: "right" },
 ];
 
 export const TOTAL_TABLE_WIDTH = TABLE_COLUMNS.reduce((sum, c) => sum + c.width, 0);
@@ -113,9 +114,8 @@ export function fmtCell(
       const n = Number(val);
       if (!n && n !== 0) return { text: "\u2014", color: muted, bold: false };
       if (n === 0) return { text: "0.00%", color: muted, bold: false };
-      const pct = Math.abs(n) < 1 ? n * 100 : n;
-      if (pct > 0) return { text: `+${pct.toFixed(2)}%`, color: pos, bold: true };
-      return { text: `${pct.toFixed(2)}%`, color: neg, bold: true };
+      if (n > 0) return { text: `+${n.toFixed(2)}%`, color: pos, bold: true };
+      return { text: `${n.toFixed(2)}%`, color: neg, bold: true };
     }
     default:
       return { text: String(val), color: primary, bold: false };
@@ -252,6 +252,7 @@ export function computeTotals(holdings: Holding[]): Record<string, number> {
 export const HeaderCell = React.memo(function HeaderCell({ col, colors, sortCol, sortDir, onSort }: {
   col: ColDef; colors: ThemePalette; sortCol: string | null; sortDir: SortDir; onSort: (k: string) => void;
 }) {
+  const { t } = useTranslation();
   const isActive = sortCol === col.key;
   const arrow = isActive ? (sortDir === "asc" ? " \u2191" : " \u2193") : " \u21C5";
   return (
@@ -263,7 +264,7 @@ export const HeaderCell = React.memo(function HeaderCell({ col, colors, sortCol,
         style={[htStyles.headerText, { color: isActive ? colors.accentPrimary : colors.textPrimary, textAlign: col.align }]}
         numberOfLines={1}
       >
-        {col.label}
+        {t(col.label)}
         <Text style={{ opacity: isActive ? 1 : 0.35, fontSize: 10 }}>{arrow}</Text>
       </Text>
     </Pressable>
@@ -290,10 +291,11 @@ function DataCell({ col, holding, colors }: { col: ColDef; holding: Holding; col
 
 /** Footer total cell — renders aggregate value for summable columns. */
 export const TotalCell = React.memo(function TotalCell({ col, totals, colors }: { col: ColDef; totals: Record<string, number>; colors: ThemePalette }) {
+  const { t } = useTranslation();
   if (col.key === "company") {
     return (
       <View style={[htStyles.dataCell, { width: col.width }]}>
-        <Text style={[htStyles.cellText, { color: colors.accentPrimary, fontWeight: "800" }]}>TOTAL</Text>
+        <Text style={[htStyles.cellText, { color: colors.accentPrimary, fontWeight: "800" }]}>{t("holdingsScreen.total")}</Text>
       </View>
     );
   }

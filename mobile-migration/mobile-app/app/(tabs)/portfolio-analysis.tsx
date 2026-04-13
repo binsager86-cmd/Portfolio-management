@@ -14,6 +14,7 @@
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import { useQueryClient } from "@tanstack/react-query";
 import React, { useCallback, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
     Alert,
     Platform,
@@ -45,6 +46,7 @@ import {
     exportHoldingsExcel,
 } from "@/services/api";
 import { useThemeStore } from "@/services/themeStore";
+import { useUserPrefsStore } from "@/src/store/userPrefsStore";
 
 // Extracted components
 import { CashBalancesSection } from "@/components/portfolio/CashBalancesSection";
@@ -70,6 +72,8 @@ function PortfolioAnalysisScreen() {
   const { colors } = useThemeStore();
   const { isDesktop, spacing } = useResponsive();
   const queryClient = useQueryClient();
+  const { t } = useTranslation();
+  const expertiseLevel = useUserPrefsStore((s) => s.preferences.expertiseLevel);
 
   // Filters
   const [selectedPortfolio, setSelectedPortfolio] = useState<string>("All");
@@ -186,7 +190,7 @@ function PortfolioAnalysisScreen() {
   // ── Loading / Error ─────────────────────────────────────────────
 
   if (holdingsLoading) return <PortfolioAnalysisSkeleton />;
-  if (holdingsError) return <ErrorScreen message={(holdingsErr as Error)?.message ?? "Failed to load holdings"} onRetry={() => refetchHoldings()} />;
+  if (holdingsError) return <ErrorScreen message={(holdingsErr as Error)?.message ?? t('portfolioAnalysis.failedToLoad')} onRetry={() => refetchHoldings()} />;
 
   const resp = holdingsResp;
 
@@ -219,14 +223,14 @@ function PortfolioAnalysisScreen() {
         {/* ── 1. Performance KPIs ───────────────────────────────── */}
         <View style={{ paddingHorizontal: spacing.pagePx, marginTop: 8 }}>
           <Text style={[s.sectionTitle, { color: colors.textPrimary }]}>
-            <FontAwesome name="bar-chart" size={16} color={colors.accentPrimary} /> Performance
+            <FontAwesome name="bar-chart" size={16} color={colors.accentPrimary} /> {t('portfolioAnalysis.performance')}
           </Text>
           <View style={s.kpiGrid}>
-            <KpiCard label="Total Portfolio Value" value={formatCurrency(_totalPortfolioValueKwd, "KWD")} colors={colors} />
-            <KpiCard label="Total Market Value" value={formatCurrency(resp.totals.total_market_value_kwd, "KWD")} colors={colors} />
-            <KpiCard label="Total Cost" value={formatCurrency(resp.totals.total_cost_kwd, "KWD")} colors={colors} />
-            <KpiCard label="Unrealized Gain/Loss" value={formatCurrency(resp.totals.total_unrealized_pnl_kwd, "KWD")} color={resp.totals.total_unrealized_pnl_kwd >= 0 ? colors.success : colors.danger} colors={colors} />
-            <KpiCard label="Stocks Held" value={sortedHoldings.length} colors={colors} />
+            <KpiCard label={t('portfolioAnalysis.totalPortfolioValue')} value={formatCurrency(_totalPortfolioValueKwd, "KWD")} colors={colors} />
+            <KpiCard label={t('portfolioAnalysis.totalMarketValue')} value={formatCurrency(resp.totals.total_market_value_kwd, "KWD")} colors={colors} />
+            <KpiCard label={t('portfolioAnalysis.totalCost')} value={formatCurrency(resp.totals.total_cost_kwd, "KWD")} colors={colors} />
+            <KpiCard label={t('portfolioAnalysis.unrealizedGainLoss')} value={formatCurrency(resp.totals.total_unrealized_pnl_kwd, "KWD")} color={resp.totals.total_unrealized_pnl_kwd >= 0 ? colors.success : colors.danger} colors={colors} />
+            <KpiCard label={t('portfolioAnalysis.stocksHeld')} value={sortedHoldings.length} colors={colors} />
           </View>
         </View>
 
@@ -244,12 +248,12 @@ function PortfolioAnalysisScreen() {
         {/* ── 3. Holdings Table ──────────────────────────────────── */}
         <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: spacing.pagePx, marginBottom: 8, marginTop: 16 }}>
           <Text style={[s.sectionTitle, { color: colors.textPrimary, marginTop: 0 }]}>
-            <FontAwesome name="briefcase" size={16} color={colors.accentPrimary} /> Holdings
+            <FontAwesome name="briefcase" size={16} color={colors.accentPrimary} /> {t('portfolioAnalysis.holdingsSection')}
           </Text>
           <Pressable
             onPress={async () => {
               if (Platform.OS !== "web") {
-                Alert.alert("Export", "Excel export is available on web.");
+                Alert.alert(t('portfolioAnalysis.exportExcel'), t('portfolioAnalysis.exportWebOnly'));
                 return;
               }
               try {
@@ -263,13 +267,13 @@ function PortfolioAnalysisScreen() {
                 document.body.removeChild(a);
                 URL.revokeObjectURL(url);
               } catch (e: any) {
-                Alert.alert("Export Failed", e?.message ?? "Unknown error");
+                Alert.alert(t('portfolioAnalysis.exportFailed'), e?.message ?? t('app.error'));
               }
             }}
             style={{ flexDirection: "row", alignItems: "center", backgroundColor: "#065f46", borderColor: "#10b981", borderWidth: 1.5, paddingHorizontal: 14, paddingVertical: 7, borderRadius: 8 }}
           >
             <FontAwesome name="download" size={13} color="#34d399" style={{ marginRight: 6 }} />
-            <Text style={{ color: "#34d399", fontSize: 13, fontWeight: "700" }}>Export Excel</Text>
+            <Text style={{ color: "#34d399", fontSize: 13, fontWeight: "700" }}>{t('portfolioAnalysis.exportExcel')}</Text>
           </Pressable>
         </View>
         <View
@@ -301,7 +305,7 @@ function PortfolioAnalysisScreen() {
               {/* Empty state */}
               {sortedHoldings.length === 0 && (
                 <View style={htStyles.emptyRow}>
-                  <Text style={{ color: colors.textMuted, fontSize: 14 }}>No active holdings found.</Text>
+                  <Text style={{ color: colors.textMuted, fontSize: 14 }}>{t('portfolioAnalysis.noActiveHoldings')}</Text>
                 </View>
               )}
             </View>
@@ -309,45 +313,47 @@ function PortfolioAnalysisScreen() {
         </View>
 
         {/* ── 4. Allocation Donut ──────────────────────────────── */}
+
+        {/* Allocation Donut — visible at all levels */}
         {allocationData.length > 0 && (
           <View style={{ paddingHorizontal: spacing.pagePx, marginBottom: 16 }}>
-            <AllocationDonut data={allocationData} title="Portfolio Allocation" colors={colors} size={280} showLegend />
+            <AllocationDonut data={allocationData} title={t('portfolioAnalysis.portfolioAllocation')} colors={colors} size={280} showLegend />
           </View>
         )}
 
         {/* ── 5. Risk Metrics ──────────────────────────────────── */}
-        {riskData && (
+        {expertiseLevel === "advanced" && riskData && (
           <View style={{ paddingHorizontal: spacing.pagePx }}>
             <Text style={[s.sectionTitle, { color: colors.textPrimary }]}>
-              <FontAwesome name="shield" size={16} color={colors.accentPrimary} /> Risk Metrics
+              <FontAwesome name="shield" size={16} color={colors.accentPrimary} /> {t('portfolioAnalysis.riskMetrics')}
             </Text>
             <View style={s.kpiGrid}>
-              <KpiCard label="Sharpe Ratio" value={riskData.sharpe_ratio.toFixed(3)} colors={colors} />
+              <KpiCard label={t('portfolioAnalysis.sharpeRatio')} value={riskData.sharpe_ratio.toFixed(3)} colors={colors} />
               <InfoTip term="Sharpe Ratio" definition={GLOSSARY["Sharpe Ratio"]} />
-              <KpiCard label="Sortino Ratio" value={riskData.sortino_ratio.toFixed(3)} colors={colors} />
+              <KpiCard label={t('portfolioAnalysis.sortinoRatio')} value={riskData.sortino_ratio.toFixed(3)} colors={colors} />
               <InfoTip term="Sortino Ratio" definition={GLOSSARY["Sortino Ratio"]} />
             </View>
           </View>
         )}
 
         {/* ── 6. Realized Profit ───────────────────────────────── */}
-        {realizedData && (
+        {expertiseLevel === "advanced" && realizedData && (
           <View style={{ paddingHorizontal: spacing.pagePx }}>
             <Text style={[s.sectionTitle, { color: colors.textPrimary }]}>
-              <FontAwesome name="check-circle" size={16} color={colors.accentPrimary} /> Realized Profit
+              <FontAwesome name="check-circle" size={16} color={colors.accentPrimary} /> {t('portfolioAnalysis.realizedProfit')}
             </Text>
             <View style={s.kpiGrid}>
-              <KpiCard label="Total Realized" value={formatCurrency(realizedData.total_realized_kwd, "KWD")} color={realizedData.total_realized_kwd >= 0 ? colors.success : colors.danger} colors={colors} />
-              <KpiCard label="Profit" value={formatCurrency(realizedData.total_profit_kwd, "KWD")} color={colors.success} colors={colors} />
-              <KpiCard label="Loss" value={formatCurrency(realizedData.total_loss_kwd, "KWD")} color={colors.danger} colors={colors} />
+              <KpiCard label={t('portfolioAnalysis.totalRealized')} value={formatCurrency(realizedData.total_realized_kwd, "KWD")} color={realizedData.total_realized_kwd >= 0 ? colors.success : colors.danger} colors={colors} />
+              <KpiCard label={t('portfolioAnalysis.profit')} value={formatCurrency(realizedData.total_profit_kwd, "KWD")} color={colors.success} colors={colors} />
+              <KpiCard label={t('portfolioAnalysis.loss')} value={formatCurrency(realizedData.total_loss_kwd, "KWD")} color={colors.danger} colors={colors} />
             </View>
 
             {realizedData.details.length > 0 && (
               <View style={[s.detailTable, { borderColor: colors.borderColor, marginTop: 8 }]}>
                 <View style={[s.detailRow, { backgroundColor: colors.bgSecondary, borderBottomColor: colors.borderColor }]}>
-                  <Text style={[s.detailCell, { color: colors.textSecondary, fontWeight: "700", flex: 2 }]}>Symbol</Text>
-                  <Text style={[s.detailCell, { color: colors.textSecondary, fontWeight: "700" }]}>Date</Text>
-                  <Text style={[s.detailCell, { color: colors.textSecondary, fontWeight: "700" }]}>P&L (KWD)</Text>
+                  <Text style={[s.detailCell, { color: colors.textSecondary, fontWeight: "700", flex: 2 }]}>{t('portfolioAnalysis.symbol')}</Text>
+                  <Text style={[s.detailCell, { color: colors.textSecondary, fontWeight: "700" }]}>{t('portfolioAnalysis.date')}</Text>
+                  <Text style={[s.detailCell, { color: colors.textSecondary, fontWeight: "700" }]}>{t('portfolioAnalysis.plKWD')}</Text>
                 </View>
                 {realizedData.details.slice(0, 30).map((d) => (
                   <View key={d.id} style={[s.detailRow, { borderBottomColor: colors.borderColor }]}>

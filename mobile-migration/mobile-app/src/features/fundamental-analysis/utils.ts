@@ -27,7 +27,7 @@ export function buildHistoricalMetrics(allMetrics: StockMetric[]) {
 }
 
 export function formatNumber(n: number): string {
-  return n.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+  return n.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 3 });
 }
 
 export function formatMetricValue(name: string, value: number): string {
@@ -43,7 +43,7 @@ export function formatMetricValue(name: string, value: number): string {
     || ["current ratio", "quick ratio", "cash ratio"].some((k) => lc === k);
   if (isMult) return value.toFixed(2) + "x";
   // Per-share metrics
-  if (lc.includes("eps") || lc.includes("earnings per share")) return value.toFixed(3);
+  if (lc.includes("eps") || lc.includes("earnings per share") || lc.includes("book value")) return value.toFixed(3);
   return formatNumber(value);
 }
 
@@ -151,10 +151,13 @@ export function enrichMetricsWithFallbacks(
       : null;
     const sharesOutstanding = balance
       ? extractLineItem(balance, "SHARES_OUTSTANDING_DILUTED", "SHARES_OUTSTANDING_BASIC",
-          "TOTAL_COMMON_SHARES_OUTSTANDING", "FILING_DATE_SHARES_OUTSTANDING")
+          "DILUTED_SHARES_OUTSTANDING", "BASIC_SHARES_OUTSTANDING",
+          "TOTAL_COMMON_SHARES_OUTSTANDING", "FILING_DATE_SHARES_OUTSTANDING",
+          "SHARES_OUTSTANDING", "SHARES_DILUTED")
       : (income
         ? extractLineItem(income, "SHARES_OUTSTANDING_DILUTED", "SHARES_OUTSTANDING_BASIC",
-            "TOTAL_COMMON_SHARES_OUTSTANDING")
+            "DILUTED_SHARES_OUTSTANDING", "BASIC_SHARES_OUTSTANDING",
+            "TOTAL_COMMON_SHARES_OUTSTANDING", "SHARES_OUTSTANDING", "SHARES_DILUTED")
         : null);
     const dividendsPaid = cashflow
       ? extractLineItem(cashflow, "COMMON_DIVIDENDS_PAID", "dividends_paid")

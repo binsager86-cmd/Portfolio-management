@@ -7,6 +7,7 @@
  * Uses jsPDF (Helvetica built-in). Works cross-platform.
  */
 
+import type { AISummary } from "@/lib/aiSummaryGenerator";
 import { todayISO } from "@/lib/dateUtils";
 import { Platform } from "react-native";
 
@@ -73,7 +74,7 @@ function fmtMetric(name: string, value: number): string {
     ["turnover", "coverage", "multiplier"].some((k) => lc.includes(k)) ||
     ["current ratio", "quick ratio", "cash ratio"].includes(lc);
   if (isMult) return value.toFixed(2) + "x";
-  if (lc.includes("eps") || lc.includes("earnings per share")) return value.toFixed(3);
+  if (lc.includes("eps") || lc.includes("earnings per share") || lc.includes("book value")) return value.toFixed(3);
   // Abbreviate large numbers: B / M / K
   const abs = Math.abs(value);
   if (abs >= 1_000_000_000) return (value / 1_000_000_000).toFixed(2) + "B";
@@ -205,6 +206,7 @@ export async function exportMetricsPdf(
   categories: Record<string, MetricsCategoryData>,
   stockSymbol: string,
   totalMetrics: number,
+  aiSummary?: AISummary | null,
 ) {
   const { jsPDF: JsPDF } = await import("jspdf");
   let doc: jsPDF | null = new JsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
@@ -289,6 +291,34 @@ export async function exportMetricsPdf(
   doc.text(summaryItems.join("   |   "), mx + 8, y + 15);
 
   y += summaryH + SECTION_GAP;
+
+  // ── AI Summary card (if provided) ────────────────────────────────
+  if (aiSummary) {
+    const riskColor = aiSummary.riskLevel === "low" ? C.success : aiSummary.riskLevel === "high" ? C.danger : "#f59e0b";
+    const bulletCount = aiSummary.bullets.length + (aiSummary.actionHint ? 1 : 0);
+    const aiCardH = 14 + bulletCount * 5 + 6;
+    ensureSpace(aiCardH + 4);
+
+    drawRoundedRect(doc, mx, y, cw, aiCardH, 3, C.cardBg, riskColor);
+
+    doc.setFont("helvetica", "bold").setFontSize(9).setTextColor(C.textDark);
+    doc.text(`${aiSummary.headline}`, mx + 8, y + 7);
+
+    drawBadge(doc, mx + cw - 32, y + 6, `RISK: ${aiSummary.riskLevel.toUpperCase()}`, riskColor + "22", riskColor);
+
+    let bulletY = y + 14;
+    doc.setFont("helvetica", "normal").setFontSize(7.5).setTextColor(C.textMedium);
+    for (const b of aiSummary.bullets) {
+      doc.text(`\u2022  ${b}`, mx + 10, bulletY);
+      bulletY += 5;
+    }
+    if (aiSummary.actionHint) {
+      doc.setFont("helvetica", "bold").setFontSize(7.5).setTextColor(C.primary);
+      doc.text(`\u27A4  ${aiSummary.actionHint}`, mx + 10, bulletY);
+    }
+
+    y += aiCardH + SECTION_GAP;
+  }
 
   // ── Category sections ────────────────────────────────────────────
   for (const [catKey, cat] of catEntries) {

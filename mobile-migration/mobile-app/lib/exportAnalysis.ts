@@ -8,6 +8,7 @@
  * All work cross-platform (web download, native share sheet).
  */
 
+import type { AISummary } from "@/lib/aiSummaryGenerator";
 import { todayISO } from "@/lib/dateUtils";
 import { Platform } from "react-native";
 
@@ -162,7 +163,7 @@ const C = {
   altRow: "#F8FAFC",
 };
 
-async function tablesToPdf(tables: TableData[], stockSymbol: string, panelName: string) {
+async function tablesToPdf(tables: TableData[], stockSymbol: string, panelName: string, aiSummary?: AISummary | null) {
   const { jsPDF } = await import("jspdf");
 
   const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
@@ -190,6 +191,36 @@ async function tablesToPdf(tables: TableData[], stockSymbol: string, panelName: 
   let page = 1;
   drawHeader();
   let y = headerH + 6;
+
+  // ── AI Summary card (if provided) ──────────────────────────────
+  if (aiSummary) {
+    const riskColor = aiSummary.riskLevel === "low" ? "#059669" : aiSummary.riskLevel === "high" ? "#DC2626" : "#f59e0b";
+    const bulletCount = aiSummary.bullets.length + (aiSummary.actionHint ? 1 : 0);
+    const cardH = 12 + bulletCount * 5 + 4;
+    doc.setFillColor("#F8FAFC");
+    doc.setDrawColor(riskColor);
+    doc.setLineWidth(0.4);
+    doc.roundedRect(mx, y, W - mx * 2, cardH, 2, 2, "FD");
+
+    doc.setFont("helvetica", "bold").setFontSize(9).setTextColor(C.textDark);
+    doc.text(`${aiSummary.headline}`, mx + 6, y + 7);
+
+    doc.setFont("helvetica", "normal").setFontSize(7).setTextColor(riskColor);
+    doc.text(`RISK: ${aiSummary.riskLevel.toUpperCase()}`, W - mx - 6, y + 7, { align: "right" });
+
+    let bulletY = y + 13;
+    doc.setFont("helvetica", "normal").setFontSize(7.5).setTextColor(C.textMedium);
+    for (const b of aiSummary.bullets) {
+      doc.text(`\u2022  ${b}`, mx + 8, bulletY);
+      bulletY += 5;
+    }
+    if (aiSummary.actionHint) {
+      doc.setFont("helvetica", "bold").setFontSize(7.5).setTextColor(C.primary);
+      doc.text(`\u27A4  ${aiSummary.actionHint}`, mx + 8, bulletY);
+    }
+
+    y += cardH + 6;
+  }
 
   for (const table of tables) {
     const colCount = table.headers.length;
@@ -282,8 +313,8 @@ export async function exportExcel(tables: TableData[], stockSymbol: string, pane
   }
 }
 
-export async function exportPDF(tables: TableData[], stockSymbol: string, panelName: string) {
-  const doc = await tablesToPdf(tables, stockSymbol, panelName);
+export async function exportPDF(tables: TableData[], stockSymbol: string, panelName: string, aiSummary?: AISummary | null) {
+  const doc = await tablesToPdf(tables, stockSymbol, panelName, aiSummary);
   const filename = buildFilename(stockSymbol, panelName, "pdf");
   if (Platform.OS === "web") {
     doc.save(filename);

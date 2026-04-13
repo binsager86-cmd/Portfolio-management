@@ -1,6 +1,7 @@
 import { useThemeStore } from "@/services/themeStore";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import React from "react";
+import { useTranslation } from "react-i18next";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
 interface SetupProgressProps {
@@ -19,12 +20,13 @@ export function SetupProgress({
   onDismiss,
 }: SetupProgressProps) {
   const { colors } = useThemeStore();
+  const { t } = useTranslation();
 
   const tasks = [
-    { id: 1, label: "Add first transaction", done: transactionCount > 0, icon: "plus-circle" as const },
-    { id: 2, label: "View holdings", done: hasHoldings, icon: "briefcase" as const },
-    { id: 3, label: "Track dividends", done: hasDividends, icon: "money" as const },
-    { id: 4, label: "Save snapshot", done: hasSnapshots, icon: "camera" as const },
+    { id: 1, label: t("onboarding.taskAddTxn"), done: transactionCount > 0, icon: "plus-circle" as const },
+    { id: 2, label: t("onboarding.taskViewHoldings"), done: hasHoldings, icon: "briefcase" as const },
+    { id: 3, label: t("onboarding.taskTrackDividends"), done: hasDividends, icon: "money" as const },
+    { id: 4, label: t("onboarding.taskSaveSnapshot"), done: hasSnapshots, icon: "camera" as const },
   ];
 
   const completed = tasks.filter((t) => t.done).length;
@@ -35,7 +37,7 @@ export function SetupProgress({
   return (
     <View style={[styles.container, { backgroundColor: colors.bgCard, borderColor: colors.borderColor }]}>
       <View style={styles.header}>
-        <Text style={[styles.title, { color: colors.textPrimary }]}>Setup Progress</Text>
+        <Text style={[styles.title, { color: colors.textPrimary }]}>{t("onboarding.setupProgress")}</Text>
         <Pressable onPress={onDismiss} hitSlop={8}>
           <FontAwesome name="times" size={14} color={colors.textMuted} />
         </Pressable>
@@ -46,7 +48,7 @@ export function SetupProgress({
         <View style={[styles.progressFill, { width: `${progress}%`, backgroundColor: colors.success }]} />
       </View>
       <Text style={[styles.progressText, { color: colors.textMuted }]}>
-        {completed} of {tasks.length} tasks completed
+        {t("onboarding.tasksCompleted", { completed, total: tasks.length })}
       </Text>
 
       {/* Tasks */}
@@ -85,7 +87,7 @@ export function SetupProgress({
         <View style={[styles.rewardCard, { backgroundColor: colors.accentPrimary + "10" }]}>
           <FontAwesome name="trophy" size={16} color={colors.accentPrimary} />
           <Text style={[styles.rewardText, { color: colors.accentPrimary }]}>
-            One more task to unlock full features!
+            {t("onboarding.oneMoreTask")}
           </Text>
         </View>
       )}

@@ -116,6 +116,15 @@ api.interceptors.request.use(async (config: InternalAxiosRequestConfig) => {
   return config;
 });
 
+// ── Network-error tracker — force logout after repeated failures ────
+
+let consecutiveNetworkErrors = 0;
+const MAX_NETWORK_ERRORS = 3;
+
+function resetNetworkErrors() {
+  consecutiveNetworkErrors = 0;
+}
+
 // ── Response interceptor: silent refresh on 401 ─────────────────────
 
 let isRefreshing = false;
@@ -131,11 +140,45 @@ function onTokenRefreshed(newToken: string) {
 }
 
 api.interceptors.response.use(
-  (response: AxiosResponse) => response,
+  (response: AxiosResponse) => {
+    // Any successful response resets the network-error counter
+    resetNetworkErrors();
+    return response;
+  },
   async (error: AxiosError) => {
     const originalRequest = error.config as InternalAxiosRequestConfig & {
       _retry?: boolean;
     };
+
+    // ── Network error (no response — backend down / timeout) ────
+    if (!error.response) {
+      consecutiveNetworkErrors++;
+      if (__DEV__) {
+        console.log(
+          `[API] Network error #${consecutiveNetworkErrors}/${MAX_NETWORK_ERRORS}:`,
+          error.message,
+        );
+      }
+
+      // After MAX_NETWORK_ERRORS consecutive failures, check if the
+      // token is already expired.  If so, force logout immediately
+      // rather than leaving the user on a broken page.
+      if (consecutiveNetworkErrors >= MAX_NETWORK_ERRORS) {
+        const token = await getToken();
+        if (isTokenExpired(token, 0)) {
+          if (__DEV__) console.log("[API] Token expired + backend unreachable — logging out");
+          await removeToken();
+          await removeRefreshToken();
+          const { useAuthStore } = require("../authStore");
+          useAuthStore.getState().logout();
+          consecutiveNetworkErrors = 0;
+        }
+      }
+      return Promise.reject(error);
+    }
+
+    // Any server response (even errors) means the network is alive
+    resetNetworkErrors();
 
     // Only attempt refresh on 401 and if we haven't retried yet
     if (error.response?.status !== 401 || originalRequest._retry) {

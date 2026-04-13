@@ -10,7 +10,7 @@
  * max-content width, sidebar visibility, and touch-target sizing.
  */
 
-import { useWindowDimensions, Platform } from "react-native";
+import { Platform, useWindowDimensions } from "react-native";
 
 // ── Breakpoints ─────────────────────────────────────────────────────
 export const BP_TABLET = 768;
@@ -91,9 +91,15 @@ export interface ResponsiveInfo {
 export function useResponsive(): ResponsiveInfo {
   const { width, height } = useWindowDimensions();
 
+  // Use the smaller dimension to determine device class (works in both orientations)
+  const shortSide = Math.min(width, height);
+
   let bp: Breakpoint = "phone";
   if (width >= BP_DESKTOP) bp = "desktop";
   else if (width >= BP_TABLET) bp = "tablet";
+  // Native devices: if the short side (portrait width) is ≥ 600px, it's a tablet
+  // (iPads, Android tablets in portrait mode, even if current width < 768 in split-view)
+  else if (Platform.OS !== "web" && shortSide >= 600) bp = "tablet";
 
   const isPhone = bp === "phone";
   const isTablet = bp === "tablet";
@@ -102,7 +108,7 @@ export function useResponsive(): ResponsiveInfo {
   // Sidebar: only on web when ≥ tablet
   const showSidebar = Platform.OS === "web" && (isDesktop || isTablet);
 
-  // Hamburger: shown on phone (any platform) or on web tablet (sidebar can be toggled)
+  // Hamburger: shown on phone (any platform)
   const showHamburger = isPhone;
 
   return {

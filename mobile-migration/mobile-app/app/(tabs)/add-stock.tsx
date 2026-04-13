@@ -10,32 +10,33 @@
  * Users can override portfolio / currency before adding.
  */
 
-import React, { useState, useMemo, useCallback } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  Pressable,
-  Alert,
-  Platform,
-  KeyboardAvoidingView,
-  ActivityIndicator,
-  TextInput as RNTextInput,
-  FlatList,
-} from "react-native";
-import { useRouter } from "expo-router";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import FontAwesome from "@expo/vector-icons/FontAwesome";
 import { useStockList, useStocks } from "@/hooks/queries";
+import { useResponsive } from "@/hooks/useResponsive";
+import { showErrorAlert } from "@/lib/errorHandling";
 import {
-  createStock,
-  fetchStockPrice,
-  StockListEntry,
+    createStock,
+    fetchStockPrice,
+    StockListEntry,
 } from "@/services/api";
 import { useThemeStore } from "@/services/themeStore";
-import { showErrorAlert } from "@/lib/errorHandling";
-import { useResponsive } from "@/hooks/useResponsive";
+import FontAwesome from "@expo/vector-icons/FontAwesome";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useRouter } from "expo-router";
+import React, { useCallback, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
+import {
+    ActivityIndicator,
+    Alert,
+    FlatList,
+    KeyboardAvoidingView,
+    Platform,
+    Pressable,
+    TextInput as RNTextInput,
+    ScrollView,
+    StyleSheet,
+    Text,
+    View,
+} from "react-native";
 
 // ── Constants ───────────────────────────────────────────────────────
 
@@ -58,6 +59,7 @@ export default function AddStockScreen() {
   const { isDesktop } = useResponsive();
   const router = useRouter();
   const queryClient = useQueryClient();
+  const { t } = useTranslation();
 
   // ── Form state ──────────────────────────────────────────────────
   const [market, setMarket] = useState<MarketLabel>("Kuwait Market");
@@ -148,7 +150,7 @@ export default function AddStockScreen() {
       queryClient.invalidateQueries({ queryKey: ["stocks"] });
       queryClient.invalidateQueries({ queryKey: ["trading-summary"] });
 
-      const msg = `Stock ${data.symbol} added successfully!\nWould you like to add a transaction for this stock?`;
+      const msg = `${t('addStock.stockAdded', { symbol: data.symbol })}\n${t('addStock.addTransactionPrompt')}`;
       if (Platform.OS === "web") {
         if (window.confirm(msg)) {
           router.replace({
@@ -159,10 +161,10 @@ export default function AddStockScreen() {
           router.back();
         }
       } else {
-        Alert.alert("Success", `Stock ${data.symbol} added successfully!`, [
-          { text: "Done", style: "cancel", onPress: () => router.back() },
+        Alert.alert(t('addDeposit.success'), t('addStock.stockAdded', { symbol: data.symbol }), [
+          { text: t('addStock.done'), style: "cancel", onPress: () => router.back() },
           {
-            text: "Add Transaction",
+            text: t('nav.addTransaction'),
             onPress: () =>
               router.replace({
                 pathname: "/(tabs)/add-transaction",
@@ -204,11 +206,11 @@ export default function AddStockScreen() {
           <Pressable onPress={() => router.back()} style={styles.backBtn}>
             <FontAwesome name="arrow-left" size={18} color={colors.textPrimary} />
           </Pressable>
-          <Text style={[styles.title, { color: colors.textPrimary }]}>Add Stock</Text>
+          <Text style={[styles.title, { color: colors.textPrimary }]}>{t('addStock.title')}</Text>
         </View>
 
         {/* ── Market Selection ──────────────────── */}
-        <Text style={[styles.label, { color: colors.textSecondary }]}>Market</Text>
+        <Text style={[styles.label, { color: colors.textSecondary }]}>{t('addStock.market')}</Text>
         <View style={styles.segmentRow}>
           {MARKETS.map((m) => {
             const active = m === market;
@@ -228,7 +230,7 @@ export default function AddStockScreen() {
                     { color: active ? "#fff" : colors.accentPrimary },
                   ]}
                 >
-                  {m === "Kuwait Market" ? "🇰🇼 Kuwait" : "🇺🇸 US"}
+                  {m === "Kuwait Market" ? t('addStock.kuwait') : t('addStock.us')}
                 </Text>
               </Pressable>
             );
@@ -237,7 +239,7 @@ export default function AddStockScreen() {
 
         {/* ── Stock Search ──────────────────────── */}
         <Text style={[styles.label, { color: colors.textSecondary }]}>
-          Search Stock ({allStocks.length} available)
+          {t('addStock.searchStock', { count: allStocks.length })}
         </Text>
         <View style={{ zIndex: 100 }}>
           <View
@@ -259,15 +261,15 @@ export default function AddStockScreen() {
               style={[styles.searchInput, { color: colors.textPrimary }]}
               placeholder={
                 market === "Kuwait Market"
-                  ? "Search Kuwait stocks (e.g. KFH, Zain)..."
-                  : "Search US stocks (e.g. AAPL, Tesla)..."
+                  ? t('addStock.searchKuwait')
+                  : t('addStock.searchUS')
               }
               placeholderTextColor={colors.textMuted}
               value={searchQuery}
-              onChangeText={(t) => {
-                setSearchQuery(t);
+              onChangeText={(tx) => {
+                setSearchQuery(tx);
                 setShowDropdown(true);
-                if (!t.trim()) setSelectedStock(null);
+                if (!tx.trim()) setSelectedStock(null);
               }}
               onFocus={() => setShowDropdown(true)}
               autoCapitalize="characters"
@@ -301,13 +303,13 @@ export default function AddStockScreen() {
                 <View style={styles.dropdownLoading}>
                   <ActivityIndicator size="small" color={colors.accentPrimary} />
                   <Text style={[styles.dropdownHint, { color: colors.textMuted }]}>
-                    Loading stock list...
+                    {t('addStock.loadingList')}
                   </Text>
                 </View>
               ) : filteredStocks.length === 0 ? (
                 <View style={styles.dropdownEmpty}>
                   <Text style={[styles.dropdownHint, { color: colors.textMuted }]}>
-                    No stocks found for "{searchQuery}"
+                    {t('addStock.noStocksFound', { query: searchQuery })}
                   </Text>
                 </View>
               ) : (
@@ -351,7 +353,7 @@ export default function AddStockScreen() {
                         </View>
                         {dup && (
                           <View style={[styles.dupBadge, { backgroundColor: "#FF9800" }]}>
-                            <Text style={styles.dupBadgeText}>EXISTS</Text>
+                            <Text style={styles.dupBadgeText}>{t('addStock.exists')}</Text>
                           </View>
                         )}
                       </Pressable>
@@ -365,7 +367,7 @@ export default function AddStockScreen() {
                           { color: colors.textMuted, padding: 8 },
                         ]}
                       >
-                        Showing 50 of {filteredStocks.length} — type more to narrow
+                        {t('addStock.showingCount', { count: filteredStocks.length })}
                       </Text>
                     ) : null
                   }
@@ -397,7 +399,7 @@ export default function AddStockScreen() {
               </Text>
               {isDuplicate && (
                 <View style={[styles.dupBadge, { backgroundColor: "#FF9800" }]}>
-                  <Text style={styles.dupBadgeText}>ALREADY EXISTS</Text>
+                  <Text style={styles.dupBadgeText}>{t('addStock.alreadyExists')}</Text>
                 </View>
               )}
             </View>
@@ -405,14 +407,14 @@ export default function AddStockScreen() {
               {selectedStock.name}
             </Text>
             <Text style={[styles.selectedTicker, { color: colors.textMuted }]}>
-              Yahoo Finance: {selectedStock.yf_ticker}
+              {t('addStock.yahooFinance')} {selectedStock.yf_ticker}
             </Text>
           </View>
         )}
 
         {/* ── Portfolio ─────────────────────────── */}
         <Text style={[styles.label, { color: colors.textSecondary, marginTop: 16 }]}>
-          Portfolio
+          {t('addStock.portfolio')}
         </Text>
         <View style={styles.segmentRow}>
           {PORTFOLIOS.map((p) => {
@@ -441,7 +443,7 @@ export default function AddStockScreen() {
         </View>
 
         {/* ── Currency ──────────────────────────── */}
-        <Text style={[styles.label, { color: colors.textSecondary }]}>Currency</Text>
+        <Text style={[styles.label, { color: colors.textSecondary }]}>{t('addStock.currency')}</Text>
         <View style={styles.segmentRow}>
           {CURRENCIES.map((c) => {
             const active = c === currency;
@@ -488,13 +490,13 @@ export default function AddStockScreen() {
             <View style={styles.submitInner}>
               <ActivityIndicator size="small" color="#fff" />
               <Text style={styles.submitText}>
-                {fetchingPrice ? "Fetching Price..." : "Adding Stock..."}
+                {fetchingPrice ? t('addStock.fetchingPrice') : t('addStock.addingStock')}
               </Text>
             </View>
           ) : (
             <View style={styles.submitInner}>
               <FontAwesome name="plus-circle" size={18} color="#fff" />
-              <Text style={styles.submitText}>Add Stock</Text>
+              <Text style={styles.submitText}>{t('addStock.title')}</Text>
             </View>
           )}
         </Pressable>

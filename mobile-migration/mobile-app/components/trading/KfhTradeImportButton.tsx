@@ -5,10 +5,12 @@
 import { extractErrorMessage } from "@/lib/errorHandling";
 import { executeImport, parseAndPreview } from "@/lib/kfh/kfhTradeImportService";
 import type { KfhImportPreview, KfhImportResult } from "@/lib/kfh/kfhTradeTypes";
+import { setCashOverride } from "@/services/api";
 import { useThemeStore } from "@/services/themeStore";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import * as DocumentPicker from "expo-document-picker";
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Alert, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import KfhTradeHelpModal from "./KfhTradeHelpModal";
 import KfhTradeImportModal from "./KfhTradeImportModal";
@@ -20,16 +22,18 @@ interface Props {
 
 export default function KfhTradeImportButton({ portfolio = "KFH", onImportComplete }: Props) {
   const { colors } = useThemeStore();
+  const { t } = useTranslation();
   const [preview, setPreview] = useState<KfhImportPreview | null>(null);
   const [previewVisible, setPreviewVisible] = useState(false);
   const [helpVisible, setHelpVisible] = useState(false);
   const [picking, setPicking] = useState(false);
+  const pendingCashRef = useRef<number | null>(null);
 
   const showError = useCallback((msg: string) => {
     if (Platform.OS === "web") {
       window.alert(msg);
     } else {
-      Alert.alert("Import Error", msg);
+      Alert.alert(t("kfhImport.importError"), msg);
     }
   }, []);
 
@@ -93,8 +97,21 @@ export default function KfhTradeImportButton({ portfolio = "KFH", onImportComple
     async (p: KfhImportPreview): Promise<KfhImportResult> => {
       const result = await executeImport(p.readyRows, portfolio);
       if (result.imported > 0) {
-        onImportComplete?.();
+        // Save cash position if user entered one
+        if (pendingCashRef.current != null) {
+          try {
+            await setCashOverride(portfolio, pendingCashRef.current, "KWD");
+          } catch {
+            // non-critical — don't block the import result
+          }
+          pendingCashRef.current = null;
+        }
       }
+      // Auto-close preview and trigger reconciliation immediately
+      console.log("[KfhImport] Import done, auto-closing preview and triggering reconciliation");
+      setPreviewVisible(false);
+      setPreview(null);
+      onImportComplete?.();
       return result;
     },
     [portfolio, onImportComplete]
@@ -109,7 +126,7 @@ export default function KfhTradeImportButton({ portfolio = "KFH", onImportComple
     <>
       <View style={s.row}>
         <Pressable
-          onPress={handlePick}
+          onPress={() => setHelpVisible(true)}
           disabled={picking}
           style={({ pressed }) => [
             s.btn,
@@ -122,12 +139,8 @@ export default function KfhTradeImportButton({ portfolio = "KFH", onImportComple
         >
           <FontAwesome name="upload" size={13} color={colors.accentPrimary} />
           <Text style={[s.btnText, { color: colors.accentPrimary }]}>
-            {picking ? "Reading…" : "Import KFH Statement"}
+            {picking ? t("kfhImport.reading") : t("kfhImport.importKfhStatement")}
           </Text>
-        </Pressable>
-
-        <Pressable onPress={() => setHelpVisible(true)} hitSlop={8}>
-          <FontAwesome name="question-circle-o" size={16} color={colors.textMuted} />
         </Pressable>
       </View>
 
@@ -141,6 +154,11 @@ export default function KfhTradeImportButton({ portfolio = "KFH", onImportComple
       <KfhTradeHelpModal
         visible={helpVisible}
         onClose={() => setHelpVisible(false)}
+        onUpload={(cashBalance) => {
+          pendingCashRef.current = cashBalance;
+          setHelpVisible(false);
+          handlePick();
+        }}
       />
     </>
   );

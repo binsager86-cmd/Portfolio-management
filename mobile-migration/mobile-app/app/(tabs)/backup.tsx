@@ -4,26 +4,27 @@
  * Mirrors Streamlit's Backup & Restore section.
  */
 
-import React, { useState } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  Pressable,
-  Platform,
-  Alert,
-} from "react-native";
-import { useMutation } from "@tanstack/react-query";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
+import { useMutation } from "@tanstack/react-query";
+import React, { useState } from "react";
+import { useTranslation } from "react-i18next";
+import {
+    Alert,
+    Platform,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Text,
+    View,
+} from "react-native";
 
-import { exportBackup, importBackup } from "@/services/api";
-import { showErrorAlert, extractErrorMessage } from "@/lib/errorHandling";
-import { useThemeStore } from "@/services/themeStore";
+import type { ThemePalette } from "@/constants/theme";
 import { useResponsive } from "@/hooks/useResponsive";
 import { useScreenStyles } from "@/hooks/useScreenStyles";
 import { todayISO } from "@/lib/dateUtils";
-import type { ThemePalette } from "@/constants/theme";
+import { extractErrorMessage, showErrorAlert } from "@/lib/errorHandling";
+import { exportBackup, importBackup } from "@/services/api";
+import { useThemeStore } from "@/services/themeStore";
 
 const IMPORT_MODES = ["merge", "replace"] as const;
 
@@ -31,6 +32,7 @@ export default function BackupRestoreScreen() {
   const { colors } = useThemeStore();
   const ss = useScreenStyles();
   const { isDesktop } = useResponsive();
+  const { t } = useTranslation();
   const isDark = colors.mode === "dark";
   const [importResult, setImportResult] = useState<any | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
@@ -51,7 +53,7 @@ export default function BackupRestoreScreen() {
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
       } else {
-        Alert.alert("Export", "Backup file downloaded successfully");
+        Alert.alert("Export", t('backup.exportSuccess'));
       }
     },
     onError: (err) => showErrorAlert("Error", err, "Export failed"),
@@ -69,7 +71,7 @@ export default function BackupRestoreScreen() {
       setImportResult(null);
       let msg: string;
       if (!err?.response) {
-        msg = "Cannot reach server. Please check your connection.";
+        msg = t('backup.cannotReachServer');
       } else {
         msg = extractErrorMessage(err, "Import failed.");
       }
@@ -94,7 +96,7 @@ export default function BackupRestoreScreen() {
       };
       input.click();
     } else {
-      Alert.alert("Import", "File import is available on web. Please use the web version to import Excel files.");
+      Alert.alert("Import", t('backup.fileImportWebOnly'));
     }
   };
 
@@ -108,9 +110,9 @@ export default function BackupRestoreScreen() {
       style={ss.container}
       contentContainerStyle={[ss.content, isDesktop && { maxWidth: 700, alignSelf: "center", width: "100%" }]}
     >
-      <Text style={[ss.title, { marginBottom: 4 }]}>Backup & Restore</Text>
+      <Text style={[ss.title, { marginBottom: 4 }]}>{t('backup.title')}</Text>
       <Text style={[s.desc, { color: colors.textSecondary }]}>
-        Export your portfolio data as an Excel file, or import transactions from a backup.
+        {t('backup.description')}
       </Text>
 
       {/* Export Section */}
@@ -118,9 +120,9 @@ export default function BackupRestoreScreen() {
         <View style={s.sectionIcon}>
           <FontAwesome name="download" size={32} color={colors.accentPrimary} />
         </View>
-        <Text style={[s.sectionTitle, { color: colors.textPrimary }]}>Export Backup</Text>
+        <Text style={[s.sectionTitle, { color: colors.textPrimary }]}>{t('backup.exportBackup')}</Text>
         <Text style={[s.sectionDesc, { color: colors.textSecondary }]}>
-          Download a full Excel backup of all transactions, deposits, holdings, and snapshots.
+          {t('backup.exportDesc')}
         </Text>
         <Pressable
           onPress={() => exportMutation.mutate()}
@@ -135,7 +137,7 @@ export default function BackupRestoreScreen() {
         >
           <FontAwesome name="file-excel-o" size={16} color="#fff" />
           <Text style={s.btnText}>
-            {exportMutation.isPending ? "Exporting..." : "Download Excel"}
+            {exportMutation.isPending ? t('backup.exporting') : t('backup.downloadExcel')}
           </Text>
         </Pressable>
       </View>
@@ -145,13 +147,13 @@ export default function BackupRestoreScreen() {
         <View style={s.sectionIcon}>
           <FontAwesome name="upload" size={32} color={colors.accentPrimary} />
         </View>
-        <Text style={[s.sectionTitle, { color: colors.textPrimary }]}>Restore from Backup</Text>
+        <Text style={[s.sectionTitle, { color: colors.textPrimary }]}>{t('backup.restoreFromBackup')}</Text>
         <Text style={[s.sectionDesc, { color: colors.textSecondary }]}>
-          Upload an Excel backup (.xlsx) to restore all data — stocks, transactions, cash deposits, and snapshots. Portfolio is read from each row automatically.
+          {t('backup.restoreDesc')}
         </Text>
 
         {/* Mode selector */}
-        <Text style={[s.fieldLabel, { color: colors.textSecondary }]}>Import Mode</Text>
+        <Text style={[s.fieldLabel, { color: colors.textSecondary }]}>{t('backup.importMode')}</Text>
         <View style={s.chipRow}>
           {IMPORT_MODES.map((m) => (
             <Pressable
@@ -179,7 +181,7 @@ export default function BackupRestoreScreen() {
         </View>
         {importMode === "replace" && (
           <Text style={[s.modeWarning, { color: colors.danger }]}>
-            Replace mode will delete ALL existing data (stocks, transactions, cash deposits, snapshots) before importing.
+            {t('backup.replaceWarning')}
           </Text>
         )}
 
@@ -201,7 +203,7 @@ export default function BackupRestoreScreen() {
         >
           <FontAwesome name="file-excel-o" size={16} color={colors.accentPrimary} />
           <Text style={[s.btnText, { color: colors.textPrimary }]}>
-            {selectedFileName ?? "Choose Excel File..."}
+            {selectedFileName ?? t('backup.chooseExcelFile')}
           </Text>
         </Pressable>
 
@@ -220,10 +222,10 @@ export default function BackupRestoreScreen() {
           <FontAwesome name="cloud-upload" size={16} color="#fff" />
           <Text style={s.btnText}>
             {importMutation.isPending
-              ? "Importing..."
+              ? t('backup.importing')
               : pendingFile
-                ? `Import (${importMode})`
-                : "Select a file first"}
+                ? `${t('backup.importMode')} (${importMode})`
+                : t('backup.selectFileFirst')}
           </Text>
         </Pressable>
       </View>
@@ -238,11 +240,11 @@ export default function BackupRestoreScreen() {
         <View style={[s.resultBox, { backgroundColor: isDark ? "rgba(239,68,68,0.08)" : "rgba(239,68,68,0.05)", borderColor: colors.danger }]}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8 }}>
             <FontAwesome name="exclamation-circle" size={18} color={colors.danger} />
-            <Text style={[s.resultTitle, { color: colors.danger }]}>Import Failed</Text>
+            <Text style={[s.resultTitle, { color: colors.danger }]}>{t('backup.importFailed')}</Text>
           </View>
           <Text style={{ color: colors.textSecondary, fontSize: 14, lineHeight: 20 }}>{importError}</Text>
           <Pressable onPress={() => setImportError(null)} style={{ marginTop: 12 }}>
-            <Text style={{ color: colors.accentPrimary, fontSize: 13, fontWeight: "600" }}>Dismiss</Text>
+            <Text style={{ color: colors.accentPrimary, fontSize: 13, fontWeight: "600" }}>{t('backup.dismiss')}</Text>
           </Pressable>
         </View>
       )}

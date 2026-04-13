@@ -108,6 +108,11 @@ describe("formatMetricValue", () => {
     expect(formatMetricValue("EPS", 3.14)).toBe("3.140");
   });
 
+  it("formats Book Value Per Share to 3 decimal places", () => {
+    expect(formatMetricValue("Book Value Per Share", 1.2)).toBe("1.200");
+    expect(formatMetricValue("Book Value Per Share", 0.12345)).toBe("0.123");
+  });
+
   it("formats generic numbers", () => {
     expect(formatMetricValue("Revenue", 1000000)).toBe("1,000,000");
   });

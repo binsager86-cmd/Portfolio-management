@@ -10,7 +10,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ActivityIndicator, Alert, Platform, Pressable, RefreshControl, ScrollView, Text, TextInput, View } from "react-native";
 
 import type { ThemePalette } from "@/constants/theme";
-import { analysisKeys, usePeerMultiples, useStockList, useValuations } from "@/hooks/queries";
+import { analysisKeys, usePeerMultiples, useStockList, useStockListSearch, useValuations } from "@/hooks/queries";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { showErrorAlert } from "@/lib/errorHandling";
 import { exportCSV, exportExcel, exportPDF, TableData } from "@/lib/exportAnalysis";
 import { buildValuationExcelTables, exportValuationPdf, type ValuationSummaryData } from "@/lib/exportValuationPdf";
@@ -22,7 +23,7 @@ import { ActionButton, Card, Chip, ExportBar, FadeIn, LabeledInput, SectionHeade
 
 /* ── Helpers ──────────────────────────────────────────────────── */
 
-const fmt = (v: unknown, dp = 2) =>
+const fmt = (v: unknown, dp = 3) =>
   typeof v === "number" ? v.toLocaleString(undefined, { minimumFractionDigits: dp, maximumFractionDigits: dp }) : "—";
 
 const MULT_OPTIONS = ["P/E", "P/B", "P/S", "P/CF", "EV/EBITDA"] as const;
@@ -211,9 +212,9 @@ function DCFResultCard({ r, colors, mos, onChangeMos, currentPrice }: { r: Valua
                 ))}
                 <Text style={{ width: COL_W + 10, paddingVertical: 6, color: colors.textMuted, fontSize: 10, fontWeight: "700", textAlign: "right", paddingHorizontal: 6 }}>Terminal Value</Text>
               </View>
-              {/* Future FCF row */}
+              {/* Future UFCF row */}
               <View style={{ flexDirection: "row", borderTopWidth: 1, borderTopColor: colors.borderColor }}>
-                <Text style={{ width: LABEL_W, paddingHorizontal: 8, paddingVertical: 5, color: colors.textMuted, fontSize: 10, fontWeight: "600" }}>Future FCF</Text>
+                <Text style={{ width: LABEL_W, paddingHorizontal: 8, paddingVertical: 5, color: colors.textMuted, fontSize: 10, fontWeight: "600" }}>Future UFCF</Text>
                 {projections.map((p) => (
                   <Text key={p.year} style={{ width: COL_W, paddingVertical: 5, color: colors.textPrimary, fontSize: 10, textAlign: "right", fontVariant: ["tabular-nums"], paddingHorizontal: 6 }}>
                     {fmtN(p.fcf)}
@@ -223,9 +224,9 @@ function DCFResultCard({ r, colors, mos, onChangeMos, currentPrice }: { r: Valua
                   {typeof r.terminal_value === "number" ? fmtN(r.terminal_value) : "—"}
                 </Text>
               </View>
-              {/* PV of FCF row */}
+              {/* PV of UFCF row */}
               <View style={{ flexDirection: "row", borderTopWidth: 1, borderTopColor: colors.borderColor }}>
-                <Text style={{ width: LABEL_W, paddingHorizontal: 8, paddingVertical: 5, color: colors.textMuted, fontSize: 10, fontWeight: "600" }}>PV of FCF</Text>
+                <Text style={{ width: LABEL_W, paddingHorizontal: 8, paddingVertical: 5, color: colors.textMuted, fontSize: 10, fontWeight: "600" }}>PV of UFCF</Text>
                 {projections.map((p) => (
                   <Text key={p.year} style={{ width: COL_W, paddingVertical: 5, color: colors.textSecondary, fontSize: 10, textAlign: "right", fontVariant: ["tabular-nums"], paddingHorizontal: 6 }}>
                     {fmtN(p.pv)}
@@ -242,7 +243,7 @@ function DCFResultCard({ r, colors, mos, onChangeMos, currentPrice }: { r: Valua
 
       {/* ── Summary section ──────────────────────────── */}
       <View style={{ backgroundColor: colors.cardBg, borderRadius: 8, borderWidth: 1, borderColor: colors.borderColor, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 10 }}>
-        <KVRow label="Sum of FCF" value={fmt(r.pv_fcfs)} colors={colors} />
+        <KVRow label="Sum of PV (UFCF)" value={fmt(r.pv_fcfs)} colors={colors} />
         <KVRow label="Cash & Cash Equivalents" value={fmt(r.cash)} colors={colors} />
         <KVRow label="Total Debt" value={fmt(r.debt)} colors={colors} />
         <View style={{ height: 1, backgroundColor: colors.borderColor, marginVertical: 6 }} />
@@ -254,7 +255,7 @@ function DCFResultCard({ r, colors, mos, onChangeMos, currentPrice }: { r: Valua
       {r.parameters && (
         <View style={{ backgroundColor: colors.cardBg, borderRadius: 8, borderWidth: 1, borderColor: colors.borderColor, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 10 }}>
           <Text style={{ color: colors.textMuted, fontSize: 11, fontWeight: "700", marginBottom: 4 }}>Assumptions</Text>
-          <KVRow label="Base FCF" value={typeof r.parameters.fcf === "number" ? fmtN(r.parameters.fcf) : "—"} colors={colors} />
+          <KVRow label="Base UFCF" value={typeof r.parameters.fcf === "number" ? fmtN(r.parameters.fcf) : "—"} colors={colors} />
           <KVRow label="Stage 1 Growth" value={typeof r.parameters.growth_stage1 === "number" ? (r.parameters.growth_stage1 * 100).toFixed(2) + "%" : "—"} colors={colors} />
           <KVRow label="Stage 2 Growth" value={typeof r.parameters.growth_stage2 === "number" ? (r.parameters.growth_stage2 * 100).toFixed(2) + "%" : "—"} colors={colors} />
           <KVRow label="Discount Rate" value={typeof r.parameters.discount_rate === "number" ? (r.parameters.discount_rate * 100).toFixed(2) + "%" : "—"} colors={colors} />
@@ -442,7 +443,7 @@ export function ValuationsPanel({ stockId, stockSymbol, colors, isDesktop }: Pan
     div, setDiv, divGr, setDivGr, rr, setRr,
     mv, setMv, pm, setPm, multipleType, setMultipleType,
     useWacc, setUseWacc,
-    waccRf, setWaccRf, waccComputed,
+    waccRf, setWaccRf, waccTax, setWaccTax, waccComputed,
     grahamMut, dcfMut, ddmMut, multMut,
     valError, lastResult,
     defaults, defaultsLoading,
@@ -465,14 +466,31 @@ export function ValuationsPanel({ stockId, stockSymbol, colors, isDesktop }: Pan
   const stockListQ = useStockList(peerMarket, model === "multiples");
   const [showPeerPicker, setShowPeerPicker] = useState(false);
   const [peerSearch, setPeerSearch] = useState("");
+  const debouncedPeerSearch = useDebouncedValue(peerSearch, 400);
 
-  // Filter stock list by search term
+  // Server-side search (augments hardcoded list with yfinance results)
+  const serverSearchQ = useStockListSearch(peerMarket, debouncedPeerSearch, model === "multiples" && showPeerPicker);
+
+  // Filter stock list by search term — merge hardcoded + server results
   const filteredStockList = useMemo(() => {
     const all = stockListQ.data?.stocks ?? [];
+    const serverResults = serverSearchQ.data?.stocks ?? [];
+
     if (!peerSearch.trim()) return all;
     const q = peerSearch.trim().toLowerCase();
-    return all.filter((s) => s.symbol.toLowerCase().includes(q) || s.name.toLowerCase().includes(q));
-  }, [stockListQ.data, peerSearch]);
+    const localFiltered = all.filter((s) => s.symbol.toLowerCase().includes(q) || s.name.toLowerCase().includes(q));
+
+    // Merge server results (dedup by symbol)
+    const seen = new Set(localFiltered.map((s) => s.symbol.toUpperCase()));
+    const merged = [...localFiltered];
+    for (const s of serverResults) {
+      if (!seen.has(s.symbol.toUpperCase())) {
+        seen.add(s.symbol.toUpperCase());
+        merged.push(s);
+      }
+    }
+    return merged;
+  }, [stockListQ.data, serverSearchQ.data, peerSearch]);
 
   // Add a peer company by symbol
   const addPeerMut = useMutation({
@@ -822,8 +840,8 @@ export function ValuationsPanel({ stockId, stockSymbol, colors, isDesktop }: Pan
                 </View>
               )}
               <View style={{ flexDirection: "row", gap: 10, flexWrap: "wrap" }}>
-                <LabeledInput label="FREE CASH FLOW" value={fcf} onChangeText={setFcf} colors={colors} keyboardType="numeric" flex={1}
-                  helperText="The company's most recent annual Free Cash Flow (Operating Cash Flow minus Capital Expenditures). Represents the cash available to all investors after reinvestment. Auto-filled from your uploaded financial statements." />
+                <LabeledInput label="UNLEVERED FCF" value={fcf} onChangeText={setFcf} colors={colors} keyboardType="numeric" flex={1}
+                  helperText="Unlevered Free Cash Flow (FCFF) — cash available to all capital providers (equity + debt). Calculated as Operating Cash Flow + After-Tax Interest − CapEx. Required for enterprise-value DCF with WACC. Auto-filled from your uploaded cash flow statements." />
                 <LabeledInput label="STAGE 1 GROWTH %" value={g1} onChangeText={setG1} colors={colors} keyboardType="numeric" flex={1}
                   helperText="Near-term annual FCF growth rate (%) for the first 5 years. Enter 10 for 10%. Reflects the company's current growth momentum. Auto-filled from historical revenue growth. Higher = more optimistic projection." />
                 <LabeledInput label="STAGE 2 GROWTH %" value={g2} onChangeText={setG2} colors={colors} keyboardType="numeric" flex={1}
@@ -872,7 +890,23 @@ export function ValuationsPanel({ stockId, stockSymbol, colors, isDesktop }: Pan
                     {defaults.wacc_equity_risk_premium != null && <KVRow label="Equity Risk Premium" value={(defaults.wacc_equity_risk_premium * 100).toFixed(2) + "%"} colors={colors} />}
                     <KVRow label="Cost of Equity (Ke)" value={waccComputed ? (waccComputed.ke * 100).toFixed(2) + "%" : defaults.wacc_cost_of_equity != null ? (defaults.wacc_cost_of_equity * 100).toFixed(2) + "%" : "—"} colors={colors} />
                     {defaults.wacc_cost_of_debt != null && <KVRow label="Cost of Debt (Kd)" value={(defaults.wacc_cost_of_debt * 100).toFixed(2) + "%"} colors={colors} />}
-                    {defaults.wacc_tax_rate != null && <KVRow label="Tax Rate (T)" value={(defaults.wacc_tax_rate * 100).toFixed(2) + "%"} colors={colors} />}
+                    <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 2 }}>
+                      <Text style={{ color: colors.textMuted, fontSize: 12 }}>Tax Rate (T)</Text>
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                        <TextInput
+                          value={waccTax}
+                          onChangeText={setWaccTax}
+                          keyboardType="numeric"
+                          placeholder="0"
+                          placeholderTextColor={colors.textMuted}
+                          style={{ color: colors.textPrimary, fontSize: 12, fontWeight: "700", fontVariant: ["tabular-nums"], borderBottomWidth: 1, borderBottomColor: "#6366f1", paddingVertical: 2, paddingHorizontal: 4, minWidth: 50, textAlign: "right" }}
+                        />
+                        <Text style={{ color: colors.textMuted, fontSize: 11 }}>%</Text>
+                      </View>
+                    </View>
+                    {(!waccTax || waccTax === "0") && defaults.wacc_tax_rate == null && (
+                      <Text style={{ color: "#f59e0b", fontSize: 10, fontStyle: "italic", marginTop: 2 }}>No tax data found — enter tax rate manually</Text>
+                    )}
                     {defaults.wacc_weight_equity != null && <KVRow label="Equity Weight (E/V)" value={(defaults.wacc_weight_equity * 100).toFixed(2) + "%"} colors={colors} />}
                     {defaults.wacc_weight_debt != null && <KVRow label="Debt Weight (D/V)" value={(defaults.wacc_weight_debt * 100).toFixed(2) + "%"} colors={colors} />}
                     <View style={{ height: 1, backgroundColor: colors.borderColor, marginVertical: 4 }} />
@@ -887,8 +921,8 @@ export function ValuationsPanel({ stockId, stockSymbol, colors, isDesktop }: Pan
                   editable={!useWacc || !waccComputed} />
                 <LabeledInput label="PERPETUAL GROWTH %" value={tg} onChangeText={setTg} colors={colors} keyboardType="numeric" flex={1}
                   helperText="The perpetual growth rate (%) assumed forever after Stage 2. Enter 2.5 for 2.5%. Used to calculate terminal value via the Gordon Growth Model. Must be less than Discount Rate. Typically 2–3%. Small changes here have large impact." />
-                <LabeledInput label="SHARES" value={shares} onChangeText={setShares} colors={colors} keyboardType="numeric" flex={1}
-                  helperText="Total shares outstanding. Used to convert enterprise value to per-share intrinsic value. Auto-filled from your financial statements." />
+                <LabeledInput label="SHARES OUTSTANDING" value={shares} onChangeText={setShares} colors={colors} keyboardType="numeric" flex={1}
+                  helperText="Total shares outstanding (diluted). Used to convert enterprise value to per-share intrinsic value. Auto-filled from your financial statements (income or balance sheet)." />
               </View>
               <View style={{ flexDirection: "row", gap: 10 }}>
                 <LabeledInput label="STAGE 1 YEARS" value={s1} onChangeText={setS1} colors={colors} keyboardType="numeric" flex={1}
@@ -999,9 +1033,18 @@ export function ValuationsPanel({ stockId, stockSymbol, colors, isDesktop }: Pan
                         );
                       })}
                       {filteredStockList.length === 0 && (
-                        <Text style={{ color: colors.textMuted, fontSize: 13, padding: 14, textAlign: "center" }}>
-                          {peerSearch ? `No matches for "${peerSearch}"` : `No stocks found for ${peerMarket === "kuwait" ? "Kuwait" : "US"} market.`}
-                        </Text>
+                        <View style={{ padding: 14, alignItems: "center" }}>
+                          {serverSearchQ.isFetching ? (
+                            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                              <ActivityIndicator size="small" color={colors.accentPrimary} />
+                              <Text style={{ color: colors.textMuted, fontSize: 13 }}>Searching...</Text>
+                            </View>
+                          ) : (
+                            <Text style={{ color: colors.textMuted, fontSize: 13, textAlign: "center" }}>
+                              {peerSearch ? `No matches for "${peerSearch}"` : `No stocks found for ${peerMarket === "kuwait" ? "Kuwait" : "US"} market.`}
+                            </Text>
+                          )}
+                        </View>
                       )}
                     </ScrollView>
                   </View>
@@ -1315,9 +1358,9 @@ export function ValuationsPanel({ stockId, stockSymbol, colors, isDesktop }: Pan
                                 ))}
                                 <Text style={{ width: COL_W + 10, paddingVertical: 6, color: colors.textMuted, fontSize: 10, fontWeight: "700", textAlign: "right", paddingHorizontal: 6 }}>Terminal Value</Text>
                               </View>
-                              {/* Future FCF row */}
+                              {/* Future UFCF row */}
                               <View style={{ flexDirection: "row", borderTopWidth: 1, borderTopColor: colors.borderColor }}>
-                                <Text style={{ width: LABEL_W, paddingHorizontal: 8, paddingVertical: 5, color: colors.textMuted, fontSize: 10, fontWeight: "600" }}>Future FCF</Text>
+                                <Text style={{ width: LABEL_W, paddingHorizontal: 8, paddingVertical: 5, color: colors.textMuted, fontSize: 10, fontWeight: "600" }}>Future UFCF</Text>
                                 {projections.map((p) => (
                                   <Text key={p.year} style={{ width: COL_W, paddingVertical: 5, color: colors.textPrimary, fontSize: 10, textAlign: "right", fontVariant: ["tabular-nums"], paddingHorizontal: 6 }}>
                                     {fmtN(p.fcf)}
@@ -1327,9 +1370,9 @@ export function ValuationsPanel({ stockId, stockSymbol, colors, isDesktop }: Pan
                                   {typeof a?.terminal_value === "number" ? fmtN(a.terminal_value as number) : "—"}
                                 </Text>
                               </View>
-                              {/* PV of FCF row */}
+                              {/* PV of UFCF row */}
                               <View style={{ flexDirection: "row", borderTopWidth: 1, borderTopColor: colors.borderColor }}>
-                                <Text style={{ width: LABEL_W, paddingHorizontal: 8, paddingVertical: 5, color: colors.textMuted, fontSize: 10, fontWeight: "600" }}>PV of FCF</Text>
+                                <Text style={{ width: LABEL_W, paddingHorizontal: 8, paddingVertical: 5, color: colors.textMuted, fontSize: 10, fontWeight: "600" }}>PV of UFCF</Text>
                                 {projections.map((p) => (
                                   <Text key={p.year} style={{ width: COL_W, paddingVertical: 5, color: colors.textSecondary, fontSize: 10, textAlign: "right", fontVariant: ["tabular-nums"], paddingHorizontal: 6 }}>
                                     {fmtN(p.pv)}
@@ -1346,7 +1389,7 @@ export function ValuationsPanel({ stockId, stockSymbol, colors, isDesktop }: Pan
 
                       {/* ── Summary section ──────────────────────── */}
                       <View style={{ backgroundColor: colors.cardBg, borderRadius: 8, borderWidth: 1, borderColor: colors.borderColor, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 10 }}>
-                        <KVRow label="Sum of FCF" value={fmt(a?.pv_fcfs)} colors={colors} />
+                        <KVRow label="Sum of PV (UFCF)" value={fmt(a?.pv_fcfs)} colors={colors} />
                         <KVRow label="Cash & Cash Equivalents" value={fmt(a?.cash)} colors={colors} />
                         <KVRow label="Total Debt" value={fmt(a?.debt)} colors={colors} />
                         <View style={{ height: 1, backgroundColor: colors.borderColor, marginVertical: 6 }} />
@@ -1358,7 +1401,7 @@ export function ValuationsPanel({ stockId, stockSymbol, colors, isDesktop }: Pan
                       {params && (
                         <View style={{ backgroundColor: colors.cardBg, borderRadius: 8, borderWidth: 1, borderColor: colors.borderColor, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 10 }}>
                           <Text style={{ color: colors.textMuted, fontSize: 11, fontWeight: "700", marginBottom: 4 }}>Assumptions</Text>
-                          <KVRow label="Base FCF" value={typeof params.fcf === "number" ? fmtN(params.fcf as number) : "—"} colors={colors} />
+                          <KVRow label="Base UFCF" value={typeof params.fcf === "number" ? fmtN(params.fcf as number) : "—"} colors={colors} />
                           <KVRow label="Stage 1 Growth" value={typeof params.growth_stage1 === "number" ? ((params.growth_stage1 as number) * 100).toFixed(2) + "%" : "—"} colors={colors} />
                           <KVRow label="Stage 2 Growth" value={typeof params.growth_stage2 === "number" ? ((params.growth_stage2 as number) * 100).toFixed(2) + "%" : "—"} colors={colors} />
                           <KVRow label="Discount Rate" value={typeof params.discount_rate === "number" ? ((params.discount_rate as number) * 100).toFixed(2) + "%" : "—"} colors={colors} />

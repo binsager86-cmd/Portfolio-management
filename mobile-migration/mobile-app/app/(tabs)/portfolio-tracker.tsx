@@ -14,6 +14,7 @@
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import React, { useCallback, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
     Alert,
     LayoutChangeEvent,
@@ -166,6 +167,7 @@ export default function PortfolioTrackerScreen() {
   const { isDesktop } = useResponsive();
   const queryClient = useQueryClient();
   const isDark = colors.mode === "dark";
+  const { t } = useTranslation();
 
   const [containerWidth, setContainerWidth] = useState(900);
   const handleLayout = useCallback((e: LayoutChangeEvent) => {
@@ -188,13 +190,13 @@ export default function PortfolioTrackerScreen() {
     mutationFn: () => saveSnapshot(),
     onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ["snapshots"] });
-      const msg = `${result.action}: ${result.message}\nPortfolio Value: ${fmtNum(result.portfolio_value)} KWD`;
+      const msg = t('tracker.snapshotSavedMessage', { action: result.action, message: result.message, value: fmtNum(result.portfolio_value) });
       if (Platform.OS === "web") window.alert(msg);
-      else Alert.alert("Snapshot Saved", msg);
+      else Alert.alert(t('tracker.snapshotSaved'), msg);
     },
     onError: (err: any) => {
       logError("SaveSnapshot", err);
-      showErrorAlert("Error", err, "Failed to save snapshot");
+      showErrorAlert(t('tracker.error'), err, t('tracker.failedToSaveSnapshot'));
     },
     retry: 1,
   });
@@ -208,9 +210,9 @@ export default function PortfolioTrackerScreen() {
     mutationFn: deleteAllSnapshots,
     onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ["snapshots"] });
-      const msg = `Deleted ${result.deleted_count} snapshots`;
+      const msg = t('tracker.deletedCount', { count: result.deleted_count });
       if (Platform.OS === "web") window.alert(msg);
-      else Alert.alert("Deleted", msg);
+      else Alert.alert(t('tracker.deleted'), msg);
     },
   });
 
@@ -222,18 +224,18 @@ export default function PortfolioTrackerScreen() {
     onSuccess: (result) => {
       console.log("[Recalculate] Success:", result);
       queryClient.invalidateQueries({ queryKey: ["snapshots"] });
-      const msg = `Recalculated ${result.updated} snapshots`;
+      const msg = t('tracker.recalculatedCount', { count: result.updated });
       if (Platform.OS === "web") window.alert(msg);
-      else Alert.alert("Recalculated", msg);
+      else Alert.alert(t('tracker.recalculated'), msg);
     },
     onError: (err: any) => {
       console.error("[Recalculate] Error:", err);
       console.error("[Recalculate] Response status:", err?.response?.status);
       console.error("[Recalculate] Response data:", err?.response?.data);
       const detail = err?.response?.data?.detail;
-      const msg = detail ?? err?.message ?? "Recalculation failed";
-      if (Platform.OS === "web") window.alert(`Recalculation error: ${msg}`);
-      else Alert.alert("Error", msg);
+      const msg = detail ?? err?.message ?? t('tracker.recalculationFailed');
+      if (Platform.OS === "web") window.alert(t('tracker.recalculationError', { message: msg }));
+      else Alert.alert(t('tracker.error'), msg);
     },
     retry: 1,
   });
@@ -243,16 +245,16 @@ export default function PortfolioTrackerScreen() {
     onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ["holdings"] });
       queryClient.invalidateQueries({ queryKey: ["snapshots"] });
-      const msg = result.message ?? "Prices updated successfully";
+      const msg = result.message ?? t('tracker.pricesUpdatedSuccessfully');
       if (Platform.OS === "web") window.alert(msg);
-      else Alert.alert("Prices Refreshed", msg);
+      else Alert.alert(t('tracker.pricesRefreshed'), msg);
     },
     onError: (err: any) => {
       console.error("[RefreshPrices] Error:", err);
       const detail = err?.response?.data?.detail;
-      const msg = detail ?? err?.message ?? "Price refresh failed";
+      const msg = detail ?? err?.message ?? t('tracker.priceRefreshFailed');
       if (Platform.OS === "web") window.alert(msg);
-      else Alert.alert("Error", msg);
+      else Alert.alert(t('tracker.error'), msg);
     },
     retry: 1,
   });
@@ -261,13 +263,13 @@ export default function PortfolioTrackerScreen() {
 
   const handleDeleteOne = useCallback(
     (snap: SnapshotRecord) => {
-      const msg = `Delete snapshot for ${snap.snapshot_date}?`;
+      const msg = t('tracker.deleteSnapshotConfirm', { date: snap.snapshot_date });
       if (Platform.OS === "web") {
         if (window.confirm(msg)) deleteOneMutation.mutate(snap.id);
       } else {
-        Alert.alert("Delete Snapshot", msg, [
-          { text: "Cancel", style: "cancel" },
-          { text: "Delete", style: "destructive", onPress: () => deleteOneMutation.mutate(snap.id) },
+        Alert.alert(t('tracker.deleteSnapshot'), msg, [
+          { text: t('app.cancel'), style: "cancel" },
+          { text: t('app.delete'), style: "destructive", onPress: () => deleteOneMutation.mutate(snap.id) },
         ]);
       }
     },
@@ -275,13 +277,13 @@ export default function PortfolioTrackerScreen() {
   );
 
   const handleDeleteAll = useCallback(() => {
-    const msg = "Delete ALL snapshots? This cannot be undone.";
+    const msg = t('tracker.deleteAllConfirm');
     if (Platform.OS === "web") {
       if (window.confirm(msg)) deleteAllMutation.mutate();
     } else {
-      Alert.alert("Delete All", msg, [
-        { text: "Cancel", style: "cancel" },
-        { text: "Delete All", style: "destructive", onPress: () => deleteAllMutation.mutate() },
+      Alert.alert(t('tracker.deleteAll'), msg, [
+        { text: t('app.cancel'), style: "cancel" },
+        { text: t('tracker.deleteAll'), style: "destructive", onPress: () => deleteAllMutation.mutate() },
       ]);
     }
   }, [deleteAllMutation]);
@@ -314,7 +316,7 @@ export default function PortfolioTrackerScreen() {
   // ── Loading / Error ──────────────────────────────────────────────
 
   if (isLoading) return <PortfolioTrackerSkeleton />;
-  if (isError) return <ErrorScreen message={error?.message ?? "Failed to load snapshots"} onRetry={refetch} />;
+  if (isError) return <ErrorScreen message={error?.message ?? t('tracker.failedToLoadSnapshots')} onRetry={refetch} />;
 
   return (
     <ScrollView
@@ -325,7 +327,7 @@ export default function PortfolioTrackerScreen() {
     >
       {/* ── Header Row ──────────────────────────────────────────── */}
       <View style={st.headerRow}>
-        <Text style={[st.pageTitle, { color: colors.textPrimary }]}>Portfolio Tracker</Text>
+        <Text style={[st.pageTitle, { color: colors.textPrimary }]}>{t('tracker.title')}</Text>
         <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
           <Pressable
             onPress={() => refreshPricesMutation.mutate()}
@@ -333,7 +335,7 @@ export default function PortfolioTrackerScreen() {
             style={[st.actionBtn, { backgroundColor: isDark ? "#0ea5e9" : "#0284c7", opacity: refreshPricesMutation.isPending ? 0.5 : 1 }]}
           >
             <FontAwesome name="refresh" size={14} color="#fff" />
-            <Text style={st.actionBtnText}>{refreshPricesMutation.isPending ? "Refreshing..." : "Refresh Prices"}</Text>
+            <Text style={st.actionBtnText}>{refreshPricesMutation.isPending ? t('tracker.refreshing') : t('tracker.refreshPrices')}</Text>
           </Pressable>
           <Pressable
             onPress={() => saveMutation.mutate()}
@@ -341,7 +343,7 @@ export default function PortfolioTrackerScreen() {
             style={[st.actionBtn, { backgroundColor: colors.accentPrimary, opacity: saveMutation.isPending ? 0.5 : 1 }]}
           >
             <FontAwesome name="camera" size={14} color="#fff" />
-            <Text style={st.actionBtnText}>{saveMutation.isPending ? "Saving..." : "Save Snapshot"}</Text>
+            <Text style={st.actionBtnText}>{saveMutation.isPending ? t('tracker.saving') : t('tracker.saveSnapshot')}</Text>
           </Pressable>
           {snapshots.length > 0 && (
             <Pressable
@@ -350,13 +352,13 @@ export default function PortfolioTrackerScreen() {
               style={[st.actionBtn, { backgroundColor: colors.success, opacity: recalcMutation.isPending ? 0.5 : 1 }]}
             >
               <FontAwesome name="calculator" size={14} color="#fff" />
-              <Text style={st.actionBtnText}>Recalculate</Text>
+              <Text style={st.actionBtnText}>{t('tracker.recalculate')}</Text>
             </Pressable>
           )}
           {snapshots.length > 0 && (
             <Pressable onPress={handleDeleteAll} style={[st.actionBtn, { backgroundColor: colors.danger }]}>
               <FontAwesome name="trash" size={14} color="#fff" />
-              <Text style={st.actionBtnText}>Clear All</Text>
+              <Text style={st.actionBtnText}>{t('tracker.clearAll')}</Text>
             </Pressable>
           )}
         </View>
@@ -366,7 +368,7 @@ export default function PortfolioTrackerScreen() {
       {(new Date().getDay() === 0 || new Date().getDay() === 6) && (
         <View style={[st.warningBanner, { backgroundColor: isDark ? "rgba(255,158,0,0.12)" : "rgba(245,158,11,0.08)", borderColor: isDark ? "rgba(255,158,0,0.3)" : "rgba(245,158,11,0.2)" }]}>
           <FontAwesome name="exclamation-triangle" size={14} color={colors.warning} />
-          <Text style={[st.warningText, { color: colors.warning }]}>Weekend — market prices may not be current</Text>
+          <Text style={[st.warningText, { color: colors.warning }]}>{t('tracker.weekendWarning')}</Text>
         </View>
       )}
 
@@ -374,32 +376,32 @@ export default function PortfolioTrackerScreen() {
       {latest && (
         <View style={st.kpiRow}>
           <KpiCard
-            label="Total Portfolio Value"
+            label={t('tracker.totalPortfolioValue')}
             value={`${fmtNum(latest.portfolio_value, 0)} KWD`}
-            subtitle="↑ Current Value"
+            subtitle={t('tracker.currentValue')}
             kpiStyle={isDark ? KPI_STYLES.value.dark : KPI_STYLES.value.light}
             colors={colors}
           />
           <KpiCard
-            label="Net Gain From Stocks"
+            label={t('tracker.netGainFromStocks')}
             value={`${fmtNum(latest.net_gain, 0)} KWD`}
-            subtitle="↑ Net Gain"
+            subtitle={t('tracker.netGainSubtitle')}
             kpiStyle={isDark ? KPI_STYLES.netGain.dark : KPI_STYLES.netGain.light}
             colors={colors}
             valueColor={latest.net_gain >= 0 ? (isDark ? "#10b981" : "#047857") : colors.danger}
           />
           <KpiCard
-            label="Profit Margin"
+            label={t('tracker.profitMargin')}
             value={`${(latest.roi_percent ?? 0).toFixed(1)}%`}
-            subtitle="↑ ROI"
+            subtitle={t('tracker.roiSubtitle')}
             kpiStyle={isDark ? KPI_STYLES.roi.dark : KPI_STYLES.roi.light}
             colors={colors}
             valueColor={(latest.roi_percent ?? 0) >= 0 ? (isDark ? "#8a2be2" : "#6366f1") : colors.danger}
           />
           <KpiCard
-            label="Average Daily Movement"
+            label={t('tracker.avgDailyMovement')}
             value={`${avgDailyMovement >= 0 ? "+" : ""}${fmtNum(avgDailyMovement)} KWD`}
-            subtitle={`↑ Avg over ${sortedAsc.length} day${sortedAsc.length !== 1 ? "s" : ""}`}
+            subtitle={t('tracker.avgOverDays', { count: sortedAsc.length })}
             kpiStyle={isDark ? KPI_STYLES.avgMovement.dark : KPI_STYLES.avgMovement.light}
             colors={colors}
             valueColor={avgDailyMovement >= 0 ? (isDark ? "#f59e0b" : "#d97706") : colors.danger}
@@ -412,7 +414,7 @@ export default function PortfolioTrackerScreen() {
         <>
           <SnapshotLineChart
             data={valueChartData}
-            title="Total Portfolio Value Over Time"
+            title={t('tracker.totalPortfolioValueOverTime')}
             colors={colors}
             lineColor={isDark ? CHART_COLORS.valueLine.dark : CHART_COLORS.valueLine.light}
             palette={isDark ? VALUE_PALETTE_DARK : VALUE_PALETTE_LIGHT}
@@ -422,7 +424,7 @@ export default function PortfolioTrackerScreen() {
           />
           <SnapshotLineChart
             data={gainChartData}
-            title="Net Gain from Stocks Over Time"
+            title={t('tracker.netGainOverTime')}
             colors={colors}
             lineColor={isDark ? CHART_COLORS.gainLine.dark : CHART_COLORS.gainLine.light}
             palette={isDark ? GAIN_PALETTE_DARK : GAIN_PALETTE_LIGHT}
@@ -436,14 +438,14 @@ export default function PortfolioTrackerScreen() {
       {/* ── Snapshot History Table ───────────────────────────────── */}
       <Text style={[st.sectionTitle, { color: colors.textPrimary }]}>
         <FontAwesome name="history" size={16} color={colors.accentPrimary} />{" "}
-        Snapshot History ({snapshots.length})
+        {t('tracker.snapshotHistory', { count: snapshots.length })}
       </Text>
 
       {snapshots.length === 0 ? (
         <View style={st.empty}>
           <FontAwesome name="camera" size={48} color={colors.textMuted} />
           <Text style={[st.emptyText, { color: colors.textSecondary }]}>
-            No snapshots yet. Tap "Save Snapshot" to record today's values.
+            {t('tracker.noSnapshots')}
           </Text>
         </View>
       ) : (
@@ -451,15 +453,15 @@ export default function PortfolioTrackerScreen() {
           <View style={[st.table, { borderColor: colors.borderColor }]}>
             {/* Table Header */}
             <View style={[st.tableRow, { backgroundColor: colors.bgSecondary, borderBottomColor: colors.borderColor }]}>
-              <Text style={[st.th, st.colDate, { color: colors.textSecondary }]}>Date</Text>
-              <Text style={[st.th, st.colMoney, { color: colors.textSecondary }]}>Value</Text>
-              <Text style={[st.th, st.colMoney, { color: colors.textSecondary }]}>Daily Movement</Text>
-              <Text style={[st.th, st.colMoney, { color: colors.textSecondary }]}>Beginning Diff</Text>
-              <Text style={[st.th, st.colSmall, { color: colors.textSecondary }]}>Deposit Cash</Text>
-              <Text style={[st.th, st.colSmall, { color: colors.textSecondary }]}>Accum. Cash</Text>
-              <Text style={[st.th, st.colMoney, { color: colors.textSecondary }]}>Net Gain</Text>
-              <Text style={[st.th, st.colPct, { color: colors.textSecondary }]}>Change %</Text>
-              <Text style={[st.th, st.colPct, { color: colors.textSecondary }]}>ROI %</Text>
+              <Text style={[st.th, st.colDate, { color: colors.textSecondary }]}>{t('tracker.date')}</Text>
+              <Text style={[st.th, st.colMoney, { color: colors.textSecondary }]}>{t('tracker.value')}</Text>
+              <Text style={[st.th, st.colMoney, { color: colors.textSecondary }]}>{t('tracker.dailyMovement')}</Text>
+              <Text style={[st.th, st.colMoney, { color: colors.textSecondary }]}>{t('tracker.beginningDiff')}</Text>
+              <Text style={[st.th, st.colSmall, { color: colors.textSecondary }]}>{t('tracker.depositCash')}</Text>
+              <Text style={[st.th, st.colSmall, { color: colors.textSecondary }]}>{t('tracker.accumCash')}</Text>
+              <Text style={[st.th, st.colMoney, { color: colors.textSecondary }]}>{t('tracker.netGain')}</Text>
+              <Text style={[st.th, st.colPct, { color: colors.textSecondary }]}>{t('tracker.changePct')}</Text>
+              <Text style={[st.th, st.colPct, { color: colors.textSecondary }]}>{t('tracker.roiPct')}</Text>
               <Text style={[st.th, st.colAction, { color: colors.textSecondary }]}></Text>
             </View>
             {/* Table Rows — most recent first */}

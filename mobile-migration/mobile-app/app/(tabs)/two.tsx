@@ -20,6 +20,7 @@ import { useThemeStore } from "@/services/themeStore";
 import { getApiErrorMessage } from "@/src/features/fundamental-analysis/types";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import React, { useCallback, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
     FlatList,
     Platform,
@@ -59,9 +60,11 @@ function MiniMetric({
 const HoldingCard = React.memo(function HoldingCard({
   item,
   colors,
+  t,
 }: {
   item: Holding;
   colors: ThemePalette;
+  t: (key: string) => string;
 }) {
   return (
     <View
@@ -93,40 +96,40 @@ const HoldingCard = React.memo(function HoldingCard({
       </View>
 
       <View style={st.metricsRow}>
-        <MiniMetric label="Shares" value={fmt(item.shares_qty, 0)} colors={colors} />
-        <MiniMetric label="Avg Cost" value={fmt(item.avg_cost, 3)} colors={colors} />
-        <MiniMetric label="Mkt Value" value={fmt(item.market_value, 2)} colors={colors} />
+        <MiniMetric label={t('holdingsScreen.shares')} value={fmt(item.shares_qty, 0)} colors={colors} />
+        <MiniMetric label={t('holdingsScreen.avgCost')} value={fmt(item.avg_cost, 3)} colors={colors} />
+        <MiniMetric label={t('holdingsScreen.mktValue')} value={fmt(item.market_value, 2)} colors={colors} />
       </View>
       <View style={st.metricsRow}>
         <MiniMetric
-          label="Unreal P/L"
+          label={t('holdingsScreen.unrealPL')}
           value={fmt(item.unrealized_pnl, 2)}
           color={pnlColor(item.unrealized_pnl, colors)}
           colors={colors}
         />
         <MiniMetric
-          label="Real P/L"
+          label={t('holdingsScreen.realPL')}
           value={fmt(item.realized_pnl, 2)}
           color={pnlColor(item.realized_pnl, colors)}
           colors={colors}
         />
         <MiniMetric
-          label="Total P/L"
+          label={t('holdingsScreen.totalPL')}
           value={fmt(item.total_pnl, 2)}
           color={pnlColor(item.total_pnl, colors)}
           colors={colors}
         />
       </View>
       <View style={st.metricsRow}>
-        <MiniMetric label="Dividends" value={fmt(item.cash_dividends, 2)} colors={colors} />
+        <MiniMetric label={t('holdingsScreen.dividends')} value={fmt(item.cash_dividends, 2)} colors={colors} />
         <MiniMetric
-          label="PNL %"
+          label={t('holdingsScreen.pnlPct')}
           value={`${(item.pnl_pct * 100).toFixed(1)}%`}
           color={pnlColor(item.pnl_pct, colors)}
           colors={colors}
         />
         <MiniMetric
-          label="Mkt Val (KWD)"
+          label={t('holdingsScreen.mktValKWD')}
           value={fmt(item.market_value_kwd, 2)}
           colors={colors}
         />
@@ -143,6 +146,7 @@ type SortKey = "symbol" | "market_value_kwd" | "total_pnl" | "pnl_pct" | "unreal
 export default function HoldingsScreen() {
   const { colors } = useThemeStore();
   const { isDesktop, spacing, maxContentWidth } = useResponsive();
+  const { t } = useTranslation();
 
   const [filter, setFilter] = useState<string | undefined>(undefined);
   const [viewMode, setViewMode] = useState<ViewMode>(
@@ -184,7 +188,7 @@ export default function HoldingsScreen() {
 
   // ── Error ──
   if (isError) {
-    return <ErrorScreen message={getApiErrorMessage(error, "Failed to load")} />;
+    return <ErrorScreen message={getApiErrorMessage(error, t('holdingsScreen.failedToLoad'))} />;
   }
 
   const filterLabel = filter ?? "All";
@@ -265,8 +269,8 @@ export default function HoldingsScreen() {
 
       {/* Sort bar */}
       <View style={[st.sortBar, { borderBottomColor: colors.borderColor }]}>
-        <Text style={[st.sortLabel, { color: colors.textMuted }]}>Sort:</Text>
-        {([["symbol", "Name"], ["market_value_kwd", "Value"], ["total_pnl", "P/L"], ["pnl_pct", "%"], ["unrealized_pnl", "Unrl"]] as [SortKey, string][]).map(([key, label]) => (
+        <Text style={[st.sortLabel, { color: colors.textMuted }]}>{t('holdingsScreen.sortLabel')}</Text>
+        {([["symbol", t('holdingsScreen.sortName')], ["market_value_kwd", t('holdingsScreen.sortValue')], ["total_pnl", t('holdingsScreen.sortPL')], ["pnl_pct", t('holdingsScreen.sortPct')], ["unrealized_pnl", t('holdingsScreen.sortUnrl')]] as [SortKey, string][]).map(([key, label]) => (
           <Pressable key={key} onPress={() => handleSort(key)} style={[st.sortChip, { backgroundColor: sortKey === key ? colors.accentPrimary + "22" : "transparent", borderColor: sortKey === key ? colors.accentPrimary : colors.borderColor }]}>
             <Text style={[st.sortChipText, { color: sortKey === key ? colors.accentPrimary : colors.textSecondary }]}>
               {label} {sortKey === key ? (sortAsc ? "↑" : "↓") : ""}
@@ -279,10 +283,10 @@ export default function HoldingsScreen() {
       {resp && (
         <View style={[st.totalsBar, { borderBottomColor: colors.borderColor }]}>
           <Text style={[st.totalsLabel, { color: colors.textSecondary }]}>
-            {resp.count} holding{resp.count !== 1 ? "s" : ""}
+            {resp.count} {t('holdingsScreen.holding', { count: resp.count })}
           </Text>
           <Text style={[st.totalsValue, { color: colors.textPrimary }]}>
-            Mkt: {fmt(resp.totals.total_market_value_kwd)} KWD
+            {t('holdingsScreen.mkt')} {fmt(resp.totals.total_market_value_kwd)} KWD
           </Text>
           <Text
             style={[
@@ -290,7 +294,7 @@ export default function HoldingsScreen() {
               { color: pnlColor(resp.totals.total_pnl_kwd, colors) },
             ]}
           >
-            P/L: {resp.totals.total_pnl_kwd >= 0 ? "+" : ""}
+            {t('holdingsScreen.pl')} {resp.totals.total_pnl_kwd >= 0 ? "+" : ""}
             {fmt(resp.totals.total_pnl_kwd)} KWD
           </Text>
         </View>
@@ -302,7 +306,7 @@ export default function HoldingsScreen() {
           <View style={st.cashRow}>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
               <FontAwesome name="bank" size={14} color={colors.accentPrimary} />
-              <Text style={[st.cashTitle, { color: colors.textPrimary }]}>Cash Balances</Text>
+              <Text style={[st.cashTitle, { color: colors.textPrimary }]}>{t('holdingsScreen.cashBalances')}</Text>
             </View>
             <Text style={[st.cashTotal, { color: colors.success }]}>
               {fmt(accountsData.total_cash_kwd)} KWD
@@ -320,7 +324,7 @@ export default function HoldingsScreen() {
           ))}
           {resp && (
             <View style={[st.cashRow, { borderTopWidth: 1, borderTopColor: colors.borderColor, paddingTop: 6, marginTop: 4 }]}>
-              <Text style={[st.cashTitle, { color: colors.textPrimary }]}>Total (Holdings + Cash)</Text>
+              <Text style={[st.cashTitle, { color: colors.textPrimary }]}>{t('holdingsScreen.totalHoldingsCash')}</Text>
               <Text style={[st.cashTotal, { color: colors.textPrimary, fontWeight: "700" }]}>
                 {fmt((resp.totals.total_market_value_kwd ?? 0) + (accountsData.total_cash_kwd ?? 0))} KWD
               </Text>
@@ -342,7 +346,7 @@ export default function HoldingsScreen() {
           data={sortedHoldings}
           keyExtractor={(item) => item.symbol}
           renderItem={({ item }) => (
-            <HoldingCard item={item} colors={colors} />
+            <HoldingCard item={item} colors={colors} t={t} />
           )}
           windowSize={5}
           maxToRenderPerBatch={10}
@@ -369,7 +373,7 @@ export default function HoldingsScreen() {
           }
           ListEmptyComponent={
             <Text style={[st.emptyText, { color: colors.textMuted }]}>
-              No holdings found.
+              {t('holdingsScreen.noHoldingsFound')}
             </Text>
           }
         />

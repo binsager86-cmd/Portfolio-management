@@ -1,22 +1,23 @@
-import { markOnboardingSeen } from "@/app/index";
 import { useAuthStore } from "@/services/authStore";
 import { useThemeStore } from "@/services/themeStore";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import { useRouter } from "expo-router";
 import React, { useRef } from "react";
+import { useTranslation } from "react-i18next";
 import { Animated, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 const CHECKLIST = [
-  { icon: "user-plus" as const, label: "Create your account", done: false },
-  { icon: "upload" as const, label: "Import your first transactions", done: false },
-  { icon: "search" as const, label: "Look up a stock for analysis", done: false },
-  { icon: "pie-chart" as const, label: "Explore your dashboard", done: false },
+  { icon: "user-plus" as const, labelKey: "onboarding.checkCreateAccount", done: false },
+  { icon: "upload" as const, labelKey: "onboarding.checkImportFirst", done: false },
+  { icon: "search" as const, labelKey: "onboarding.checkLookUpStock", done: false },
+  { icon: "pie-chart" as const, labelKey: "onboarding.checkExploreDashboard", done: false },
 ];
 
 export default function GetStartedScreen() {
   const router = useRouter();
   const { colors } = useThemeStore();
   const token = useAuthStore((s) => s.token);
+  const { t } = useTranslation();
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(0.9)).current;
 
@@ -37,12 +38,7 @@ export default function GetStartedScreen() {
   }, []);
 
   const handleGetStarted = async () => {
-    await markOnboardingSeen();
-    if (token) {
-      router.replace("/(tabs)");
-    } else {
-      router.replace("/(auth)/login");
-    }
+    router.push("/(onboarding)/select-expertise");
   };
 
   return (
@@ -54,9 +50,9 @@ export default function GetStartedScreen() {
             <FontAwesome name="rocket" size={48} color={colors.accentPrimary} />
           </View>
 
-          <Text style={[styles.heading, { color: colors.textPrimary }]}>Quick Start Checklist</Text>
+          <Text style={[styles.heading, { color: colors.textPrimary }]}>{t('onboarding.quickStartChecklist')}</Text>
           <Text style={[styles.sub, { color: colors.textSecondary }]}>
-            Here's what to do after you sign in — we'll guide you every step of the way.
+            {t('onboarding.checklistSubtitle')}
           </Text>
 
           {/* Checklist */}
@@ -68,7 +64,7 @@ export default function GetStartedScreen() {
               <View style={[styles.checkIcon, { backgroundColor: colors.textMuted + "20" }]}>
                 <FontAwesome name={item.icon} size={16} color={colors.textMuted} />
               </View>
-              <Text style={[styles.checkLabel, { color: colors.textPrimary }]}>{item.label}</Text>
+              <Text style={[styles.checkLabel, { color: colors.textPrimary }]}>{t(item.labelKey)}</Text>
               <FontAwesome name="circle-o" size={18} color={colors.borderColor} />
             </View>
           ))}
@@ -79,7 +75,7 @@ export default function GetStartedScreen() {
       <View style={[styles.footer, { borderTopColor: colors.borderColor }]}>
         <Pressable onPress={handleGetStarted} style={[styles.button, { backgroundColor: colors.accentPrimary }]}>
           <FontAwesome name="rocket" size={16} color="#fff" style={{ marginRight: 8 }} />
-          <Text style={styles.buttonText}>Let's Go!</Text>
+          <Text style={styles.buttonText}>{t('onboarding.letsGo')}</Text>
         </Pressable>
 
         <Pressable
@@ -87,7 +83,7 @@ export default function GetStartedScreen() {
           style={[styles.outlineButton, { borderColor: colors.borderColor }]}
         >
           <FontAwesome name="upload" size={14} color={colors.accentPrimary} style={{ marginRight: 8 }} />
-          <Text style={[styles.outlineText, { color: colors.accentPrimary }]}>Import Excel to Get Started</Text>
+          <Text style={[styles.outlineText, { color: colors.accentPrimary }]}>{t('onboarding.importExcelToStart')}</Text>
         </Pressable>
       </View>
     </View>

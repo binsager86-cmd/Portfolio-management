@@ -33,12 +33,14 @@ import { useResponsive } from "@/hooks/useResponsive";
 import { loginSchema, type LoginFormData } from "@/lib/validationSchemas";
 import { useAuthStore } from "@/services/authStore";
 import { useThemeStore } from "@/services/themeStore";
+import { useTranslation } from "react-i18next";
 
 export default function LoginScreen() {
   const router = useRouter();
   const { login, googleSignIn, isLoading, error, clearError } = useAuthStore();
   const { colors, toggle, mode } = useThemeStore();
   const { isDesktop } = useResponsive();
+  const { t } = useTranslation();
 
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -133,13 +135,13 @@ export default function LoginScreen() {
         }
       } else if (!result.cancelled) {
         useAuthStore.setState({
-          error: result.error || "Google Sign-In failed. Please try again.",
+          error: result.error || t('auth.googleSignInFailed'),
         });
       }
     } catch (err: unknown) {
       console.error("[Login] Google Sign-In error:", err);
       useAuthStore.setState({
-        error: err instanceof Error ? err.message : "Google Sign-In failed unexpectedly.",
+        error: err instanceof Error ? err.message : t('auth.googleSignInUnexpected'),
       });
     }
   };
@@ -184,10 +186,10 @@ export default function LoginScreen() {
         <View style={styles.header}>
           <Text style={styles.icon}>📊</Text>
           <Text style={[styles.title, { color: colors.textPrimary }]}>
-            Portfolio Tracker
+            {t('app.title')}
           </Text>
           <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
-            Sign in to your account
+            {t('auth.signInToContinue')}
           </Text>
         </View>
 
@@ -236,7 +238,7 @@ export default function LoginScreen() {
                           { color: colors.danger },
                         ]}
                       >
-                        Double-check your email and password, then try again.
+                        {t('auth.doubleCheck')}
                       </Text>
                     ) : null}
                   </View>
@@ -258,10 +260,10 @@ export default function LoginScreen() {
               name="email"
               render={({ field: { onChange, onBlur, value } }) => (
                 <TextInput
-                  label="Email"
+                  label={t('auth.email')}
                   value={value}
-                  onChangeText={(t) => {
-                    onChange(t);
+                  onChangeText={(tx) => {
+                    onChange(tx);
                     if (error) clearError();
                   }}
                   onBlur={onBlur}
@@ -297,10 +299,10 @@ export default function LoginScreen() {
               name="password"
               render={({ field: { onChange, onBlur, value } }) => (
                 <TextInput
-                  label="Password"
+                  label={t('auth.password')}
                   value={value}
-                  onChangeText={(t) => {
-                    onChange(t);
+                  onChangeText={(tx) => {
+                    onChange(tx);
                     if (error) clearError();
                   }}
                   onBlur={onBlur}
@@ -347,7 +349,7 @@ export default function LoginScreen() {
               buttonColor={colors.accentPrimary}
               textColor="#ffffff"
             >
-              Sign In
+              {t('auth.login')}
             </Button>
 
             {/* Forgot Password */}
@@ -358,14 +360,14 @@ export default function LoginScreen() {
               style={styles.forgotButton}
               labelStyle={[styles.forgotLabel, { color: colors.textSecondary }]}
             >
-              Forgot Password?
+              {t('auth.forgotPassword')}
             </Button>
 
             {/* Divider */}
             <View style={styles.dividerRow}>
               <Divider style={[styles.dividerLine, { backgroundColor: colors.borderColor }]} />
               <Text style={[styles.dividerText, { color: colors.textMuted }]}>
-                or
+                {t('auth.or')}
               </Text>
               <Divider style={[styles.dividerLine, { backgroundColor: colors.borderColor }]} />
             </View>
@@ -381,7 +383,7 @@ export default function LoginScreen() {
               contentStyle={styles.buttonContent}
               labelStyle={[styles.googleLabel, { color: colors.textPrimary }]}
             >
-              Continue with Google
+              {t('auth.signInGoogle')}
             </Button>
 
             {/* Register link */}
@@ -395,13 +397,13 @@ export default function LoginScreen() {
                 { color: colors.accentPrimary },
               ]}
             >
-              Register as New User
+              {t('auth.registerNewUser')}
             </Button>
           </Card.Content>
         </Card>
 
         <Text style={[styles.footer, { color: colors.textMuted }]}>
-          Portfolio Mobile — Phase 3
+          {t('auth.footerText')}
         </Text>
       </ScrollView>
     </KeyboardAvoidingView>

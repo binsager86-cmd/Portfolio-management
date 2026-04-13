@@ -11,6 +11,7 @@ import { fmtNum } from "@/lib/currency";
 import type { TradingTransaction } from "@/services/api";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import React, { useCallback, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
     Platform,
     Pressable,
@@ -43,26 +44,26 @@ export type SortDir = "asc" | "desc" | null;
 
 /** Ordered column layout for the trading transactions table. */
 export const TABLE_COLUMNS: ColDef[] = [
-  { key: "id",            label: "ID",            fmt: "id",              width: 52,  align: "left" },
-  { key: "date",          label: "Date",          fmt: "date",            width: 90,  align: "left" },
-  { key: "company_name",  label: "Company",       fmt: "text_bold",       width: 140, align: "left" },
-  { key: "symbol",        label: "Symbol",        fmt: "text",            width: 100, align: "left" },
-  { key: "portfolio",     label: "Portfolio",     fmt: "text",            width: 72,  align: "left" },
-  { key: "type",          label: "Type",          fmt: "type_badge",      width: 80,  align: "left" },
-  { key: "status",        label: "Status",        fmt: "status",          width: 82,  align: "left" },
-  { key: "source",        label: "Source",         fmt: "source",          width: 80,  align: "left" },
-  { key: "quantity",      label: "Qty",           fmt: "quantity",        width: 68,  align: "right" },
-  { key: "avg_cost",      label: "Avg Cost",      fmt: "price",           width: 82,  align: "right" },
-  { key: "price",         label: "Price",         fmt: "price",           width: 76,  align: "right" },
-  { key: "current_price", label: "Curr. Price",   fmt: "price",           width: 82,  align: "right" },
-  { key: "sell_price",    label: "Sell Price",    fmt: "price",           width: 82,  align: "right" },
-  { key: "value",         label: "Value",         fmt: "money",           width: 88,  align: "right" },
-  { key: "pnl",           label: "P&L",           fmt: "money_colored",   width: 92,  align: "right" },
-  { key: "pnl_pct",       label: "P&L %",         fmt: "percent_colored", width: 76,  align: "right" },
-  { key: "fees",          label: "Fees",          fmt: "money_small",     width: 68,  align: "right" },
-  { key: "dividend",      label: "Dividend",      fmt: "money_small",     width: 76,  align: "right" },
-  { key: "bonus_shares",  label: "Bonus",         fmt: "quantity",        width: 60,  align: "right" },
-  { key: "notes",         label: "Notes",         fmt: "text",            width: 120, align: "left" },
+  { key: "id",            label: "trading.colId",         fmt: "id",              width: 52,  align: "left" },
+  { key: "date",          label: "trading.colDate",       fmt: "date",            width: 90,  align: "left" },
+  { key: "company_name",  label: "trading.colCompany",    fmt: "text_bold",       width: 140, align: "left" },
+  { key: "symbol",        label: "trading.colSymbol",     fmt: "text",            width: 100, align: "left" },
+  { key: "portfolio",     label: "trading.colPortfolio",  fmt: "text",            width: 72,  align: "left" },
+  { key: "type",          label: "trading.colType",       fmt: "type_badge",      width: 80,  align: "left" },
+  { key: "status",        label: "trading.colStatus",     fmt: "status",          width: 82,  align: "left" },
+  { key: "source",        label: "trading.colSource",     fmt: "source",          width: 80,  align: "left" },
+  { key: "quantity",      label: "trading.colQty",        fmt: "quantity",        width: 68,  align: "right" },
+  { key: "avg_cost",      label: "trading.colAvgCost",    fmt: "price",           width: 82,  align: "right" },
+  { key: "price",         label: "trading.colPrice",      fmt: "price",           width: 76,  align: "right" },
+  { key: "current_price", label: "trading.colCurrPrice",  fmt: "price",           width: 82,  align: "right" },
+  { key: "sell_price",    label: "trading.colSellPrice",  fmt: "price",           width: 82,  align: "right" },
+  { key: "value",         label: "trading.colValue",      fmt: "money",           width: 88,  align: "right" },
+  { key: "pnl",           label: "trading.colPnl",        fmt: "money_colored",   width: 92,  align: "right" },
+  { key: "pnl_pct",       label: "trading.colPnlPct",     fmt: "percent_colored", width: 76,  align: "right" },
+  { key: "fees",          label: "trading.colFees",       fmt: "money_small",     width: 68,  align: "right" },
+  { key: "dividend",      label: "trading.colDividend",   fmt: "money_small",     width: 76,  align: "right" },
+  { key: "bonus_shares",  label: "trading.colBonus",      fmt: "quantity",        width: 60,  align: "right" },
+  { key: "notes",         label: "trading.colNotes",      fmt: "text",            width: 120, align: "left" },
 ];
 
 export const TOTAL_TABLE_WIDTH = TABLE_COLUMNS.reduce((sum, c) => sum + c.width, 0);
@@ -202,6 +203,7 @@ export const HeaderCell = React.memo(function HeaderCell({
   sortDir: SortDir;
   onSort: (key: keyof TradingTransaction) => void;
 }) {
+  const { t } = useTranslation();
   const isActive = sortCol === col.key;
   const arrow = isActive ? (sortDir === "asc" ? " ↑" : " ↓") : " ⇅";
   return (
@@ -219,7 +221,7 @@ export const HeaderCell = React.memo(function HeaderCell({
         ]}
         numberOfLines={1}
       >
-        {col.label}
+        {t(col.label)}
         <Text style={{ opacity: isActive ? 1 : 0.35, fontSize: 10 }}>{arrow}</Text>
       </Text>
     </Pressable>

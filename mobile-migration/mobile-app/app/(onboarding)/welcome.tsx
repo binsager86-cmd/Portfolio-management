@@ -1,13 +1,17 @@
 import { markOnboardingSeen } from "@/app/index";
+import { useAuthStore } from "@/services/authStore";
 import { useThemeStore } from "@/services/themeStore";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import { useRouter } from "expo-router";
 import React, { useRef } from "react";
+import { useTranslation } from "react-i18next";
 import { Animated, Pressable, StyleSheet, Text, View } from "react-native";
 
 export default function WelcomeScreen() {
   const router = useRouter();
   const { colors } = useThemeStore();
+  const token = useAuthStore((s) => s.token);
+  const { t } = useTranslation();
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(50)).current;
 
@@ -42,27 +46,27 @@ export default function WelcomeScreen() {
 
         {/* Title */}
         <Text style={[styles.title, { color: colors.textPrimary }]}>
-          Track Your Portfolio Like a Pro
+          {t('onboarding.trackLikePro')}
         </Text>
 
         {/* Description */}
         <Text style={[styles.description, { color: colors.textSecondary }]}>
-          Import transactions, analyze fundamentals, and get AI-powered insights — all in one place.
+          {t('onboarding.importDesc')}
         </Text>
 
         {/* Feature Pills */}
         <View style={styles.featurePills}>
           <View style={[styles.pill, { backgroundColor: colors.bgCard, borderColor: colors.borderColor }]}>
             <FontAwesome name="upload" size={14} color={colors.success} />
-            <Text style={[styles.pillText, { color: colors.textSecondary }]}>Import Excel</Text>
+            <Text style={[styles.pillText, { color: colors.textSecondary }]}>{t('onboarding.importExcel')}</Text>
           </View>
           <View style={[styles.pill, { backgroundColor: colors.bgCard, borderColor: colors.borderColor }]}>
             <FontAwesome name="flask" size={14} color={colors.accentPrimary} />
-            <Text style={[styles.pillText, { color: colors.textSecondary }]}>AI Analysis</Text>
+            <Text style={[styles.pillText, { color: colors.textSecondary }]}>{t('onboarding.aiAnalysis')}</Text>
           </View>
           <View style={[styles.pill, { backgroundColor: colors.bgCard, borderColor: colors.borderColor }]}>
             <FontAwesome name="line-chart" size={14} color={colors.accentSecondary} />
-            <Text style={[styles.pillText, { color: colors.textSecondary }]}>Valuations</Text>
+            <Text style={[styles.pillText, { color: colors.textSecondary }]}>{t('onboarding.valuations')}</Text>
           </View>
         </View>
 
@@ -71,13 +75,13 @@ export default function WelcomeScreen() {
           onPress={() => router.push("/(onboarding)/features")}
           style={[styles.button, { backgroundColor: colors.accentPrimary }]}
         >
-          <Text style={styles.buttonText}>Next</Text>
+          <Text style={styles.buttonText}>{t('onboarding.next')}</Text>
           <FontAwesome name="arrow-right" size={16} color="#fff" style={{ marginLeft: 8 }} />
         </Pressable>
 
         {/* Skip Link */}
-        <Pressable onPress={() => { markOnboardingSeen(); router.replace("/(auth)/login"); }} style={styles.skip}>
-          <Text style={[styles.skipText, { color: colors.textMuted }]}>Skip for now</Text>
+        <Pressable onPress={() => { markOnboardingSeen(); router.replace(token ? "/(tabs)" : "/(auth)/login"); }} style={styles.skip}>
+          <Text style={[styles.skipText, { color: colors.textMuted }]}>{t('onboarding.skipForNow')}</Text>
         </Pressable>
       </Animated.View>
     </View>

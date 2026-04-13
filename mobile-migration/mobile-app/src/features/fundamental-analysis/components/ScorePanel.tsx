@@ -11,17 +11,30 @@ import { Pressable, RefreshControl, ScrollView, Text, View } from "react-native"
 import { FAPanelSkeleton } from "@/components/ui/PageSkeletons";
 import type { ThemePalette } from "@/constants/theme";
 import { useScoreHistory, useStockScore, useValuations } from "@/hooks/queries";
+import { generateStockSummary, type AISummary } from "@/lib/aiSummaryGenerator";
 import { exportCSV, exportExcel, exportPDF, TableData } from "@/lib/exportAnalysis";
 import type { CategoryBreakdown } from "@/services/api";
+import { useUserPrefsStore } from "@/src/store/userPrefsStore";
 import { st } from "../styles";
 import { SCORE_WEIGHTS, type PanelWithSymbolProps } from "../types";
 import { formatScoreDate, INTERPRETATION_SCALE, safeFormatMetric, scoreColor, scoreLabel } from "../utils";
 import { Card, ExportBar, FadeIn, NetworkErrorState, SectionHeader } from "./shared";
 
+/** Beginner-friendly 3-word score label (no financial jargon). */
+function beginnerScoreLabel(score: number): string {
+  if (score >= 80) return "Strong";
+  if (score >= 60) return "Okay";
+  if (score >= 40) return "Weak";
+  return "Risky";
+}
+
 export const ScorePanel = React.memo(function ScorePanel({ stockId, stockSymbol, colors, isDesktop }: PanelWithSymbolProps) {
   const { data, isLoading, isError, error, refetch, isFetching } = useStockScore(stockId);
   const historyQ = useScoreHistory(stockId);
   const valuationsQ = useValuations(stockId);
+  const preferences = useUserPrefsStore((s) => s.preferences);
+  const isBeginner = preferences.expertiseLevel === "normal";
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   const score = data;
   const scoreHistory = historyQ.data?.scores ?? [];
@@ -38,6 +51,25 @@ export const ScorePanel = React.memo(function ScorePanel({ stockId, stockSymbol,
     const models = Object.values(map);
     return models.length > 0 ? models.reduce((s, x) => s + x, 0) / models.length : null;
   }, [valuations]);
+
+  // AI Summary
+  const aiSummary = useMemo((): AISummary | null => {
+    if (!score || score.overall_score == null) return null;
+    const currentPrice = score.details?.["Current Price"] ?? 0;
+    return generateStockSummary(
+      stockSymbol,
+      currentPrice,
+      avgIV,
+      {
+        fundamental: score.fundamental_score,
+        valuation: score.valuation_score,
+        growth: score.growth_score,
+        quality: score.quality_score,
+        risk: score.risk_score,
+      },
+      preferences,
+    );
+  }, [score, avgIV, stockSymbol, preferences]);
 
   const VIRTUALIZE_THRESHOLD = 20;
 
@@ -127,11 +159,47 @@ export const ScorePanel = React.memo(function ScorePanel({ stockId, stockSymbol,
                 const t = exportTables();
                 if (fmt === "xlsx") await exportExcel(t, stockSymbol, "Score");
                 else if (fmt === "csv") await exportCSV(t, stockSymbol, "Score");
-                else await exportPDF(t, stockSymbol, "Score");
+                else await exportPDF(t, stockSymbol, "Score", aiSummary);
               }}
               colors={colors}
             />
           </View>
+
+          {/* AI Summary Card */}
+          {aiSummary && (
+            <FadeIn>
+              <Card colors={colors} style={{ marginBottom: 16, paddingVertical: 16, paddingHorizontal: 18 }}>
+                <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 10 }}>
+                  <Text style={{ fontSize: 20, marginRight: 8 }}>{aiSummary.emoji}</Text>
+                  <Text style={{ color: colors.textPrimary, fontSize: 15, fontWeight: "700", flex: 1 }}>
+                    {aiSummary.headline}
+                  </Text>
+                </View>
+                {aiSummary.bullets.map((b, i) => (
+                  <View key={i} style={{ flexDirection: "row", alignItems: "flex-start", marginBottom: 4, paddingLeft: 4 }}>
+                    <Text style={{ color: colors.textMuted, fontSize: 13, marginRight: 6 }}>{"\u2022"}</Text>
+                    <Text style={{ color: colors.textSecondary, fontSize: 13, lineHeight: 19, flex: 1 }}>{b}</Text>
+                  </View>
+                ))}
+                {aiSummary.actionHint && (
+                  <View style={{ marginTop: 8, backgroundColor: colors.accentPrimary + "14", borderRadius: 8, paddingVertical: 8, paddingHorizontal: 12 }}>
+                    <Text style={{ color: colors.accentPrimary, fontSize: 13, fontWeight: "600" }}>
+                      {"\u27A4"} {aiSummary.actionHint}
+                    </Text>
+                  </View>
+                )}
+                <View style={{ flexDirection: "row", alignItems: "center", marginTop: 10, paddingTop: 8, borderTopWidth: 1, borderTopColor: colors.borderColor + "40" }}>
+                  <View style={{
+                    width: 8, height: 8, borderRadius: 4, marginRight: 6,
+                    backgroundColor: aiSummary.riskLevel === "low" ? colors.success : aiSummary.riskLevel === "high" ? colors.danger : colors.warning,
+                  }} />
+                  <Text style={{ color: colors.textMuted, fontSize: 12 }}>
+                    Risk: {aiSummary.riskLevel.charAt(0).toUpperCase() + aiSummary.riskLevel.slice(1)}
+                  </Text>
+                </View>
+              </Card>
+            </FadeIn>
+          )}
 
           {/* Overall Score */}
           <FadeIn>
@@ -143,13 +211,28 @@ export const ScorePanel = React.memo(function ScorePanel({ stockId, stockSymbol,
                   </Text>
                 </View>
               </View>
-              <Text style={{ color: colors.textPrimary, fontSize: 18, fontWeight: "800", marginTop: 14 }}>
-                {scoreLabel(score.overall_score ?? 0)}
-              </Text>
-              <Text style={{ color: colors.textMuted, fontSize: 13, marginTop: 6, textAlign: "center", lineHeight: 18 }}>
-                CFA-Based Composite Score{"\n"}
-                Fundamentals {SCORE_WEIGHTS.FUNDAMENTAL.label} · Quality {SCORE_WEIGHTS.QUALITY.label} · Growth {SCORE_WEIGHTS.GROWTH.label} · Valuation {SCORE_WEIGHTS.VALUATION.label}{"\n"}Risk penalty up to {SCORE_WEIGHTS.RISK.label}
-              </Text>
+
+              {isBeginner ? (
+                <>
+                  {/* Beginner: simple 3-word label */}
+                  <Text style={{ color: scoreColor(score.overall_score ?? 0, colors), fontSize: 22, fontWeight: "800", marginTop: 14 }}>
+                    {beginnerScoreLabel(score.overall_score ?? 0)}
+                  </Text>
+                  <Text style={{ color: colors.textMuted, fontSize: 13, marginTop: 6, textAlign: "center", lineHeight: 18 }}>
+                    Overall health of this stock
+                  </Text>
+                </>
+              ) : (
+                <>
+                  <Text style={{ color: colors.textPrimary, fontSize: 18, fontWeight: "800", marginTop: 14 }}>
+                    {scoreLabel(score.overall_score ?? 0)}
+                  </Text>
+                  <Text style={{ color: colors.textMuted, fontSize: 13, marginTop: 6, textAlign: "center", lineHeight: 18 }}>
+                    CFA-Based Composite Score{"\n"}
+                    Fundamentals {SCORE_WEIGHTS.FUNDAMENTAL.label} · Quality {SCORE_WEIGHTS.QUALITY.label} · Growth {SCORE_WEIGHTS.GROWTH.label} · Valuation {SCORE_WEIGHTS.VALUATION.label}{"\n"}Risk penalty up to {SCORE_WEIGHTS.RISK.label}
+                  </Text>
+                </>
+              )}
 
               {/* Sector Percentile (when available from API) */}
               {score.sector_percentile != null && (
@@ -157,15 +240,19 @@ export const ScorePanel = React.memo(function ScorePanel({ stockId, stockSymbol,
                   <Text style={{ color: colors.accentSecondary, fontSize: 13, fontWeight: "700" }}>
                     Top {Math.max(1, 100 - Math.round(score.sector_percentile))}% in {score.sector_name ?? "Sector"}
                   </Text>
-                  <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: 2 }}>Peer-relative ranking</Text>
+                  {!isBeginner && (
+                    <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: 2 }}>Peer-relative ranking</Text>
+                  )}
                 </View>
               )}
 
               {/* Risk disclaimer */}
-              <Text style={{ color: colors.textMuted, fontSize: 11, marginTop: 10, textAlign: "center", lineHeight: 16 }}>
-                * Fundamental score only. Not risk-adjusted.{"\n"}
-                Past performance ≠ future results.
-              </Text>
+              {!isBeginner && (
+                <Text style={{ color: colors.textMuted, fontSize: 11, marginTop: 10, textAlign: "center", lineHeight: 16 }}>
+                  * Fundamental score only. Not risk-adjusted.{"\n"}
+                  Past performance ≠ future results.
+                </Text>
+              )}
             </Card>
           </FadeIn>
 
@@ -216,6 +303,7 @@ export const ScorePanel = React.memo(function ScorePanel({ stockId, stockSymbol,
           })()}
 
           {/* Interpretation Scale */}
+          {(!isBeginner || showAdvanced) && (
           <FadeIn delay={50}>
             <Card colors={colors} style={{ marginBottom: 16, paddingVertical: 14, paddingHorizontal: 16 }}>
               <Text style={{ color: colors.textPrimary, fontSize: 14, fontWeight: "700", marginBottom: 10 }}>
@@ -251,8 +339,10 @@ export const ScorePanel = React.memo(function ScorePanel({ stockId, stockSymbol,
               })}
             </Card>
           </FadeIn>
+          )}
 
           {/* Sub-scores */}
+          {(!isBeginner || showAdvanced) && (
           <FadeIn delay={100}>
             <SectionHeader title="Sub-Scores" icon="sliders" iconColor={colors.accentSecondary} colors={colors} />
             <Card colors={colors} style={{ marginBottom: 16 }}>
@@ -263,9 +353,10 @@ export const ScorePanel = React.memo(function ScorePanel({ stockId, stockSymbol,
               <ScoreBarPremium label="Risk" weight={SCORE_WEIGHTS.RISK.label} value={score.risk_score} colors={colors} iconColor={SCORE_WEIGHTS.RISK.iconColor} breakdown={score.score_breakdown?.risk} penaltyPct={score.risk_penalty_pct} />
             </Card>
           </FadeIn>
+          )}
 
           {/* Score History */}
-          {scoreHistory.length > 1 && (
+          {(!isBeginner || showAdvanced) && scoreHistory.length > 1 && (
             <FadeIn delay={200}>
               <SectionHeader title="Score History" icon="history" iconColor={colors.warning} badge={scoreHistory.length} colors={colors} />
               <Card colors={colors} noPadding style={{ marginBottom: 16 }}>
@@ -296,7 +387,7 @@ export const ScorePanel = React.memo(function ScorePanel({ stockId, stockSymbol,
           )}
 
           {/* Underlying Metrics */}
-          {score.details && Object.keys(score.details).length > 0 && (
+          {(!isBeginner || showAdvanced) && score.details && Object.keys(score.details).length > 0 && (
             <FadeIn delay={300}>
               <SectionHeader title="Underlying Metrics" icon="list-ol" iconColor={colors.accentPrimary} badge={Object.keys(score.details).length} colors={colors} />
               <Card colors={colors}>
@@ -313,6 +404,18 @@ export const ScorePanel = React.memo(function ScorePanel({ stockId, stockSymbol,
                 ))}
               </Card>
             </FadeIn>
+          )}
+
+          {/* Beginner: show/hide advanced toggle */}
+          {isBeginner && (
+            <Pressable
+              onPress={() => setShowAdvanced((p) => !p)}
+              style={{ alignItems: "center", paddingVertical: 14, marginBottom: 16 }}
+            >
+              <Text style={{ color: colors.accentPrimary, fontSize: 13, fontWeight: "600" }}>
+                {showAdvanced ? "Hide technical details \u25B2" : "Show technical details \u25BC"}
+              </Text>
+            </Pressable>
           )}
         </>
       )}

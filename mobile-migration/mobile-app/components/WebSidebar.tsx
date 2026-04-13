@@ -11,9 +11,11 @@
 import { useResponsive } from "@/hooks/useResponsive";
 import { useAuthStore } from "@/services/authStore";
 import { useThemeStore } from "@/services/themeStore";
+import { ExpertiseLevel, useUserPrefsStore } from "@/src/store/userPrefsStore";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import { usePathname, useRouter } from "expo-router";
 import React from "react";
+import { useTranslation } from "react-i18next";
 import {
     Pressable,
     ScrollView,
@@ -32,22 +34,28 @@ export interface NavItem {
   section?: string;
   /** Only show to admin users */
   adminOnly?: boolean;
+  /** Minimum expertise level required (default: "normal") */
+  minLevel?: ExpertiseLevel;
 }
 
 export const NAV_ITEMS: NavItem[] = [
-  { label: "Overview", icon: "line-chart", path: "/(tabs)", section: "Dashboard" },
-  { label: "Holdings", icon: "briefcase", path: "/(tabs)/portfolio-analysis" },
-  { label: "Trading", icon: "bar-chart-o", path: "/(tabs)/trading", section: "Analysis" },
-  { label: "Fundamentals", icon: "flask", path: "/(tabs)/fundamental-analysis" },
-  { label: "Tracker", icon: "camera", path: "/(tabs)/portfolio-tracker" },
-  { label: "Dividends", icon: "money", path: "/(tabs)/dividends" },
-  { label: "Transactions", icon: "exchange", path: "/(tabs)/transactions", section: "Management" },
-  { label: "Deposits", icon: "bank", path: "/(tabs)/deposits" },
-  { label: "Planner", icon: "calculator", path: "/(tabs)/planner" },
-  { label: "Integrity", icon: "stethoscope", path: "/(tabs)/integrity", section: "System" },
-  { label: "Backup", icon: "cloud-download", path: "/(tabs)/backup" },
-  { label: "Settings", icon: "cog", path: "/(tabs)/settings" },
-  { label: "Admin", icon: "shield", path: "/(tabs)/admin", section: "Admin", adminOnly: true },
+  { label: "overview", icon: "line-chart", path: "/(tabs)", section: "sectionDashboard" },
+  { label: "market", icon: "globe", path: "/(tabs)/market" },
+  { label: "holdings", icon: "briefcase", path: "/(tabs)/portfolio-analysis" },
+  { label: "trading", icon: "bar-chart-o", path: "/(tabs)/trading", section: "sectionAnalysis", minLevel: "intermediate" },
+  { label: "fundamentals", icon: "flask", path: "/(tabs)/fundamental-analysis", minLevel: "intermediate" },
+  { label: "tracker", icon: "camera", path: "/(tabs)/portfolio-tracker" },
+  { label: "dividends", icon: "money", path: "/(tabs)/dividends" },
+  { label: "transactions", icon: "exchange", path: "/(tabs)/transactions", section: "sectionManagement" },
+  { label: "deposits", icon: "bank", path: "/(tabs)/deposits" },
+  { label: "alerts", icon: "bell", path: "/(tabs)/alerts", minLevel: "intermediate" },
+  { label: "news", icon: "newspaper-o", path: "/(tabs)/news", minLevel: "intermediate" },
+  { label: "planner", icon: "calculator", path: "/(tabs)/planner", minLevel: "normal" },
+  { label: "pfm", icon: "pie-chart", path: "/(tabs)/pfm", minLevel: "advanced" },
+  { label: "integrity", icon: "stethoscope", path: "/(tabs)/integrity", section: "sectionSystem", minLevel: "advanced" },
+  { label: "backup", icon: "cloud-download", path: "/(tabs)/backup", minLevel: "advanced" },
+  { label: "settings", icon: "cog", path: "/(tabs)/settings" },
+  { label: "admin", icon: "shield", path: "/(tabs)/admin", section: "sectionAdmin", adminOnly: true },
 ];
 
 // ── Widths ───────────────────────────────────────────────────────────
@@ -66,14 +74,21 @@ interface WebSidebarProps {
 export default function WebSidebar({ collapsed: collapsedProp, onToggleCollapse }: WebSidebarProps = {}) {
   const router = useRouter();
   const pathname = usePathname();
+  const { t } = useTranslation();
   const logout = useAuthStore((s) => s.logout);
   const isAdmin = useAuthStore((s) => s.isAdmin);
   const { colors, toggle, mode } = useThemeStore();
   const { isTablet } = useResponsive();
+  const expertiseLevel = useUserPrefsStore((s) => s.preferences.expertiseLevel);
 
-  const navItems = isAdmin
+  const levelOrder: ExpertiseLevel[] = ["normal", "intermediate", "advanced"];
+  const navItems = (isAdmin
     ? NAV_ITEMS.filter((item) => item.adminOnly)
-    : NAV_ITEMS.filter((item) => !item.adminOnly);
+    : NAV_ITEMS.filter((item) => !item.adminOnly)
+  ).filter((item) => {
+    const minLevel = item.minLevel ?? "normal";
+    return levelOrder.indexOf(expertiseLevel) >= levelOrder.indexOf(minLevel);
+  });
 
   // Auto-collapse on tablet unless prop overrides
   const isCollapsed = collapsedProp ?? isTablet;
@@ -113,7 +128,7 @@ export default function WebSidebar({ collapsed: collapsedProp, onToggleCollapse 
       >
         <FontAwesome name="pie-chart" size={isCollapsed ? 24 : 28} color={colors.accentPrimary} />
         {!isCollapsed && (
-          <Text style={[s.brandText, { color: colors.textPrimary }]}>Portfolio</Text>
+          <Text style={[s.brandText, { color: colors.textPrimary }]}>{t('nav.portfolio')}</Text>
         )}
       </Pressable>
 
@@ -131,7 +146,7 @@ export default function WebSidebar({ collapsed: collapsedProp, onToggleCollapse 
                     { color: colors.textMuted },
                   ]}
                 >
-                  {item.section}
+                  {t('nav.' + item.section)}
                 </Text>
               )}
               <Pressable
@@ -148,7 +163,7 @@ export default function WebSidebar({ collapsed: collapsedProp, onToggleCollapse 
                     borderLeftColor: active ? colors.accentPrimary : "transparent",
                   },
                 ]}
-                accessibilityLabel={item.label}
+                accessibilityLabel={t('nav.' + item.label)}
               >
                 <FontAwesome
                   name={item.icon}
@@ -166,7 +181,7 @@ export default function WebSidebar({ collapsed: collapsedProp, onToggleCollapse 
                       },
                     ]}
                   >
-                    {item.label}
+                    {t('nav.' + item.label)}
                   </Text>
                 )}
               </Pressable>
@@ -194,7 +209,7 @@ export default function WebSidebar({ collapsed: collapsedProp, onToggleCollapse 
           />
           {!isCollapsed && (
             <Text style={[s.navLabel, { color: colors.textSecondary }]}>
-              {mode === "dark" ? "Light Mode" : "Dark Mode"}
+              {mode === "dark" ? t('nav.lightMode') : t('nav.darkMode')}
             </Text>
           )}
         </Pressable>
@@ -206,7 +221,7 @@ export default function WebSidebar({ collapsed: collapsedProp, onToggleCollapse 
             isCollapsed && s.actionBtnCollapsed,
             { backgroundColor: pressed ? colors.bgCardHover : "transparent" },
           ]}
-          accessibilityLabel="Sign out"
+          accessibilityLabel={t('nav.signOut')}
         >
           <FontAwesome
             name="sign-out"
@@ -215,7 +230,7 @@ export default function WebSidebar({ collapsed: collapsedProp, onToggleCollapse 
             style={s.navIcon}
           />
           {!isCollapsed && (
-            <Text style={[s.navLabel, { color: colors.danger }]}>Sign Out</Text>
+            <Text style={[s.navLabel, { color: colors.danger }]}>{t('nav.signOut')}</Text>
           )}
         </Pressable>
       </View>
@@ -305,3 +320,4 @@ const s = StyleSheet.create({
 });
 
 export { SIDEBAR_WIDTH };
+

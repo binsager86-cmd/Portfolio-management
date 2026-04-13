@@ -7,30 +7,40 @@
  * Includes a CSV download button (web) / share button (native).
  */
 
-import React, { useMemo } from "react";
-import {
-  View,
-  Text,
-  ScrollView,
-  StyleSheet,
-  Pressable,
-  Platform,
-} from "react-native";
-import FontAwesome from "@expo/vector-icons/FontAwesome";
-import type { Holding } from "@/services/api";
+import ShariaBadge from "@/components/ui/ShariaBadge";
 import type { ThemePalette } from "@/constants/theme";
-import { todayISO } from "@/lib/dateUtils";
 import { fmt } from "@/lib/currency";
+import { todayISO } from "@/lib/dateUtils";
+import { getMusaffaStatus } from "@/lib/shariaCompliance";
+import { createAlertRule, loadAlertRules, saveAlertRules } from "@/services/alerts/alertRules";
+import type { Holding } from "@/services/api";
+import { useUserPrefsStore } from "@/src/store/userPrefsStore";
+import FontAwesome from "@expo/vector-icons/FontAwesome";
+import React, { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
+import {
+    Alert,
+    Modal,
+    Platform,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    View,
+} from "react-native";
 
 // ── Column definitions ──────────────────────────────────────────────
 
 interface Column {
-  key: keyof Holding | "pnl_pct_display";
+  key: keyof Holding | "pnl_pct_display" | "sharia_status" | "actions";
   label: string;
   width: number;
-  align?: "left" | "right";
+  align?: "left" | "right" | "center";
   format?: (v: any, item: Holding) => string;
   colorFn?: (item: Holding) => string | undefined;
+  /** If true, column renders a custom component instead of text. */
+  custom?: boolean;
 }
 
 function pnlColor(n: number, c: ThemePalette): string | undefined {
@@ -40,46 +50,46 @@ function pnlColor(n: number, c: ThemePalette): string | undefined {
 }
 
 const COLUMNS: (colors: ThemePalette) => Column[] = (colors) => [
-  { key: "symbol", label: "Symbol", width: 100, align: "left" },
-  { key: "company", label: "Company", width: 160, align: "left" },
+  { key: "symbol", label: "holdings.symbol", width: 100, align: "left" },
+  { key: "company", label: "holdings.company", width: 160, align: "left" },
   {
     key: "shares_qty",
-    label: "Shares",
+    label: "holdings.shares",
     width: 80,
     align: "right",
     format: (v) => fmt(v, 0),
   },
   {
     key: "avg_cost",
-    label: "Avg Cost",
+    label: "holdings.avgCost",
     width: 90,
     align: "right",
     format: (v) => fmt(v, 3),
   },
   {
     key: "market_price",
-    label: "Price",
+    label: "holdings.price",
     width: 90,
     align: "right",
     format: (v) => fmt(v, 3),
   },
   {
     key: "total_cost",
-    label: "Cost",
+    label: "holdings.cost",
     width: 100,
     align: "right",
     format: (v) => fmt(v, 2),
   },
   {
     key: "market_value",
-    label: "Mkt Value",
+    label: "holdings.mktValue",
     width: 110,
     align: "right",
     format: (v) => fmt(v, 2),
   },
   {
     key: "unrealized_pnl",
-    label: "Unreal P/L",
+    label: "holdings.unrealPL",
     width: 110,
     align: "right",
     format: (v) => fmt(v, 2),
@@ -87,7 +97,7 @@ const COLUMNS: (colors: ThemePalette) => Column[] = (colors) => [
   },
   {
     key: "realized_pnl",
-    label: "Real P/L",
+    label: "holdings.realPL",
     width: 100,
     align: "right",
     format: (v) => fmt(v, 2),
@@ -95,7 +105,7 @@ const COLUMNS: (colors: ThemePalette) => Column[] = (colors) => [
   },
   {
     key: "total_pnl",
-    label: "Total P/L",
+    label: "holdings.totalPL",
     width: 110,
     align: "right",
     format: (v) => fmt(v, 2),
@@ -103,7 +113,7 @@ const COLUMNS: (colors: ThemePalette) => Column[] = (colors) => [
   },
   {
     key: "pnl_pct_display",
-    label: "P/L %",
+    label: "holdings.pctChange",
     width: 80,
     align: "right",
     format: (_v, item) => `${(item.pnl_pct * 100).toFixed(1)}%`,
@@ -111,21 +121,21 @@ const COLUMNS: (colors: ThemePalette) => Column[] = (colors) => [
   },
   {
     key: "cash_dividends",
-    label: "Dividends",
+    label: "holdings.dividends",
     width: 100,
     align: "right",
     format: (v) => fmt(v, 2),
   },
   {
     key: "market_value_kwd",
-    label: "Mkt Val (KWD)",
+    label: "holdings.mktValueKWD",
     width: 120,
     align: "right",
     format: (v) => fmt(v, 2),
   },
   {
     key: "currency",
-    label: "CCY",
+    label: "holdings.currency",
     width: 55,
     align: "left",
   },
@@ -133,8 +143,8 @@ const COLUMNS: (colors: ThemePalette) => Column[] = (colors) => [
 
 // ── CSV Download ────────────────────────────────────────────────────
 
-function generateCSV(holdings: Holding[], columns: Column[]): string {
-  const header = columns.map((c) => c.label).join(",");
+function generateCSV(holdings: Holding[], columns: Column[], t: (key: string) => string): string {
+  const header = columns.map((c) => t(c.label)).join(",");
   const rows = holdings.map((item) =>
     columns
       .map((col) => {
@@ -168,19 +178,82 @@ interface HoldingsTableProps {
   holdings: Holding[];
   colors: ThemePalette;
   filterLabel?: string;
+  /** Called when a price alert is created from row action */
+  onAlertCreated?: (symbol: string) => void;
 }
 
 export default function HoldingsTable({
   holdings,
   colors,
   filterLabel = "All",
+  onAlertCreated,
 }: HoldingsTableProps) {
-  const columns = useMemo(() => COLUMNS(colors), [colors]);
+  const { t } = useTranslation();
+  const enableShariaFilter = useUserPrefsStore((s) => s.preferences.enableShariaFilter);
+  const dividendFocus = useUserPrefsStore((s) => s.preferences.dividendFocus);
+  const [menuSymbol, setMenuSymbol] = useState<string | null>(null);
+  const [alertModalSymbol, setAlertModalSymbol] = useState<string | null>(null);
+  const [alertThreshold, setAlertThreshold] = useState("");
+  const [alertCondition, setAlertCondition] = useState<"price-above" | "price-below">("price-below");
+
+  const columns = useMemo(() => {
+    const base = COLUMNS(colors);
+    if (enableShariaFilter) {
+      const symbolIdx = base.findIndex((c) => c.key === "symbol");
+      base.splice(symbolIdx + 1, 0, {
+        key: "sharia_status",
+        label: "holdings.shariaStatus",
+        width: 110,
+        align: "left",
+        custom: true,
+      });
+    }
+    if (dividendFocus) {
+      // Insert yield column after dividends column
+      const divIdx = base.findIndex((c) => c.key === "cash_dividends");
+      if (divIdx >= 0) {
+        base.splice(divIdx + 1, 0, {
+          key: "dividend_yield_on_cost_pct",
+          label: "holdings.yieldPct",
+          width: 80,
+          align: "right",
+          format: (v) => v != null ? `${Number(v).toFixed(2)}%` : "—",
+        });
+      }
+    }
+    // Always add actions column at the end
+    base.push({
+      key: "actions",
+      label: "",
+      width: 44,
+      align: "center",
+      custom: true,
+    });
+    return base;
+  }, [colors, enableShariaFilter, dividendFocus]);
 
   const totalWidth = useMemo(() => columns.reduce((a, c) => a + c.width, 0), [columns]);
 
+  // When Sharia filter is on, only show compliant + unrated holdings (hide non-compliant)
+  const filteredHoldings = useMemo(() => {
+    let result = enableShariaFilter
+      ? holdings.filter((h) => {
+          // Musaffa override takes priority over backend status
+          const status = getMusaffaStatus(h.symbol) ?? (h as any).sharia_status;
+          return status !== "non-compliant";
+        })
+      : holdings;
+    // When dividend focus is on, sort by dividend yield descending
+    if (dividendFocus) {
+      result = [...result].sort(
+        (a, b) => (b.dividend_yield_on_cost_pct || 0) - (a.dividend_yield_on_cost_pct || 0),
+      );
+    }
+    return result;
+  }, [holdings, enableShariaFilter, dividendFocus]);
+
   const handleDownload = () => {
-    const csv = generateCSV(holdings, columns);
+    const csv = generateCSV(filteredHoldings, columns, t);
     downloadCSV(csv, `holdings_${filterLabel}_${todayISO()}.csv`);
   };
 
@@ -189,7 +262,7 @@ export default function HoldingsTable({
       {/* Toolbar */}
       <View style={[ts.toolbar, { borderBottomColor: colors.borderColor }]}>
         <Text style={[ts.tableTitle, { color: colors.textPrimary }]}>
-          Holdings Data ({holdings.length})
+          Holdings Data ({filteredHoldings.length})
         </Text>
 
         {Platform.OS === "web" && (
@@ -244,13 +317,13 @@ export default function HoldingsTable({
                 ]}
                 numberOfLines={1}
               >
-                {col.label}
+                {col.label ? t(col.label) : ''}
               </Text>
             ))}
           </View>
 
           {/* Data rows */}
-          {holdings.map((item, idx) => (
+          {filteredHoldings.map((item, idx) => (
             <View
               key={item.symbol}
               style={[
@@ -263,6 +336,72 @@ export default function HoldingsTable({
               ]}
             >
               {columns.map((col) => {
+                if (col.custom && col.key === "sharia_status") {
+                  return (
+                    <View key={col.key} style={{ width: col.width, justifyContent: "center", paddingHorizontal: 4 }}>
+                      <ShariaBadge
+                        status={(item as any).sharia_status}
+                        symbol={item.symbol}
+                        compact
+                        colors={colors}
+                      />
+                    </View>
+                  );
+                }
+
+                if (col.custom && col.key === "actions") {
+                  return (
+                    <View key={col.key} style={{ width: col.width, alignItems: "center", justifyContent: "center" }}>
+                      <Pressable
+                        onPress={() =>
+                          setMenuSymbol(menuSymbol === item.symbol ? null : item.symbol)
+                        }
+                        style={ts.menuBtn}
+                        accessibilityLabel={`Actions for ${item.symbol}`}
+                      >
+                        <FontAwesome
+                          name="ellipsis-v"
+                          size={16}
+                          color={colors.textMuted}
+                        />
+                      </Pressable>
+                      {menuSymbol === item.symbol && (
+                        <View
+                          style={[
+                            ts.menuPopup,
+                            {
+                              backgroundColor: colors.bgCard,
+                              borderColor: colors.borderColor,
+                            },
+                          ]}
+                        >
+                          <Pressable
+                            onPress={() => {
+                              setMenuSymbol(null);
+                              setAlertModalSymbol(item.symbol);
+                              // Pre-suggest 5% below current price
+                              const suggested = (item.market_price * 0.95).toFixed(3);
+                              setAlertThreshold(suggested);
+                              setAlertCondition("price-below");
+                            }}
+                            style={ts.menuItem}
+                          >
+                            <FontAwesome
+                              name="bell"
+                              size={13}
+                              color={colors.accentPrimary}
+                              style={{ marginRight: 8 }}
+                            />
+                            <Text style={[ts.menuItemText, { color: colors.textPrimary }]}>
+                              Set Price Alert
+                            </Text>
+                          </Pressable>
+                        </View>
+                      )}
+                    </View>
+                  );
+                }
+
                 const raw =
                   col.key === "pnl_pct_display" ? null : (item as any)[col.key];
                 const display = col.format
@@ -304,6 +443,172 @@ export default function HoldingsTable({
           )}
         </View>
       </ScrollView>
+
+      {/* Dismiss menu overlay */}
+      {menuSymbol && (
+        <Pressable
+          style={StyleSheet.absoluteFill}
+          onPress={() => setMenuSymbol(null)}
+        />
+      )}
+
+      {/* ── Quick Alert Modal ── */}
+      <Modal
+        visible={alertModalSymbol !== null}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setAlertModalSymbol(null)}
+      >
+        <View style={ts.alertOverlay}>
+          <View
+            style={[
+              ts.alertModal,
+              { backgroundColor: colors.bgCard, borderColor: colors.borderColor },
+            ]}
+          >
+            <Text style={[ts.alertTitle, { color: colors.textPrimary }]}>
+              Set Alert for {alertModalSymbol}
+            </Text>
+
+            {/* Condition toggle */}
+            <View style={ts.alertCondRow}>
+              {(["price-below", "price-above"] as const).map((cond) => (
+                <Pressable
+                  key={cond}
+                  onPress={() => setAlertCondition(cond)}
+                  style={[
+                    ts.alertCondChip,
+                    {
+                      backgroundColor:
+                        alertCondition === cond
+                          ? colors.accentPrimary + "20"
+                          : colors.bgSecondary,
+                      borderColor:
+                        alertCondition === cond
+                          ? colors.accentPrimary
+                          : colors.borderColor,
+                    },
+                  ]}
+                >
+                  <FontAwesome
+                    name={cond === "price-below" ? "arrow-down" : "arrow-up"}
+                    size={12}
+                    color={
+                      alertCondition === cond ? colors.accentPrimary : colors.textMuted
+                    }
+                  />
+                  <Text
+                    style={{
+                      fontSize: 12,
+                      fontWeight: "600",
+                      color:
+                        alertCondition === cond
+                          ? colors.accentPrimary
+                          : colors.textSecondary,
+                    }}
+                  >
+                    {cond === "price-below" ? "Below" : "Above"}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+
+            {/* Threshold input */}
+            <Text style={[ts.alertFieldLabel, { color: colors.textSecondary }]}>
+              Threshold Price
+            </Text>
+            <TextInput
+              style={[
+                ts.alertInput,
+                {
+                  backgroundColor: colors.bgSecondary,
+                  color: colors.textPrimary,
+                  borderColor: colors.borderColor,
+                },
+              ]}
+              value={alertThreshold}
+              onChangeText={setAlertThreshold}
+              keyboardType="decimal-pad"
+              placeholder="0.000"
+              placeholderTextColor={colors.textMuted}
+            />
+
+            {/* Quick suggestions */}
+            {alertModalSymbol && (
+              <View style={ts.alertSuggestions}>
+                {(() => {
+                  const h = holdings.find((x) => x.symbol === alertModalSymbol);
+                  if (!h) return null;
+                  const suggestions = [
+                    { label: "5% drop", val: (h.market_price * 0.95).toFixed(3) },
+                    { label: "10% drop", val: (h.market_price * 0.9).toFixed(3) },
+                    { label: "Avg cost", val: h.avg_cost.toFixed(3) },
+                  ];
+                  return suggestions.map((s) => (
+                    <Pressable
+                      key={s.label}
+                      onPress={() => {
+                        setAlertThreshold(s.val);
+                        setAlertCondition("price-below");
+                      }}
+                      style={[
+                        ts.alertSuggestChip,
+                        {
+                          backgroundColor: colors.bgSecondary,
+                          borderColor: colors.borderColor,
+                        },
+                      ]}
+                    >
+                      <Text style={{ fontSize: 11, color: colors.textSecondary }}>
+                        {s.label}: {s.val}
+                      </Text>
+                    </Pressable>
+                  ));
+                })()}
+              </View>
+            )}
+
+            {/* Actions */}
+            <View style={ts.alertActions}>
+              <Pressable
+                onPress={() => setAlertModalSymbol(null)}
+                style={[
+                  ts.alertBtn,
+                  { borderColor: colors.borderColor, borderWidth: 1 },
+                ]}
+              >
+                <Text style={{ fontSize: 14, fontWeight: "600", color: colors.textSecondary }}>
+                  Cancel
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={async () => {
+                  const num = parseFloat(alertThreshold);
+                  if (isNaN(num) || num <= 0 || !alertModalSymbol) return;
+                  const rule = createAlertRule({
+                    symbol: alertModalSymbol,
+                    condition: alertCondition,
+                    threshold: num,
+                    label: `${alertModalSymbol} ${alertCondition === "price-below" ? "drop" : "rise"} alert`,
+                  });
+                  const existing = await loadAlertRules();
+                  await saveAlertRules([rule, ...existing]);
+                  onAlertCreated?.(alertModalSymbol);
+                  setAlertModalSymbol(null);
+                  const msg = `Alert set: ${alertModalSymbol} ${alertCondition === "price-below" ? "below" : "above"} ${num.toFixed(3)}`;
+                  Platform.OS === "web"
+                    ? window.alert(msg)
+                    : Alert.alert("Alert Created", msg);
+                }}
+                style={[ts.alertBtn, { backgroundColor: colors.accentPrimary }]}
+              >
+                <FontAwesome name="bell" size={13} color="#fff" style={{ marginRight: 6 }} />
+                <Text style={{ fontSize: 14, fontWeight: "700", color: "#fff" }}>Save</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -364,5 +669,106 @@ const ts = StyleSheet.create({
   emptyRow: {
     padding: 24,
     alignItems: "center",
+  },
+  // ── Row action menu ──
+  menuBtn: {
+    width: 36,
+    height: 36,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  menuPopup: {
+    position: "absolute",
+    top: 32,
+    right: 0,
+    minWidth: 160,
+    borderRadius: 8,
+    borderWidth: 1,
+    paddingVertical: 4,
+    zIndex: 100,
+    elevation: 8,
+    shadowColor: "#000",
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+  },
+  menuItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  menuItemText: {
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  // ── Quick Alert Modal ──
+  alertOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    justifyContent: "center",
+    paddingHorizontal: 24,
+  },
+  alertModal: {
+    borderRadius: 14,
+    borderWidth: 1,
+    padding: 20,
+  },
+  alertTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    marginBottom: 14,
+  },
+  alertCondRow: {
+    flexDirection: "row",
+    gap: 10,
+    marginBottom: 10,
+  },
+  alertCondChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 14,
+    borderWidth: 1,
+    gap: 5,
+  },
+  alertFieldLabel: {
+    fontSize: 12,
+    fontWeight: "600",
+    marginBottom: 4,
+    marginTop: 8,
+  },
+  alertInput: {
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+  },
+  alertSuggestions: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 10,
+  },
+  alertSuggestChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  alertActions: {
+    flexDirection: "row",
+    gap: 12,
+    marginTop: 20,
+  },
+  alertBtn: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 11,
+    borderRadius: 8,
   },
 });

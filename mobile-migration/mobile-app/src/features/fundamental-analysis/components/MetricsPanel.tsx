@@ -204,34 +204,50 @@ export function MetricsPanel({ stockId, stockSymbol, colors, isDesktop }: PanelW
               return (
                 <FadeIn key={cat} delay={idx * 60}>
                   <SectionHeader title={catInfo.label} icon={catInfo.icon} iconColor={catInfo.color} badge={metricNames.length} colors={colors} />
-                  <ScrollView horizontal showsHorizontalScrollIndicator style={{ marginBottom: 16 }}>
-                    <Card colors={colors} noPadding>
-                      {/* Header */}
-                      <View style={[st.metricTableHeader, { borderBottomColor: colors.borderColor }]}>
-                        <Text style={[st.metricTableNameCell, { color: colors.textPrimary, fontWeight: "800" }]}>Metric</Text>
-                        {years.map((yr) => (
-                          <Text key={yr} style={[st.metricTableValCell, { color: colors.textPrimary, fontWeight: "800" }]}>FY{yr}</Text>
+                  <Card colors={colors} noPadding style={{ marginBottom: 16 }}>
+                    <View style={{ flexDirection: "row" }}>
+                      {/* Frozen first column */}
+                      <View style={{ width: 150, borderRightWidth: 1, borderRightColor: colors.borderColor }}>
+                        {/* Header */}
+                        <View style={[st.metricTableHeader, { borderBottomColor: colors.borderColor }]}>
+                          <Text style={[st.metricTableNameCell, { color: colors.textPrimary, fontWeight: "800" }]}>Metric</Text>
+                        </View>
+                        {/* Row labels */}
+                        {metricNames.map((name, ri) => (
+                          <View key={name} style={[st.metricTableRow, { backgroundColor: ri % 2 === 0 ? "transparent" : colors.bgPrimary + "30" }]}>
+                            <Text numberOfLines={1} style={[st.metricTableNameCell, { color: colors.textSecondary }]}>{name}</Text>
+                          </View>
                         ))}
                       </View>
-                      {/* Rows */}
-                      {metricNames.map((name, ri) => (
-                        <View key={name} style={[st.metricTableRow, { backgroundColor: ri % 2 === 0 ? "transparent" : colors.bgPrimary + "30" }]}>
-                          <Text numberOfLines={1} style={[st.metricTableNameCell, { color: colors.textSecondary }]}>{name}</Text>
-                          {years.map((yr) => {
-                            const val = yearData[yr]?.[name];
-                            return (
-                              <Text key={yr} style={[st.metricTableValCell, {
-                                color: val != null ? colors.textPrimary : colors.textMuted,
-                                fontWeight: val != null ? "600" : "400",
-                              }]}>
-                                {val != null ? formatMetricValue(name, val) : "–"}
-                              </Text>
-                            );
-                          })}
+                      {/* Scrollable year columns */}
+                      <ScrollView horizontal showsHorizontalScrollIndicator style={{ flex: 1 }}>
+                        <View>
+                          {/* Header */}
+                          <View style={[st.metricTableHeader, { borderBottomColor: colors.borderColor, paddingHorizontal: 0 }]}>
+                            {years.map((yr) => (
+                              <Text key={yr} style={[st.metricTableValCell, { color: colors.textPrimary, fontWeight: "800" }]}>FY{yr}</Text>
+                            ))}
+                          </View>
+                          {/* Rows */}
+                          {metricNames.map((name, ri) => (
+                            <View key={name} style={[st.metricTableRow, { backgroundColor: ri % 2 === 0 ? "transparent" : colors.bgPrimary + "30", paddingHorizontal: 0 }]}>
+                              {years.map((yr) => {
+                                const val = yearData[yr]?.[name];
+                                return (
+                                  <Text key={yr} style={[st.metricTableValCell, {
+                                    color: val != null ? colors.textPrimary : colors.textMuted,
+                                    fontWeight: val != null ? "600" : "400",
+                                  }]}>
+                                    {val != null ? formatMetricValue(name, val) : "–"}
+                                  </Text>
+                                );
+                              })}
+                            </View>
+                          ))}
                         </View>
-                      ))}
-                    </Card>
-                  </ScrollView>
+                      </ScrollView>
+                    </View>
+                  </Card>
                 </FadeIn>
               );
             })

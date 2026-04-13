@@ -25,6 +25,8 @@ export const stockKeys = {
   /** Separate key when querying all stocks for merge modal. */
   allForMerge: () => ["all-stocks-for-merge"] as const,
   stockList: (market: string) => ["stock-list", market] as const,
+  stockListSearch: (market: string, search: string) =>
+    ["stock-list-search", market, search] as const,
   securities: (search?: string) => ["securities", search] as const,
 } as const;
 
@@ -67,6 +69,21 @@ export function useStockList(market: string, enabled = true) {
     staleTime: Infinity,
     gcTime: 24 * 60 * 60_000,
     enabled,
+  });
+}
+
+/**
+ * Live server-side stock search — augments hardcoded list with yfinance
+ * results for US market. Only fires when search has 2+ characters.
+ */
+export function useStockListSearch(market: string, search: string, enabled = true) {
+  const clean = useMemo(() => sanitizeSearch(search), [search]);
+  return useQuery({
+    queryKey: stockKeys.stockListSearch(market, clean ?? ""),
+    queryFn: () => getStockList({ market, search: clean }),
+    enabled: enabled && !!clean && clean.length >= 2,
+    staleTime: 30_000,
+    gcTime: 5 * 60_000,
   });
 }
 

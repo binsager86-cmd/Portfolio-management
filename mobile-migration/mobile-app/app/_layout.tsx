@@ -8,18 +8,23 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { useFonts } from "expo-font";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
+import { StatusBar } from "expo-status-bar";
 import { useEffect } from "react";
-import { Platform } from "react-native";
+import { I18nManager, Platform, View } from "react-native";
 import { MD3DarkTheme, MD3LightTheme, PaperProvider } from "react-native-paper";
 import "react-native-reanimated";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { AppErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { ToastProvider } from "@/components/ui/ToastProvider";
+import { useSessionGuard } from "@/hooks/useSessionGuard";
+import i18n from "@/lib/i18n/config";
 import { queryClient } from "@/lib/queryClient";
 import { getStockList } from "@/services/api";
 import { useAuthStore } from "@/services/authStore";
+import { registerPushToken } from "@/services/notifications/pushTokenService";
 import { useThemeStore } from "@/services/themeStore";
+import { useUserPrefsStore } from "@/src/store/userPrefsStore";
 
 export {
     ErrorBoundary
@@ -90,6 +95,11 @@ function RootLayoutNav() {
   const googleSignIn = useAuthStore((s) => s.googleSignIn);
   const hydrateTheme = useThemeStore((s) => s.hydrate);
   const themeMode = useThemeStore((s) => s.mode);
+  const hydrateUserPrefs = useUserPrefsStore((s) => s.hydrate);
+  const language = useUserPrefsStore((s) => s.preferences.language);
+
+  // ── Session guard: periodic heartbeat + focus re-validation ────
+  useSessionGuard();
 
   // ── Single init effect: theme → OAuth hash check → hydration ───
   // Must be one sequential async flow so nothing can redirect
@@ -97,6 +107,7 @@ function RootLayoutNav() {
   useEffect(() => {
     async function init() {
       hydrateTheme();
+      hydrateUserPrefs();
 
       // Check for Google OAuth redirect (web only)
       if (Platform.OS === "web" && typeof window !== "undefined") {
@@ -126,6 +137,18 @@ function RootLayoutNav() {
     init();
   }, []);
 
+  // Sync i18n language + RTL direction when userPrefsStore language changes
+  useEffect(() => {
+    if (language && i18n.language !== language) {
+      i18n.changeLanguage(language);
+    }
+    const shouldBeRTL = language === "ar";
+    if (I18nManager.isRTL !== shouldBeRTL) {
+      I18nManager.allowRTL(shouldBeRTL);
+      I18nManager.forceRTL(shouldBeRTL);
+    }
+  }, [language]);
+
   // Prefetch stock reference lists (static data) so dropdowns load instantly
   useEffect(() => {
     if (!token) return; // only after login
@@ -138,6 +161,11 @@ function RootLayoutNav() {
       queryKey: ["stock-list", "us"],
       queryFn: () => getStockList({ market: "us" }),
       staleTime: Infinity,
+    });
+
+    // Register push token for real-time news notifications
+    registerPushToken().catch((err) => {
+      if (__DEV__) console.warn("[Push] Registration failed:", err);
     });
   }, [token]);
 
@@ -177,6 +205,8 @@ function RootLayoutNav() {
 
   return (
     <SafeAreaProvider>
+    <View style={{ flex: 1, direction: language === "ar" ? "rtl" : "ltr" }}>
+    <StatusBar style={themeMode === "dark" ? "light" : "dark"} />
     <QueryClientProvider client={queryClient}>
       <PaperProvider theme={paperTheme}>
         <ThemeProvider value={buildNavTheme(themeMode)}>
@@ -194,6 +224,7 @@ function RootLayoutNav() {
         </ThemeProvider>
       </PaperProvider>
     </QueryClientProvider>
+    </View>
     </SafeAreaProvider>
   );
 }

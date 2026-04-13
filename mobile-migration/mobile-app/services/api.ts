@@ -1282,6 +1282,14 @@ export async function exportBackup(): Promise<Blob> {
   return response.data;
 }
 
+/** Reset account — permanently delete all portfolio data. */
+export async function resetAccount(): Promise<{ message: string; deleted: Record<string, string> }> {
+  const { data } = await api.post<{ status: string; data: { message: string; deleted: Record<string, string> } }>(
+    "/api/v1/portfolio/reset-account",
+  );
+  return data.data;
+}
+
 export interface BackupImportResult {
   imported: number;
   skipped: number;
@@ -2276,8 +2284,14 @@ export async function changePassword(
 
 /** Get current user info. */
 export async function getMe(): Promise<{ user_id: number; username: string; name: string }> {
-  const { data } = await api.get<{ status: string; data: { user_id: number; username: string; name: string } }>("/api/v1/auth/me");
-  return data.data;
+  const { data } = await api.get("/api/v1/auth/me");
+  return data.data ?? data;
+}
+
+/** Update current user's display name. */
+export async function updateName(name: string): Promise<{ message: string }> {
+  const { data } = await api.put<{ status: string; data: { message: string } }>("/api/v1/auth/me", { name });
+  return data.data ?? data;
 }
 
 /** Get account/cash balances. */

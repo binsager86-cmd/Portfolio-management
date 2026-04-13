@@ -38,6 +38,7 @@ import * as DocumentPicker from "expo-document-picker";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useMemo, useState } from "react";
 import { Controller, useForm } from "react-hook-form";
+import { useTranslation } from "react-i18next";
 import {
     ActivityIndicator,
     Alert,
@@ -183,6 +184,7 @@ function toPayload(values: TxnFormValues): TransactionCreate {
 
 export default function AddTransactionScreen() {
   const { colors } = useThemeStore();
+  const { t } = useTranslation();
   const router = useRouter();
   const queryClient = useQueryClient();
   const toast = useToast();
@@ -291,8 +293,13 @@ export default function AddTransactionScreen() {
     );
   }, [refStocksData, stockSearchText]);
 
-  const createMutation = useCreateTransaction(() => router.back());
-  const updateMutation = useUpdateTransaction(() => router.back());
+  const navigateToTransactions = () => {
+    toast.success(isEditMode ? "Transaction updated successfully" : "Transaction saved successfully");
+    router.replace("/(tabs)/transactions");
+  };
+
+  const createMutation = useCreateTransaction(navigateToTransactions);
+  const updateMutation = useUpdateTransaction(navigateToTransactions);
   const activeMutation = isEditMode ? updateMutation : createMutation;
 
   const onSubmit = async (values: TxnFormValues) => {
@@ -342,7 +349,7 @@ export default function AddTransactionScreen() {
   // ── Upload mutation ─────────────────────────────────────────────
   const uploadMutation = useMutation({
     mutationFn: () => {
-      if (!selectedFile) throw new Error("No file selected");
+      if (!selectedFile) throw new Error(t('addTransaction.noFileSelected'));
       return importTransactions(selectedFile.file, uploadPortfolio, uploadMode);
     },
     onSuccess: async (result) => {
@@ -353,10 +360,10 @@ export default function AddTransactionScreen() {
           queryClient.invalidateQueries({ queryKey: [key] })
         )
       );
-      const msg = `Imported ${result?.imported ?? 0} transactions (${uploadMode} mode)`;
+      const msg = t('addTransaction.importedMsg', { count: result?.imported ?? 0, mode: uploadMode });
       toast.success(msg);
     },
-    onError: (err) => showErrorAlert("Import Error", err, "Upload failed"),
+    onError: (err) => showErrorAlert(t('addTransaction.importError'), err, t('addTransaction.uploadFailed')),
   });
 
   // ── Delete-all mutation ─────────────────────────────────────────
@@ -368,10 +375,10 @@ export default function AddTransactionScreen() {
           queryClient.invalidateQueries({ queryKey: [key] })
         )
       );
-      const msg = result?.message ?? `Deleted ${result?.deleted_count ?? 0} transactions`;
+      const msg = result?.message ?? t('addTransaction.deletedMsg', { count: result?.deleted_count ?? 0 });
       toast.info(msg);
     },
-    onError: (err) => showErrorAlert("Error", err, "Delete failed"),
+    onError: (err) => showErrorAlert(t('app.error'), err, t('addTransaction.deleteFailed')),
   });
 
   // ── File picker handler ─────────────────────────────────────────
@@ -410,16 +417,16 @@ export default function AddTransactionScreen() {
   const confirmDeleteAll = () => {
     if (Platform.OS === "web") {
       // eslint-disable-next-line no-restricted-globals
-      if (confirm("Are you sure you want to delete ALL transactions? This action can be undone via restore.")) {
+      if (confirm(t('addTransaction.confirmDeleteAllRestore'))) {
         deleteMutation.mutate();
       }
     } else {
       Alert.alert(
-        "Delete All Transactions",
-        "Are you sure? This will soft-delete all your transactions. They can be restored later.",
+        t('addTransaction.deleteAllTransactions'),
+        t('addTransaction.confirmDeleteAllBody'),
         [
-          { text: "Cancel", style: "cancel" },
-          { text: "Delete All", style: "destructive", onPress: () => deleteMutation.mutate() },
+          { text: t('app.cancel'), style: "cancel" },
+          { text: t('addTransaction.deleteAll'), style: "destructive", onPress: () => deleteMutation.mutate() },
         ]
       );
     }
@@ -432,15 +439,15 @@ export default function AddTransactionScreen() {
 
       <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>
         <FontAwesome name="upload" size={16} color={colors.textPrimary} />{" "}
-        Import from Excel
+        {t('addTransaction.importFromExcel')}
       </Text>
       <Text style={[styles.sectionHint, { color: colors.textSecondary }]}>
-        Upload an Excel file (.xlsx) with a &quot;Transactions&quot; sheet to bulk-import.
+        {t('addTransaction.importHintBulk')}
       </Text>
 
       {/* Portfolio selector */}
       <View style={styles.uploadRow}>
-        <Text style={[styles.uploadLabel, { color: colors.textSecondary }]}>Portfolio</Text>
+        <Text style={[styles.uploadLabel, { color: colors.textSecondary }]}>{t('addTransaction.portfolio')}</Text>
         <View style={styles.segmentRow}>
           {(["KFH", "BBYN", "USA"] as const).map((p) => (
             <Pressable
@@ -469,11 +476,11 @@ export default function AddTransactionScreen() {
 
       {/* Mode selector */}
       <View style={styles.uploadRow}>
-        <Text style={[styles.uploadLabel, { color: colors.textSecondary }]}>Mode</Text>
+        <Text style={[styles.uploadLabel, { color: colors.textSecondary }]}>{t('addTransaction.mode')}</Text>
         <View style={styles.segmentRow}>
           {([
-            { key: "merge" as const, label: "Merge (Append)", icon: "plus" as const },
-            { key: "replace" as const, label: "Replace All", icon: "refresh" as const },
+            { key: "merge" as const, label: t('addTransaction.mergeAppend'), icon: "plus" as const },
+            { key: "replace" as const, label: t('addTransaction.replaceAll'), icon: "refresh" as const },
           ]).map((m) => (
             <Pressable
               key={m.key}
@@ -506,7 +513,7 @@ export default function AddTransactionScreen() {
       </View>
       {uploadMode === "replace" && (
         <Text style={[styles.warningText, { color: colors.warning ?? "#e67e22" }]}>
-          ⚠ Replace mode will delete all existing transactions in {uploadPortfolio} before importing.
+          {t('addTransaction.replaceWarningPortfolio', { portfolio: uploadPortfolio })}
         </Text>
       )}
 
@@ -520,7 +527,7 @@ export default function AddTransactionScreen() {
       >
         <FontAwesome name="file-excel-o" size={20} color={colors.accentPrimary} />
         <Text style={[styles.filePickText, { color: colors.textPrimary }]}>
-          {selectedFile ? selectedFile.name : "Choose Excel File…"}
+          {selectedFile ? selectedFile.name : t('addTransaction.chooseExcelFile')}
         </Text>
       </Pressable>
 
@@ -539,11 +546,11 @@ export default function AddTransactionScreen() {
         {uploadMutation.isPending ? (
           <View style={styles.loadingRow}>
             <ActivityIndicator size="small" color="#fff" />
-            <Text style={[styles.submitText, { marginLeft: 8 }]}>Importing…</Text>
+            <Text style={[styles.submitText, { marginLeft: 8 }]}>{t('addTransaction.importing')}</Text>
           </View>
         ) : (
           <Text style={styles.submitText}>
-            <FontAwesome name="cloud-upload" size={16} color="#fff" /> Upload &amp; Import
+            <FontAwesome name="cloud-upload" size={16} color="#fff" /> {t('addTransaction.uploadImport')}
           </Text>
         )}
       </Pressable>
@@ -551,13 +558,13 @@ export default function AddTransactionScreen() {
       {/* Upload result */}
       {uploadResult && (
         <View style={[styles.resultBox, { backgroundColor: colors.bgSecondary, borderColor: colors.borderColor }]}>
-          <Text style={[styles.resultTitle, { color: colors.accentPrimary }]}>Import Result</Text>
+          <Text style={[styles.resultTitle, { color: colors.accentPrimary }]}>{t('addTransaction.importResult')}</Text>
           <Text style={{ color: colors.textPrimary }}>
-            Imported: {uploadResult.imported ?? 0} | Skipped: {uploadResult.skipped ?? 0} | Errors: {uploadResult.errors ?? 0}
+            {t('addTransaction.importedStats', { imported: uploadResult.imported ?? 0, skipped: uploadResult.skipped ?? 0, errors: uploadResult.errors ?? 0 })}
           </Text>
           {uploadResult.mode && (
             <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 4 }}>
-              Mode: {uploadResult.mode}
+              {t('addTransaction.mode')}: {uploadResult.mode}
             </Text>
           )}
         </View>
@@ -568,7 +575,7 @@ export default function AddTransactionScreen() {
 
       <Text style={[styles.sectionTitle, { color: colors.danger ?? "#e74c3c" }]}>
         <FontAwesome name="exclamation-triangle" size={16} color={colors.danger ?? "#e74c3c"} />{" "}
-        Danger Zone
+        {t('addTransaction.dangerZone')}
       </Text>
 
       <Pressable
@@ -586,18 +593,18 @@ export default function AddTransactionScreen() {
           <View style={styles.loadingRow}>
             <ActivityIndicator size="small" color={colors.danger ?? "#e74c3c"} />
             <Text style={[styles.deleteAllText, { color: colors.danger ?? "#e74c3c", marginLeft: 8 }]}>
-              Deleting…
+              {t('addTransaction.deleting')}
             </Text>
           </View>
         ) : (
           <Text style={[styles.deleteAllText, { color: colors.danger ?? "#e74c3c" }]}>
             <FontAwesome name="trash" size={14} color={colors.danger ?? "#e74c3c"} />{" "}
-            Delete All Transactions
+            {t('addTransaction.deleteAllTransactions')}
           </Text>
         )}
       </Pressable>
       <Text style={[styles.sectionHint, { color: colors.textSecondary }]}>
-        Soft-deletes all transactions. They can be restored from the Transactions list.
+        {t('addTransaction.deleteAllHintFull')}
       </Text>
     </>
   ) : undefined;
@@ -606,10 +613,10 @@ export default function AddTransactionScreen() {
 
   return (
     <FormScreen
-      title={isEditMode ? "Edit Transaction" : "Add Transaction"}
+      title={isEditMode ? t('addTransaction.editTitle') : t('addTransaction.title')}
       onSubmit={handleSubmit(onSubmit)}
       isSubmitting={activeMutation.isPending || (isEditMode && isLoadingEdit)}
-      submitLabel={isEditMode ? "Update Transaction" : "Add Transaction"}
+      submitLabel={isEditMode ? t('addTransaction.updateTransaction') : t('addTransaction.title')}
       footer={footerContent}
     >
         {/* ── Loading spinner for edit mode ──── */}
@@ -617,7 +624,7 @@ export default function AddTransactionScreen() {
           <View style={{ alignItems: "center", paddingVertical: 40 }}>
             <ActivityIndicator size="large" color={colors.accentPrimary} />
             <Text style={{ color: colors.textSecondary, marginTop: 12, fontSize: 14 }}>
-              Loading transaction…
+              {t('addTransaction.loading')}
             </Text>
           </View>
         )}
@@ -626,7 +633,7 @@ export default function AddTransactionScreen() {
         {(!isEditMode || (isEditMode && editTxn)) && (
         <>
         {/* ── Portfolio ─────────────────────────── */}
-        <FormField label="Portfolio" required error={errors.portfolio?.message}>
+        <FormField label={t('addTransaction.portfolio')} required error={errors.portfolio?.message}>
           <Controller
             control={control}
             name="portfolio"
@@ -642,7 +649,7 @@ export default function AddTransactionScreen() {
 
         {/* ── Transaction Type ──────────────────── */}
         <FormField
-          label="Transaction Type"
+          label={t('addTransaction.transactionType')}
           required
           error={errors.txn_type?.message}
         >
@@ -661,7 +668,7 @@ export default function AddTransactionScreen() {
 
         {/* ── Symbol (Dropdown + Text Input) ────── */}
         <FormField
-          label="Stock Symbol"
+          label={t('addTransaction.stockSymbol')}
           required
           error={errors.stock_symbol?.message}
         >
@@ -688,7 +695,7 @@ export default function AddTransactionScreen() {
                     ]}
                     numberOfLines={1}
                   >
-                    {value || "Select or type stock symbol…"}
+                    {value || t('addTransaction.selectOrType')}
                   </Text>
                   <FontAwesome
                     name={showStockDropdown ? "chevron-up" : "chevron-down"}
@@ -708,7 +715,7 @@ export default function AddTransactionScreen() {
                     <TextInput
                       value={stockSearchText}
                       onChangeText={setStockSearchText}
-                      placeholder="Search stocks…"
+                      placeholder={t('addTransaction.searchStocks')}
                       autoFocus
                       autoCapitalize="characters"
                     />
@@ -766,7 +773,7 @@ export default function AddTransactionScreen() {
                           { color: colors.textMuted },
                         ]}
                       >
-                        No stocks found. Type symbol below.
+                        {t('addTransaction.noStocksFound')}
                       </Text>
                     )}
 
@@ -774,8 +781,8 @@ export default function AddTransactionScreen() {
                     <View style={styles.manualRow}>
                       <TextInput
                         value={value}
-                        onChangeText={(t) => onChange(t.toUpperCase().trim())}
-                        placeholder="Or type symbol manually"
+                        onChangeText={(tx) => onChange(tx.toUpperCase().trim())}
+                        placeholder={t('addTransaction.typeManually')}
                         autoCapitalize="characters"
                         hasError={!!errors.stock_symbol}
                       />
@@ -788,7 +795,7 @@ export default function AddTransactionScreen() {
         </FormField>
 
         {/* ── Date ──────────────────────────────── */}
-        <FormField label="Date" required error={errors.txn_date?.message}>
+        <FormField label={t('addTransaction.date')} required error={errors.txn_date?.message}>
           <Controller
             control={control}
             name="txn_date"
@@ -804,14 +811,14 @@ export default function AddTransactionScreen() {
 
         {/* ── Shares (Buy/Sell only) ──────────── */}
         {!isDividendOnly && (
-          <FormField label="Shares" required error={errors.shares?.message}>
+          <FormField label={t('addTransaction.shares')} required error={errors.shares?.message}>
             <Controller
               control={control}
               name="shares"
               render={({ field: { value, onChange } }) => (
                 <NumberInput
                   value={value != null ? String(value) : ""}
-                  onChangeText={(t) => onChange(t === "" ? undefined : t)}
+                  onChangeText={(tx) => onChange(tx === "" ? undefined : tx)}
                   placeholder="0"
                   hasError={!!errors.shares}
                 />
@@ -823,7 +830,7 @@ export default function AddTransactionScreen() {
         {/* ── Purchase Cost (Buy only) ──────────── */}
         {isBuy && (
           <FormField
-            label="Purchase Cost"
+            label={t('addTransaction.purchaseCost')}
             required
             error={errors.purchase_cost?.message}
           >
@@ -833,8 +840,8 @@ export default function AddTransactionScreen() {
               render={({ field: { value, onChange } }) => (
                 <NumberInput
                   value={value != null && value !== ("" as any) ? String(value) : ""}
-                  onChangeText={(t) => onChange(t)}
-                  placeholder="Total cost"
+                  onChangeText={(tx) => onChange(tx)}
+                  placeholder={t('addTransaction.totalCost')}
                   suffix="KWD"
                   hasError={!!errors.purchase_cost}
                 />
@@ -846,7 +853,7 @@ export default function AddTransactionScreen() {
         {/* ── Sell Value (Sell only) ────────────── */}
         {isSell && (
           <FormField
-            label="Sell Value"
+            label={t('addTransaction.sellValue')}
             required
             error={errors.sell_value?.message}
           >
@@ -856,8 +863,8 @@ export default function AddTransactionScreen() {
               render={({ field: { value, onChange } }) => (
                 <NumberInput
                   value={value != null && value !== ("" as any) ? String(value) : ""}
-                  onChangeText={(t) => onChange(t)}
-                  placeholder="Total proceeds"
+                  onChangeText={(tx) => onChange(tx)}
+                  placeholder={t('addTransaction.totalProceeds')}
                   suffix="KWD"
                   hasError={!!errors.sell_value}
                 />
@@ -872,13 +879,13 @@ export default function AddTransactionScreen() {
         <View style={[styles.fieldGroupHeader, { borderColor: colors.borderColor }]}>
           <FontAwesome name="money" size={13} color={colors.accentTertiary ?? colors.accentSecondary} />
           <Text style={[styles.fieldGroupTitle, { color: colors.textPrimary }]}>
-            {isDividendOnly ? "Dividend Details" : "Dividend & Bonus (Optional)"}
+            {isDividendOnly ? t('addTransaction.dividendDetails') : t('addTransaction.dividendBonusOptional')}
           </Text>
         </View>
 
         {/* Cash Dividend */}
         <FormField
-          label={isDividendOnly ? "Cash Dividend (KD)" : "Cash Dividend"}
+          label={isDividendOnly ? t('addTransaction.cashDividendKD') : t('addTransaction.cashDividend')}
           required={isDividendOnly}
           error={errors.cash_dividend?.message}
         >
@@ -888,7 +895,7 @@ export default function AddTransactionScreen() {
             render={({ field: { value, onChange } }) => (
               <NumberInput
                 value={value != null && value !== ("" as any) ? String(value) : ""}
-                onChangeText={(t) => onChange(t)}
+                onChangeText={(tx) => onChange(tx)}
                 placeholder="0.000"
                 suffix="KWD"
                 hasError={!!errors.cash_dividend}
@@ -898,14 +905,14 @@ export default function AddTransactionScreen() {
         </FormField>
 
         {/* Reinvested Dividend */}
-        <FormField label="Reinvested Dividend" error={errors.reinvested_dividend?.message}>
+        <FormField label={t('addTransaction.reinvestedDividend')} error={errors.reinvested_dividend?.message}>
           <Controller
             control={control}
             name="reinvested_dividend"
             render={({ field: { value, onChange } }) => (
               <NumberInput
                 value={value != null && value !== ("" as any) ? String(value) : ""}
-                onChangeText={(t) => onChange(t)}
+                onChangeText={(tx) => onChange(tx)}
                 placeholder="0.000"
                 suffix="KWD"
               />
@@ -914,14 +921,14 @@ export default function AddTransactionScreen() {
         </FormField>
 
         {/* Bonus Shares */}
-        <FormField label="Bonus Shares (Stock Dividend)" error={errors.bonus_shares?.message}>
+        <FormField label={t('addTransaction.bonusShares')} error={errors.bonus_shares?.message}>
           <Controller
             control={control}
             name="bonus_shares"
             render={({ field: { value, onChange } }) => (
               <NumberInput
                 value={value != null && value !== ("" as any) ? String(value) : ""}
-                onChangeText={(t) => onChange(t)}
+                onChangeText={(tx) => onChange(tx)}
                 placeholder="0"
               />
             )}
@@ -941,7 +948,7 @@ export default function AddTransactionScreen() {
               ]}
             >
               <Text style={[styles.advancedLabel, { color: colors.textSecondary }]}>
-                Advanced Fields
+                {t('addTransaction.advancedFields')}
               </Text>
               <FontAwesome
                 name={showAdvanced ? "chevron-up" : "chevron-down"}
@@ -953,14 +960,14 @@ export default function AddTransactionScreen() {
             {showAdvanced && (
               <View style={styles.advancedSection}>
                 {/* Fees */}
-                <FormField label="Fees" error={errors.fees?.message}>
+                <FormField label={t('addTransaction.fees')} error={errors.fees?.message}>
                   <Controller
                     control={control}
                     name="fees"
                     render={({ field: { value, onChange } }) => (
                       <NumberInput
                         value={value != null && value !== ("" as any) ? String(value) : ""}
-                        onChangeText={(t) => onChange(t)}
+                        onChangeText={(tx) => onChange(tx)}
                         placeholder="0.000"
                         suffix="KWD"
                       />
@@ -969,14 +976,14 @@ export default function AddTransactionScreen() {
                 </FormField>
 
                 {/* Price Override */}
-                <FormField label="Price Override" error={errors.price_override?.message}>
+                <FormField label={t('addTransaction.priceOverride')} error={errors.price_override?.message}>
                   <Controller
                     control={control}
                     name="price_override"
                     render={({ field: { value, onChange } }) => (
                       <NumberInput
                         value={value != null && value !== ("" as any) ? String(value) : ""}
-                        onChangeText={(t) => onChange(t)}
+                        onChangeText={(tx) => onChange(tx)}
                         placeholder="0.000000"
                       />
                     )}
@@ -984,14 +991,14 @@ export default function AddTransactionScreen() {
                 </FormField>
 
                 {/* Planned Cum Shares */}
-                <FormField label="Planned Cum. Shares" error={errors.planned_cum_shares?.message}>
+                <FormField label={t('addTransaction.plannedCumShares')} error={errors.planned_cum_shares?.message}>
                   <Controller
                     control={control}
                     name="planned_cum_shares"
                     render={({ field: { value, onChange } }) => (
                       <NumberInput
                         value={value != null && value !== ("" as any) ? String(value) : ""}
-                        onChangeText={(t) => onChange(t)}
+                        onChangeText={(tx) => onChange(tx)}
                         placeholder="0"
                       />
                     )}
@@ -999,7 +1006,7 @@ export default function AddTransactionScreen() {
                 </FormField>
 
                 {/* Broker */}
-                <FormField label="Broker" error={errors.broker?.message}>
+                <FormField label={t('addTransaction.broker')} error={errors.broker?.message}>
                   <Controller
                     control={control}
                     name="broker"
@@ -1007,14 +1014,14 @@ export default function AddTransactionScreen() {
                       <TextInput
                         value={value ?? ""}
                         onChangeText={onChange}
-                        placeholder="e.g. KFH Capital"
+                        placeholder={t('addTransaction.brokerExample')}
                       />
                     )}
                   />
                 </FormField>
 
                 {/* Reference */}
-                <FormField label="Reference" error={errors.reference?.message}>
+                <FormField label={t('addTransaction.reference')} error={errors.reference?.message}>
                   <Controller
                     control={control}
                     name="reference"
@@ -1022,7 +1029,7 @@ export default function AddTransactionScreen() {
                       <TextInput
                         value={value ?? ""}
                         onChangeText={onChange}
-                        placeholder="Order/Receipt #"
+                        placeholder={t('addTransaction.orderReceipt')}
                       />
                     )}
                   />
@@ -1033,7 +1040,7 @@ export default function AddTransactionScreen() {
         )}
 
         {/* ── Notes (all types) ──────────────── */}
-        <FormField label="Notes" error={errors.notes?.message}>
+        <FormField label={t('addTransaction.notesLabel')} error={errors.notes?.message}>
           <Controller
             control={control}
             name="notes"
@@ -1041,7 +1048,7 @@ export default function AddTransactionScreen() {
               <TextInput
                 value={value ?? ""}
                 onChangeText={onChange}
-                placeholder="Optional notes…"
+                placeholder={t('addTransaction.optionalNotes')}
                 multiline
                 numberOfLines={3}
               />

@@ -2,45 +2,49 @@
  * Cash Management Section — manual override for cash balances per portfolio.
  */
 
-import React, { useState, useMemo } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  Pressable,
-  Platform,
-  TextInput as RNTextInput,
-  Alert,
-} from "react-native";
-import { useQueryClient, useMutation } from "@tanstack/react-query";
-import FontAwesome from "@expo/vector-icons/FontAwesome";
-import {
-  setCashOverride,
-  clearCashOverride,
-  PortfolioCashBalance,
-} from "@/services/api";
 import type { ThemePalette } from "@/constants/theme";
 import { fmtNum } from "@/lib/currency";
 import { showErrorAlert } from "@/lib/errorHandling";
+import {
+    clearCashOverride,
+    PortfolioCashBalance,
+    setCashOverride,
+} from "@/services/api";
+import FontAwesome from "@expo/vector-icons/FontAwesome";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import React, { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
+import {
+    Alert,
+    Platform,
+    Pressable,
+    TextInput as RNTextInput,
+    StyleSheet,
+    Text,
+    View,
+} from "react-native";
 
 const PORTFOLIO_CCY: Record<string, string> = { KFH: "KWD", BBYN: "KWD", USA: "USD" };
 export const DEFAULT_USD_KWD_RATE = 0.307;
 
-export function CashBalancesSection({ cashData, depositTotals, colors, spacing, queryClient }: {
+export function CashBalancesSection({ cashData, depositTotals, colors, spacing, queryClient, onReconcile }: {
   cashData: Record<string, PortfolioCashBalance>;
   depositTotals: Record<string, number>;
   colors: ThemePalette;
   spacing: { pagePx: number };
   queryClient: ReturnType<typeof useQueryClient>;
+  /** Optional callback to trigger reconciliation for a portfolio. */
+  onReconcile?: (portfolio: string) => void;
 }) {
   const [editingPf, setEditingPf] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
+  const { t } = useTranslation();
 
   const overrideMutation = useMutation({
     mutationFn: ({ portfolio, balance, currency }: { portfolio: string; balance: number; currency: string }) =>
       setCashOverride(portfolio, balance, currency),
     onSuccess: async () => { await Promise.all([queryClient.refetchQueries({ queryKey: ["cash-balances"] }), queryClient.refetchQueries({ queryKey: ["portfolio-overview"] })]); setEditingPf(null); setEditValue(""); },
-    onError: (err) => showErrorAlert("Error", err, "Failed to save"),
+    onError: (err) => showErrorAlert(t("holdingsScreen.error"), err, t("holdingsScreen.failedToLoad")),
   });
 
   const clearMutation = useMutation({
@@ -51,8 +55,8 @@ export function CashBalancesSection({ cashData, depositTotals, colors, spacing, 
   const handleSaveOverride = (portfolio: string) => {
     const num = parseFloat(editValue);
     if (isNaN(num) || num < 0) {
-      if (Platform.OS === "web") window.alert("Enter a valid positive number");
-      else Alert.alert("Invalid", "Enter a valid positive number");
+      if (Platform.OS === "web") window.alert(t("holdingsScreen.enterValidNumber"));
+      else Alert.alert(t("holdingsScreen.invalid"), t("holdingsScreen.enterValidNumber"));
       return;
     }
     overrideMutation.mutate({ portfolio, balance: num, currency: PORTFOLIO_CCY[portfolio] ?? "KWD" });
@@ -75,17 +79,17 @@ export function CashBalancesSection({ cashData, depositTotals, colors, spacing, 
       <View style={cs.cashHeader}>
         <Text style={[cs.sectionTitle, { color: colors.textPrimary }]}>
           <FontAwesome name="money" size={16} color={colors.accentPrimary} />{" "}
-          Cash Management
+          {t("holdingsScreen.cashManagement")}
         </Text>
-        <Text style={[cs.cashCaption, { color: colors.textMuted }]}>Edit cash balances manually. Tap the pencil to override.</Text>
+        <Text style={[cs.cashCaption, { color: colors.textMuted }]}>{t("holdingsScreen.editCashBalances")}</Text>
       </View>
 
       {/* Table Header */}
       <View style={[cs.tableHeaderRow, { backgroundColor: colors.bgSecondary, borderBottomColor: colors.borderColor }]}>
-        <Text style={[cs.tableHeaderCell, cs.cellPortfolio, { color: colors.textSecondary }]}>Portfolio</Text>
-        <Text style={[cs.tableHeaderCell, cs.cellCcy, { color: colors.textSecondary }]}>CCY</Text>
-        <Text style={[cs.tableHeaderCell, cs.cellCapital, { color: colors.textSecondary }]}>Total Capital</Text>
-        <Text style={[cs.tableHeaderCell, cs.cellCash, { color: colors.textSecondary }]}>Available Cash</Text>
+        <Text style={[cs.tableHeaderCell, cs.cellPortfolio, { color: colors.textSecondary }]}>{t("holdingsScreen.portfolioLabel")}</Text>
+        <Text style={[cs.tableHeaderCell, cs.cellCcy, { color: colors.textSecondary }]}>{t("holdingsScreen.ccy")}</Text>
+        <Text style={[cs.tableHeaderCell, cs.cellCapital, { color: colors.textSecondary }]}>{t("holdingsScreen.totalCapital")}</Text>
+        <Text style={[cs.tableHeaderCell, cs.cellCash, { color: colors.textSecondary }]}>{t("holdingsScreen.availableCash")}</Text>
         <Text style={[cs.tableHeaderCell, cs.cellActions, { color: colors.textSecondary }]}> </Text>
       </View>
 
@@ -105,7 +109,17 @@ export function CashBalancesSection({ cashData, depositTotals, colors, spacing, 
               <Text style={[cs.cellText, { color: colors.textPrimary, fontWeight: "600" }]}>{pf}</Text>
               {isManual && (
                 <View style={[cs.overrideBadge, { backgroundColor: colors.warning + "22" }]}>
-                  <Text style={[cs.manualBadgeText, { color: colors.warning }]}>MANUAL</Text>
+                  <Text style={[cs.manualBadgeText, { color: colors.warning }]}>{t("holdingsScreen.manual")}</Text>
+                </View>
+              )}
+              {item?.reconciliationStatus === "reconciled" && (
+                <View style={[cs.overrideBadge, { backgroundColor: colors.success + "22" }]}>
+                  <Text style={[cs.manualBadgeText, { color: colors.success }]}>{t("reconciliation.reconciled")}</Text>
+                </View>
+              )}
+              {item?.reconciliationStatus === "pending" && (
+                <View style={[cs.overrideBadge, { backgroundColor: colors.danger + "22" }]}>
+                  <Text style={[cs.manualBadgeText, { color: colors.danger }]}>{t("reconciliation.pending")}</Text>
                 </View>
               )}
             </View>
@@ -125,7 +139,7 @@ export function CashBalancesSection({ cashData, depositTotals, colors, spacing, 
                   value={editValue}
                   onChangeText={setEditValue}
                   keyboardType="decimal-pad"
-                  placeholder={ccy === "USD" ? "Amount (USD)" : "Amount"}
+                  placeholder={ccy === "USD" ? `${t("holdingsScreen.amount")} (USD)` : t("holdingsScreen.amount")}
                   placeholderTextColor={colors.textMuted}
                   autoFocus
                 />
@@ -160,13 +174,21 @@ export function CashBalancesSection({ cashData, depositTotals, colors, spacing, 
                 {isManual && (
                   <Pressable
                     onPress={() => {
-                      const msg = `Clear manual override for ${pf}? Balance will be recalculated automatically.`;
+                      const msg = t("holdingsScreen.clearOverrideMessage", { portfolio: pf });
                       if (Platform.OS === "web") { if (window.confirm(msg)) clearMutation.mutate(pf); }
-                      else { Alert.alert("Clear Override", msg, [{ text: "Cancel", style: "cancel" }, { text: "Clear", onPress: () => clearMutation.mutate(pf) }]); }
+                      else { Alert.alert(t("holdingsScreen.clearOverride"), msg, [{ text: t("holdingsScreen.cancel"), style: "cancel" }, { text: t("holdingsScreen.clear"), onPress: () => clearMutation.mutate(pf) }]); }
                     }}
                     style={({ pressed }) => [cs.actionBtn, { backgroundColor: colors.warning + "20", borderColor: colors.warning + "44", opacity: pressed ? 0.6 : 1 }]}
                   >
                     <FontAwesome name="undo" size={14} color={colors.warning} />
+                  </Pressable>
+                )}
+                {onReconcile && (
+                  <Pressable
+                    onPress={() => onReconcile(pf)}
+                    style={({ pressed }) => [cs.actionBtn, { backgroundColor: colors.accentSecondary + "20", borderColor: colors.accentSecondary + "44", opacity: pressed ? 0.6 : 1 }]}
+                  >
+                    <FontAwesome name="balance-scale" size={13} color={colors.accentSecondary} />
                   </Pressable>
                 )}
               </View>
@@ -177,7 +199,7 @@ export function CashBalancesSection({ cashData, depositTotals, colors, spacing, 
       })}
 
       <View style={[cs.totalCashRow, { borderTopColor: colors.accentPrimary }]}>
-        <Text style={[cs.totalCashLabel, { color: colors.textSecondary }]}>Total Free Cash</Text>
+        <Text style={[cs.totalCashLabel, { color: colors.textSecondary }]}>{t("holdingsScreen.totalFreeCash")}</Text>
         <Text style={[cs.totalCashValue, { color: colors.accentPrimary }]}>{fmtNum(totalFreeCashKwd, 3)} KWD</Text>
       </View>
     </View>

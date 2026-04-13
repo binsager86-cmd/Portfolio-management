@@ -12,5 +12,6 @@ export * from "./analytics";
 export * from "./auth";
 export * from "./extraction";
 export * from "./portfolio";
+export * from "./reconciliation";
 export * from "./transactions";
 

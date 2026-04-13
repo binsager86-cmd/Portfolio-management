@@ -6,6 +6,7 @@ export default function OnboardingLayout() {
       <Stack.Screen name="welcome" />
       <Stack.Screen name="features" />
       <Stack.Screen name="get-started" />
+      <Stack.Screen name="select-expertise" />
     </Stack>
   );
 }

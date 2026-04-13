@@ -5,13 +5,17 @@
 
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import React, { useCallback, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Pressable, ScrollView, Text, View } from "react-native";
 
+import { NewsFeed } from "@/components/news/NewsFeed";
 import { useResponsive } from "@/hooks/useResponsive";
 import { AnalysisStock } from "@/services/api";
 import { useThemeStore } from "@/services/themeStore";
+import { useUserPrefsStore, type ExpertiseLevel } from "@/src/store/userPrefsStore";
 
 import { ComparisonPanel } from "@/src/features/fundamental-analysis/components/ComparisonPanel";
+import { DecisionPanel } from "@/src/features/fundamental-analysis/components/DecisionPanel";
 import { GrowthPanel } from "@/src/features/fundamental-analysis/components/GrowthPanel";
 import { MetricsPanel } from "@/src/features/fundamental-analysis/components/MetricsPanel";
 import { ScorePanel } from "@/src/features/fundamental-analysis/components/ScorePanel";
@@ -24,10 +28,19 @@ import { SUB_TABS, type SubTab } from "@/src/features/fundamental-analysis/types
 
 export default function FundamentalAnalysisScreen() {
   const { colors } = useThemeStore();
+  const { t } = useTranslation();
   const { isDesktop } = useResponsive();
+  const expertiseLevel = useUserPrefsStore((s) => s.preferences.expertiseLevel);
   const [tab, setTab] = useState<SubTab>("stocks");
   const [selectedStockId, setSelectedStockId] = useState<number | null>(null);
   const [selectedStockSymbol, setSelectedStockSymbol] = useState<string>("");
+
+  // Filter sub-tabs by expertise level
+  const levelOrder: ExpertiseLevel[] = ["normal", "intermediate", "advanced"];
+  const visibleTabs = SUB_TABS.filter((t) => {
+    if (!t.minLevel) return true;
+    return levelOrder.indexOf(expertiseLevel) >= levelOrder.indexOf(t.minLevel);
+  });
 
   const handleSelectStock = useCallback((stock: AnalysisStock) => {
     setSelectedStockId(stock.id);
@@ -53,7 +66,7 @@ export default function FundamentalAnalysisScreen() {
               </Pressable>
             )}
             <Text style={[st.headerTitle, { color: colors.textPrimary }]}>
-              {selectedStockId ? selectedStockSymbol : "Fundamental Analysis"}
+              {selectedStockId ? selectedStockSymbol : t('fundamental.title')}
             </Text>
             {selectedStockId && (
               <View style={[st.headerBadge, { backgroundColor: colors.accentPrimary + "15" }]}>
@@ -63,7 +76,7 @@ export default function FundamentalAnalysisScreen() {
           </View>
           {!selectedStockId && (
             <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: 2 }}>
-              CFA-grade stock analysis & valuation
+              {t('fundamental.subtitle')}
             </Text>
           )}
         </View>
@@ -72,7 +85,7 @@ export default function FundamentalAnalysisScreen() {
       {/* ── Tab bar ────────────────────────────────────────── */}
       <View style={[st.tabContainer, { backgroundColor: colors.headerBg, borderBottomColor: colors.borderColor }]}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 8 }}>
-          {SUB_TABS.map((t) => {
+          {visibleTabs.map((t) => {
             const disabled = t.key !== "stocks" && !selectedStockId;
             const active = tab === t.key;
             return (
@@ -135,9 +148,19 @@ export default function FundamentalAnalysisScreen() {
           <ScorePanel stockId={selectedStockId} stockSymbol={selectedStockSymbol} colors={colors} isDesktop={isDesktop} />
         </ErrorBoundary>
       )}
+      {tab === "decision" && selectedStockId && (
+        <ErrorBoundary colors={colors}>
+          <DecisionPanel stockId={selectedStockId} stockSymbol={selectedStockSymbol} colors={colors} isDesktop={isDesktop} />
+        </ErrorBoundary>
+      )}
       {tab === "valuations" && selectedStockId && (
         <ErrorBoundary colors={colors}>
           <ValuationsPanel stockId={selectedStockId} stockSymbol={selectedStockSymbol} colors={colors} isDesktop={isDesktop} />
+        </ErrorBoundary>
+      )}
+      {tab === "news" && selectedStockId && (
+        <ErrorBoundary colors={colors}>
+          <NewsFeed symbol={selectedStockSymbol} compact={false} hideCategoryFilter />
         </ErrorBoundary>
       )}
     </View>

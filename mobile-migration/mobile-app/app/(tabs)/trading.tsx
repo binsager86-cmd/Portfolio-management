@@ -33,6 +33,7 @@ import { useThemeStore } from "@/services/themeStore";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import React, { useCallback, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
     ActivityIndicator,
     Alert,
@@ -73,6 +74,7 @@ import {
 function TradingScreen() {
   const { colors } = useThemeStore();
   const { isDesktop, fonts } = useResponsive();
+  const { t } = useTranslation();
   const queryClient = useQueryClient();
 
   const [portfolios, setPortfolios] = useState<string[]>([]);
@@ -113,12 +115,12 @@ function TradingScreen() {
     onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ["trading-summary"] });
       Alert.alert(
-        "Recalculation Complete",
-        `Updated ${result.updated} transactions across ${result.positions_processed} positions.`
-        + (result.errors.length > 0 ? `\n\nErrors: ${result.errors.join(", ")}` : "")
+        t('trading.recalculateComplete'),
+        `${t('trading.updated')} ${result.updated} transactions across ${result.positions_processed} positions.`
+        + (result.errors.length > 0 ? `\n\n${t('trading.errors')}: ${result.errors.join(", ")}` : "")
       );
     },
-    onError: (err) => showErrorAlert("Error", err, "Failed to recalculate"),
+    onError: (err) => showErrorAlert(t('app.error'), err, "Failed to recalculate"),
   });
 
   // Rename stock mutation (inline edit on company name)
@@ -127,10 +129,10 @@ function TradingScreen() {
       renameStockBySymbol(symbol, name),
     onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ["trading-summary"] });
-      Alert.alert("Updated", `"${result.symbol}" renamed to "${result.name}"`);
+      Alert.alert(t('trading.updated'), `"${result.symbol}" ${t('trading.renamedTo')} "${result.name}"`);
     },
     onError: (err: any) => {
-      Alert.alert("Rename Failed", err?.message ?? "Could not rename stock");
+      Alert.alert(t('trading.renameFailed'), err?.message ?? "Could not rename stock");
     },
   });
 
@@ -153,7 +155,7 @@ function TradingScreen() {
         a.click();
         URL.revokeObjectURL(url);
       } else {
-        Alert.alert("Export", "Excel export is available on the web version.");
+        Alert.alert("Export", t('trading.exportWebOnly'));
       }
     } catch (err: unknown) {
       showErrorAlert("Export Error", err, "Failed to export");
@@ -316,14 +318,14 @@ function TradingScreen() {
         try { await recalculateWAC(); } catch (_) { /* non-critical */ }
         queryClient.invalidateQueries({ queryKey: ["trading-summary"] });
         Alert.alert(
-          "Saved",
-          `Updated ${changes} transaction(s).` +
-            (errors.length > 0 ? `\n\nErrors:\n${errors.join("\n")}` : "")
+          t('trading.saved'),
+          t('trading.updatedCount', { count: changes }) +
+            (errors.length > 0 ? `\n\n${t('trading.errors')}:\n${errors.join("\n")}` : "")
         );
       } else if (errors.length > 0) {
-        Alert.alert("Errors", errors.join("\n"));
+        Alert.alert(t('trading.errors'), errors.join("\n"));
       } else {
-        Alert.alert("No Changes", "No modifications detected.");
+        Alert.alert(t('trading.noChanges'), t('trading.noModifications'));
       }
       exitEditMode();
     } catch (err: unknown) {
@@ -352,9 +354,9 @@ function TradingScreen() {
         try { await recalculateWAC(); } catch (_) { /* non-critical */ }
         queryClient.invalidateQueries({ queryKey: ["trading-summary"] });
         Alert.alert(
-          "Deleted",
-          `Deleted ${deleted} transaction(s). Use Trash to undo.` +
-            (errors.length > 0 ? `\n\nErrors:\n${errors.join("\n")}` : "")
+          t('trading.deleted'),
+          t('trading.deletedCount', { count: deleted }) +
+            (errors.length > 0 ? `\n\n${t('trading.errors')}:\n${errors.join("\n")}` : "")
         );
       } else if (errors.length > 0) {
         Alert.alert("Errors", errors.join("\n"));
@@ -370,7 +372,7 @@ function TradingScreen() {
 
   if (isLoading && !data) return <TradingSkeleton />;
   if (isError && !data)
-    return <ErrorScreen message={error?.message ?? "Failed to load"} onRetry={refetch} />;
+    return <ErrorScreen message={error?.message ?? t('app.failedToLoad')} onRetry={refetch} />;
 
   const summary = data?.summary;
 
@@ -381,19 +383,18 @@ function TradingScreen() {
       {/* Title */}
       <View style={[s.headerCard, { backgroundColor: colors.bgCard, borderColor: colors.borderColor }]}>
         <Text style={[s.title, { color: colors.textPrimary, fontSize: fonts.title }]}>
-          📈 Trading Section
+          📈 {t('trading.title')}
         </Text>
         <Text style={[s.subtitle, { color: colors.textSecondary }]}>
-          All transactions · Real-time P&L · CFA-compliant cost basis
+          {t('trading.subtitle')}
         </Text>
       </View>
 
       {/* Info card */}
       <View style={[s.infoCard, { backgroundColor: colors.bgCard, borderColor: colors.borderColor }]}>
-        <Text style={[s.infoTitle, { color: colors.textPrimary }]}>📋 All your saved transactions</Text>
+        <Text style={[s.infoTitle, { color: colors.textPrimary }]}>📋 {t('trading.infoTitle')}</Text>
         <Text style={[s.infoBody, { color: colors.textSecondary }]}>
-          Buy/Sell trades, Cash Deposits/Withdrawals, Dividends, Bonus Shares — all in one view.
-          {"\n"}P&L calculated using CFA-compliant Weighted Average Cost method per portfolio.
+          {t('trading.infoBody')}
         </Text>
       </View>
 
@@ -403,7 +404,7 @@ function TradingScreen() {
       {/* Section header: Filters */}
       <View style={[s.sectionHeader, { borderBottomColor: colors.borderColor }]}>
         <FontAwesome name="filter" size={14} color={colors.accentSecondary} />
-        <Text style={[s.sectionTitle, { color: colors.textPrimary }]}>Filters</Text>
+        <Text style={[s.sectionTitle, { color: colors.textPrimary }]}>{t('trading.filters')}</Text>
       </View>
 
       {/* Portfolio filter */}
@@ -470,8 +471,8 @@ function TradingScreen() {
           ) : (
             <TextInput
               value={dateFrom}
-              onChangeText={(t) => { setDateFrom(t); setPage(1); }}
-              placeholder="From (YYYY-MM-DD)"
+              onChangeText={(tx) => { setDateFrom(tx); setPage(1); }}
+              placeholder={t('trading.fromDate')}
               placeholderTextColor={colors.textMuted}
               style={[s.dateInput, { color: colors.textPrimary }]}
               maxLength={10}
@@ -500,8 +501,8 @@ function TradingScreen() {
           ) : (
             <TextInput
               value={dateTo}
-              onChangeText={(t) => { setDateTo(t); setPage(1); }}
-              placeholder="To (YYYY-MM-DD)"
+              onChangeText={(tx) => { setDateTo(tx); setPage(1); }}
+              placeholder={t('trading.toDate')}
               placeholderTextColor={colors.textMuted}
               style={[s.dateInput, { color: colors.textPrimary }]}
               maxLength={10}
@@ -518,7 +519,7 @@ function TradingScreen() {
           style={[s.clearBtn, { borderColor: colors.danger }]}
         >
           <FontAwesome name="times" size={12} color={colors.danger} />
-          <Text style={[s.clearBtnText, { color: colors.danger }]}>Clear All Filters</Text>
+          <Text style={[s.clearBtnText, { color: colors.danger }]}>{t('trading.clearAllFilters')}</Text>
         </Pressable>
       )}
 
@@ -527,8 +528,8 @@ function TradingScreen() {
         <FontAwesome name="search" size={14} color={colors.textMuted} />
         <TextInput
           value={search}
-          onChangeText={(t) => { setSearch(t); setPage(1); }}
-          placeholder="Search symbol, portfolio, notes..."
+          onChangeText={(tx) => { setSearch(tx); setPage(1); }}
+          placeholder={t('trading.searchPlaceholder')}
           placeholderTextColor={colors.textMuted}
           style={[s.searchInput, { color: colors.textPrimary }]}
           returnKeyType="search"
@@ -545,7 +546,7 @@ function TradingScreen() {
       {/* Results count */}
       <View style={s.resultsRow}>
         <Text style={[s.resultsText, { color: colors.textSecondary }]}>
-          {data?.pagination?.total_items ?? 0} transactions
+          {data?.pagination?.total_items ?? 0} {t('trading.transactionsLabel')}
           {portfolios.length ? ` · ${portfolios.join(", ")}` : ""}
           {txnTypes.length ? ` · ${txnTypes.join(", ")}` : ""}
           {dateFrom ? ` · from ${dateFrom}` : ""}
@@ -574,7 +575,7 @@ function TradingScreen() {
             <FontAwesome name="refresh" size={13} color={colors.accentPrimary} />
           )}
           <Text style={[s.actionBtnText, { color: colors.accentPrimary }]}>
-            {recalcMutation.isPending ? "Recalculating..." : "Recalculate WAC"}
+            {recalcMutation.isPending ? t('trading.recalculating') : t('trading.recalculateWAC')}
           </Text>
         </Pressable>
 
@@ -589,14 +590,14 @@ function TradingScreen() {
           ]}
         >
           <FontAwesome name="download" size={13} color={colors.success} />
-          <Text style={[s.actionBtnText, { color: colors.success }]}>Export Excel</Text>
+          <Text style={[s.actionBtnText, { color: colors.success }]}>{t('trading.exportExcel')}</Text>
         </Pressable>
       </View>
 
       {/* Section header: Transaction Log */}
       <View style={[s.sectionHeader, { borderBottomColor: colors.borderColor }]}>
         <FontAwesome name="list" size={14} color={colors.success} />
-        <Text style={[s.sectionTitle, { color: colors.textPrimary }]}>Transaction Log</Text>
+        <Text style={[s.sectionTitle, { color: colors.textPrimary }]}>{t('trading.transactionLog')}</Text>
       </View>
 
       {/* View / Edit mode toggle */}
@@ -612,7 +613,7 @@ function TradingScreen() {
         >
           <FontAwesome name="bar-chart" size={12} color={!editMode ? "#fff" : colors.textSecondary} />
           <Text style={[editStyles.modeBtnText, { color: !editMode ? "#fff" : colors.textSecondary }]}>
-            View
+            {t('trading.view')}
           </Text>
         </Pressable>
         <Pressable
@@ -626,7 +627,7 @@ function TradingScreen() {
         >
           <FontAwesome name="pencil" size={12} color={editMode ? "#fff" : colors.textSecondary} />
           <Text style={[editStyles.modeBtnText, { color: editMode ? "#fff" : colors.textSecondary }]}>
-            Edit
+            {t('trading.editMode')}
           </Text>
         </Pressable>
       </View>
@@ -636,7 +637,7 @@ function TradingScreen() {
         <View style={[editStyles.editWarning, { backgroundColor: "#f59e0b18", borderColor: "#f59e0b50" }]}>
           <FontAwesome name="exclamation-triangle" size={14} color="#f59e0b" />
           <Text style={[editStyles.editWarningText, { color: "#f59e0b" }]}>
-            Editing here updates the main transactions table. Changes affect portfolio positions and cash.
+            {t('trading.editWarning')}
           </Text>
         </View>
       )}
@@ -663,7 +664,7 @@ function TradingScreen() {
                 <FontAwesome name="save" size={13} color={colors.accentPrimary} />
               )}
               <Text style={[editStyles.editActionBtnText, { color: colors.accentPrimary }]}>
-                {isSaving ? "Saving..." : "Save Changes"}
+                {isSaving ? t('trading.savingChanges') : t('trading.saveChanges')}
               </Text>
             </Pressable>
 
@@ -693,7 +694,7 @@ function TradingScreen() {
                   { color: selectedIds.size > 0 ? colors.danger : colors.textMuted },
                 ]}
               >
-                Delete ({selectedIds.size})
+                {t('trading.deleteCount', { count: selectedIds.size })}
               </Text>
             </Pressable>
 
@@ -702,7 +703,7 @@ function TradingScreen() {
               style={[editStyles.editActionBtn, { borderColor: colors.borderColor }]}
             >
               <FontAwesome name="times" size={13} color={colors.textSecondary} />
-              <Text style={[editStyles.editActionBtnText, { color: colors.textSecondary }]}>Cancel</Text>
+              <Text style={[editStyles.editActionBtnText, { color: colors.textSecondary }]}>{t('app.cancel')}</Text>
             </Pressable>
           </View>
 
@@ -710,7 +711,7 @@ function TradingScreen() {
           {deleteConfirmPending && (
             <View style={[editStyles.confirmOverlay, { backgroundColor: colors.danger + "10", borderColor: colors.danger + "50" }]}>
               <Text style={[editStyles.confirmText, { color: colors.danger }]}>
-                âڑ ï¸ڈ CONFIRM DELETE: You are about to permanently delete {selectedIds.size} transaction(s). This cannot be undone!
+                {t('trading.confirmDeleteMsg', { count: selectedIds.size })}
               </Text>
               <View style={editStyles.confirmBtnRow}>
                 <Pressable
@@ -724,7 +725,7 @@ function TradingScreen() {
                     <FontAwesome name="check" size={11} color="#fff" />
                   )}
                   <Text style={[editStyles.confirmBtnText, { color: "#fff" }]}>
-                    {isDeleting ? "Deleting..." : "Yes, Delete"}
+                    {isDeleting ? t('trading.deleting') : t('trading.yesDelete')}
                   </Text>
                 </Pressable>
                 <Pressable
@@ -732,7 +733,7 @@ function TradingScreen() {
                   style={[editStyles.confirmBtn, { borderColor: colors.borderColor }]}
                 >
                   <FontAwesome name="times" size={11} color={colors.textSecondary} />
-                  <Text style={[editStyles.confirmBtnText, { color: colors.textSecondary }]}>Cancel</Text>
+                  <Text style={[editStyles.confirmBtnText, { color: colors.textSecondary }]}>{t('app.cancel')}</Text>
                 </Pressable>
               </View>
             </View>
@@ -743,7 +744,7 @@ function TradingScreen() {
       {/* Hint for view mode */}
       {!editMode && (
         <Text style={{ fontSize: 11, color: colors.textMuted, marginBottom: 6 }}>
-          Switch to <Text style={{ fontWeight: "700" }}>Edit</Text> mode to modify transactions.
+          {t('trading.switchToEdit')}
         </Text>
       )}
     </View>
@@ -771,10 +772,10 @@ function TradingScreen() {
           <View style={s.empty}>
             <FontAwesome name="bar-chart" size={48} color={colors.textMuted} />
             <Text style={[s.emptyText, { color: colors.textSecondary }]}>
-              No transactions found
+              {t('trading.noTransactions')}
             </Text>
             <Text style={[s.emptyHint, { color: colors.textMuted }]}>
-              Use "Add Transactions" to record trades
+              {t('trading.addTransactionsHint')}
             </Text>
           </View>
         ) : editMode ? (

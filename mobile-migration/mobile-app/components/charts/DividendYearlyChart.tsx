@@ -50,6 +50,8 @@ export interface YearlyDividendData {
 
 interface Props {
   data: YearlyDividendData[];
+  /** Optional projected data — rendered with dashed border / translucent fill */
+  projectedData?: YearlyDividendData[];
   currency?: string;
   height?: number;
 }
@@ -74,6 +76,7 @@ function fmtVal(v: number): string {
 
 export default function DividendYearlyChart({
   data,
+  projectedData,
   currency = "KWD",
   height: chartHeight = 260,
 }: Props) {
@@ -114,10 +117,28 @@ export default function DividendYearlyChart({
   const chartW = Math.max(0, width - PADDING_LEFT - PADDING_RIGHT);
   const chartH = Math.max(0, chartHeight - PADDING_TOP - PADDING_BOTTOM);
 
+  // Combine historical + projected for geometry calculations
+  const allData = useMemo(() => {
+    const combined = [...data];
+    if (projectedData) {
+      for (const p of projectedData) {
+        if (!combined.find((d) => d.year === p.year)) {
+          combined.push(p);
+        }
+      }
+    }
+    return combined.sort((a, b) => a.year.localeCompare(b.year));
+  }, [data, projectedData]);
+
+  const projectedYears = useMemo(
+    () => new Set(projectedData?.map((p) => p.year) ?? []),
+    [projectedData],
+  );
+
   const maxVal = useMemo(() => {
-    const m = Math.max(...data.map((d) => d.amount), 0);
+    const m = Math.max(...allData.map((d) => d.amount), 0);
     return niceMax(m * 1.1);
-  }, [data]);
+  }, [allData]);
 
   // Y-axis ticks (4 ticks)
   const yTicks = useMemo(() => {
@@ -128,19 +149,20 @@ export default function DividendYearlyChart({
   }, [maxVal]);
 
   // Bar geometry
-  const barGap = data.length > 8 ? 4 : 8;
-  const barWidth = data.length > 0
-    ? Math.max(12, (chartW - barGap * (data.length - 1)) / data.length)
+  const barGap = allData.length > 8 ? 4 : 8;
+  const barWidth = allData.length > 0
+    ? Math.max(12, (chartW - barGap * (allData.length - 1)) / allData.length)
     : 0;
 
   const bars = useMemo(() => {
-    return data.map((d, i) => {
+    return allData.map((d, i) => {
       const x = PADDING_LEFT + i * (barWidth + barGap);
       const barH = maxVal > 0 ? (d.amount / maxVal) * chartH : 0;
       const y = PADDING_TOP + chartH - barH;
-      return { x, y, w: barWidth, h: barH, ...d };
+      const isProjected = projectedYears.has(d.year);
+      return { x, y, w: barWidth, h: barH, isProjected, ...d };
     });
-  }, [data, barWidth, barGap, chartH, maxVal]);
+  }, [allData, barWidth, barGap, chartH, maxVal, projectedYears]);
 
   // ── Touch / hover ─────────────────────────────────────────────────
 
@@ -168,7 +190,7 @@ export default function DividendYearlyChart({
     [bars, barGap]
   );
 
-  if (!data.length || width === 0) {
+  if (!allData.length || width === 0) {
     return (
       <Animated.View style={[s.container, containerStyle]} onLayout={onLayout}>
         {width > 0 && (
@@ -222,6 +244,10 @@ export default function DividendYearlyChart({
               <Stop offset="0%" stopColor={colors.success} stopOpacity={1} />
               <Stop offset="100%" stopColor={colors.accentPrimary} stopOpacity={1} />
             </LinearGradient>
+            <LinearGradient id="barGradProjected" x1="0" y1="0" x2="0" y2="1">
+              <Stop offset="0%" stopColor={colors.warning} stopOpacity={0.5} />
+              <Stop offset="100%" stopColor={colors.accentSecondary ?? colors.accentPrimary} stopOpacity={0.3} />
+            </LinearGradient>
           </Defs>
 
           {/* Y-axis grid lines + labels */}
@@ -257,6 +283,9 @@ export default function DividendYearlyChart({
           {bars.map((bar, i) => {
             const isActive = activeIdx === i;
             const radius = Math.min(6, bar.w / 3);
+            const fillId = bar.isProjected
+              ? "url(#barGradProjected)"
+              : isActive ? "url(#barGradActive)" : "url(#barGrad)";
             return (
               <G key={`bar-${i}`}>
                 {/* Bar body (rect) */}
@@ -267,9 +296,26 @@ export default function DividendYearlyChart({
                   height={Math.max(0, bar.h)}
                   rx={radius}
                   ry={radius}
-                  fill={isActive ? "url(#barGradActive)" : "url(#barGrad)"}
+                  fill={fillId}
                   opacity={activeIdx !== null && !isActive ? 0.4 : 1}
                 />
+
+                {/* Dashed border for projected bars */}
+                {bar.isProjected && bar.h > 0 && (
+                  <Rect
+                    x={bar.x}
+                    y={bar.y}
+                    width={bar.w}
+                    height={bar.h}
+                    rx={radius}
+                    ry={radius}
+                    fill="none"
+                    stroke={colors.warning}
+                    strokeWidth={2}
+                    strokeDasharray="6,3"
+                    opacity={0.8}
+                  />
+                )}
 
                 {/* Glow effect for active bar */}
                 {isActive && bar.h > 0 && (

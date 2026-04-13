@@ -5,6 +5,7 @@
  * Uses React Query for data fetching and pull-to-refresh.
  */
 
+import { ReconciliationModal } from "@/components/portfolio/ReconciliationModal";
 import KfhTradeImportButton from "@/components/trading/KfhTradeImportButton";
 import { withErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { ErrorScreen } from "@/components/ui/ErrorScreen";
@@ -15,20 +16,34 @@ import { useTransactions } from "@/hooks/queries";
 import { useResponsive } from "@/hooks/useResponsive";
 import { useDeleteTransaction } from "@/hooks/useTransactionMutations";
 import { formatCurrency } from "@/lib/currency";
-import { TransactionRecord } from "@/services/api";
+import type { ReconciliationSummary } from "@/lib/reconciliation/utils";
+import { buildReconciliationSummary } from "@/lib/reconciliation/utils";
+import {
+  deleteDeposit,
+  getTransactions as fetchAllTransactions,
+  getCashBalances,
+  getDeposits,
+  getHoldings,
+  setCashOverride,
+  TransactionRecord,
+} from "@/services/api";
+import { useApplyReconciliation } from "@/services/api/reconciliation";
 import { useThemeStore } from "@/services/themeStore";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import { FlashList } from "@shopify/flash-list";
+import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
 import React, { useCallback, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
-    Alert,
-    Platform,
-    Pressable,
-    RefreshControl,
-    StyleSheet,
-    Text,
-    View,
+  ActivityIndicator,
+  Alert,
+  Platform,
+  Pressable,
+  RefreshControl,
+  StyleSheet,
+  Text,
+  View,
 } from "react-native";
 
 // ── Transaction Row ─────────────────────────────────────────────────
@@ -45,9 +60,15 @@ const TxnRow = React.memo(function TxnRow({
   onDelete?: (txn: TransactionRecord) => void;
 }) {
   const isBuy = txn.txn_type === "Buy";
-  const amount = isBuy ? txn.purchase_cost : txn.sell_value;
+  const isDividend = txn.txn_type === "DIVIDEND_ONLY";
+  const amount = isDividend
+    ? txn.cash_dividend
+    : isBuy
+      ? txn.purchase_cost
+      : txn.sell_value;
   const amountColor = isBuy ? colors.danger : colors.success;
-  const typeLabel = isBuy ? "BUY" : "SELL";
+  const typeLabel = isDividend ? "CASH DIVIDEND" : isBuy ? "BUY" : "SELL";
+  const icon = isDividend ? "money" : isBuy ? "arrow-down" : "arrow-up";
 
   return (
     <View
@@ -68,7 +89,7 @@ const TxnRow = React.memo(function TxnRow({
           ]}
         >
           <FontAwesome
-            name={isBuy ? "arrow-down" : "arrow-up"}
+            name={icon}
             size={12}
             color={amountColor}
           />
@@ -81,7 +102,7 @@ const TxnRow = React.memo(function TxnRow({
             {txn.stock_symbol}
           </Text>
           <Text style={[styles.meta, { color: colors.textSecondary }]}>
-            {typeLabel} · {txn.shares} shares · {txn.txn_date}
+            {typeLabel} · {isDividend ? "" : `${txn.shares} shares · `}{txn.txn_date}
           </Text>
         </View>
       </View>
@@ -117,15 +138,138 @@ const TxnRow = React.memo(function TxnRow({
   );
 });
 
+// ── Reconciliation Summary Banner ───────────────────────────────────
+
+const ReconBanner = React.memo(function ReconBanner({
+  summary,
+  portfolio,
+  colors,
+  onReview,
+  onDismiss,
+}: {
+  summary: ReconciliationSummary;
+  portfolio: string;
+  colors: ThemePalette;
+  onReview: () => void;
+  onDismiss: () => void;
+}) {
+  const { t } = useTranslation();
+  const hasDiscrepancy = Math.abs(summary.discrepancy) > 0.01;
+  const hasWithdrawals = (summary.allWithdrawals ?? []).length > 0;
+  const hasOrphanedSells = (summary.orphanedSells ?? []).length > 0;
+  const borderColor = hasDiscrepancy ? colors.warning : colors.success;
+
+  return (
+    <View
+      style={[
+        rs.banner,
+        {
+          backgroundColor: colors.bgCard,
+          borderColor,
+          borderLeftWidth: 4,
+        },
+      ]}
+    >
+      <View style={rs.bannerHeader}>
+        <FontAwesome
+          name={hasDiscrepancy ? "exclamation-triangle" : "check-circle"}
+          size={16}
+          color={borderColor}
+        />
+        <Text style={[rs.bannerTitle, { color: colors.textPrimary }]}>
+          {t("reconciliation.sectionTitle")} — {portfolio}
+        </Text>
+        <Pressable onPress={onDismiss} hitSlop={12}>
+          <FontAwesome name="times" size={14} color={colors.textMuted} />
+        </Pressable>
+      </View>
+
+      {/* Discrepancy row */}
+      <View style={rs.statRow}>
+        <Text style={[rs.statLabel, { color: colors.textSecondary }]}>
+          {t("reconciliation.manualDeposits")}
+        </Text>
+        <Text style={[rs.statValue, { color: colors.textPrimary }]}>
+          {formatCurrency(summary.manualTotalDeposits, "KWD")}
+        </Text>
+      </View>
+      <View style={rs.statRow}>
+        <Text style={[rs.statLabel, { color: colors.textSecondary }]}>
+          {t("reconciliation.computedCash")}
+        </Text>
+        <Text style={[rs.statValue, { color: colors.textPrimary }]}>
+          {formatCurrency(summary.computedCashFromTxns, "KWD")}
+        </Text>
+      </View>
+      {hasDiscrepancy && (
+        <View style={[rs.statRow, { marginTop: 4 }]}>
+          <Text style={[rs.statLabel, { color: colors.warning, fontWeight: "600" }]}>
+            {t("reconciliation.discrepancy")} ({summary.discrepancyPct.toFixed(1)}%)
+          </Text>
+          <Text style={[rs.statValue, { color: colors.warning, fontWeight: "700" }]}>
+            {formatCurrency(summary.discrepancy, "KWD")}
+          </Text>
+        </View>
+      )}
+
+      {/* Withdrawal transactions count */}
+      {hasWithdrawals && (
+        <View style={[rs.flagRow, { backgroundColor: colors.warning + "15" }]}>
+          <FontAwesome name="flag" size={12} color={colors.warning} />
+          <Text style={[rs.flagText, { color: colors.textSecondary }]}>
+            {summary.allWithdrawals.length} {t("reconciliation.withdrawalTransactions").toLowerCase()}
+          </Text>
+        </View>
+      )}
+
+      {/* Orphaned sells count */}
+      {hasOrphanedSells && (
+        <View style={[rs.flagRow, { backgroundColor: colors.danger + "15" }]}>
+          <FontAwesome name="exclamation-circle" size={12} color={colors.danger} />
+          <Text style={[rs.flagText, { color: colors.textSecondary }]}>
+            {summary.orphanedSells.length} {t("reconciliation.orphanedSells").toLowerCase()}
+          </Text>
+        </View>
+      )}
+
+      {/* Actions */}
+      <View style={rs.actions}>
+        <Pressable
+          onPress={onReview}
+          style={[rs.reviewBtn, { backgroundColor: colors.accentPrimary }]}
+        >
+          <FontAwesome name="balance-scale" size={12} color="#fff" />
+          <Text style={rs.reviewBtnText}>{t("reconciliation.reviewManually")}</Text>
+        </Pressable>
+        <Pressable onPress={onDismiss} style={[rs.dismissBtn, { borderColor: colors.borderColor }]}>
+          <Text style={[rs.dismissBtnText, { color: colors.textSecondary }]}>
+            {t("reconciliation.skip")}
+          </Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+});
+
 // ── Main Screen ─────────────────────────────────────────────────────
 
 function TransactionsScreen() {
   const { colors } = useThemeStore();
   const { isDesktop } = useResponsive();
   const router = useRouter();
+  const { t } = useTranslation();
+  const queryClient = useQueryClient();
   const [page, setPage] = useState(1);
   const [portfolioFilter, setPortfolioFilter] = useState<string | undefined>(undefined);
   const [typeFilter, setTypeFilter] = useState<string | undefined>(undefined);
+
+  // Reconciliation state
+  const [reconSummary, setReconSummary] = useState<ReconciliationSummary | null>(null);
+  const [reconPortfolio, setReconPortfolio] = useState("KFH");
+  const [reconModalVisible, setReconModalVisible] = useState(false);
+  const [reconLoading, setReconLoading] = useState(false);
+  const [reconDeleting, setReconDeleting] = useState(false);
+  const reconMutation = useApplyReconciliation(reconPortfolio);
 
   const { data, isLoading, isError, error, refetch, isFetching } = useTransactions({
     page,
@@ -162,6 +306,106 @@ function TransactionsScreen() {
     refetch();
   }, [refetch]);
 
+  // ── Reconciliation: post-import handler ─────────────────────────
+  const handleImportComplete = useCallback(async () => {
+    refetch();
+    setReconLoading(true);
+    try {
+      const pf = "KFH";
+      const [txnData, depData, cashData, holdingsData] = await Promise.all([
+        fetchAllTransactions({ portfolio: pf, per_page: 10000 }),
+        getDeposits({ portfolio: pf, page_size: 10000 }),
+        getCashBalances(true),
+        getHoldings(pf),
+      ]);
+      const txns = txnData.transactions ?? [];
+      const deposits = depData.deposits ?? [];
+      const holdings = holdingsData.holdings ?? [];
+      const cashBal = cashData[pf];
+      const manualDeposits = cashBal?.manual_override ? cashBal.balance : 0;
+      const computedCash = cashBal?.balance ?? 0;
+      const summary = buildReconciliationSummary(txns, deposits, manualDeposits, computedCash, undefined, holdings);
+      console.log("[Reconciliation]", {
+        txns: txns.length,
+        deposits: deposits.length,
+        holdings: holdings.length,
+        cashBal: !!cashBal,
+        manualDeposits,
+        computedCash,
+        withdrawals: summary.allWithdrawals.length,
+        orphanedSells: summary.orphanedSells.length,
+        discrepancy: summary.discrepancy,
+      });
+      if (
+        summary.allWithdrawals.length > 0 ||
+        summary.orphanedSells.length > 0 ||
+        Math.abs(summary.discrepancy) > 0.01
+      ) {
+        setReconSummary(summary);
+        setReconPortfolio(pf);
+        setReconModalVisible(true);
+      }
+    } catch (err) {
+      console.error("[Reconciliation] Error:", err);
+    } finally {
+      setReconLoading(false);
+    }
+  }, [refetch]);
+
+  const handleReconApply = useCallback(
+    async (flaggedIds: number[], openingAmount: number, openingDate: string) => {
+      try {
+        await reconMutation.mutateAsync({
+          withdrawalIds: flaggedIds,
+          openingBalanceAmount: openingAmount,
+          openingBalanceDate: openingDate,
+        });
+      } catch {
+        // Fallback: set cash override if backend endpoint doesn't exist
+        try {
+          const newBalance = (reconSummary?.computedCashFromTxns ?? 0) + openingAmount;
+          await setCashOverride(reconPortfolio, newBalance, "KWD");
+          queryClient.invalidateQueries({ queryKey: ["cash-balances"] });
+        } catch { /* ignore */ }
+      }
+      setReconModalVisible(false);
+      setReconSummary(null);
+      refetch();
+    },
+    [reconPortfolio, reconSummary, reconMutation, queryClient, refetch],
+  );
+
+  const handleReconDismiss = useCallback(() => {
+    setReconSummary(null);
+    setReconModalVisible(false);
+  }, []);
+
+  // Delete selected withdrawal deposits + orphaned-sell transactions after confirmation
+  const handleDeleteTransactions = useCallback(
+    async (depositIds: number[], txnIds: number[]) => {
+      if (depositIds.length === 0 && txnIds.length === 0) return;
+      setReconDeleting(true);
+      try {
+        // Delete withdrawal deposit records
+        for (const id of depositIds) {
+          await deleteDeposit(id);
+        }
+        // Delete orphaned sell transactions
+        for (const id of txnIds) {
+          await deleteMutation.mutateAsync(id);
+        }
+        setReconModalVisible(false);
+        setReconSummary(null);
+        refetch();
+      } catch (err) {
+        console.error("[Reconciliation] Delete error:", err);
+      } finally {
+        setReconDeleting(false);
+      }
+    },
+    [deleteMutation, refetch],
+  );
+
   if (isLoading) return <TransactionsSkeleton />;
   if (isError)
     return (
@@ -194,7 +438,7 @@ function TransactionsScreen() {
             {data?.count ?? 0} total
           </Text>
         </View>
-        <KfhTradeImportButton portfolio="KFH" onImportComplete={() => refetch()} />
+        <KfhTradeImportButton portfolio="KFH" onImportComplete={handleImportComplete} />
       </View>
 
       {/* Filters */}
@@ -209,17 +453,38 @@ function TransactionsScreen() {
           />
         ))}
         <View style={{ width: 8 }} />
-        {[undefined, "Buy", "Sell"].map((tp) => (
+        {[undefined, "Buy", "Sell", "DIVIDEND_ONLY"].map((tp) => (
           <FilterChip
             key={tp ?? "any"}
-            label={tp ?? "All Types"}
+            label={tp === "DIVIDEND_ONLY" ? "Dividend" : tp ?? "All Types"}
             active={typeFilter === tp}
             onPress={() => setTypeFilter(tp)}
-            activeColor={tp === "Buy" ? colors.danger : tp === "Sell" ? colors.success : undefined}
+            activeColor={tp === "Buy" ? colors.danger : tp === "Sell" ? colors.success : tp === "DIVIDEND_ONLY" ? colors.accentPrimary : undefined}
             colors={colors}
           />
         ))}
       </View>
+
+      {/* Reconciliation loading */}
+      {reconLoading && (
+        <View style={[rs.loadingRow, { borderBottomColor: colors.borderColor }]}>
+          <ActivityIndicator size="small" color={colors.accentPrimary} />
+          <Text style={[rs.loadingText, { color: colors.textSecondary }]}>
+            {t("reconciliation.loading")}
+          </Text>
+        </View>
+      )}
+
+      {/* Reconciliation summary banner (shown after upload) */}
+      {reconSummary && !reconLoading && (
+        <ReconBanner
+          summary={reconSummary}
+          portfolio={reconPortfolio}
+          colors={colors}
+          onReview={() => setReconModalVisible(true)}
+          onDismiss={handleReconDismiss}
+        />
+      )}
 
       {/* List */}
       <FlashList
@@ -318,6 +583,23 @@ function TransactionsScreen() {
       >
         <FontAwesome name="plus" size={22} color="#fff" />
       </Pressable>
+
+      {/* Reconciliation detail modal */}
+      {reconSummary && (
+        <ReconciliationModal
+          visible={reconModalVisible}
+          onClose={() => setReconModalVisible(false)}
+          summary={reconSummary}
+          portfolio={reconPortfolio}
+          currency="KWD"
+          colors={colors}
+          onApply={handleReconApply}
+          onDeleteTransactions={handleDeleteTransactions}
+          onSkip={handleReconDismiss}
+          applying={reconMutation.isPending}
+          deleting={reconDeleting}
+        />
+      )}
     </View>
   );
 }
@@ -405,6 +687,71 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
     elevation: 6,
   },
+});
+
+// ── Reconciliation Banner Styles ────────────────────────────────────
+
+const rs = StyleSheet.create({
+  banner: {
+    marginHorizontal: 16,
+    marginTop: 12,
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  bannerHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 10,
+  },
+  bannerTitle: { flex: 1, fontSize: 14, fontWeight: "700" },
+  statRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingVertical: 3,
+  },
+  statLabel: { fontSize: 13 },
+  statValue: { fontSize: 13, fontWeight: "600" },
+  flagRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginTop: 8,
+    padding: 8,
+    borderRadius: 8,
+  },
+  flagText: { fontSize: 12 },
+  actions: {
+    flexDirection: "row",
+    gap: 8,
+    marginTop: 12,
+  },
+  reviewBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  reviewBtnText: { color: "#fff", fontSize: 13, fontWeight: "600" },
+  dismissBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  dismissBtnText: { fontSize: 13 },
+  loadingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+  },
+  loadingText: { fontSize: 13 },
 });
 
 export default withErrorBoundary(TransactionsScreen, "Unable to load Transactions. Please try again.");

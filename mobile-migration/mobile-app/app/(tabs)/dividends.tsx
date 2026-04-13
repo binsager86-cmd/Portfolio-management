@@ -24,24 +24,30 @@ import {
 import DividendYearlyChart, { type YearlyDividendData } from "@/components/charts/DividendYearlyChart";
 import { ErrorScreen } from "@/components/ui/ErrorScreen";
 import { DividendsSkeleton } from "@/components/ui/PageSkeletons";
-import { useAllDividends, useBonusShares, useDividends, useDividendsByStock } from "@/hooks/queries";
+import { useAllDividends, useBonusShares, useDividends, useDividendsByStock, useHoldings } from "@/hooks/queries";
 import { useResponsive } from "@/hooks/useResponsive";
 import { useScreenStyles } from "@/hooks/useScreenStyles";
 import { formatCurrency } from "@/lib/currency";
+import { projectPortfolioDividends, type PortfolioProjectionSummary } from "@/lib/dividendProjector";
 import { showErrorAlert } from "@/lib/errorHandling";
 import { exportYieldCalcPdf } from "@/lib/exportYieldPdf";
 import { deleteDividend } from "@/services/api";
 import { useThemeStore } from "@/services/themeStore";
+import { useUserPrefsStore } from "@/src/store/userPrefsStore";
+import { useTranslation } from "react-i18next";
 
-type TabKey = "all" | "by-stock" | "bonus" | "calculator";
+type TabKey = "all" | "by-stock" | "bonus" | "calculator" | "projections";
 
 export default function DividendsScreen() {
   const { colors } = useThemeStore();
   const ss = useScreenStyles();
   const { isDesktop } = useResponsive();
   const queryClient = useQueryClient();
+  const { t } = useTranslation();
+  const expertiseLevel = useUserPrefsStore((s) => s.preferences.expertiseLevel);
   const [tab, setTab] = useState<TabKey>("all");
   const [page, setPage] = useState(1);
+  const [showProjectionOnChart, setShowProjectionOnChart] = useState(false);
 
   // ── Yield Calculator state ──
   const [calcCompanyName, setCalcCompanyName] = useState("");
@@ -69,6 +75,9 @@ export default function DividendsScreen() {
   // All dividends for the yearly chart
   const { data: allDivData } = useAllDividends();
 
+  // Holdings for projections
+  const { data: holdingsResp } = useHoldings();
+
   const yearlyChartData = useMemo<YearlyDividendData[]>(() => {
     const divs = allDivData?.dividends ?? [];
     if (!divs.length) return [];
@@ -83,26 +92,42 @@ export default function DividendsScreen() {
       .map((year) => ({ year, amount: byYear[year] }));
   }, [allDivData]);
 
+  // Dividend projection
+  const projection = useMemo<PortfolioProjectionSummary | null>(() => {
+    const holdings = holdingsResp?.holdings;
+    if (!holdings || holdings.length === 0) return null;
+    const byStockDivs = byStockData?.stocks;
+    return projectPortfolioDividends(holdings, byStockDivs);
+  }, [holdingsResp, byStockData]);
+
+  // Projected chart data — next year as a dashed bar
+  const projectedChartData = useMemo<YearlyDividendData[]>(() => {
+    if (!projection || projection.totalProjected <= 0) return [];
+    const currentYear = new Date().getFullYear();
+    const nextYear = String(currentYear + 1);
+    return [{ year: nextYear, amount: projection.totalProjected }];
+  }, [projection]);
+
   const deleteMut = useMutation({
     mutationFn: (id: number) => deleteDividend(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["dividends"] });
       queryClient.invalidateQueries({ queryKey: ["dividends-by-stock"] });
       queryClient.invalidateQueries({ queryKey: ["bonus-shares"] });
-      const msg = "Dividend record deleted";
-      Platform.OS === "web" ? window.alert(msg) : Alert.alert("Success", msg);
+      const msg = t("dividends.recordDeleted");
+      Platform.OS === "web" ? window.alert(msg) : Alert.alert(t("dividends.success"), msg);
     },
-    onError: (err) => showErrorAlert("Error", err, "Delete failed"),
+    onError: (err) => showErrorAlert(t("dividends.error"), err, t("dividends.deleteFailed")),
   });
 
   const handleDelete = (id: number) => {
     const doDelete = () => deleteMut.mutate(id);
     if (Platform.OS === "web") {
-      if (window.confirm("Delete this dividend record?")) doDelete();
+      if (window.confirm(t("dividends.deleteRecord"))) doDelete();
     } else {
-      Alert.alert("Confirm", "Delete this dividend record?", [
-        { text: "Cancel", style: "cancel" },
-        { text: "Delete", style: "destructive", onPress: doDelete },
+      Alert.alert(t("dividends.confirm"), t("dividends.deleteRecord"), [
+        { text: t("dividends.cancel"), style: "cancel" },
+        { text: t("dividends.deleteAction"), style: "destructive", onPress: doDelete },
       ]);
     }
   };
@@ -192,7 +217,7 @@ export default function DividendsScreen() {
 
   if (isLoading) return <DividendsSkeleton />;
   if (isError)
-    return <ErrorScreen message={error?.message ?? "Failed to load dividends"} onRetry={refetch} />;
+    return <ErrorScreen message={error?.message ?? t("dividends.failedToLoad")} onRetry={refetch} />;
 
   const dividends = divData?.dividends ?? [];
   const totals = divData?.totals;
@@ -200,37 +225,44 @@ export default function DividendsScreen() {
   const bonusRecords = bonusData?.records ?? [];
   const bonusByStock = bonusData?.by_stock ?? [];
 
-  const TABS: { key: TabKey; label: string }[] = [
-    { key: "all", label: "All Dividends" },
-    { key: "by-stock", label: "By Stock" },
-    { key: "bonus", label: "Bonus Shares" },
-    { key: "calculator", label: "Yield Calc" },
+  const TABS: { key: TabKey; label: string; minLevel?: 'normal' | 'intermediate' | 'advanced' }[] = [
+    { key: "all", label: t("dividends.allDividends") },
+    { key: "by-stock", label: t("dividends.byStock") },
+    { key: "bonus", label: t("dividends.bonusShares"), minLevel: "intermediate" },
+    { key: "projections", label: t("dividends.projections") },
+    { key: "calculator", label: t("dividends.yieldCalc") },
   ];
+
+  const levelOrder = ["normal", "intermediate", "advanced"] as const;
+  const visibleTabs = TABS.filter((t) => {
+    if (!t.minLevel) return true;
+    return levelOrder.indexOf(expertiseLevel) >= levelOrder.indexOf(t.minLevel);
+  });
 
   return (
     <View style={ss.container}>
       {/* Header */}
       <View style={ss.header}>
-        <Text style={ss.title}>Dividends Tracker</Text>
+        <Text style={ss.title}>{t("dividends.title")}</Text>
       </View>
 
       {/* Totals Row */}
       {totals && (
         <View style={[s.totalsRow, { borderBottomColor: colors.borderColor }]}>
           <View style={[s.totalCard, { backgroundColor: colors.bgCard, borderColor: colors.borderColor }]}>
-            <Text style={[s.totalLabel, { color: colors.textSecondary }]}>Cash Dividends</Text>
+            <Text style={[s.totalLabel, { color: colors.textSecondary }]}>{t("dividends.cashDividends")}</Text>
             <Text style={[s.totalValue, { color: colors.success }]}>{formatCurrency(totals.total_cash_dividend_kwd, "KWD")}</Text>
           </View>
           <View style={[s.totalCard, { backgroundColor: colors.bgCard, borderColor: colors.borderColor }]}>
-            <Text style={[s.totalLabel, { color: colors.textSecondary }]}>Bonus Shares</Text>
+            <Text style={[s.totalLabel, { color: colors.textSecondary }]}>{t("dividends.bonusShares")}</Text>
             <Text style={[s.totalValue, { color: colors.accentPrimary }]}>{totals.total_bonus_shares.toLocaleString()}</Text>
           </View>
           <View style={[s.totalCard, { backgroundColor: colors.bgCard, borderColor: colors.borderColor }]}>
-            <Text style={[s.totalLabel, { color: colors.textSecondary }]}>Reinvested</Text>
+            <Text style={[s.totalLabel, { color: colors.textSecondary }]}>{t("dividends.reinvested")}</Text>
             <Text style={[s.totalValue, { color: colors.accentPrimary }]}>{formatCurrency(totals.total_reinvested_kwd, "KWD")}</Text>
           </View>
           <View style={[s.totalCard, { backgroundColor: colors.bgCard, borderColor: colors.borderColor }]}>
-            <Text style={[s.totalLabel, { color: colors.textSecondary }]}>Stocks</Text>
+            <Text style={[s.totalLabel, { color: colors.textSecondary }]}>{t("dividends.stocks")}</Text>
             <Text style={[s.totalValue, { color: colors.textPrimary }]}>{totals.unique_stocks}</Text>
           </View>
         </View>
@@ -239,7 +271,32 @@ export default function DividendsScreen() {
       {/* Yearly Dividend Chart */}
       {yearlyChartData.length > 0 && (
         <View style={[s.chartContainer, { backgroundColor: colors.bgCard, borderColor: colors.borderColor }]}>
-          <DividendYearlyChart data={yearlyChartData} currency="KWD" />
+          {projection && projection.totalProjected > 0 && (
+            <Pressable
+              onPress={() => setShowProjectionOnChart((v) => !v)}
+              style={[
+                s.projectionToggle,
+                {
+                  backgroundColor: showProjectionOnChart ? colors.warning + "20" : colors.bgPrimary,
+                  borderColor: showProjectionOnChart ? colors.warning : colors.borderColor,
+                },
+              ]}
+            >
+              <FontAwesome
+                name={showProjectionOnChart ? "eye" : "eye-slash"}
+                size={13}
+                color={showProjectionOnChart ? colors.warning : colors.textMuted}
+              />
+              <Text style={{ color: showProjectionOnChart ? colors.warning : colors.textMuted, fontSize: 12, fontWeight: "600" }}>
+                {t("dividends.projectionMode")}
+              </Text>
+            </Pressable>
+          )}
+          <DividendYearlyChart
+            data={yearlyChartData}
+            projectedData={showProjectionOnChart ? projectedChartData : undefined}
+            currency="KWD"
+          />
         </View>
       )}
 
@@ -250,7 +307,7 @@ export default function DividendsScreen() {
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={s.tabContentContainer}
         >
-          {TABS.map((t) => (
+          {visibleTabs.map((t) => (
             <Pressable
               key={t.key}
               onPress={() => setTab(t.key)}
@@ -287,17 +344,17 @@ export default function DividendsScreen() {
               <View style={{ alignItems: "flex-end", gap: 2 }}>
                 {item.cash_dividend > 0 && (
                   <Text style={[s.divAmt, { color: colors.success }]}>
-                    Cash: {formatCurrency(item.cash_dividend_kwd, "KWD")}
+                    {t("dividends.cashLabel")} {formatCurrency(item.cash_dividend_kwd, "KWD")}
                   </Text>
                 )}
                 {item.bonus_shares > 0 && (
                   <Text style={[s.divAmt, { color: colors.accentPrimary }]}>
-                    Bonus: {item.bonus_shares} shares
+                    {t("dividends.bonusLabel")} {item.bonus_shares} {t("dividends.shares")}
                   </Text>
                 )}
                 {item.reinvested_dividend > 0 && (
                   <Text style={[s.divAmt, { color: colors.textSecondary }]}>
-                    Reinvested: {formatCurrency(item.reinvested_kwd, "KWD")}
+                    {t("dividends.reinvestedLabel")} {formatCurrency(item.reinvested_kwd, "KWD")}
                   </Text>
                 )}
                 <Pressable onPress={() => handleDelete(item.id)} hitSlop={8}>
@@ -309,7 +366,7 @@ export default function DividendsScreen() {
           ListEmptyComponent={
             <View style={s.empty}>
               <FontAwesome name="money" size={48} color={colors.textMuted} />
-              <Text style={[s.emptyText, { color: colors.textSecondary }]}>No dividend records found</Text>
+              <Text style={[s.emptyText, { color: colors.textSecondary }]}>{t("dividends.noDividendRecords")}</Text>
             </View>
           }
           ListFooterComponent={
@@ -349,20 +406,20 @@ export default function DividendsScreen() {
               <View style={{ flex: 1 }}>
                 <Text style={[s.divSymbol, { color: colors.textPrimary }]}>{item.stock_symbol}</Text>
                 <Text style={[s.divMeta, { color: colors.textSecondary }]}>
-                  {item.dividend_count} dividends · Cost: {formatCurrency(item.total_cost, "KWD")}
+                  {t("dividends.dividendsCostMeta", { count: item.dividend_count, cost: formatCurrency(item.total_cost, "KWD") })}
                 </Text>
               </View>
               <View style={{ alignItems: "flex-end" }}>
                 <Text style={[s.divAmt, { color: colors.success }]}>
-                  Cash: {formatCurrency(item.total_cash_dividend_kwd, "KWD")}
+                  {t("dividends.cashLabel")} {formatCurrency(item.total_cash_dividend_kwd, "KWD")}
                 </Text>
                 {item.total_bonus_shares > 0 && (
                   <Text style={[s.divAmt, { color: colors.accentPrimary }]}>
-                    Bonus: {item.total_bonus_shares}
+                    {t("dividends.bonusLabel")} {item.total_bonus_shares}
                   </Text>
                 )}
                 <Text style={[s.divAmt, { color: item.yield_on_cost_pct > 0 ? colors.success : colors.textMuted }]}>
-                  Yield: {item.yield_on_cost_pct.toFixed(2)}%
+                  {t("dividends.yieldColon")} {item.yield_on_cost_pct.toFixed(2)}%
                 </Text>
               </View>
             </View>
@@ -370,7 +427,7 @@ export default function DividendsScreen() {
           ListEmptyComponent={
             <View style={s.empty}>
               <FontAwesome name="money" size={48} color={colors.textMuted} />
-              <Text style={[s.emptyText, { color: colors.textSecondary }]}>No dividend data by stock</Text>
+              <Text style={[s.emptyText, { color: colors.textSecondary }]}>{t("dividends.noDividendByStock")}</Text>
             </View>
           }
         />
@@ -382,11 +439,11 @@ export default function DividendsScreen() {
           {/* Summary cards */}
           <View style={[s.totalsRow, { borderBottomWidth: 0, paddingHorizontal: 0, marginBottom: 8 }]}>
             <View style={[s.totalCard, { backgroundColor: colors.bgCard, borderColor: colors.borderColor }]}>
-              <Text style={[s.totalLabel, { color: colors.textSecondary }]}>Total Bonus</Text>
+              <Text style={[s.totalLabel, { color: colors.textSecondary }]}>{t("dividends.totalBonus")}</Text>
               <Text style={[s.totalValue, { color: colors.accentPrimary }]}>{(bonusData?.total_bonus_shares ?? 0).toLocaleString()}</Text>
             </View>
             <View style={[s.totalCard, { backgroundColor: colors.bgCard, borderColor: colors.borderColor }]}>
-              <Text style={[s.totalLabel, { color: colors.textSecondary }]}>Stocks</Text>
+              <Text style={[s.totalLabel, { color: colors.textSecondary }]}>{t("dividends.stocks")}</Text>
               <Text style={[s.totalValue, { color: colors.textPrimary }]}>{bonusByStock.length}</Text>
             </View>
           </View>
@@ -394,15 +451,15 @@ export default function DividendsScreen() {
           {/* By-stock summary */}
           {bonusByStock.length > 0 && (
             <>
-              <Text style={[s.sectionLabel, { color: colors.textSecondary }]}>By Stock</Text>
+              <Text style={[s.sectionLabel, { color: colors.textSecondary }]}>{t("dividends.byStockSection")}</Text>
               {bonusByStock.map((bs) => (
                 <View key={bs.stock_symbol} style={[s.divRow, { backgroundColor: colors.bgCard, borderColor: colors.borderColor }]}>
                   <View style={{ flex: 1 }}>
                     <Text style={[s.divSymbol, { color: colors.textPrimary }]}>{bs.stock_symbol}</Text>
-                    <Text style={[s.divMeta, { color: colors.textSecondary }]}>{bs.bonus_count} events</Text>
+                    <Text style={[s.divMeta, { color: colors.textSecondary }]}>{t("dividends.eventsCount", { count: bs.bonus_count })}</Text>
                   </View>
                   <Text style={[s.divAmt, { color: colors.accentPrimary, fontWeight: "700" }]}>
-                    {bs.total_bonus_shares.toLocaleString()} shares
+                    {t("dividends.sharesCount", { count: bs.total_bonus_shares.toLocaleString() })}
                   </Text>
                 </View>
               ))}
@@ -410,11 +467,11 @@ export default function DividendsScreen() {
           )}
 
           {/* History list */}
-          <Text style={[s.sectionLabel, { color: colors.textSecondary, marginTop: 16 }]}>History</Text>
+          <Text style={[s.sectionLabel, { color: colors.textSecondary, marginTop: 16 }]}>{t("dividends.history")}</Text>
           {bonusRecords.length === 0 ? (
             <View style={s.empty}>
               <FontAwesome name="gift" size={48} color={colors.textMuted} />
-              <Text style={[s.emptyText, { color: colors.textSecondary }]}>No bonus share records</Text>
+              <Text style={[s.emptyText, { color: colors.textSecondary }]}>{t("dividends.noBonusRecords")}</Text>
             </View>
           ) : (
             bonusRecords.map((rec) => (
@@ -426,7 +483,7 @@ export default function DividendsScreen() {
                   </Text>
                 </View>
                 <Text style={[s.divAmt, { color: colors.accentPrimary }]}>
-                  +{rec.bonus_shares} shares
+                  {t("dividends.bonusSharesAmount", { count: rec.bonus_shares })}
                 </Text>
               </View>
             ))
@@ -437,20 +494,20 @@ export default function DividendsScreen() {
       {/* ── Tab: Yield Calculator ── */}
       {tab === "calculator" && (
         <ScrollView contentContainerStyle={[ss.listContent, isDesktop && { maxWidth: 600, alignSelf: "center", width: "100%" }]}>
-          <Text style={[s.sectionLabel, { color: colors.textSecondary }]}>Dividend Yield Calculator</Text>
+          <Text style={[s.sectionLabel, { color: colors.textSecondary }]}>{t("dividends.yieldCalcTitle")}</Text>
 
           <View style={[s.calcCard, { backgroundColor: colors.bgCard, borderColor: colors.borderColor }]}>
-            <Text style={[s.calcFieldLabel, { color: colors.textSecondary }]}>Company Name</Text>
+            <Text style={[s.calcFieldLabel, { color: colors.textSecondary }]}>{t("dividends.companyName")}</Text>
             <TextInput
               style={[s.calcInput, { backgroundColor: colors.bgPrimary, color: colors.textPrimary, borderColor: colors.borderColor }]}
               placeholderTextColor={colors.textMuted}
-              placeholder="e.g. National Bank of Kuwait"
+              placeholder={t("dividends.placeholderCompanyName")}
               keyboardType="default"
               value={calcCompanyName}
               onChangeText={setCalcCompanyName}
             />
 
-            <Text style={[s.calcFieldLabel, { color: colors.textSecondary }]}>Purchase Price per Share</Text>
+            <Text style={[s.calcFieldLabel, { color: colors.textSecondary }]}>{t("dividends.purchasePricePerShare")}</Text>
             <TextInput
               style={[s.calcInput, { backgroundColor: colors.bgPrimary, color: colors.textPrimary, borderColor: colors.borderColor }]}
               placeholderTextColor={colors.textMuted}
@@ -460,7 +517,7 @@ export default function DividendsScreen() {
               onChangeText={setCalcPurchasePrice}
             />
 
-            <Text style={[s.calcFieldLabel, { color: colors.textSecondary }]}>Number of Shares</Text>
+            <Text style={[s.calcFieldLabel, { color: colors.textSecondary }]}>{t("dividends.numberOfShares")}</Text>
             <TextInput
               style={[s.calcInput, { backgroundColor: colors.bgPrimary, color: colors.textPrimary, borderColor: colors.borderColor }]}
               placeholderTextColor={colors.textMuted}
@@ -470,7 +527,7 @@ export default function DividendsScreen() {
               onChangeText={setCalcShares}
             />
 
-            <Text style={[s.calcFieldLabel, { color: colors.textSecondary }]}>Par / Nominal Value</Text>
+            <Text style={[s.calcFieldLabel, { color: colors.textSecondary }]}>{t("dividends.parNominalValue")}</Text>
             <TextInput
               style={[s.calcInput, { backgroundColor: colors.bgPrimary, color: colors.textPrimary, borderColor: colors.borderColor }]}
               placeholderTextColor={colors.textMuted}
@@ -480,7 +537,7 @@ export default function DividendsScreen() {
               onChangeText={setCalcParValue}
             />
 
-            <Text style={[s.calcFieldLabel, { color: colors.textSecondary }]}>Cash Dividend % (of par value)</Text>
+            <Text style={[s.calcFieldLabel, { color: colors.textSecondary }]}>{t("dividends.cashDivPercent")}</Text>
             <TextInput
               style={[s.calcInput, { backgroundColor: colors.bgPrimary, color: colors.textPrimary, borderColor: colors.borderColor }]}
               placeholderTextColor={colors.textMuted}
@@ -490,7 +547,7 @@ export default function DividendsScreen() {
               onChangeText={setCalcDivPercent}
             />
 
-            <Text style={[s.calcFieldLabel, { color: colors.textSecondary }]}>Bonus Share % (optional)</Text>
+            <Text style={[s.calcFieldLabel, { color: colors.textSecondary }]}>{t("dividends.bonusSharePercent")}</Text>
             <TextInput
               style={[s.calcInput, { backgroundColor: colors.bgPrimary, color: colors.textPrimary, borderColor: colors.borderColor }]}
               placeholderTextColor={colors.textMuted}
@@ -500,11 +557,11 @@ export default function DividendsScreen() {
               onChangeText={setCalcBonusPercent}
             />
 
-            <Text style={[s.calcFieldLabel, { color: colors.textSecondary }]}>Price Before Ex-Date (market price)</Text>
+            <Text style={[s.calcFieldLabel, { color: colors.textSecondary }]}>{t("dividends.priceBeforeExDate")}</Text>
             <TextInput
               style={[s.calcInput, { backgroundColor: colors.bgPrimary, color: colors.textPrimary, borderColor: colors.borderColor }]}
               placeholderTextColor={colors.textMuted}
-              placeholder="Same as purchase price if empty"
+              placeholder={t("dividends.placeholderPreExPrice")}
               keyboardType="decimal-pad"
               value={calcPreExPrice}
               onChangeText={setCalcPreExPrice}
@@ -519,7 +576,7 @@ export default function DividendsScreen() {
                 {calcIncludeCashInEx && <FontAwesome name="check" size={12} color="#fff" />}
               </View>
               <Text style={{ color: colors.textPrimary, fontSize: 13, flex: 1 }}>
-                Include cash dividend in ex-date price adjustment
+                {t("dividends.includeCashInExDate")}
               </Text>
             </Pressable>
           </View>
@@ -529,60 +586,60 @@ export default function DividendsScreen() {
             <>
               {/* Cash Dividend Section */}
               <View style={[s.calcCard, { backgroundColor: colors.bgCard, borderColor: colors.borderColor, marginTop: 12 }]}>
-                <Text style={[s.sectionLabel, { color: colors.success, marginBottom: 10 }]}>💰 Cash Dividend</Text>
+                <Text style={[s.sectionLabel, { color: colors.success, marginBottom: 10 }]}>💰 {t("dividends.cashDividendSection")}</Text>
 
                 <View style={s.calcRow}>
-                  <Text style={[s.calcRowLabel, { color: colors.textSecondary }]}>Total Cost</Text>
+                  <Text style={[s.calcRowLabel, { color: colors.textSecondary }]}>{t("dividends.totalCost")}</Text>
                   <Text style={[s.calcRowValue, { color: colors.textPrimary }]}>{formatCurrency(calcResults.totalCost, "KWD")}</Text>
                 </View>
                 <View style={s.calcRow}>
-                  <Text style={[s.calcRowLabel, { color: colors.textSecondary }]}>Par Value</Text>
+                  <Text style={[s.calcRowLabel, { color: colors.textSecondary }]}>{t("dividends.parValueLabel")}</Text>
                   <Text style={[s.calcRowValue, { color: colors.textPrimary }]}>{calcResults.parValue.toFixed(3)}</Text>
                 </View>
                 <View style={s.calcRow}>
-                  <Text style={[s.calcRowLabel, { color: colors.textSecondary }]}>Cash Div / Share</Text>
+                  <Text style={[s.calcRowLabel, { color: colors.textSecondary }]}>{t("dividends.cashDivPerShare")}</Text>
                   <Text style={[s.calcRowValue, { color: colors.success }]}>{calcResults.cashDivPerShare.toFixed(3)}</Text>
                 </View>
                 <View style={s.calcRow}>
-                  <Text style={[s.calcRowLabel, { color: colors.textSecondary }]}>Total Cash Dividend</Text>
+                  <Text style={[s.calcRowLabel, { color: colors.textSecondary }]}>{t("dividends.totalCashDividend")}</Text>
                   <Text style={[s.calcRowValue, { color: colors.success }]}>{formatCurrency(calcResults.totalCashDiv, "KWD")}</Text>
                 </View>
                 <View style={[s.calcRow, { borderTopWidth: 1, borderTopColor: colors.borderColor, paddingTop: 8, marginTop: 4 }]}>
-                  <Text style={[s.calcRowLabel, { color: colors.textPrimary, fontWeight: "700" }]}>Cash Yield on Cost</Text>
+                  <Text style={[s.calcRowLabel, { color: colors.textPrimary, fontWeight: "700" }]}>{t("dividends.cashYieldOnCost")}</Text>
                   <Text style={[s.calcRowValue, { color: colors.success, fontWeight: "700" }]}>{calcResults.cashYieldOnCost.toFixed(2)}%</Text>
                 </View>
               </View>
 
               {/* Before Ex-Date */}
               <View style={[s.calcCard, { backgroundColor: colors.bgCard, borderColor: colors.borderColor, marginTop: 12 }]}>
-                <Text style={[s.sectionLabel, { color: colors.accentPrimary, marginBottom: 10 }]}>📈 Before Ex-Date Yield</Text>
+                <Text style={[s.sectionLabel, { color: colors.accentPrimary, marginBottom: 10 }]}>📈 {t("dividends.beforeExDateYield")}</Text>
 
                 <View style={s.calcRow}>
-                  <Text style={[s.calcRowLabel, { color: colors.textSecondary }]}>Pre-Ex Price</Text>
+                  <Text style={[s.calcRowLabel, { color: colors.textSecondary }]}>{t("dividends.preExPrice")}</Text>
                   <Text style={[s.calcRowValue, { color: colors.textPrimary }]}>{calcResults.preExPrice.toFixed(3)}</Text>
                 </View>
                 {calcResults.hasBonus && (
                   <>
                     <View style={s.calcRow}>
-                      <Text style={[s.calcRowLabel, { color: colors.textSecondary }]}>Bonus Shares</Text>
+                      <Text style={[s.calcRowLabel, { color: colors.textSecondary }]}>{t("dividends.bonusSharesCalc")}</Text>
                       <Text style={[s.calcRowValue, { color: colors.accentPrimary }]}>{calcResults.bonusShares.toLocaleString()}</Text>
                     </View>
                     <View style={s.calcRow}>
-                      <Text style={[s.calcRowLabel, { color: colors.textSecondary }]}>Bonus Value (× pre-ex price)</Text>
+                      <Text style={[s.calcRowLabel, { color: colors.textSecondary }]}>{t("dividends.bonusValuePreEx")}</Text>
                       <Text style={[s.calcRowValue, { color: colors.accentPrimary }]}>{formatCurrency(calcResults.bonusValueBeforeEx, "KWD")}</Text>
                     </View>
                   </>
                 )}
                 <View style={s.calcRow}>
-                  <Text style={[s.calcRowLabel, { color: colors.textSecondary }]}>Cash Dividend</Text>
+                  <Text style={[s.calcRowLabel, { color: colors.textSecondary }]}>{t("dividends.cashDividendRow")}</Text>
                   <Text style={[s.calcRowValue, { color: colors.success }]}>{formatCurrency(calcResults.totalCashDiv, "KWD")}</Text>
                 </View>
                 <View style={[s.calcRow, { borderTopWidth: 1, borderTopColor: colors.borderColor, paddingTop: 8, marginTop: 4 }]}>
-                  <Text style={[s.calcRowLabel, { color: colors.textPrimary, fontWeight: "700" }]}>Total Return</Text>
+                  <Text style={[s.calcRowLabel, { color: colors.textPrimary, fontWeight: "700" }]}>{t("dividends.totalReturn")}</Text>
                   <Text style={[s.calcRowValue, { color: colors.success, fontWeight: "700" }]}>{formatCurrency(calcResults.totalReturnBeforeEx, "KWD")}</Text>
                 </View>
                 <View style={s.calcRow}>
-                  <Text style={[s.calcRowLabel, { color: colors.textPrimary, fontWeight: "700" }]}>Yield on Cost</Text>
+                  <Text style={[s.calcRowLabel, { color: colors.textPrimary, fontWeight: "700" }]}>{t("dividends.yieldOnCost")}</Text>
                   <Text style={[s.calcRowValue, { color: colors.success, fontWeight: "700" }]}>{calcResults.yieldBeforeEx.toFixed(2)}%</Text>
                 </View>
               </View>
@@ -590,14 +647,14 @@ export default function DividendsScreen() {
               {/* After Ex-Date */}
               {calcResults.hasExDateAdj && (
                 <View style={[s.calcCard, { backgroundColor: colors.bgCard, borderColor: colors.borderColor, marginTop: 12 }]}>
-                  <Text style={[s.sectionLabel, { color: colors.warning ?? "#f59e0b", marginBottom: 10 }]}>📉 After Ex-Date Yield</Text>
+                  <Text style={[s.sectionLabel, { color: colors.warning ?? "#f59e0b", marginBottom: 10 }]}>📉 {t("dividends.afterExDateYield")}</Text>
 
                   <View style={s.calcRow}>
-                    <Text style={[s.calcRowLabel, { color: colors.textSecondary }]}>Theoretical Ex-Price</Text>
+                    <Text style={[s.calcRowLabel, { color: colors.textSecondary }]}>{t("dividends.theoreticalExPrice")}</Text>
                     <Text style={[s.calcRowValue, { color: colors.textPrimary }]}>{calcResults.theoreticalExPrice.toFixed(3)}</Text>
                   </View>
                   <View style={s.calcRow}>
-                    <Text style={[s.calcRowLabel, { color: colors.textSecondary }]}>Adjustment Formula</Text>
+                    <Text style={[s.calcRowLabel, { color: colors.textSecondary }]}>{t("dividends.adjustmentFormula")}</Text>
                     <Text style={[s.calcRowValue, { color: colors.textMuted, fontSize: 11 }]}>
                       {calcResults.hasBonus && calcIncludeCashInEx
                         ? "(P−Div) / (1+Bonus%)"
@@ -607,7 +664,7 @@ export default function DividendsScreen() {
                     </Text>
                   </View>
                   <View style={s.calcRow}>
-                    <Text style={[s.calcRowLabel, { color: colors.textSecondary }]}>Price Drop</Text>
+                    <Text style={[s.calcRowLabel, { color: colors.textSecondary }]}>{t("dividends.priceDrop")}</Text>
                     <Text style={[s.calcRowValue, { color: colors.danger }]}>
                       −{(calcResults.preExPrice - calcResults.theoreticalExPrice).toFixed(3)}
                       {" "}({(((calcResults.preExPrice - calcResults.theoreticalExPrice) / calcResults.preExPrice) * 100).toFixed(2)}%)
@@ -616,33 +673,33 @@ export default function DividendsScreen() {
                   {calcResults.hasBonus && (
                     <>
                       <View style={s.calcRow}>
-                        <Text style={[s.calcRowLabel, { color: colors.textSecondary }]}>Bonus Shares</Text>
+                        <Text style={[s.calcRowLabel, { color: colors.textSecondary }]}>{t("dividends.bonusSharesCalc")}</Text>
                         <Text style={[s.calcRowValue, { color: colors.accentPrimary }]}>{calcResults.bonusShares.toLocaleString()}</Text>
                       </View>
                       <View style={s.calcRow}>
-                        <Text style={[s.calcRowLabel, { color: colors.textSecondary }]}>Bonus Value (× ex price)</Text>
+                        <Text style={[s.calcRowLabel, { color: colors.textSecondary }]}>{t("dividends.bonusValueExPrice")}</Text>
                         <Text style={[s.calcRowValue, { color: colors.accentPrimary }]}>{formatCurrency(calcResults.bonusValueAfterEx, "KWD")}</Text>
                       </View>
                     </>
                   )}
                   <View style={s.calcRow}>
-                    <Text style={[s.calcRowLabel, { color: colors.textSecondary }]}>Cash Dividend</Text>
+                    <Text style={[s.calcRowLabel, { color: colors.textSecondary }]}>{t("dividends.cashDividendRow")}</Text>
                     <Text style={[s.calcRowValue, { color: colors.success }]}>{formatCurrency(calcResults.totalCashDiv, "KWD")}</Text>
                   </View>
                   <View style={s.calcRow}>
-                    <Text style={[s.calcRowLabel, { color: colors.textSecondary }]}>Total Shares After Ex</Text>
+                    <Text style={[s.calcRowLabel, { color: colors.textSecondary }]}>{t("dividends.totalSharesAfterEx")}</Text>
                     <Text style={[s.calcRowValue, { color: colors.textPrimary }]}>{calcResults.totalSharesAfterEx.toLocaleString()}</Text>
                   </View>
                   <View style={s.calcRow}>
-                    <Text style={[s.calcRowLabel, { color: colors.textSecondary }]}>Adjusted Avg Cost</Text>
+                    <Text style={[s.calcRowLabel, { color: colors.textSecondary }]}>{t("dividends.adjustedAvgCost")}</Text>
                     <Text style={[s.calcRowValue, { color: colors.textPrimary }]}>{calcResults.adjustedAvgCost.toFixed(3)}</Text>
                   </View>
                   <View style={[s.calcRow, { borderTopWidth: 1, borderTopColor: colors.borderColor, paddingTop: 8, marginTop: 4 }]}>
-                    <Text style={[s.calcRowLabel, { color: colors.textPrimary, fontWeight: "700" }]}>Total Return</Text>
+                    <Text style={[s.calcRowLabel, { color: colors.textPrimary, fontWeight: "700" }]}>{t("dividends.totalReturn")}</Text>
                     <Text style={[s.calcRowValue, { color: colors.success, fontWeight: "700" }]}>{formatCurrency(calcResults.totalReturnAfterEx, "KWD")}</Text>
                   </View>
                   <View style={s.calcRow}>
-                    <Text style={[s.calcRowLabel, { color: colors.textPrimary, fontWeight: "700" }]}>Yield on Cost</Text>
+                    <Text style={[s.calcRowLabel, { color: colors.textPrimary, fontWeight: "700" }]}>{t("dividends.yieldOnCost")}</Text>
                     <Text style={[s.calcRowValue, { color: colors.success, fontWeight: "700" }]}>{calcResults.yieldAfterEx.toFixed(2)}%</Text>
                   </View>
                 </View>
@@ -650,24 +707,24 @@ export default function DividendsScreen() {
 
               {/* Yield Comparison Summary */}
               <View style={[s.calcCard, { backgroundColor: colors.bgCard, borderColor: colors.borderColor, marginTop: 12 }]}>
-                <Text style={[s.sectionLabel, { color: colors.textSecondary, marginBottom: 10 }]}>📊 Yield Summary</Text>
+                <Text style={[s.sectionLabel, { color: colors.textSecondary, marginBottom: 10 }]}>📊 {t("dividends.yieldSummary")}</Text>
 
                 <View style={s.calcRow}>
-                  <Text style={[s.calcRowLabel, { color: colors.textSecondary }]}>Cash Yield on Cost</Text>
+                  <Text style={[s.calcRowLabel, { color: colors.textSecondary }]}>{t("dividends.cashYieldOnCost")}</Text>
                   <Text style={[s.calcRowValue, { color: colors.success, fontWeight: "700" }]}>{calcResults.cashYieldOnCost.toFixed(2)}%</Text>
                 </View>
                 <View style={s.calcRow}>
-                  <Text style={[s.calcRowLabel, { color: colors.textSecondary }]}>Before Ex-Date Total Yield</Text>
+                  <Text style={[s.calcRowLabel, { color: colors.textSecondary }]}>{t("dividends.beforeExTotalYield")}</Text>
                   <Text style={[s.calcRowValue, { color: colors.success, fontWeight: "700" }]}>{calcResults.yieldBeforeEx.toFixed(2)}%</Text>
                 </View>
                 {calcResults.hasExDateAdj && (
                   <>
                     <View style={s.calcRow}>
-                      <Text style={[s.calcRowLabel, { color: colors.textSecondary }]}>After Ex-Date Total Yield</Text>
+                      <Text style={[s.calcRowLabel, { color: colors.textSecondary }]}>{t("dividends.afterExTotalYield")}</Text>
                       <Text style={[s.calcRowValue, { color: colors.success, fontWeight: "700" }]}>{calcResults.yieldAfterEx.toFixed(2)}%</Text>
                     </View>
                     <View style={[s.calcRow, { borderTopWidth: 1, borderTopColor: colors.borderColor, paddingTop: 8, marginTop: 4 }]}>
-                      <Text style={[s.calcRowLabel, { color: colors.textSecondary }]}>Yield Difference</Text>
+                      <Text style={[s.calcRowLabel, { color: colors.textSecondary }]}>{t("dividends.yieldDifference")}</Text>
                       <Text style={[s.calcRowValue, { color: colors.danger, fontWeight: "700" }]}>
                         {(calcResults.yieldBeforeEx - calcResults.yieldAfterEx).toFixed(2)}%
                       </Text>
@@ -706,14 +763,123 @@ export default function DividendsScreen() {
                 ]}
               >
                 <FontAwesome name="file-pdf-o" size={16} color="#fff" />
-                <Text style={s.exportBtnText}>Download PDF Report</Text>
+                <Text style={s.exportBtnText}>{t("dividends.downloadPdfReport")}</Text>
               </Pressable>
             </>
           )}
         </ScrollView>
       )}
+
+      {/* ── Tab: Projections ── */}
+      {tab === "projections" && (
+        <ScrollView
+          contentContainerStyle={[ss.listContent, isDesktop && { maxWidth: 900, alignSelf: "center", width: "100%" }]}
+        >
+          {/* Income Forecast Card */}
+          {projection && projection.projections.length > 0 ? (
+            <>
+              {/* Beginner-friendly summary card */}
+              {expertiseLevel === "normal" ? (
+                <View style={[s.calcCard, { backgroundColor: colors.bgCard, borderColor: colors.borderColor, marginBottom: 12 }]}>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                    <Text style={{ fontSize: 24 }}>💰</Text>
+                    <Text style={{ color: colors.textPrimary, fontSize: 16, fontWeight: "700", flex: 1 }}>
+                      {t("dividends.incomeForecast")}
+                    </Text>
+                  </View>
+                  <Text style={{ color: colors.textPrimary, fontSize: 15, lineHeight: 22 }}>
+                    {t("dividends.beginnerForecast", {
+                      amount: formatCurrency(projection.totalProjected, "KWD"),
+                    })}
+                  </Text>
+                  <View style={[s.confidenceBadge, { backgroundColor: confidenceColor(projection.avgConfidence, colors) + "20", marginTop: 10 }]}>
+                    <Text style={{ color: confidenceColor(projection.avgConfidence, colors), fontSize: 12, fontWeight: "600" }}>
+                      {t("dividends.confidence")}: {t(`dividends.confidence_${projection.avgConfidence}`)}
+                    </Text>
+                  </View>
+                </View>
+              ) : (
+                /* Advanced: total forecast card */
+                <View style={[s.calcCard, { backgroundColor: colors.bgCard, borderColor: colors.borderColor, marginBottom: 12 }]}>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 10 }}>
+                    <FontAwesome name="line-chart" size={18} color={colors.accentPrimary} />
+                    <Text style={{ color: colors.textPrimary, fontSize: 16, fontWeight: "700", flex: 1 }}>
+                      {t("dividends.incomeForecast")}
+                    </Text>
+                    <View style={[s.confidenceBadge, { backgroundColor: confidenceColor(projection.avgConfidence, colors) + "20" }]}>
+                      <Text style={{ color: confidenceColor(projection.avgConfidence, colors), fontSize: 11, fontWeight: "600" }}>
+                        {t(`dividends.confidence_${projection.avgConfidence}`)}
+                      </Text>
+                    </View>
+                  </View>
+                  <View style={s.calcRow}>
+                    <Text style={[s.calcRowLabel, { color: colors.textSecondary }]}>{t("dividends.totalProjected")}</Text>
+                    <Text style={[s.calcRowValue, { color: colors.success, fontSize: 18 }]}>
+                      {formatCurrency(projection.totalProjected, "KWD")}
+                    </Text>
+                  </View>
+                  <View style={s.calcRow}>
+                    <Text style={[s.calcRowLabel, { color: colors.textSecondary }]}>{t("dividends.paymentWindow")}</Text>
+                    <Text style={[s.calcRowValue, { color: colors.textPrimary }]}>Mar – Jun</Text>
+                  </View>
+                  <View style={s.calcRow}>
+                    <Text style={[s.calcRowLabel, { color: colors.textSecondary }]}>{t("dividends.stocksWithDiv")}</Text>
+                    <Text style={[s.calcRowValue, { color: colors.textPrimary }]}>{projection.projections.length}</Text>
+                  </View>
+                </View>
+              )}
+
+              {/* Per-stock projections (advanced/intermediate only) */}
+              {expertiseLevel !== "normal" && projection.projections.map((p) => (
+                <View
+                  key={p.symbol}
+                  style={[s.divRow, { backgroundColor: colors.bgCard, borderColor: colors.borderColor }]}
+                >
+                  <View style={{ flex: 1 }}>
+                    <Text style={[s.divSymbol, { color: colors.textPrimary }]}>{p.company || p.symbol}</Text>
+                    <Text style={[s.divMeta, { color: colors.textSecondary }]}>
+                      {p.shares.toLocaleString()} {t("dividends.shares")} · {t("dividends.yieldLabel")}: {p.yieldOnCost.toFixed(2)}%
+                      {p.hasBonus ? " · 🎁" : ""}
+                    </Text>
+                  </View>
+                  <View style={{ alignItems: "flex-end" }}>
+                    <Text style={[s.divAmt, { color: colors.success }]}>
+                      {formatCurrency(p.projectedAmount, "KWD")}
+                    </Text>
+                    <View style={[s.confidenceBadge, { backgroundColor: confidenceColor(p.confidence, colors) + "20", marginTop: 2 }]}>
+                      <Text style={{ color: confidenceColor(p.confidence, colors), fontSize: 10, fontWeight: "600" }}>
+                        {t(`dividends.confidence_${p.confidence}`)}
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+              ))}
+
+              {/* Disclaimer */}
+              <View style={{ paddingHorizontal: 8, paddingVertical: 12 }}>
+                <Text style={{ color: colors.textMuted, fontSize: 11, fontStyle: "italic", textAlign: "center" }}>
+                  {t("dividends.projectionDisclaimer")}
+                </Text>
+              </View>
+            </>
+          ) : (
+            <View style={s.empty}>
+              <FontAwesome name="line-chart" size={48} color={colors.textMuted} />
+              <Text style={[s.emptyText, { color: colors.textSecondary }]}>
+                {t("dividends.noProjections")}
+              </Text>
+            </View>
+          )}
+        </ScrollView>
+      )}
     </View>
   );
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────
+
+function confidenceColor(confidence: "high" | "medium" | "low", colors: { success: string; warning: string; danger: string }) {
+  return confidence === "high" ? colors.success : confidence === "medium" ? colors.warning : colors.danger;
 }
 
 const s = StyleSheet.create({
@@ -845,5 +1011,21 @@ const s = StyleSheet.create({
     padding: 16,
     borderRadius: 14,
     borderWidth: 1,
+  },
+  projectionToggle: {
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "flex-end",
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+    borderWidth: 1,
+    marginBottom: 8,
+  },
+  confidenceBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
   },
 });

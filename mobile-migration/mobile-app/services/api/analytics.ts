@@ -805,6 +805,11 @@ export async function getStockScore(stockId: number): Promise<StockScoreSummary 
 }
 
 /** Get score history. */
+
+// ── Local Market Insights ───────────────────────────────────────────
+
+export { clearInsightsCache, getKuwaitInsights, hasKuwaitHoldings } from "../localInsights/boursaKuwait";
+export type { InsightTrend, KuwaitInsight, KuwaitInsightsResponse } from "../localInsights/boursaKuwait";
 export async function getScoreHistory(stockId: number): Promise<{ scores: StockScore[]; count: number }> {
   const { data } = await api.get<{ status: string; data: { scores: StockScore[]; count: number } }>(
     `/api/v1/fundamental/stocks/${stockId}/scores/history`,

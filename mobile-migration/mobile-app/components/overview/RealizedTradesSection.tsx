@@ -3,13 +3,14 @@
  * summary metrics, per-stock aggregation, and recent trades table.
  */
 
-import React, { useState, useMemo } from "react";
-import { View, Text, StyleSheet, Pressable } from "react-native";
-import FontAwesome from "@expo/vector-icons/FontAwesome";
 import { MetricCard } from "@/components/ui/MetricCard";
-import { formatCurrency, formatSignedCurrency } from "@/lib/currency";
 import type { ThemePalette } from "@/constants/theme";
+import { formatCurrency, formatSignedCurrency } from "@/lib/currency";
 import type { RealizedProfitData } from "@/services/api";
+import FontAwesome from "@expo/vector-icons/FontAwesome";
+import React, { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 
 export function RealizedTradesSection({
   data,
@@ -23,6 +24,7 @@ export function RealizedTradesSection({
   isPhone: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const { t } = useTranslation();
 
   // Summary by stock
   const byStock = useMemo(() => {
@@ -68,14 +70,14 @@ export function RealizedTradesSection({
             { color: colors.textSecondary, fontSize: Math.max(fonts.caption, 13), marginBottom: 0, marginTop: 0 },
           ]}
         >
-          Realized Trades Breakdown
+          {t("realizedTrades.breakdown")}
         </Text>
         <View style={s.toggleBadges}>
           <Text style={[s.badge, { color: colors.success }]}>
-            {profitCount} wins
+            {profitCount} {t("realizedTrades.wins")}
           </Text>
           <Text style={[s.badge, { color: colors.danger }]}>
-            {lossCount} losses
+            {lossCount} {t("realizedTrades.losses")}
           </Text>
         </View>
       </Pressable>
@@ -90,7 +92,7 @@ export function RealizedTradesSection({
             ]}
           >
             <MetricCard
-              label="Total Trades"
+              label={t("realizedTrades.totalTrades")}
               value={`${data?.details?.length ?? 0}`}
               subline={`${profitCount}W / ${lossCount}L`}
               icon="exchange"
@@ -98,23 +100,23 @@ export function RealizedTradesSection({
               width={isPhone ? "48%" : "24%"}
             />
             <MetricCard
-              label="Total Realized"
+              label={t("realizedTrades.totalRealized")}
               value={formatSignedCurrency(data.total_realized_kwd)}
-              subline="Net P/L (KWD)"
+              subline={t("realizedTrades.netPL") + " (KWD)"}
               trend={data.total_realized_kwd >= 0 ? "up" : "down"}
               width={isPhone ? "48%" : "24%"}
             />
             <MetricCard
-              label="Gross Gains"
+              label={t("realizedTrades.grossGains")}
               value={formatCurrency(data.total_profit_kwd)}
-              subline="Winning trades"
+              subline={t("realizedTrades.winningTrades")}
               accentColor={colors.success}
               width={isPhone ? "48%" : "24%"}
             />
             <MetricCard
-              label="Gross Losses"
+              label={t("realizedTrades.grossLosses")}
               value={formatCurrency(Math.abs(data.total_loss_kwd))}
-              subline="Losing trades"
+              subline={t("realizedTrades.losingTrades")}
               accentColor={colors.danger}
               width={isPhone ? "48%" : "24%"}
             />
@@ -122,16 +124,16 @@ export function RealizedTradesSection({
 
           {/* Summary by stock table */}
           <Text style={[s.tableLabel, { color: colors.textSecondary }]}>
-            Summary by Stock
+            {t("realizedTrades.summaryByStock")}
           </Text>
           <View style={[s.tableContainer, { borderColor: colors.borderColor, marginBottom: 12 }]}>
             {/* Header */}
             <View style={[s.headerRow, { backgroundColor: colors.bgSecondary, borderBottomColor: colors.borderColor }]}>
-              <Text style={[s.headerCellWide, { color: colors.textSecondary }]}>Symbol</Text>
-              <Text style={[s.headerCell, { color: colors.textSecondary }]}>Trades</Text>
-              <Text style={[s.headerCellMed, { color: colors.textSecondary }]}>Gains</Text>
-              <Text style={[s.headerCellMed, { color: colors.textSecondary }]}>Losses</Text>
-              <Text style={[s.headerCellMed, { color: colors.textSecondary }]}>Net P/L</Text>
+              <Text style={[s.headerCellWide, { color: colors.textSecondary }]}>{t("realizedTrades.symbol")}</Text>
+              <Text style={[s.headerCell, { color: colors.textSecondary }]}>{t("realizedTrades.trades")}</Text>
+              <Text style={[s.headerCellMed, { color: colors.textSecondary }]}>{t("realizedTrades.gains")}</Text>
+              <Text style={[s.headerCellMed, { color: colors.textSecondary }]}>{t("realizedTrades.losses")}</Text>
+              <Text style={[s.headerCellMed, { color: colors.textSecondary }]}>{t("realizedTrades.netPL")}</Text>
             </View>
             {/* Rows */}
             {byStock.map((row, idx) => (
@@ -155,15 +157,15 @@ export function RealizedTradesSection({
 
           {/* Detailed trades table */}
           <Text style={[s.tableLabel, { color: colors.textSecondary }]}>
-            Recent Trades ({Math.min(30, data?.details?.length ?? 0)} of {data?.details?.length ?? 0})
+            {t("realizedTrades.recentTrades", { shown: Math.min(30, data?.details?.length ?? 0), total: data?.details?.length ?? 0 })}
           </Text>
           <View style={[s.tableContainer, { borderColor: colors.borderColor }]}>
             {/* Header */}
             <View style={[s.headerRow, { backgroundColor: colors.bgSecondary, borderBottomColor: colors.borderColor }]}>
-              <Text style={[s.headerCellMed, { color: colors.textSecondary }]}>Symbol</Text>
-              <Text style={[s.headerCellMed, { color: colors.textSecondary }]}>Date</Text>
-              <Text style={[s.headerCell, { color: colors.textSecondary }]}>Shares</Text>
-              <Text style={[s.headerCellMed, { color: colors.textSecondary }]}>P/L (KWD)</Text>
+              <Text style={[s.headerCellMed, { color: colors.textSecondary }]}>{t("realizedTrades.symbol")}</Text>
+              <Text style={[s.headerCellMed, { color: colors.textSecondary }]}>{t("realizedTrades.date")}</Text>
+              <Text style={[s.headerCell, { color: colors.textSecondary }]}>{t("realizedTrades.shares")}</Text>
+              <Text style={[s.headerCellMed, { color: colors.textSecondary }]}>{t("realizedTrades.plKWD")}</Text>
             </View>
             {(data?.details ?? []).slice(0, 30).map((d, idx) => (
               <View
