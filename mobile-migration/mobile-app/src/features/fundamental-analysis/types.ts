@@ -27,7 +27,7 @@ export function getApiErrorMessage(err: unknown, fallback = "Something went wron
 }
 
 // ── Sub-tab navigation ────────────────────────────────────────────
-export type SubTab = "stocks" | "statements" | "comparison" | "metrics" | "growth" | "score" | "decision" | "valuations" | "news";
+export type SubTab = "stocks" | "statements" | "comparison" | "metrics" | "growth" | "score" | "decision" | "valuations" | "buffett" | "news";
 
 export const SUB_TABS: { key: SubTab; label: string; icon: IconName; minLevel?: ExpertiseLevel }[] = [
   { key: "stocks",      label: "Stocks",      icon: "th-list" },
@@ -38,6 +38,7 @@ export const SUB_TABS: { key: SubTab; label: string; icon: IconName; minLevel?: 
   { key: "score",       label: "Score",       icon: "star",        minLevel: "intermediate" },
   { key: "decision",    label: "Decision",    icon: "gavel" },
   { key: "valuations",  label: "Valuations",  icon: "calculator",  minLevel: "advanced" },
+  { key: "buffett",     label: "Buffett",     icon: "check-square-o", minLevel: "intermediate" },
   { key: "news",        label: "News",        icon: "newspaper-o", minLevel: "intermediate" },
 ];
 

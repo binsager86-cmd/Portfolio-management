@@ -23,6 +23,7 @@ import { ErrorBoundary } from "@/src/features/fundamental-analysis/components/sh
 import { StatementsPanel } from "@/src/features/fundamental-analysis/components/StatementsPanel";
 import { StocksPanel } from "@/src/features/fundamental-analysis/components/StocksPanel";
 import { ValuationsPanel } from "@/src/features/fundamental-analysis/components/ValuationsPanel";
+import { BuffettChecklistPanel } from "@/src/features/fundamental-analysis/components/BuffettChecklistPanel";
 import { st } from "@/src/features/fundamental-analysis/styles";
 import { SUB_TABS, type SubTab } from "@/src/features/fundamental-analysis/types";
 
@@ -156,6 +157,11 @@ export default function FundamentalAnalysisScreen() {
       {tab === "valuations" && selectedStockId && (
         <ErrorBoundary colors={colors}>
           <ValuationsPanel stockId={selectedStockId} stockSymbol={selectedStockSymbol} colors={colors} isDesktop={isDesktop} />
+        </ErrorBoundary>
+      )}
+      {tab === "buffett" && selectedStockId && (
+        <ErrorBoundary colors={colors}>
+          <BuffettChecklistPanel stockId={selectedStockId} stockSymbol={selectedStockSymbol} colors={colors} isDesktop={isDesktop} />
         </ErrorBoundary>
       )}
       {tab === "news" && selectedStockId && (
