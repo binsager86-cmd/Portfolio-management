@@ -25,8 +25,25 @@ env/
 # OS generated files
 .DS_Store
 Thumbs.db
-# Secrets (use Streamlit Cloud secrets instead)
-.streamlit/secrets.toml
+# Secrets
+.streamlit/
+
+# Legacy root files (project moved to mobile-migration/)
+/*.py
+/*.bat
+/*.txt
+/*.toml
+/*.cfg
+/pages/
+/data/
+/frontend/
+/models/
+/scripts/
+/utils/
+/components/
+/config/
+/archive_legacy/
+/requirements*.txt
 
 # Jupyter
 .ipynb_checkpoints/
