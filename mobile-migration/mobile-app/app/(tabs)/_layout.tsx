@@ -95,7 +95,9 @@ export default function TabLayout() {
           }
           screenOptions={{
             // Hide default tab bar (we use custom AnimatedTabBar)
-            tabBarStyle: showSidebar || Platform.OS === "web" ? { display: "none" } : undefined,
+            tabBarStyle: showSidebar || Platform.OS === "web"
+              ? { display: "none", height: 0, overflow: "hidden" as const }
+              : undefined,
             tabBarHideOnKeyboard: true,
             lazy: true,
             tabBarActiveTintColor: colors.accentPrimary,
