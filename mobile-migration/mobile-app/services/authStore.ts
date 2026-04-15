@@ -347,6 +347,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       username: null,
       name: null,
       isAdmin: false,
+      isLoading: false,
       error: null,
       lastAuthError: null,
     });

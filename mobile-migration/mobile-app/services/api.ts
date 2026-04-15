@@ -117,11 +117,14 @@ api.interceptors.response.use(
         }
         return api(originalRequest);
       } catch {
-        // Refresh failed — clear tokens and reset auth state
-        // This triggers the auth guard redirect to login
+        // Refresh failed — clear tokens and redirect to login
         await removeToken();
         await removeRefreshToken();
-        useAuthStore.getState().logout();
+        await useAuthStore.getState().logout();
+        // On web, force navigation to login immediately
+        if (typeof window !== "undefined" && window.location) {
+          window.location.href = "/login";
+        }
         onTokenRefreshFailed(error);
         return Promise.reject(error);
       } finally {
