@@ -20,7 +20,13 @@
     "@typescript-eslint/no-explicit-any": "error",
     "@typescript-eslint/no-unused-vars": ["warn", { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }],
     "@typescript-eslint/ban-ts-comment": "off",
-    "no-console": "warn"
+    "no-console": "warn",
+    "no-restricted-imports": ["error", {
+      "patterns": [
+        { "group": ["**/services/api.ts"], "message": "Import from @/services/api (barrel) instead." },
+        { "group": ["**/services/api.old*"], "message": "Legacy API file deleted — use @/services/api." }
+      ]
+    }]
   },
   "ignorePatterns": ["node_modules/", ".expo/", "dist/", "web-build/"]
 }

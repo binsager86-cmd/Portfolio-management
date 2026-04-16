@@ -5,6 +5,10 @@
  */
 
 export type {
+  AdminActivitiesResponse,
+  AdminActivity,
+  AdminUser,
+  AdminUsersResponse,
   AIAnalysisResult,
   AIUploadResult,
   AIValidationResult,
@@ -14,6 +18,7 @@ export type {
   BonusShareRecord,
   BonusSharesResponse,
   CashIntegrityResult,
+  CategoryBreakdown,
   DividendByStock,
   DividendListResponse,
   DividendRecord,
@@ -21,6 +26,7 @@ export type {
   FinancialStatement,
   IntegrityCheckResult,
   PaginationInfo,
+  PeerMultiple,
   PerformanceData,
   PfmAsset,
   PfmIncomeExpense,
@@ -31,6 +37,8 @@ export type {
   RealizedProfitDetail,
   RiskMetrics,
   SaveSnapshotResponse,
+  ScoreBreakdown,
+  ScoreMetricBreakdown,
   SecurityRecord,
   SnapshotRecord,
   StockMetric,
@@ -39,6 +47,7 @@ export type {
   TradingSummary,
   TradingSummaryResponse,
   TradingTransaction,
+  ValuationDefaults,
   ValuationResult,
   ValuationRunResult,
 } from "../types";

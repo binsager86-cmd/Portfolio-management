@@ -587,13 +587,38 @@ export interface AnalysisStock {
   latest_score?: StockScoreSummary | null;
 }
 
+export interface ScoreMetricBreakdown {
+  metric: string;
+  value: number | null;
+  points: number;
+  reason: string;
+}
+
+export interface CategoryBreakdown {
+  base: number;
+  metrics: ScoreMetricBreakdown[];
+}
+
+export interface ScoreBreakdown {
+  fundamental: CategoryBreakdown;
+  valuation: CategoryBreakdown;
+  growth: CategoryBreakdown;
+  quality: CategoryBreakdown;
+  risk: CategoryBreakdown;
+}
+
 export interface StockScoreSummary {
   overall_score: number | null;
   fundamental_score: number | null;
   valuation_score: number | null;
   growth_score: number | null;
   quality_score: number | null;
+  risk_score: number | null;
+  risk_penalty_pct?: number | null;
   scoring_date?: string;
+  sector_percentile?: number | null;
+  sector_name?: string | null;
+  score_breakdown?: ScoreBreakdown;
 }
 
 export interface FinancialStatement {
@@ -745,6 +770,98 @@ export interface SecurityRecord {
   country: string | null;
   status: string | null;
   sector: string | null;
+}
+
+// ── Peer Multiples ──────────────────────────────────────────────────
+
+export interface PeerMultiple {
+  stock_id: number;
+  symbol: string;
+  company_name: string;
+  pe: number | null;
+  pb: number | null;
+  ps: number | null;
+  pcf: number | null;
+  ev_ebitda: number | null;
+  eps: number | null;
+  price: number | null;
+}
+
+// ── Valuation Defaults ──────────────────────────────────────────────
+
+export interface ValuationDefaults {
+  eps: number | null;
+  book_value_per_share: number | null;
+  dividends_per_share: number | null;
+  fcf: number | null;
+  fcf_history: { year: number; fcf: number }[];
+  avg_fcf_growth: number | null;
+  shares_outstanding: number | null;
+  revenue_growth: number | null;
+  avg_dividend_growth: number | null;
+  dps_history: { year: number; dps: number }[];
+  total_debt: number | null;
+  total_cash: number | null;
+  net_margin: number | null;
+  roe: number | null;
+  graham_growth_cagr: number | null;
+  eps_history: { year: number; eps: number | null }[];
+  current_price: number | null;
+  bond_yield: number | null;
+  summary_margin_of_safety: number | null;
+  exchange: string;
+  wacc: number | null;
+  wacc_risk_free_rate: number | null;
+  wacc_beta: number | null;
+  wacc_equity_risk_premium: number | null;
+  wacc_cost_of_equity: number | null;
+  wacc_cost_of_debt: number | null;
+  wacc_tax_rate: number | null;
+  wacc_weight_equity: number | null;
+  wacc_weight_debt: number | null;
+}
+
+// ── Admin ───────────────────────────────────────────────────────────
+
+export interface AdminUser {
+  id: number;
+  username: string;
+  name: string | null;
+  created_at: number | null;
+  last_login: number | null;
+  stocks_value: number;
+  cash_balance: number;
+  total_value: number;
+  portfolio_value: number;
+  growth_value: number;
+  transaction_count: number;
+}
+
+export interface AdminUsersResponse {
+  status: string;
+  count: number;
+  users: AdminUser[];
+}
+
+export interface AdminActivity {
+  id: number;
+  user_id: number;
+  username: string;
+  txn_date: string | null;
+  txn_type: string;
+  stock_symbol: string;
+  portfolio: string;
+  shares: number;
+  value: number;
+  price: number;
+  created_at: number | null;
+}
+
+export interface AdminActivitiesResponse {
+  status: string;
+  count: number;
+  total: number;
+  activities: AdminActivity[];
 }
 
 // ── AI Analyst ──────────────────────────────────────────────────────

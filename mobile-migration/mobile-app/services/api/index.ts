@@ -8,6 +8,7 @@
 export { default } from "./client";
 export * from "./types";
 
+export * from "./admin";
 export * from "./analytics/index";
 export * from "./auth";
 export * from "./extraction";

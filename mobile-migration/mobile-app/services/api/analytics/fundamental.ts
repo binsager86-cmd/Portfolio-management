@@ -105,6 +105,29 @@ export async function deleteStatement(stockId: number, statementId: number): Pro
   await api.delete(`/api/v1/fundamental/stocks/${stockId}/statements/${statementId}`);
 }
 
+/** Delete statements for the given period_end_date values, optionally filtered by type. */
+export async function deleteStatementsByPeriod(
+  stockId: number,
+  periods: string[],
+  statementType?: string,
+): Promise<{ message: string; deleted_count: number }> {
+  const { data } = await api.post<{ status: string; data: { message: string; deleted_count: number } }>(
+    `/api/v1/fundamental/stocks/${stockId}/statements/delete-periods`,
+    { periods, ...(statementType ? { statement_type: statementType } : {}) },
+  );
+  return data.data;
+}
+
+/** Hard-delete ALL financial statements and line items for a stock. */
+export async function deleteAllStatements(
+  stockId: number,
+): Promise<{ message: string; deleted_count: number }> {
+  const { data } = await api.delete<{ status: string; data: { message: string; deleted_count: number } }>(
+    `/api/v1/fundamental/stocks/${stockId}/statements`,
+  );
+  return data.data;
+}
+
 /** Update a single line item amount. */
 export async function updateLineItem(
   itemId: number,
@@ -114,6 +137,64 @@ export async function updateLineItem(
     `/api/v1/fundamental/line-items/${itemId}`,
     { amount },
   );
+  return data.data;
+}
+
+/** Bulk-update order_index for line items (drag-and-drop reorder). */
+export async function reorderLineItems(
+  stockId: number,
+  items: Array<{ id: number; order_index: number }>,
+): Promise<{ message: string; updated: number }> {
+  const { data } = await api.post<{ status: string; data: { message: string; updated: number } }>(
+    `/api/v1/fundamental/stocks/${stockId}/statements/reorder-items`,
+    { items },
+  );
+  return data.data;
+}
+
+/** Create a single line item in an existing statement (fill a dash). */
+export async function createLineItem(
+  stockId: number,
+  payload: { statement_id: number; line_item_code: string; line_item_name: string; amount: number; order_index?: number },
+): Promise<{ id: number; message: string }> {
+  const { data } = await api.post<{ status: string; data: { id: number; message: string } }>(
+    `/api/v1/fundamental/stocks/${stockId}/line-items`,
+    payload,
+  );
+  return data.data;
+}
+
+/** Delete a single line item (row removal). */
+export async function deleteLineItem(
+  itemId: number,
+): Promise<{ message: string }> {
+  const { data } = await api.delete<{ status: string; data: { message: string } }>(
+    `/api/v1/fundamental/line-items/${itemId}`,
+  );
+  return data.data;
+}
+
+/** Merge two line items: keep_code absorbs values from remove_code, then remove_code is deleted. */
+export async function mergeLineItems(
+  stockId: number,
+  keepCode: string,
+  removeCode: string,
+): Promise<{ message: string; merged_count: number; deleted_count: number }> {
+  const { data } = await api.post<{ status: string; data: { message: string; merged_count: number; deleted_count: number } }>(
+    `/api/v1/fundamental/stocks/${stockId}/merge-line-items`,
+    { keep_code: keepCode, remove_code: removeCode },
+  );
+  return data.data;
+}
+
+/** Fetch financial statements online (Kuwait via stockanalysis.com, US via macrotrends.net). */
+export async function fetchStatementsOnline(
+  stockId: number,
+): Promise<{ message: string; summary: Array<{ statement_type: string; periods_saved: number }>; source: string }> {
+  const { data } = await api.post<{
+    status: string;
+    data: { message: string; summary: Array<{ statement_type: string; periods_saved: number }>; source: string };
+  }>(`/api/v1/fundamental/stocks/${stockId}/fetch-statements-online`);
   return data.data;
 }
 

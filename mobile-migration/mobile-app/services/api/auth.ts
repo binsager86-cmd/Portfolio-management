@@ -107,3 +107,56 @@ export async function getApiKey(): Promise<{ has_key: boolean; masked_key: strin
   );
   return data.data;
 }
+
+// ── Password Reset ──────────────────────────────────────────────────
+
+/** Request a password reset OTP code via email. */
+export async function forgotPassword(email: string): Promise<{ message: string }> {
+  const validated = z.string().min(1).max(200).trim().parse(email);
+  const { data } = await api.post<{ status: string; message: string }>(
+    "/api/v1/auth/forgot-password",
+    { email: validated },
+  );
+  return { message: data.message };
+}
+
+/** Verify an OTP code (pre-check before setting new password). */
+export async function verifyOtp(
+  email: string,
+  otpCode: string,
+): Promise<{ message: string }> {
+  const { data } = await api.post<{ status: string; message: string }>(
+    "/api/v1/auth/verify-otp",
+    { email: email.trim(), otp_code: otpCode.trim() },
+  );
+  return { message: data.message };
+}
+
+/** Reset password using a verified OTP code. */
+export async function resetPassword(
+  email: string,
+  otpCode: string,
+  newPassword: string,
+): Promise<{ message: string }> {
+  const { data } = await api.post<{ status: string; message: string }>(
+    "/api/v1/auth/reset-password",
+    { email: email.trim(), otp_code: otpCode.trim(), new_password: newPassword },
+  );
+  return { message: data.message };
+}
+
+// ── Account Management ──────────────────────────────────────────────
+
+/** Reset account — permanently delete all portfolio data. */
+export async function resetAccount(): Promise<{ message: string; deleted: Record<string, string> }> {
+  const { data } = await api.post<{ status: string; data: { message: string; deleted: Record<string, string> } }>(
+    "/api/v1/portfolio/reset-account",
+  );
+  return data.data;
+}
+
+/** Update current user's display name. */
+export async function updateName(name: string): Promise<{ message: string }> {
+  const { data } = await api.put<{ status: string; data: { message: string } }>("/api/v1/auth/me", { name });
+  return data.data ?? data;
+}
