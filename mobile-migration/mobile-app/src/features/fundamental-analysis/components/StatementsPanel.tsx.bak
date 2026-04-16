@@ -1,0 +1,1868 @@
+/**
+ * StatementsPanel — Financial statement upload, display, and editing.
+ * Includes EditableCell (memoized), StatementsTable, and upload stepper.
+ * Client-side normalizeCode removed — trusts backend canonical codes.
+ */
+
+import FontAwesome from "@expo/vector-icons/FontAwesome";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+    ActivityIndicator,
+    Alert,
+    Platform,
+    Pressable,
+    RefreshControl,
+    ScrollView,
+    Text,
+    TextInput,
+    View,
+} from "react-native";
+
+// dnd-kit — web only (tree-shaken on native)
+import {
+    closestCenter,
+    DndContext,
+    KeyboardSensor,
+    PointerSensor,
+    useSensor,
+    useSensors,
+    type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+    arrayMove,
+    SortableContext,
+    useSortable,
+    verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+
+import { FAPanelSkeleton } from "@/components/ui/PageSkeletons";
+import type { ThemePalette } from "@/constants/theme";
+import { useStatements } from "@/hooks/queries";
+import { showErrorAlert } from "@/lib/errorHandling";
+import type { TableData } from "@/lib/exportAnalysis";
+import {
+    createLineItem,
+    createStatement,
+    deleteAllStatements,
+    deleteLineItem,
+    deleteStatementsByPeriod,
+    fetchStatementsOnline,
+    FinancialStatement,
+    mergeLineItems,
+    reorderLineItems,
+    updateLineItem
+} from "@/services/api";
+import {
+    aiAttributeExtraction,
+    aiRearrangeStatement,
+    deleteStockPdf,
+    downloadStockPdf,
+    listStockPdfs,
+    logStatementChange,
+    type SavedPdf,
+} from "@/services/api/analytics";
+import { useFinancialStatements, type GeminiModel } from "../hooks/useFinancialStatements";
+import { st } from "../styles";
+import type { PanelWithSymbolProps } from "../types";
+import { STMNT_ICONS, STMNT_META, STMNT_TYPES } from "../types";
+import { formatNumber } from "../utils";
+import { ExportBar, StatementTabBar } from "./shared";
+
+/* ═══════════════════════════════════════════════════════════════════ */
+/*  STATEMENTS PANEL                                                  */
+/* ═══════════════════════════════════════════════════════════════════ */
+
+export function StatementsPanel({ stockId, stockSymbol, colors, isDesktop }: PanelWithSymbolProps) {
+  const [typeFilter, setTypeFilter] = useState<string | undefined>("income");
+  const { data, isLoading, refetch, isFetching } = useStatements(stockId, typeFilter);
+
+  const [selectedModel, setSelectedModel] = useState<GeminiModel>("gemini-2.5-flash");
+
+  const {
+    processingSteps, uploadResult, uploadError, uploading, allDone,
+    handlePickAndUpload,
+    dismissSteps, dismissError, dismissResult,
+  } = useFinancialStatements(stockId, selectedModel);
+
+  const queryClient = useQueryClient();
+
+  // AI attribution state
+  const [attributing, setAttributing] = useState(false);
+  const [attributionDismissed, setAttributionDismissed] = useState(false);
+  const [attributionResult, setAttributionResult] = useState<{ message: string; corrections: number } | null>(null);
+
+  // Excel import state
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState<string | null>(null);
+
+  // Online fetch state (stockanalysis.com)
+  const [fetchingOnline, setFetchingOnline] = useState(false);
+  const [onlineResult, setOnlineResult] = useState<string | null>(null);
+
+  /** Detect statement type from sheet/tab name */
+  const detectStatementType = useCallback((sheetName: string): string | null => {
+    const s = sheetName.toLowerCase().trim();
+    if (/balance|financial\s*position|bs\b/.test(s)) return "balance";
+    if (/income|profit|loss|p\s*&\s*l|p&l|earnings/.test(s)) return "income";
+    if (/cash\s*flow|cashflow|cf\b/.test(s)) return "cashflow";
+    if (/equity|changes\s*in\s*equity/.test(s)) return "equity";
+    return null;
+  }, []);
+
+  /**
+   * Parse imported AOA (array-of-arrays) from Excel and create statements.
+   * Expected format:
+   *   Row 0 (headers): ["Line Item", "FY2022", "FY2023", ...]  or  ["", "2022-12-31", "2023-12-31", ...]
+   *   Row 1+: ["Revenue", 1000000, 1200000, ...]
+   */
+  const processImportedAoa = useCallback(async (aoa: unknown[][], stmtType: string): Promise<number> => {
+    const headers = (aoa[0] as (string | number | null)[]).map((h) => String(h ?? "").trim());
+    const yearColumns: { colIdx: number; year: number; period: string }[] = [];
+
+    // Parse year columns from headers (skip col 0 which is line item name)
+    for (let c = 1; c < headers.length; c++) {
+      const h = headers[c];
+      // Match: "FY2022", "2022", "FY2022 Q1", "2022-12-31", etc.
+      const yearMatch = h.match(/(\d{4})/);
+      if (!yearMatch) continue;
+      const year = parseInt(yearMatch[1], 10);
+      if (year < 1900 || year > 2100) continue;
+      // Use a date match if available, otherwise default to Dec 31
+      const dateMatch = h.match(/(\d{4}-\d{2}-\d{2})/);
+      const period = dateMatch ? dateMatch[1] : `${year}-12-31`;
+      yearColumns.push({ colIdx: c, year, period });
+    }
+
+    if (yearColumns.length === 0) throw new Error("No year columns detected. Headers should contain years (e.g. FY2022, 2023, or 2023-12-31)");
+
+    // Parse data rows
+    const dataRows = aoa.slice(1).filter((row) => {
+      const name = String((row as unknown[])[0] ?? "").trim();
+      return name.length > 0;
+    });
+
+    if (dataRows.length === 0) throw new Error("No data rows found");
+
+    let totalCreated = 0;
+    for (const yc of yearColumns) {
+      const lineItems: { code: string; name: string; amount: number; is_total?: boolean }[] = [];
+      for (let ri = 0; ri < dataRows.length; ri++) {
+        const row = dataRows[ri] as (string | number | null)[];
+        const name = String(row[0] ?? "").trim();
+        const rawVal = row[yc.colIdx];
+        // Parse amount: handle strings like "1,234,567" or "(123,456)" for negatives
+        let amount = 0;
+        if (typeof rawVal === "number") {
+          amount = rawVal;
+        } else if (typeof rawVal === "string") {
+          const cleaned = rawVal.replace(/[,$\s]/g, "");
+          if (cleaned.startsWith("(") && cleaned.endsWith(")")) {
+            amount = -parseFloat(cleaned.slice(1, -1)) || 0;
+          } else {
+            amount = parseFloat(cleaned) || 0;
+          }
+        }
+        const code = name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+        const isTotal = name.toLowerCase().includes("total") || name.toLowerCase().startsWith("net ");
+        lineItems.push({ code, name, amount, is_total: isTotal });
+      }
+
+      await createStatement(stockId, {
+        statement_type: stmtType,
+        fiscal_year: yc.year,
+        period_end_date: yc.period,
+        extracted_by: "excel_import",
+        notes: "Imported from Excel",
+        line_items: lineItems,
+      });
+      totalCreated++;
+    }
+
+    return totalCreated;
+  }, [stockId]);
+
+  /** Process all sheets in a workbook */
+  const processWorkbook = useCallback(async (XLSX: typeof import("xlsx"), wb: import("xlsx").WorkBook) => {
+    const results: string[] = [];
+    let totalCreated = 0;
+
+    for (const sheetName of wb.SheetNames) {
+      const detectedType = detectStatementType(sheetName);
+      const stmtType = detectedType ?? typeFilter ?? "income";
+      const ws = wb.Sheets[sheetName];
+      const aoa: unknown[][] = XLSX.utils.sheet_to_json(ws, { header: 1 });
+      if (aoa.length < 2) {
+        results.push(`"${sheetName}": skipped (no data rows)`);
+        continue;
+      }
+      const created = await processImportedAoa(aoa, stmtType);
+      totalCreated += created;
+      results.push(`"${sheetName}" → ${stmtType} (${created} period(s))`);
+    }
+
+    queryClient.invalidateQueries({ queryKey: ["analysis-statements", stockId] });
+    setImportResult(`Imported ${totalCreated} period(s) from ${results.length} sheet(s):\n${results.join("\n")}`);
+  }, [detectStatementType, typeFilter, processImportedAoa, stockId, queryClient]);
+
+  const handleImportExcel = useCallback(async () => {
+    try {
+      if (Platform.OS === "web") {
+        // Web: use file input
+        const input = document.createElement("input");
+        input.type = "file";
+        input.accept = ".xlsx,.xls,.csv";
+        input.onchange = async () => {
+          const file = input.files?.[0];
+          if (!file) return;
+          setImporting(true);
+          setImportResult(null);
+          try {
+            const XLSX = await import("xlsx");
+            const buf = await file.arrayBuffer();
+            const wb = XLSX.read(buf, { type: "array" });
+            await processWorkbook(XLSX, wb);
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : "Import failed";
+            setImportResult(`Error: ${msg}`);
+          } finally {
+            setImporting(false);
+          }
+        };
+        input.click();
+      } else {
+        // Native: use expo-document-picker
+        setImporting(true);
+        setImportResult(null);
+        try {
+          const DocumentPicker = await import("expo-document-picker");
+          const result = await DocumentPicker.getDocumentAsync({
+            type: ["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/vnd.ms-excel", "text/csv"],
+            copyToCacheDirectory: true,
+          });
+          if (result.canceled || !result.assets?.[0]) {
+            setImporting(false);
+            return;
+          }
+          const asset = result.assets[0];
+          const FileSystem = await import("expo-file-system");
+          const base64 = await FileSystem.readAsStringAsync(asset.uri, { encoding: "base64" as const });
+          const XLSX = await import("xlsx");
+          const wb = XLSX.read(base64, { type: "base64" });
+          await processWorkbook(XLSX, wb);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "Import failed";
+          setImportResult(`Error: ${msg}`);
+        } finally {
+          setImporting(false);
+        }
+      }
+    } catch (err) {
+      setImporting(false);
+      const msg = err instanceof Error ? err.message : "Import failed";
+      setImportResult(`Error: ${msg}`);
+    }
+  }, [processWorkbook]);
+
+  // Saved PDFs query
+  const { data: savedPdfs = [] } = useQuery({
+    queryKey: ["stock-pdfs", stockId],
+    queryFn: () => listStockPdfs(stockId),
+    staleTime: 30_000,
+  });
+
+  // Refresh statements + saved PDFs when a new upload completes
+  useEffect(() => {
+    if (uploadResult && !uploading) {
+      queryClient.invalidateQueries({ queryKey: ["stock-pdfs", stockId] });
+      queryClient.invalidateQueries({ queryKey: ["analysis-statements", stockId] });
+      // Auto-switch to first extracted statement type so user sees the new data
+      const firstType = uploadResult.statements[0]?.statement_type;
+      if (firstType) setTypeFilter(firstType);
+    }
+  }, [uploadResult, uploading, stockId, queryClient]);
+
+  const statements = data?.statements ?? [];
+
+  return (
+    <View style={{ flex: 1 }}>
+      {/* ── Upload Section ─────────────────────────────────────────── */}
+      <View style={{
+        paddingHorizontal: 16, paddingVertical: 14,
+        borderBottomWidth: 1, borderBottomColor: colors.borderColor,
+        backgroundColor: colors.bgCard,
+      }}>
+        <Pressable
+          onPress={handlePickAndUpload}
+          disabled={uploading}
+          style={({ pressed }) => [
+            {
+              flexDirection: "row", alignItems: "center", justifyContent: "center",
+              paddingVertical: 14, paddingHorizontal: 20,
+              borderRadius: 12, borderWidth: 2, borderStyle: "dashed",
+              borderColor: uploading ? colors.textMuted : colors.accentPrimary,
+              backgroundColor: uploading ? colors.bgInput : colors.accentPrimary + "08",
+              gap: 10,
+            },
+            pressed && !uploading && { backgroundColor: colors.accentPrimary + "15", transform: [{ scale: 0.98 }] },
+          ]}
+        >
+          {uploading ? (
+            <ActivityIndicator size="small" color={colors.accentPrimary} />
+          ) : (
+            <View style={{
+              width: 36, height: 36, borderRadius: 18,
+              backgroundColor: colors.accentPrimary + "15",
+              alignItems: "center", justifyContent: "center",
+            }}>
+              <FontAwesome name="cloud-upload" size={18} color={colors.accentPrimary} />
+            </View>
+          )}
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: uploading ? colors.textMuted : colors.textPrimary, fontSize: 14, fontWeight: "700" }}>
+              {uploading ? "Processing..." : "Upload Financial Report (PDF)"}
+            </Text>
+            <Text style={{ color: colors.textMuted, fontSize: 11, marginTop: 2 }}>
+              {uploading
+                ? processingSteps.find((s) => s.status === "running")?.label ?? "Working..."
+                : "AI extracts income, balance sheet, cash flow & equity statements"}
+            </Text>
+          </View>
+          {!uploading && <FontAwesome name="file-pdf-o" size={20} color={colors.danger + "80"} />}
+        </Pressable>
+
+        {/* ── Import Excel Button ──────────────────────────────────── */}
+        <Pressable
+          onPress={handleImportExcel}
+          disabled={importing || uploading}
+          style={({ pressed }) => [
+            {
+              flexDirection: "row", alignItems: "center", justifyContent: "center",
+              paddingVertical: 10, paddingHorizontal: 16, marginTop: 10,
+              borderRadius: 10, borderWidth: 1.5,
+              borderColor: importing ? colors.textMuted : colors.success,
+              backgroundColor: importing ? colors.bgInput : colors.success + "08",
+              gap: 8,
+            },
+            pressed && !importing && { backgroundColor: colors.success + "15", transform: [{ scale: 0.98 }] },
+          ]}
+        >
+          {importing ? (
+            <ActivityIndicator size="small" color={colors.success} />
+          ) : (
+            <FontAwesome name="file-excel-o" size={16} color={colors.success} />
+          )}
+          <Text style={{ color: importing ? colors.textMuted : colors.textPrimary, fontSize: 13, fontWeight: "600" }}>
+            {importing ? "Importing..." : "Import from Excel (.xlsx)"}
+          </Text>
+          <Text style={{ color: colors.textMuted, fontSize: 10 }}>
+            into {STMNT_META[typeFilter ?? "income"]?.label ?? "Income"}
+          </Text>
+        </Pressable>
+
+        {/* Import result banner */}
+        {importResult && (
+          <View style={{
+            flexDirection: "row", alignItems: "center", marginTop: 8,
+            paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8,
+            backgroundColor: importResult.startsWith("Error") ? colors.danger + "15" : colors.success + "15",
+            gap: 6,
+          }}>
+            <FontAwesome
+              name={importResult.startsWith("Error") ? "exclamation-circle" : "check-circle"}
+              size={13}
+              color={importResult.startsWith("Error") ? colors.danger : colors.success}
+            />
+            <Text style={{ flex: 1, fontSize: 11, color: importResult.startsWith("Error") ? colors.danger : colors.success }}>
+              {importResult}
+            </Text>
+            <Pressable onPress={() => setImportResult(null)} hitSlop={8}>
+              <FontAwesome name="times" size={12} color={colors.textMuted} />
+            </Pressable>
+          </View>
+        )}
+
+        {/* ── Get Statements Online (stockanalysis.com) ────────────── */}
+        <Pressable
+          onPress={async () => {
+            setFetchingOnline(true);
+            setOnlineResult(null);
+            try {
+              const res = await fetchStatementsOnline(stockId);
+              setOnlineResult(res.message);
+              queryClient.invalidateQueries({ queryKey: ["analysis-statements", stockId] });
+              refetch();
+            } catch (err: unknown) {
+              setOnlineResult("Error: " + (err instanceof Error ? err.message : "Failed to fetch statements"));
+            } finally {
+              setFetchingOnline(false);
+            }
+          }}
+          disabled={fetchingOnline || uploading}
+          style={({ pressed }) => [
+            {
+              flexDirection: "row", alignItems: "center", justifyContent: "center",
+              paddingVertical: 10, paddingHorizontal: 16, marginTop: 10,
+              borderRadius: 10, borderWidth: 1.5,
+              borderColor: fetchingOnline ? colors.textMuted : colors.accentPrimary,
+              backgroundColor: fetchingOnline ? colors.bgInput : colors.accentPrimary + "08",
+              gap: 8,
+            },
+            pressed && !fetchingOnline && { backgroundColor: colors.accentPrimary + "15", transform: [{ scale: 0.98 }] },
+          ]}
+        >
+          {fetchingOnline ? (
+            <ActivityIndicator size="small" color={colors.accentPrimary} />
+          ) : (
+            <FontAwesome name="globe" size={16} color={colors.accentPrimary} />
+          )}
+          <Text style={{ color: fetchingOnline ? colors.textMuted : colors.textPrimary, fontSize: 13, fontWeight: "600" }}>
+            {fetchingOnline ? "Fetching..." : "Get Statements"}
+          </Text>
+          <Text style={{ color: colors.textMuted, fontSize: 10 }}>
+            from stockanalysis.com
+          </Text>
+        </Pressable>
+
+        {/* Online fetch result banner */}
+        {onlineResult && (
+          <View style={{
+            flexDirection: "row", alignItems: "center", marginTop: 8,
+            paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8,
+            backgroundColor: onlineResult.startsWith("Error") ? colors.danger + "15" : colors.success + "15",
+            gap: 6,
+          }}>
+            <FontAwesome
+              name={onlineResult.startsWith("Error") ? "exclamation-circle" : "check-circle"}
+              size={13}
+              color={onlineResult.startsWith("Error") ? colors.danger : colors.success}
+            />
+            <Text style={{ flex: 1, fontSize: 11, color: onlineResult.startsWith("Error") ? colors.danger : colors.success }}>
+              {onlineResult}
+            </Text>
+            <Pressable onPress={() => setOnlineResult(null)} hitSlop={8}>
+              <FontAwesome name="times" size={12} color={colors.textMuted} />
+            </Pressable>
+          </View>
+        )}
+
+        {/* ── Model selector ───────────────────────────────────────── */}
+        <View style={{ flexDirection: "row", alignItems: "center", marginTop: 10, gap: 8 }}>
+          <Text style={{ fontSize: 11, color: colors.textMuted, fontWeight: "600" }}>AI Model:</Text>
+          {(["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.5-pro-preview-03-25"] as const).map((m) => {
+            const label = m === "gemini-2.5-flash" ? "2.5 Flash" : m === "gemini-2.5-pro" ? "2.5 Pro" : "3.1 Pro";
+            return (
+              <Pressable
+                key={m}
+                onPress={() => setSelectedModel(m)}
+                disabled={uploading}
+                style={({ pressed }) => ({
+                  paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8,
+                  borderWidth: 1,
+                  borderColor: selectedModel === m ? colors.accentPrimary : colors.borderColor,
+                  backgroundColor: selectedModel === m ? colors.accentPrimary + "18" : "transparent",
+                  opacity: uploading ? 0.5 : pressed ? 0.8 : 1,
+                })}
+              >
+                <Text style={{
+                  fontSize: 11, fontWeight: selectedModel === m ? "700" : "500",
+                  color: selectedModel === m ? colors.accentPrimary : colors.textSecondary,
+                }}>
+                  {label}
+                </Text>
+              </Pressable>
+            );
+          })}
+          {selectedModel !== "gemini-2.5-flash" && (
+            <Text style={{ fontSize: 9, color: colors.warning, fontWeight: "600" }}>Better accuracy, slower</Text>
+          )}
+        </View>
+
+        {/* ── Processing indicator ────────────────────────────────── */}
+        {processingSteps.length > 0 && (
+          <View style={{ marginTop: 12, gap: 6 }}>
+            {processingSteps.map((step) => {
+              const iconName: React.ComponentProps<typeof FontAwesome>["name"] =
+                step.status === "done" ? "check-circle" :
+                step.status === "error" ? "exclamation-triangle" :
+                step.status === "running" ? "spinner" : "circle-o";
+              const iconColor =
+                step.status === "done" ? colors.success :
+                step.status === "error" ? colors.warning :
+                step.status === "running" ? colors.accentPrimary : colors.textMuted;
+
+              return (
+                <View key={step.key} style={[st.rowCenter, { gap: 10, paddingVertical: 4, paddingHorizontal: 4 }]}>
+                  {step.status === "running" ? (
+                    <ActivityIndicator size={14} color={colors.accentPrimary} />
+                  ) : (
+                    <FontAwesome name={iconName} size={14} color={iconColor} />
+                  )}
+                  <Text style={{ fontSize: 12, fontWeight: "600", color: step.status === "pending" ? colors.textMuted : colors.textPrimary, flex: 1 }}>
+                    {step.label}
+                  </Text>
+                  {step.detail && (
+                    <Text style={{ fontSize: 10, color: step.status === "error" ? colors.warning : colors.textMuted }}>
+                      {step.detail}
+                    </Text>
+                  )}
+                </View>
+              );
+            })}
+            {allDone && !uploading && (
+              <Pressable onPress={dismissSteps} style={{ alignSelf: "flex-end", paddingVertical: 4, paddingHorizontal: 8 }} hitSlop={8}>
+                <Text style={{ fontSize: 11, color: colors.accentPrimary, fontWeight: "600" }}>Dismiss</Text>
+              </Pressable>
+            )}
+          </View>
+        )}
+
+        {/* Extraction result summary — matches Streamlit's AI Vision result display */}
+        {uploadResult && !uploading && (
+          <View style={{
+            marginTop: 10, padding: 12, borderRadius: 10,
+            backgroundColor: colors.success + "10",
+            borderWidth: 1, borderColor: colors.success + "30",
+          }}>
+            <View style={[st.rowCenter, { gap: 8 }]}>
+              <FontAwesome name="check-circle" size={16} color={colors.success} />
+              <Text style={{ color: colors.success, fontSize: 13, fontWeight: "700", flex: 1 }}>
+                AI Vision Extraction Complete
+              </Text>
+              <Pressable onPress={dismissResult} hitSlop={8}>
+                <FontAwesome name="times" size={14} color={colors.textMuted} />
+              </Pressable>
+            </View>
+            {/* Summary metrics — mirrors Streamlit's cols summary */}
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12, marginTop: 10 }}>
+              <View>
+                <Text style={{ color: colors.textMuted, fontSize: 10, fontWeight: "500" }}>Statements</Text>
+                <Text style={{ color: colors.textPrimary, fontSize: 14, fontWeight: "700" }}>{uploadResult.statements.length}</Text>
+              </View>
+              <View>
+                <Text style={{ color: colors.textMuted, fontSize: 10, fontWeight: "500" }}>Confidence</Text>
+                <Text style={{ color: colors.textPrimary, fontSize: 14, fontWeight: "700" }}>{Math.round(uploadResult.confidence * 100)}%</Text>
+              </View>
+              <View>
+                <Text style={{ color: colors.textMuted, fontSize: 10, fontWeight: "500" }}>Pages</Text>
+                <Text style={{ color: colors.textPrimary, fontSize: 14, fontWeight: "700" }}>{uploadResult.pages_processed}</Text>
+              </View>
+              <View>
+                <Text style={{ color: colors.textMuted, fontSize: 10, fontWeight: "500" }}>Model</Text>
+                <Text style={{ color: colors.textPrimary, fontSize: 14, fontWeight: "700" }}>{uploadResult.model}</Text>
+              </View>
+              <View>
+                <Text style={{ color: colors.textMuted, fontSize: 10, fontWeight: "500" }}>Audit</Text>
+                <Text style={{ color: uploadResult.audit.checks_failed === 0 ? colors.success : colors.warning, fontSize: 14, fontWeight: "700" }}>
+                  {uploadResult.audit.checks_passed}/{uploadResult.audit.checks_total}
+                </Text>
+              </View>
+            </View>
+            {/* Per-statement chips — like Streamlit's detected types display */}
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+              {uploadResult.statements.map((s, i) => (
+                <View key={i} style={{
+                  paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6,
+                  backgroundColor: (STMNT_ICONS[s.statement_type]?.color ?? "#6366f1") + "15",
+                }}>
+                  <Text style={{
+                    color: STMNT_ICONS[s.statement_type]?.color ?? "#6366f1",
+                    fontSize: 10, fontWeight: "700", textTransform: "capitalize",
+                  }}>
+                    {s.statement_type} FY{s.fiscal_year} ({s.line_items_count} items · {s.currency})
+                  </Text>
+                </View>
+              ))}
+            </View>
+            {/* Audit details — like Streamlit's validation checks */}
+            {uploadResult.audit.details.length > 0 && (
+              <View style={{ marginTop: 8, gap: 3 }}>
+                <Text style={{ fontSize: 10, fontWeight: "700", color: colors.textMuted }}>Audit Checks</Text>
+                {uploadResult.audit.details.map((d, i) => (
+                  <View key={i} style={{ gap: 1 }}>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                      <FontAwesome name={d.passed ? "check" : "times"} size={10} color={d.passed ? colors.success : colors.danger} />
+                      <Text style={{ fontSize: 10, color: colors.textSecondary, flex: 1 }}>
+                        {d.statement_type} · {d.period} · {d.rule}
+                      </Text>
+                      <Text style={{ fontSize: 10, color: d.passed ? colors.textMuted : colors.danger }}>
+                        {d.passed ? "OK" : `Exp: ${d.expected} / Act: ${d.actual}`}
+                      </Text>
+                    </View>
+                    {!d.passed && d.detail ? (
+                      <Text style={{ fontSize: 9, color: colors.danger, marginLeft: 14, fontFamily: "monospace" }}>
+                        {d.detail}
+                      </Text>
+                    ) : null}
+                  </View>
+                ))}
+              </View>
+            )}
+
+            {/* ── AI Attribution Prompt ─────────────────────────── */}
+            {uploadResult.audit.checks_failed > 0 && !attributionDismissed && !attributionResult && (
+              <View style={{
+                marginTop: 10, padding: 12, borderRadius: 10,
+                backgroundColor: colors.warning + "10",
+                borderWidth: 1, borderColor: colors.warning + "30",
+              }}>
+                <View style={[st.rowCenter, { gap: 8 }]}>
+                  <FontAwesome name="lightbulb-o" size={16} color={colors.warning} />
+                  <Text style={{ color: colors.textPrimary, fontSize: 12, fontWeight: "600", flex: 1 }}>
+                    Some items may have attribution discrepancies. Would you like AI to review and fix the linking?
+                  </Text>
+                </View>
+                {/* Show which checks failed */}
+                <View style={{ marginTop: 6, gap: 2 }}>
+                  {uploadResult.audit.details
+                    .filter((d) => !d.passed)
+                    .map((d, i) => (
+                      <View key={i} style={{ flexDirection: "row", alignItems: "flex-start", gap: 4, marginLeft: 24 }}>
+                        <FontAwesome name="exclamation-triangle" size={9} color={colors.warning} style={{ marginTop: 2 }} />
+                        <Text style={{ fontSize: 10, color: colors.textSecondary, flex: 1 }}>
+                          {d.detail || `${d.statement_type} · ${d.period} · ${d.rule}: Exp ${d.expected} / Act ${d.actual}`}
+                        </Text>
+                      </View>
+                    ))}
+                </View>
+                <View style={{ flexDirection: "row", gap: 10, marginTop: 10, justifyContent: "flex-end" }}>
+                  <Pressable
+                    onPress={() => setAttributionDismissed(true)}
+                    disabled={attributing}
+                    style={({ pressed }) => [{
+                      paddingVertical: 8, paddingHorizontal: 16, borderRadius: 8,
+                      borderWidth: 1, borderColor: colors.borderColor,
+                      backgroundColor: pressed ? colors.bgInput : colors.bgCard,
+                    }]}
+                  >
+                    <Text style={{ fontSize: 12, fontWeight: "600", color: colors.textMuted }}>No</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={async () => {
+                      setAttributing(true);
+                      try {
+                        const res = await aiAttributeExtraction(stockId);
+                        setAttributionResult({
+                          message: res.message,
+                          corrections: res.corrections_applied,
+                        });
+                        if (res.corrections_applied > 0) {
+                          queryClient.invalidateQueries({ queryKey: ["analysis-statements", stockId] });
+                        }
+                      } catch (err) {
+                        const msg = err instanceof Error ? err.message : "Attribution failed";
+                        showErrorAlert("AI Attribution", msg);
+                      } finally {
+                        setAttributing(false);
+                      }
+                    }}
+                    disabled={attributing}
+                    style={({ pressed }) => [{
+                      paddingVertical: 8, paddingHorizontal: 16, borderRadius: 8,
+                      backgroundColor: pressed ? colors.accentPrimary + "CC" : colors.accentPrimary,
+                      flexDirection: "row", alignItems: "center", gap: 6,
+                    }]}
+                  >
+                    {attributing && <ActivityIndicator size={12} color="#fff" />}
+                    <Text style={{ fontSize: 12, fontWeight: "700", color: "#fff" }}>
+                      {attributing ? "Reviewing..." : "Yes, Fix with AI"}
+                    </Text>
+                  </Pressable>
+                </View>
+              </View>
+            )}
+
+            {/* ── Attribution Result ───────────────────────────── */}
+            {attributionResult && (
+              <View style={{
+                marginTop: 10, padding: 12, borderRadius: 10,
+                backgroundColor: (attributionResult.corrections > 0 ? colors.success : colors.accentPrimary) + "10",
+                borderWidth: 1,
+                borderColor: (attributionResult.corrections > 0 ? colors.success : colors.accentPrimary) + "30",
+              }}>
+                <View style={[st.rowCenter, { gap: 8 }]}>
+                  <FontAwesome
+                    name={attributionResult.corrections > 0 ? "check-circle" : "info-circle"}
+                    size={14}
+                    color={attributionResult.corrections > 0 ? colors.success : colors.accentPrimary}
+                  />
+                  <Text style={{ color: colors.textPrimary, fontSize: 12, fontWeight: "600", flex: 1 }}>
+                    {attributionResult.message}
+                  </Text>
+                  <Pressable onPress={() => setAttributionResult(null)} hitSlop={8}>
+                    <FontAwesome name="times" size={12} color={colors.textMuted} />
+                  </Pressable>
+                </View>
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* Upload error */}
+        {uploadError && !uploading && (
+          <View style={{
+            marginTop: 10, padding: 12, borderRadius: 10,
+            backgroundColor: colors.danger + "10",
+            borderWidth: 1, borderColor: colors.danger + "30",
+          }}>
+            <View style={[st.rowCenter, { gap: 8 }]}>
+              <FontAwesome name="exclamation-circle" size={16} color={colors.danger} />
+              <Text style={{ color: colors.danger, fontSize: 13, fontWeight: "600", flex: 1 }}>{uploadError}</Text>
+              <Pressable onPress={dismissError} hitSlop={8}>
+                <FontAwesome name="times" size={14} color={colors.textMuted} />
+              </Pressable>
+            </View>
+            <Pressable
+              onPress={handlePickAndUpload}
+              style={{ alignSelf: "flex-start", flexDirection: "row", alignItems: "center", gap: 4, marginTop: 8, paddingVertical: 4, paddingHorizontal: 8 }}
+              hitSlop={8}
+            >
+              <FontAwesome name="refresh" size={11} color={colors.accentPrimary} />
+              <Text style={{ fontSize: 11, color: colors.accentPrimary, fontWeight: "600" }}>Try Again</Text>
+            </Pressable>
+          </View>
+        )}
+      </View>
+
+      {/* ── Saved PDFs ─────────────────────────────────────────────── */}
+      <SavedPdfsList pdfs={savedPdfs} stockId={stockId} colors={colors} />
+
+      {/* Type filter tabs */}
+      <StatementTabBar value={typeFilter} onChange={setTypeFilter} colors={colors} showAll={true} />
+
+      {isLoading ? (
+        <FAPanelSkeleton />
+      ) : typeFilter == null ? (
+        /* ── "All" view: grouped by statement type ──────────────── */
+        <ScrollView style={{ flex: 1 }}>
+          {STMNT_TYPES.map((sType) => {
+            const filtered = statements.filter((s) => s.statement_type === sType);
+            if (filtered.length === 0) return null;
+            const meta = STMNT_META[sType];
+            return (
+              <View key={sType}>
+                {/* Category header */}
+                <View style={{
+                  flexDirection: "row", alignItems: "center", gap: 8,
+                  paddingHorizontal: 14, paddingVertical: 10,
+                  backgroundColor: (meta?.color ?? colors.accentPrimary) + "12",
+                  borderBottomWidth: 1, borderBottomColor: colors.borderColor,
+                }}>
+                  <FontAwesome name={meta?.icon ?? "file-text-o"} size={14} color={meta?.color ?? colors.accentPrimary} />
+                  <Text style={{ fontSize: 13, fontWeight: "700", color: meta?.color ?? colors.textPrimary, letterSpacing: 0.3 }}>
+                    {meta?.label ?? sType}
+                  </Text>
+                  <Text style={{ fontSize: 11, color: colors.textMuted }}>({filtered.length} period{filtered.length !== 1 ? "s" : ""})</Text>
+                </View>
+                <StatementsTable stockId={stockId} stockSymbol={stockSymbol} statements={filtered} colors={colors} isDesktop={isDesktop} isFetching={isFetching} onRefresh={refetch} statementType={sType} />
+              </View>
+            );
+          })}
+        </ScrollView>
+      ) : (
+        <StatementsTable stockId={stockId} stockSymbol={stockSymbol} statements={statements} colors={colors} isDesktop={isDesktop} isFetching={isFetching} onRefresh={refetch} statementType={typeFilter} />
+      )}
+    </View>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════ */
+/*  SAVED PDFs LIST                                                    */
+/* ═══════════════════════════════════════════════════════════════════ */
+
+function SavedPdfsList({ pdfs, stockId, colors }: { pdfs: SavedPdf[]; stockId: number; colors: ThemePalette }) {
+  const queryClient = useQueryClient();
+  const [expanded, setExpanded] = useState(true);
+
+  const handleDownload = useCallback(async (pdf: SavedPdf) => {
+    try {
+      if (Platform.OS === "web") {
+        await downloadStockPdf(stockId, pdf.id, pdf.original_name);
+      } else {
+        Alert.alert("Download", "PDF download is supported on web. On mobile, PDFs are stored on the server for reference.");
+      }
+    } catch {
+      Alert.alert("Error", "Failed to download PDF.");
+    }
+  }, [stockId]);
+
+  const doDelete = useCallback(async (pdf: SavedPdf) => {
+    try {
+      await deleteStockPdf(stockId, pdf.id);
+      queryClient.invalidateQueries({ queryKey: ["stock-pdfs", stockId] });
+      if (Platform.OS === "web") window.alert("PDF deleted successfully.");
+      else Alert.alert("Deleted", "PDF deleted successfully.");
+    } catch {
+      if (Platform.OS === "web") window.alert("Failed to delete PDF.");
+      else Alert.alert("Error", "Failed to delete PDF.");
+    }
+  }, [stockId, queryClient]);
+
+  const handleDelete = useCallback((pdf: SavedPdf) => {
+    if (Platform.OS === "web") {
+      if (window.confirm(`Delete "${pdf.original_name}"? This cannot be undone.`)) {
+        doDelete(pdf);
+      }
+    } else {
+      Alert.alert(
+        "Delete PDF",
+        `Delete "${pdf.original_name}"? This cannot be undone.`,
+        [
+          { text: "Cancel", style: "cancel" },
+          { text: "Delete", style: "destructive", onPress: () => doDelete(pdf) },
+        ],
+      );
+    }
+  }, [doDelete]);
+
+  const formatFileSize = (bytes: number) => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  const formatDate = (ts: number) => {
+    const d = new Date(ts * 1000);
+    return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+  };
+
+  return (
+    <View style={{
+      paddingHorizontal: 16, paddingVertical: 10,
+      borderBottomWidth: 1, borderBottomColor: colors.borderColor,
+    }}>
+      <Pressable
+        onPress={() => setExpanded((v) => !v)}
+        style={[st.rowCenter, { gap: 8, paddingVertical: 4 }]}
+      >
+        <FontAwesome name="folder-open" size={14} color={colors.accentPrimary} />
+        <Text style={{ fontSize: 13, fontWeight: "700", color: colors.textPrimary, flex: 1 }}>
+          Saved Reports ({pdfs.length})
+        </Text>
+        <FontAwesome
+          name={expanded ? "chevron-up" : "chevron-down"}
+          size={12}
+          color={colors.textMuted}
+        />
+      </Pressable>
+
+      {expanded && (
+        <View style={{ marginTop: 8, gap: 6 }}>
+          {pdfs.length === 0 && (
+            <Text style={{ fontSize: 12, color: colors.textMuted, fontStyle: "italic", paddingVertical: 8 }}>
+              No saved reports yet. Upload a PDF above — it will be saved here automatically.
+            </Text>
+          )}
+          {pdfs.map((pdf) => (
+            <View
+              key={pdf.id}
+              style={{
+                flexDirection: "row", alignItems: "center", gap: 10,
+                paddingVertical: 8, paddingHorizontal: 10,
+                borderRadius: 8,
+                backgroundColor: colors.bgInput,
+              }}
+            >
+              <FontAwesome name="file-pdf-o" size={16} color={colors.danger + "90"} />
+              <View style={{ flex: 1 }}>
+                <Text
+                  numberOfLines={1}
+                  style={{ fontSize: 12, fontWeight: "600", color: colors.textPrimary }}
+                >
+                  {pdf.original_name}
+                </Text>
+                <Text style={{ fontSize: 10, color: colors.textMuted, marginTop: 1 }}>
+                  {formatFileSize(pdf.file_size)} · {formatDate(pdf.created_at)}
+                </Text>
+              </View>
+              <Pressable onPress={() => handleDownload(pdf)} hitSlop={8} style={{ padding: 6 }}>
+                <FontAwesome name="download" size={14} color={colors.accentPrimary} />
+              </Pressable>
+              <Pressable onPress={() => handleDelete(pdf)} hitSlop={8} style={{ padding: 6 }}>
+                <FontAwesome name="trash-o" size={14} color={colors.danger + "80"} />
+              </Pressable>
+            </View>
+          ))}
+        </View>
+      )}
+    </View>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════ */
+/*  EDITABLE CELL (memoized)                                          */
+/* ═══════════════════════════════════════════════════════════════════ */
+
+const EditableCell = React.memo(function EditableCell({
+  itemId, value, isTotal, isEdited, colWidth, colors, editingKey,
+  onStartEdit, onSave, onCancel, cellEditKey, onCreateSave,
+}: {
+  itemId: number | null;
+  value: number | undefined | null;
+  isTotal: boolean;
+  isEdited: boolean;
+  colWidth: number;
+  colors: ThemePalette;
+  editingKey: string | null;
+  onStartEdit: (id: string, val: string) => void;
+  onSave: (id: number, amount: number) => void;
+  onCancel: () => void;
+  /** Unique key for dash cells (no itemId) so they can enter edit mode */
+  cellEditKey?: string;
+  /** Called when saving a dash cell — creates a new line item */
+  onCreateSave?: (amount: number) => void;
+}) {
+  const actualKey = itemId != null ? String(itemId) : cellEditKey ?? null;
+  const isEditing = editingKey != null && actualKey === editingKey;
+  const [localValue, setLocalValue] = useState(String(value ?? "0"));
+
+  useEffect(() => {
+    if (isEditing) setLocalValue(String(value ?? "0"));
+  }, [isEditing, value]);
+
+  const handleSubmit = useCallback(() => {
+    const num = parseFloat(localValue);
+    if (isNaN(num)) return;
+    if (itemId != null) {
+      onSave(itemId, num);
+    } else if (onCreateSave) {
+      onCreateSave(num);
+    }
+  }, [localValue, itemId, onSave, onCreateSave]);
+
+  if (isEditing) {
+    return (
+      <View style={{ width: colWidth, alignItems: "flex-end", justifyContent: "center" }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 3 }}>
+          <TextInput
+            value={localValue}
+            onChangeText={setLocalValue}
+            keyboardType="numeric"
+            autoFocus
+            style={{
+              width: colWidth - 40, height: 26, borderWidth: 1, borderRadius: 6,
+              borderColor: colors.accentPrimary, color: colors.textPrimary,
+              backgroundColor: colors.bgCard, fontSize: 11,
+              paddingHorizontal: 6, textAlign: "right", fontVariant: ["tabular-nums"],
+            }}
+            onSubmitEditing={handleSubmit}
+          />
+          <Pressable onPress={handleSubmit} hitSlop={6}>
+            <FontAwesome name="check" size={12} color={colors.success} />
+          </Pressable>
+          <Pressable onPress={onCancel} hitSlop={6}>
+            <FontAwesome name="times" size={12} color={colors.textMuted} />
+          </Pressable>
+        </View>
+      </View>
+    );
+  }
+
+  return (
+    <View style={{ width: colWidth, alignItems: "flex-end", justifyContent: "center" }}>
+      <Pressable
+        onPress={() => { if (actualKey) onStartEdit(actualKey, String(value ?? "0")); }}
+        style={{ flexDirection: "row", alignItems: "center" }}
+      >
+        <Text style={{
+          fontSize: 12, fontWeight: isTotal ? "700" : "500",
+          color: value != null && value < 0 ? colors.danger : (isTotal ? colors.textPrimary : colors.textSecondary),
+          fontVariant: ["tabular-nums"], textAlign: "right",
+        }}>
+          {value != null ? formatNumber(value) : "-"}
+        </Text>
+        {isEdited && (
+          <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: colors.warning, marginLeft: 4 }} />
+        )}
+      </Pressable>
+    </View>
+  );
+});
+
+/* ═══════════════════════════════════════════════════════════════════ */
+/*  SORTABLE ROW (dnd-kit)                                            */
+/* ═══════════════════════════════════════════════════════════════════ */
+
+type PeriodInfo = {
+  label: string;
+  period: string;
+  statementId: number;
+  items: Record<string, { id: number; amount: number; name: string; isTotal: boolean; edited: boolean }>;
+};
+
+function SortableRow({
+  id, item, rowIdx, periods, colors, COL_NAME_W, COL_VAL_W,
+  editingKey, onStartEdit, onSaveEdit, onCancelEdit, onCreateSave, onDeleteRow,
+  mergeMode, mergeSelected, onToggleMerge,
+}: {
+  id: string;
+  item: { code: string; name: string; isTotal: boolean };
+  rowIdx: number;
+  periods: PeriodInfo[];
+  colors: ThemePalette;
+  COL_NAME_W: number;
+  COL_VAL_W: number;
+  editingKey: string | null;
+  onStartEdit: (id: string, val: string) => void;
+  onSaveEdit: (id: number, amount: number) => void;
+  onCancelEdit: () => void;
+  onCreateSave: (statementId: number, code: string, name: string, orderIdx: number, amount: number) => void;
+  onDeleteRow: (code: string, name: string) => void;
+  mergeMode: boolean;
+  mergeSelected: boolean;
+  onToggleMerge: (code: string) => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition: transition ?? undefined,
+    opacity: isDragging ? 0.5 : 1,
+    display: "flex",
+    flexDirection: "row",
+    alignItems: "center",
+    paddingTop: 8,
+    paddingBottom: 8,
+    paddingLeft: 8,
+    paddingRight: 8,
+    backgroundColor: isDragging
+      ? (colors.accentPrimary + "20")
+      : item.isTotal ? (colors.bgInput + "60") : rowIdx % 2 === 0 ? "transparent" : (colors.bgPrimary + "30"),
+    borderTopWidth: item.isTotal ? 1 : 0,
+    borderTopColor: colors.borderColor,
+    borderTopStyle: item.isTotal ? "solid" as const : undefined,
+    zIndex: isDragging ? 999 : undefined,
+  };
+
+  return (
+    <div ref={setNodeRef} style={{
+      ...style,
+      ...(mergeSelected ? { backgroundColor: colors.accentPrimary + "25", borderLeft: `3px solid ${colors.accentPrimary}` } : {}),
+    }}>
+      {/* Merge checkbox */}
+      {mergeMode && (
+        <Pressable
+          onPress={() => onToggleMerge(item.code)}
+          hitSlop={4}
+          style={{ marginRight: 4, padding: 2 }}
+        >
+          <View style={{
+            width: 18, height: 18, borderRadius: 4, borderWidth: 1.5,
+            borderColor: mergeSelected ? colors.accentPrimary : colors.textMuted,
+            backgroundColor: mergeSelected ? colors.accentPrimary : "transparent",
+            alignItems: "center", justifyContent: "center",
+          }}>
+            {mergeSelected && <FontAwesome name="check" size={10} color="#fff" />}
+          </View>
+        </Pressable>
+      )}
+      {/* Drag handle */}
+      <div
+        {...attributes}
+        {...listeners}
+        style={{
+          cursor: "grab",
+          padding: 2,
+          marginRight: 4,
+          display: "flex",
+          alignItems: "center",
+          touchAction: "none",
+        }}
+      >
+        <Text style={{ fontSize: 12, color: colors.textMuted }}>⠿</Text>
+      </div>
+
+      {/* Row name */}
+      <Text numberOfLines={1} style={{
+        width: COL_NAME_W - 36,
+        fontSize: 12,
+        fontWeight: item.isTotal ? "700" : "400",
+        color: item.isTotal ? colors.textPrimary : colors.textSecondary,
+      }}>
+        {item.name}
+      </Text>
+
+      {/* Delete row button */}
+      <Pressable
+        onPress={() => onDeleteRow(item.code, item.name)}
+        hitSlop={4}
+        style={{ marginRight: 2, padding: 2 }}
+      >
+        <FontAwesome name="trash-o" size={10} color={colors.danger + "80"} />
+      </Pressable>
+
+      {/* Period cells */}
+      {periods.map((p) => {
+        const cell = p.items[item.code];
+        const dashKey = cell?.id == null ? `create_${p.statementId}_${item.code}` : undefined;
+        return (
+          <EditableCell
+            key={p.period}
+            itemId={cell?.id ?? null}
+            value={cell?.amount}
+            isTotal={item.isTotal}
+            isEdited={!!cell?.edited}
+            colWidth={COL_VAL_W}
+            colors={colors}
+            editingKey={editingKey}
+            onStartEdit={onStartEdit}
+            onSave={onSaveEdit}
+            onCancel={onCancelEdit}
+            cellEditKey={dashKey}
+            onCreateSave={dashKey ? (amount: number) => onCreateSave(p.statementId, item.code, item.name, rowIdx + 1, amount) : undefined}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════ */
+/*  STATEMENTS TABLE                                                  */
+/* ═══════════════════════════════════════════════════════════════════ */
+
+function StatementsTable({
+  stockId, stockSymbol, statements, colors, isDesktop, isFetching, onRefresh, statementType,
+}: {
+  stockId: number;
+  stockSymbol: string;
+  statements: FinancialStatement[];
+  colors: ThemePalette;
+  isDesktop: boolean;
+  isFetching: boolean;
+  onRefresh: () => void;
+  statementType?: string;
+}) {
+  const queryClient = useQueryClient();
+  const [editingKey, setEditingKey] = useState<string | null>(null);
+  const [selectedPeriods, setSelectedPeriods] = useState<Set<string>>(new Set());
+  const [deleteMode, setDeleteMode] = useState(false);
+  const [rearranging, setRearranging] = useState(false);
+  const [rearrangeResult, setRearrangeResult] = useState<string | null>(null);
+  const [pdfPickerOpen, setPdfPickerOpen] = useState(false);
+  const [stmtPickerOpen, setStmtPickerOpen] = useState(false);
+  const [reconcileType, setReconcileType] = useState<string>("all");
+  const RECONCILE_OPTS = [
+    { key: "all", label: "All Types" },
+    { key: "income", label: "Income Only" },
+    { key: "balance", label: "Balance Sheet Only" },
+    { key: "cashflow", label: "Cash Flow Only" },
+    { key: "equity", label: "Equity Only" },
+  ] as const;
+
+  // ── Merge mode state ────────────────────────────────────────────
+  const [mergeMode, setMergeMode] = useState(false);
+  const [mergeSelection, setMergeSelection] = useState<string[]>([]);
+  const [mergeResult, setMergeResult] = useState<string | null>(null);
+
+  // ── Drag-and-drop state ─────────────────────────────────────────
+  const [localOrder, setLocalOrder] = useState<{ code: string; name: string; isTotal: boolean }[] | null>(null);
+
+  // ── Ref for syncing horizontal scroll between sticky header and body ──
+  const headerScrollRef = useRef<ScrollView>(null);
+
+  // Saved PDFs for AI rearrange PDF picker
+  const { data: tablePdfs = [] } = useQuery({
+    queryKey: ["stock-pdfs", stockId],
+    queryFn: () => listStockPdfs(stockId),
+    staleTime: 30_000,
+  });
+  const [selectedPdfId, setSelectedPdfId] = useState<number | undefined>();
+
+  // Auto-select latest PDF when list loads
+  useEffect(() => {
+    if (tablePdfs.length > 0 && !selectedPdfId) {
+      setSelectedPdfId(tablePdfs[0].id);
+    }
+  }, [tablePdfs, selectedPdfId]);
+
+  const handleRearrange = useCallback(async () => {
+    const targetType = reconcileType === "all" ? statementType : reconcileType;
+    if (!targetType) return;
+    setPdfPickerOpen(false);
+    setStmtPickerOpen(false);
+    setRearranging(true);
+    setRearrangeResult(null);
+    try {
+      const typesToReconcile = reconcileType === "all"
+        ? ["income", "balance", "cashflow", "equity"]
+        : [reconcileType];
+      const messages: string[] = [];
+      let totalCorrections = 0;
+      for (const t of typesToReconcile) {
+        const res = await aiRearrangeStatement(stockId, t, undefined, selectedPdfId);
+        messages.push(res.message);
+        totalCorrections += res.corrections_applied;
+      }
+      const combined = typesToReconcile.length > 1
+        ? `Reconciled ${typesToReconcile.length} statements — ${totalCorrections} total corrections.\n${messages.join("\n")}`
+        : messages[0];
+      setRearrangeResult(combined);
+      if (totalCorrections > 0) {
+        queryClient.invalidateQueries({ queryKey: ["analysis-statements", stockId] });
+      }
+    } catch (err: unknown) {
+      let msg = "AI reconciliation failed";
+      if (err && typeof err === "object" && "response" in err) {
+        const axErr = err as { response?: { data?: { detail?: string } } };
+        msg = axErr.response?.data?.detail || (err instanceof Error ? err.message : msg);
+      } else if (err instanceof Error) {
+        msg = err.message;
+      }
+      setRearrangeResult(`Error: ${msg}`);
+    } finally {
+      setRearranging(false);
+    }
+  }, [stockId, statementType, reconcileType, selectedPdfId, queryClient]);
+
+  const updateMut = useMutation({
+    mutationFn: ({ itemId, amount }: { itemId: number; amount: number }) => updateLineItem(itemId, amount),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["analysis-statements", stockId] }); setEditingKey(null); },
+    onError: (err: Error) => showErrorAlert("Update Failed", err),
+  });
+
+  const handleStartEdit = useCallback((id: string, _val: string) => {
+    setEditingKey(id);
+  }, []);
+
+  // Audit-aware save: confirm before modifying financial data
+  const handleSaveEdit = useCallback(async (itemId: number, amount: number) => {
+    const lineItem = statements
+      .flatMap((s) => (s.line_items || []).map((li) => ({ ...li, _statementId: s.id })))
+      .find((li) => li.id === itemId);
+    const currentValue = lineItem?.amount ?? null;
+    const statementId = lineItem?._statementId ?? 0;
+
+    const msg = "Modifying financial statements affects all derived metrics and scores. This action is logged.";
+
+    const doSave = () => {
+      updateMut.mutate({ itemId, amount });
+      logStatementChange(
+        stockId,
+        statementId,
+        itemId,
+        "manually_edited",
+        currentValue,
+        amount,
+        "user",
+        "Manual adjustment via UI",
+      ).catch((err: unknown) => console.warn("Audit log failed:", err));
+    };
+
+    if (Platform.OS === "web") {
+      if (confirm(msg)) doSave();
+    } else {
+      Alert.alert("Confirm Adjustment", msg, [
+        { text: "Cancel", style: "cancel" },
+        { text: "Confirm", style: "default", onPress: doSave },
+      ]);
+    }
+  }, [updateMut, stockId, statements]);
+
+  const handleCancelEdit = useCallback(() => { setEditingKey(null); }, []);
+
+  // ── Create line item mutation (for dash cells) ──────────────────
+  const createMut = useMutation({
+    mutationFn: (payload: { statement_id: number; line_item_code: string; line_item_name: string; amount: number; order_index?: number }) =>
+      createLineItem(stockId, payload),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["analysis-statements", stockId] }); setEditingKey(null); },
+    onError: (err: Error) => showErrorAlert("Create Failed", err),
+  });
+
+  const handleCreateSave = useCallback((statementId: number, code: string, name: string, orderIdx: number, amount: number) => {
+    createMut.mutate({ statement_id: statementId, line_item_code: code, line_item_name: name, amount, order_index: orderIdx });
+  }, [createMut]);
+
+  // ── Reorder mutation (drag-and-drop) ────────────────────────────
+  const reorderMut = useMutation({
+    mutationFn: (items: Array<{ id: number; order_index: number }>) => reorderLineItems(stockId, items),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["analysis-statements", stockId] }); },
+    onError: (err: Error) => { showErrorAlert("Reorder Failed", err); setLocalOrder(null); },
+  });
+
+  // ── Delete line item mutation ───────────────────────────────────
+  const deleteLineItemMut = useMutation({
+    mutationFn: (itemId: number) => deleteLineItem(itemId),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["analysis-statements", stockId] }); },
+    onError: (err: Error) => showErrorAlert("Delete Failed", err),
+  });
+
+  // ── Merge line items mutation ───────────────────────────────────
+  const mergeMut = useMutation({
+    mutationFn: ({ keepCode, removeCode }: { keepCode: string; removeCode: string }) =>
+      mergeLineItems(stockId, keepCode, removeCode),
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: ["analysis-statements", stockId] });
+      setMergeResult(res.message);
+      setMergeSelection([]);
+      setMergeMode(false);
+    },
+    onError: (err: Error) => { showErrorAlert("Merge Failed", err); },
+  });
+
+  const handleToggleMerge = useCallback((code: string) => {
+    setMergeSelection((prev) => {
+      if (prev.includes(code)) return prev.filter((c) => c !== code);
+      if (prev.length >= 2) return [prev[1], code]; // Replace oldest selection
+      return [...prev, code];
+    });
+  }, []);
+
+  // ── dnd-kit sensors ────────────────────────────────────────────
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor),
+  );
+
+  const deleteMut = useMutation({
+    mutationFn: (periods: string[]) => deleteStatementsByPeriod(stockId, periods, statementType),
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: ["analysis-statements", stockId] });
+      setSelectedPeriods(new Set());
+      setDeleteMode(false);
+      Alert.alert("Deleted", res.message);
+    },
+    onError: (err: Error) => showErrorAlert("Delete Failed", err),
+  });
+
+  const deleteAllMut = useMutation({
+    mutationFn: () => deleteAllStatements(stockId),
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: ["analysis-statements", stockId] });
+      setDeleteMode(false);
+      Alert.alert("Deleted", res.message);
+    },
+    onError: (err: Error) => showErrorAlert("Delete All Failed", err),
+  });
+
+  const togglePeriod = useCallback((period: string) => {
+    setSelectedPeriods((prev) => {
+      const next = new Set(prev);
+      if (next.has(period)) next.delete(period); else next.add(period);
+      return next;
+    });
+  }, []);
+
+  // Build columns — keyed by canonical line_item_code (no client-side normalization)
+  const periods = useMemo(() =>
+    [...statements]
+      .sort((a, b) => a.period_end_date.localeCompare(b.period_end_date))
+      .map((s) => ({
+        label: `FY${s.fiscal_year}${s.fiscal_quarter ? ` Q${s.fiscal_quarter}` : ""}`,
+        period: s.period_end_date,
+        statementId: s.id,
+        items: Object.fromEntries(
+          (s.line_items ?? []).map((li) => [li.line_item_code, { id: li.id, amount: li.amount, name: li.line_item_name, isTotal: li.is_total, edited: li.manually_edited }])
+        ),
+      })),
+  [statements]);
+
+  // Build unified row list — aggregate best order_index across ALL statements
+  const allCodes = useMemo(() => {
+    const map = new Map<string, { name: string; isTotal: boolean; minOrder: number }>();
+    for (const s of statements) {
+      for (const li of s.line_items ?? []) {
+        const existing = map.get(li.line_item_code);
+        const idx = li.order_index ?? 9999;
+        if (!existing) {
+          map.set(li.line_item_code, { name: li.line_item_name, isTotal: li.is_total, minOrder: idx });
+        } else if (idx < existing.minOrder) {
+          existing.minOrder = idx;
+        }
+      }
+    }
+    return [...map.entries()]
+      .sort((a, b) => a[1].minOrder - b[1].minOrder)
+      .map(([code, v]) => ({ code, name: v.name, isTotal: v.isTotal }));
+  }, [statements]);
+
+  // Serialise code order so useEffect only fires when the actual order changes
+  const allCodesKey = useMemo(() => allCodes.map((r) => r.code).join(","), [allCodes]);
+
+  // Reset local drag order only when the server-side order genuinely changes
+  useEffect(() => { setLocalOrder(null); }, [allCodesKey]);
+
+  // The rows to actually render (local drag order takes priority)
+  const displayRows = localOrder ?? allCodes;
+
+  const handleMerge = useCallback(() => {
+    if (mergeSelection.length !== 2) return;
+    const [keepCode, removeCode] = mergeSelection;
+    const keepName = displayRows.find((r) => r.code === keepCode)?.name ?? keepCode;
+    const removeName = displayRows.find((r) => r.code === removeCode)?.name ?? removeCode;
+    const msg = `Merge "${removeName}" into "${keepName}"?\n\nValues from "${removeName}" will fill empty cells in "${keepName}", then "${removeName}" row will be deleted.`;
+    const doMerge = () => mergeMut.mutate({ keepCode, removeCode });
+    if (Platform.OS === "web") {
+      if (confirm(msg)) doMerge();
+    } else {
+      Alert.alert("Merge Rows", msg, [
+        { text: "Cancel", style: "cancel" },
+        { text: "Merge", style: "default", onPress: doMerge },
+      ]);
+    }
+  }, [mergeSelection, displayRows, mergeMut]);
+
+  const handleDeleteRow = useCallback((code: string, name: string) => {
+    const ids: number[] = [];
+    for (const p of periods) {
+      const cell = p.items[code];
+      if (cell?.id != null) ids.push(cell.id);
+    }
+    if (ids.length === 0) return;
+    const msg = `Delete row "${name}" from all periods? (${ids.length} item${ids.length > 1 ? "s" : ""})`;
+    const doDelete = () => { ids.forEach((id) => deleteLineItemMut.mutate(id)); };
+    if (Platform.OS === "web") {
+      if (confirm(msg)) doDelete();
+    } else {
+      Alert.alert("Delete Row", msg, [
+        { text: "Cancel", style: "cancel" },
+        { text: "Delete", style: "destructive", onPress: doDelete },
+      ]);
+    }
+  }, [periods, deleteLineItemMut]);
+
+  const handleDragEnd = useCallback((event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const rows = localOrder ?? allCodes;
+    const oldIndex = rows.findIndex((r) => r.code === active.id);
+    const newIndex = rows.findIndex((r) => r.code === over.id);
+    if (oldIndex === -1 || newIndex === -1) return;
+    const newOrder = arrayMove(rows, oldIndex, newIndex);
+    setLocalOrder(newOrder);
+    const reorderItems: Array<{ id: number; order_index: number }> = [];
+    newOrder.forEach((row, idx) => {
+      for (const p of periods) {
+        const cell = p.items[row.code];
+        if (cell?.id != null) {
+          reorderItems.push({ id: cell.id, order_index: idx + 1 });
+        }
+      }
+    });
+    if (reorderItems.length > 0) reorderMut.mutate(reorderItems);
+  }, [localOrder, allCodes, periods, reorderMut]);
+
+  // ── Export data builder ───────────────────────────────────────────
+  const exportTables = useCallback((): TableData[] => {
+    const headers = ["Line Item", ...periods.map((p) => p.label)];
+    const rows = displayRows.map((item) => {
+      const row: (string | number | null)[] = [item.name];
+      for (const p of periods) {
+        const val = p.items[item.code]?.amount;
+        row.push(val ?? null);
+      }
+      return row;
+    });
+    const typeName = STMNT_META[statementType ?? ""]?.label ?? statementType ?? "Statements";
+    return [{ title: typeName, headers, rows }];
+  }, [periods, displayRows, statementType]);
+
+  const handleDelete = useCallback(() => {
+    if (selectedPeriods.size === 0) return;
+    const labels = periods.filter((p) => selectedPeriods.has(p.period)).map((p) => p.label).join(", ");
+    const typeName = statementType ? (STMNT_META[statementType]?.label ?? statementType) : "all statement types";
+    const msg = `Delete ${selectedPeriods.size} period(s) for ${typeName}?\n\n${labels}\n\nThis will permanently remove the selected data and cannot be undone.`;
+    if (Platform.OS === "web") {
+      if (confirm(msg)) deleteMut.mutate(Array.from(selectedPeriods));
+    } else {
+      Alert.alert("Delete Periods", msg, [
+        { text: "Cancel", style: "cancel" },
+        { text: "Delete", style: "destructive", onPress: () => deleteMut.mutate(Array.from(selectedPeriods)) },
+      ]);
+    }
+  }, [selectedPeriods, periods, deleteMut, statementType]);
+
+  const handleDeleteAll = useCallback(() => {
+    const total = periods.length;
+    if (total === 0) return;
+    const msg = `Delete ALL ${total} statement(s) for this stock?\n\nThis will permanently remove every statement and line item and cannot be undone.`;
+    if (Platform.OS === "web") {
+      if (confirm(msg)) deleteAllMut.mutate();
+    } else {
+      Alert.alert("Delete All Statements", msg, [
+        { text: "Cancel", style: "cancel" },
+        { text: "Delete All", style: "destructive", onPress: () => deleteAllMut.mutate() },
+      ]);
+    }
+  }, [periods, deleteAllMut]);
+
+  if (periods.length === 0) {
+    return (
+      <View style={st.empty}>
+        <View style={[st.emptyIcon, { backgroundColor: colors.accentSecondary + "10" }]}>
+          <FontAwesome name="file-text-o" size={32} color={colors.accentSecondary} />
+        </View>
+        <Text style={[st.emptyTitle, { color: colors.textPrimary }]}>No statements</Text>
+        <Text style={[st.emptySubtitle, { color: colors.textMuted }]}>Upload a financial report PDF above to extract statements with AI</Text>
+      </View>
+    );
+  }
+
+  const COL_NAME_W = isDesktop ? 200 : 160;
+  const COL_VAL_W = isDesktop ? 120 : 105;
+
+  return (
+    <View style={{ flex: 1 }}>
+      {/* Toolbar: AI Rearrange + Delete mode — FROZEN at top */}
+      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "flex-end", paddingHorizontal: 12, paddingTop: 6, gap: 8, flexWrap: "wrap", zIndex: stmtPickerOpen || pdfPickerOpen ? 1000 : 1 }}>
+        {/* AI Rearrange */}
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 6, zIndex: stmtPickerOpen || pdfPickerOpen ? 1000 : 1 }}>
+          {tablePdfs.length > 0 && (
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 4, flexWrap: "wrap", zIndex: stmtPickerOpen || pdfPickerOpen ? 1000 : 1 }}>
+              {/* Statement type picker */}
+              <View style={{ position: "relative" as const, zIndex: stmtPickerOpen ? 1001 : 1 }}>
+                <Pressable
+                  onPress={() => { setStmtPickerOpen((v) => !v); setPdfPickerOpen(false); }}
+                  style={{ flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, backgroundColor: colors.bgInput, borderWidth: 1, borderColor: reconcileType !== "all" ? colors.accentPrimary : colors.borderColor }}
+                >
+                  <FontAwesome name="file-text-o" size={10} color={reconcileType !== "all" ? colors.accentPrimary : colors.textMuted} />
+                  <Text numberOfLines={1} style={{ fontSize: 10, color: reconcileType !== "all" ? colors.accentPrimary : colors.textMuted }}>
+                    {RECONCILE_OPTS.find((o) => o.key === reconcileType)?.label ?? "All"}
+                  </Text>
+                  <FontAwesome name={stmtPickerOpen ? "caret-up" : "caret-down"} size={10} color={colors.textMuted} />
+                </Pressable>
+                {stmtPickerOpen && (
+                  <View style={{ position: "absolute" as const, top: "100%", left: 0, zIndex: 1000, minWidth: 170, marginTop: 4, backgroundColor: colors.bgPrimary, borderRadius: 8, borderWidth: 1, borderColor: colors.borderColor, shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.15, shadowRadius: 8, elevation: 5, overflow: "hidden" as const }}>
+                    {RECONCILE_OPTS.map((opt) => (
+                      <Pressable
+                        key={opt.key}
+                        onPress={() => { setReconcileType(opt.key); setStmtPickerOpen(false); }}
+                        style={({ pressed }) => [{ flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 10, paddingVertical: 8, backgroundColor: opt.key === reconcileType ? colors.accentPrimary + "15" : pressed ? colors.bgInput : "transparent" }]}
+                      >
+                        <Text style={{ flex: 1, fontSize: 11, color: opt.key === reconcileType ? colors.accentPrimary : colors.textPrimary, fontWeight: opt.key === reconcileType ? "600" : "400" }}>
+                          {opt.label}
+                        </Text>
+                        {opt.key === reconcileType && <FontAwesome name="check" size={10} color={colors.accentPrimary} />}
+                      </Pressable>
+                    ))}
+                  </View>
+                )}
+              </View>
+              {/* PDF picker */}
+              <Text style={{ fontSize: 11, color: colors.textMuted }}>PDF:</Text>
+              <View style={{ position: "relative" as const, zIndex: pdfPickerOpen ? 1001 : 1 }}>
+                <Pressable
+                  onPress={() => { setPdfPickerOpen((v) => !v); setStmtPickerOpen(false); }}
+                  style={{ flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, backgroundColor: selectedPdfId ? colors.accentPrimary + "20" : colors.bgInput, borderWidth: 1, borderColor: selectedPdfId ? colors.accentPrimary : colors.borderColor }}
+                >
+                  <Text numberOfLines={1} style={{ fontSize: 10, color: selectedPdfId ? colors.accentPrimary : colors.textMuted, maxWidth: 140 }}>
+                    {selectedPdfId ? tablePdfs.find((p) => p.id === selectedPdfId)?.original_name?.slice(0, 22) ?? "PDF" : "Select PDF"}
+                  </Text>
+                  <FontAwesome name={pdfPickerOpen ? "caret-up" : "caret-down"} size={10} color={selectedPdfId ? colors.accentPrimary : colors.textMuted} />
+                </Pressable>
+                {pdfPickerOpen && (
+                  <View style={{ position: "absolute" as const, top: "100%", left: 0, zIndex: 999, minWidth: 200, marginTop: 4, backgroundColor: colors.bgPrimary, borderRadius: 8, borderWidth: 1, borderColor: colors.borderColor, shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.15, shadowRadius: 8, elevation: 5, overflow: "hidden" as const }}>
+                    {tablePdfs.map((pdf) => (
+                      <Pressable
+                        key={pdf.id}
+                        onPress={() => { setSelectedPdfId(pdf.id); setPdfPickerOpen(false); }}
+                        style={({ pressed }) => [{ flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 10, paddingVertical: 8, backgroundColor: pdf.id === selectedPdfId ? colors.accentPrimary + "15" : pressed ? colors.bgInput : "transparent" }]}
+                      >
+                        <FontAwesome name="file-pdf-o" size={12} color={pdf.id === selectedPdfId ? colors.accentPrimary : colors.textMuted} />
+                        <Text numberOfLines={1} style={{ flex: 1, fontSize: 11, color: pdf.id === selectedPdfId ? colors.accentPrimary : colors.textPrimary, fontWeight: pdf.id === selectedPdfId ? "600" : "400" }}>
+                          {pdf.original_name}
+                        </Text>
+                        {pdf.id === selectedPdfId && <FontAwesome name="check" size={10} color={colors.accentPrimary} />}
+                      </Pressable>
+                    ))}
+                  </View>
+                )}
+              </View>
+            </View>
+          )}
+          <Pressable
+            onPress={handleRearrange}
+            disabled={rearranging || !selectedPdfId}
+            style={({ pressed }) => [{
+              flexDirection: "row", alignItems: "center", gap: 5,
+              paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8,
+              backgroundColor: !selectedPdfId ? colors.bgInput : colors.accentPrimary + "15",
+              borderWidth: 1, borderColor: !selectedPdfId ? colors.borderColor : colors.accentPrimary,
+              opacity: pressed ? 0.8 : (!selectedPdfId ? 0.5 : 1),
+            }]}
+          >
+            {rearranging ? (
+              <ActivityIndicator size="small" color={colors.accentPrimary} />
+            ) : (
+              <FontAwesome name="random" size={12} color={!selectedPdfId ? colors.textMuted : colors.accentPrimary} />
+            )}
+            <Text style={{ fontSize: 12, fontWeight: "600", color: !selectedPdfId ? colors.textMuted : colors.accentPrimary }}>
+              {rearranging ? "Auditing..." : "AI Reconcile"}
+            </Text>
+          </Pressable>
+        </View>
+
+        {/* Merge mode */}
+        {mergeMode && mergeSelection.length === 2 && (
+          <Pressable
+            onPress={handleMerge}
+            disabled={mergeMut.isPending}
+            style={({ pressed }) => [{
+              flexDirection: "row", alignItems: "center", gap: 5,
+              paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8,
+              backgroundColor: colors.accentPrimary, opacity: pressed ? 0.8 : 1,
+            }]}
+          >
+            {mergeMut.isPending ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <FontAwesome name="compress" size={12} color="#fff" />
+            )}
+            <Text style={{ color: "#fff", fontSize: 12, fontWeight: "700" }}>Merge ({mergeSelection.length})</Text>
+          </Pressable>
+        )}
+        <Pressable
+          onPress={() => { setMergeMode((v) => !v); setMergeSelection([]); }}
+          style={({ pressed }) => [{
+            flexDirection: "row", alignItems: "center", gap: 5,
+            paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8,
+            backgroundColor: mergeMode ? colors.accentPrimary + "15" : colors.bgInput,
+            borderWidth: 1, borderColor: mergeMode ? colors.accentPrimary : colors.borderColor,
+            opacity: pressed ? 0.8 : 1,
+          }]}
+        >
+          <FontAwesome name={mergeMode ? "times" : "compress"} size={12} color={mergeMode ? colors.accentPrimary : colors.textMuted} />
+          <Text style={{ fontSize: 12, fontWeight: "600", color: mergeMode ? colors.accentPrimary : colors.textMuted }}>
+            {mergeMode ? "Cancel Merge" : "Merge Rows"}
+          </Text>
+        </Pressable>
+
+        {/* Delete mode */}
+        {deleteMode && selectedPeriods.size > 0 && (
+          <Pressable
+            onPress={handleDelete}
+            disabled={deleteMut.isPending}
+            style={({ pressed }) => [{
+              flexDirection: "row", alignItems: "center", gap: 5,
+              paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8,
+              backgroundColor: colors.danger, opacity: pressed ? 0.8 : 1,
+            }]}
+          >
+            {deleteMut.isPending ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <FontAwesome name="trash" size={12} color="#fff" />
+            )}
+            <Text style={{ color: "#fff", fontSize: 12, fontWeight: "700" }}>Delete Selected ({selectedPeriods.size})</Text>
+          </Pressable>
+        )}
+        {deleteMode && (
+          <Pressable
+            onPress={handleDeleteAll}
+            disabled={deleteAllMut.isPending}
+            style={({ pressed }) => [{
+              flexDirection: "row", alignItems: "center", gap: 5,
+              paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8,
+              backgroundColor: colors.danger, opacity: pressed ? 0.8 : 1,
+              borderWidth: 1, borderColor: "#fff3",
+            }]}
+          >
+            {deleteAllMut.isPending ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <FontAwesome name="trash" size={12} color="#fff" />
+            )}
+            <Text style={{ color: "#fff", fontSize: 12, fontWeight: "700" }}>Delete All</Text>
+          </Pressable>
+        )}
+        <Pressable
+          onPress={() => { setDeleteMode((v) => !v); setSelectedPeriods(new Set()); }}
+          style={({ pressed }) => [{
+            flexDirection: "row", alignItems: "center", gap: 5,
+            paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8,
+            backgroundColor: deleteMode ? colors.danger + "15" : colors.bgInput,
+            borderWidth: 1, borderColor: deleteMode ? colors.danger : colors.borderColor,
+            opacity: pressed ? 0.8 : 1,
+          }]}
+        >
+          <FontAwesome name={deleteMode ? "times" : "trash-o"} size={12} color={deleteMode ? colors.danger : colors.textMuted} />
+          <Text style={{ fontSize: 12, fontWeight: "600", color: deleteMode ? colors.danger : colors.textMuted }}>
+            {deleteMode ? "Cancel" : "Select Years"}
+          </Text>
+        </Pressable>
+
+        <View style={{ flex: 1 }} />
+        <ExportBar
+          onExport={async (fmt) => {
+            const { exportExcel, exportCSV, exportPDF } = await import("@/lib/exportAnalysis");
+            const t = exportTables();
+            if (fmt === "xlsx") await exportExcel(t, stockSymbol, "Statements");
+            else if (fmt === "csv") await exportCSV(t, stockSymbol, "Statements");
+            else await exportPDF(t, stockSymbol, "Statements");
+          }}
+          colors={colors}
+          disabled={periods.length === 0}
+        />
+      </View>
+
+      {/* AI Rearrange result banner */}
+      {rearrangeResult && (
+        <View style={{
+          flexDirection: "row", alignItems: "center", marginHorizontal: 12, marginTop: 4,
+          paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8,
+          backgroundColor: rearrangeResult.startsWith("Error") ? colors.danger + "15" : colors.success + "15",
+          gap: 6,
+        }}>
+          <FontAwesome
+            name={rearrangeResult.startsWith("Error") ? "exclamation-circle" : "check-circle"}
+            size={13}
+            color={rearrangeResult.startsWith("Error") ? colors.danger : colors.success}
+          />
+          <Text style={{ flex: 1, fontSize: 11, color: rearrangeResult.startsWith("Error") ? colors.danger : colors.success }}>
+            {rearrangeResult}
+          </Text>
+          <Pressable onPress={() => setRearrangeResult(null)} hitSlop={8}>
+            <FontAwesome name="times" size={12} color={colors.textMuted} />
+          </Pressable>
+        </View>
+      )}
+
+      {/* Merge result banner */}
+      {mergeResult && (
+        <View style={{
+          flexDirection: "row", alignItems: "center", marginHorizontal: 12, marginTop: 4,
+          paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8,
+          backgroundColor: mergeResult.startsWith("Error") ? colors.danger + "15" : colors.success + "15",
+          gap: 6,
+        }}>
+          <FontAwesome
+            name={mergeResult.startsWith("Error") ? "exclamation-circle" : "check-circle"}
+            size={13}
+            color={mergeResult.startsWith("Error") ? colors.danger : colors.success}
+          />
+          <Text style={{ flex: 1, fontSize: 11, color: mergeResult.startsWith("Error") ? colors.danger : colors.success }}>
+            {mergeResult}
+          </Text>
+          <Pressable onPress={() => setMergeResult(null)} hitSlop={8}>
+            <FontAwesome name="times" size={12} color={colors.textMuted} />
+          </Pressable>
+        </View>
+      )}
+
+      {/* ── Scrollable table with sticky year header ───────────────── */}
+      <ScrollView
+        refreshControl={<RefreshControl refreshing={isFetching} onRefresh={onRefresh} tintColor={colors.accentPrimary} />}
+        style={{ flex: 1 }}
+        stickyHeaderIndices={[0]}
+      >
+        {/* Child 0 — sticky year column header (synced horizontally) */}
+        <View style={{ backgroundColor: colors.bgCard, zIndex: 10 }}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            ref={headerScrollRef}
+            scrollEnabled={false}
+          >
+            <View style={{
+              flexDirection: "row", alignItems: "center", paddingVertical: 10, paddingHorizontal: 16,
+              borderBottomWidth: 2, borderBottomColor: colors.accentPrimary, backgroundColor: colors.bgCard,
+            }}>
+              <Text style={{ width: COL_NAME_W, fontSize: 12, fontWeight: "800", color: colors.textPrimary }} numberOfLines={1}>
+                Line Item
+              </Text>
+              {periods.map((p) => (
+                <Pressable
+                  key={p.period}
+                  disabled={!deleteMode}
+                  onPress={() => togglePeriod(p.period)}
+                  style={{ width: COL_VAL_W, alignItems: "center", flexDirection: "row", justifyContent: "flex-end", gap: 4 }}
+                >
+                  {deleteMode && (
+                    <View style={{
+                      width: 16, height: 16, borderRadius: 4, borderWidth: 1.5,
+                      borderColor: selectedPeriods.has(p.period) ? colors.danger : colors.textMuted,
+                      backgroundColor: selectedPeriods.has(p.period) ? colors.danger : "transparent",
+                      alignItems: "center", justifyContent: "center",
+                    }}>
+                      {selectedPeriods.has(p.period) && <FontAwesome name="check" size={10} color="#fff" />}
+                    </View>
+                  )}
+                  <Text style={{ fontSize: 12, fontWeight: "800", color: selectedPeriods.has(p.period) ? colors.danger : colors.textPrimary, textAlign: "right" }}>
+                    {p.label}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          </ScrollView>
+        </View>
+
+        {/* Child 1 — scrollable data body (horizontal scroll syncs header) */}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator
+          onScroll={(e) => {
+            headerScrollRef.current?.scrollTo({ x: e.nativeEvent.contentOffset.x, animated: false });
+          }}
+          scrollEventThrottle={16}
+          contentContainerStyle={{ paddingHorizontal: 8, paddingBottom: 80 }}
+        >
+          <View>
+            {/* Sortable data rows */}
+            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+              <SortableContext items={displayRows.map((r) => r.code)} strategy={verticalListSortingStrategy}>
+                {displayRows.map((item, rowIdx) => (
+                  <SortableRow
+                    key={item.code}
+                    id={item.code}
+                    item={item}
+                    rowIdx={rowIdx}
+                    periods={periods}
+                    colors={colors}
+                    COL_NAME_W={COL_NAME_W}
+                    COL_VAL_W={COL_VAL_W}
+                    editingKey={editingKey}
+                    onStartEdit={handleStartEdit}
+                    onSaveEdit={handleSaveEdit}
+                    onCancelEdit={handleCancelEdit}
+                    onCreateSave={handleCreateSave}
+                    onDeleteRow={handleDeleteRow}
+                    mergeMode={mergeMode}
+                    mergeSelected={mergeSelection.includes(item.code)}
+                    onToggleMerge={handleToggleMerge}
+                  />
+                ))}
+              </SortableContext>
+            </DndContext>
+
+            {/* Balance Sheet Integrity Row — display aid for manual verification */}
+            {statementType === "balance" && periods.length > 0 && (() => {
+              const diffs = periods.map((p) => {
+                const assets = p.items["assets"]?.amount ?? p.items["total_assets"]?.amount;
+                const liabilities = p.items["liabilities"]?.amount ?? p.items["total_liabilities"]?.amount;
+                const equity = p.items["equity"]?.amount ?? p.items["total_equity"]?.amount;
+                if (assets == null || liabilities == null || equity == null) return null;
+                return assets - (liabilities + equity);
+              });
+              const hasData = diffs.some((d) => d != null);
+              if (!hasData) return null;
+              return (
+                <View style={{
+                  flexDirection: "row", alignItems: "center", paddingVertical: 8, paddingHorizontal: 8,
+                  borderTopWidth: 2, borderTopColor: colors.borderColor, backgroundColor: colors.bgInput + "40",
+                }}>
+                  <Text numberOfLines={1} style={{
+                    width: COL_NAME_W, fontSize: 11, fontWeight: "700",
+                    color: colors.textPrimary, paddingRight: 8, fontStyle: "italic",
+                  }}>
+                    ✔ A = L + E Check
+                  </Text>
+                  {diffs.map((diff, i) => (
+                    <View key={periods[i].period} style={{ width: COL_VAL_W, alignItems: "flex-end", justifyContent: "center" }}>
+                      <Text style={{
+                        fontSize: 11, fontWeight: "700", fontVariant: ["tabular-nums"],
+                        color: diff == null ? colors.textMuted : Math.abs(diff) < 0.01 ? colors.success : colors.danger,
+                      }}>
+                        {diff == null ? "—" : Math.abs(diff) < 0.01 ? "✓ Balanced" : formatNumber(diff)}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              );
+            })()}
+          </View>
+        </ScrollView>
+      </ScrollView>
+    </View>
+  );
+}

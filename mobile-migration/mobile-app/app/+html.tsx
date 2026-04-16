@@ -25,6 +25,10 @@ export default function Root({ children }: { children: React.ReactNode }) {
         <meta name="robots" content="index, follow" />
         <meta name="google-site-verification" content="KeR7f3qPReAU2SpQNa_JjjV8JZsXm_5XWDOtbpq7nuU" />
 
+        {/* Google Analytics (gtag.js) */}
+        <script async src="https://www.googletagmanager.com/gtag/js?id=G-KSKB3TGB13" />
+        <script dangerouslySetInnerHTML={{ __html: `window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-KSKB3TGB13');` }} />
+
         {/* 
           Disable body scrolling on web. This makes ScrollView components work closer to how they do on native. 
           However, body scrolling is often nice to have for mobile web. If you want to enable it, remove this line.
