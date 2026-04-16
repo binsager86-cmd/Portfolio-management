@@ -30,7 +30,6 @@ import { useScreenStyles } from "@/hooks/useScreenStyles";
 import { formatCurrency } from "@/lib/currency";
 import { projectPortfolioDividends, type PortfolioProjectionSummary } from "@/lib/dividendProjector";
 import { showErrorAlert } from "@/lib/errorHandling";
-import { exportYieldCalcPdf } from "@/lib/exportYieldPdf";
 import { deleteDividend } from "@/services/api";
 import { useThemeStore } from "@/services/themeStore";
 import { useUserPrefsStore } from "@/src/store/userPrefsStore";
@@ -329,6 +328,7 @@ export default function DividendsScreen() {
         <FlashList
           data={dividends}
           keyExtractor={(item) => String(item.id)}
+          drawDistance={200}
           contentContainerStyle={[ss.listContent, isDesktop && { maxWidth: 900, alignSelf: "center", width: "100%" }]}
           refreshControl={
             <RefreshControl refreshing={isFetching && !isLoading} onRefresh={refetch} tintColor={colors.accentPrimary} />
@@ -400,6 +400,7 @@ export default function DividendsScreen() {
         <FlashList
           data={byStockList}
           keyExtractor={(item) => item.stock_symbol}
+          drawDistance={200}
           contentContainerStyle={[ss.listContent, isDesktop && { maxWidth: 900, alignSelf: "center", width: "100%" }]}
           renderItem={({ item }) => (
             <View style={[s.divRow, { backgroundColor: colors.bgCard, borderColor: colors.borderColor }]}>
@@ -736,6 +737,7 @@ export default function DividendsScreen() {
               {/* ── Export PDF Button ── */}
               <Pressable
                 onPress={async () => {
+                  const { exportYieldCalcPdf } = await import("@/lib/exportYieldPdf");
                   await exportYieldCalcPdf(
                     {
                       companyName: calcCompanyName.trim() || undefined,

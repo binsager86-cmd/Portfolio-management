@@ -11,8 +11,8 @@ import { RefreshControl, ScrollView, Text, View } from "react-native";
 import { FAPanelSkeleton } from "@/components/ui/PageSkeletons";
 import { useStatements, useStockMetrics } from "@/hooks/queries";
 import { showErrorAlert } from "@/lib/errorHandling";
-import { exportCSV, exportExcel, TableData } from "@/lib/exportAnalysis";
-import { exportMetricsPdf, type MetricsCategoryData } from "@/lib/exportMetricsPdf";
+import type { TableData } from "@/lib/exportAnalysis";
+import type { MetricsCategoryData } from "@/lib/exportMetricsPdf";
 import { calculateMetrics, StockMetric } from "@/services/api";
 import { st } from "../styles";
 import { CATEGORY_LABELS, type PanelWithSymbolProps } from "../types";
@@ -182,6 +182,7 @@ export function MetricsPanel({ stockId, stockSymbol, colors, isDesktop }: PanelW
             <ExportBar
               onExport={async (fmt) => {
                 if (fmt === "pdf") {
+                  const { exportMetricsPdf } = await import("@/lib/exportMetricsPdf");
                   const pdfCats: Record<string, MetricsCategoryData> = {};
                   for (const [cat, { metricNames, yearData, years }] of Object.entries(historicalCategories)) {
                     const catInfo = CATEGORY_LABELS[cat] ?? { label: cat, color: "#6366f1" };
@@ -189,6 +190,7 @@ export function MetricsPanel({ stockId, stockSymbol, colors, isDesktop }: PanelW
                   }
                   await exportMetricsPdf(pdfCats, stockSymbol, allMetrics.length);
                 } else {
+                  const { exportExcel, exportCSV } = await import("@/lib/exportAnalysis");
                   const t = exportTables();
                   if (fmt === "xlsx") await exportExcel(t, stockSymbol, "Metrics");
                   else await exportCSV(t, stockSymbol, "Metrics");

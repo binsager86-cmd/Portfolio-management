@@ -7,6 +7,7 @@
  */
 
 import { todayISO } from "@/lib/dateUtils";
+import { sanitizePdfText } from "@/lib/sanitizePdf";
 import { Platform } from "react-native";
 
 type jsPDF = import("jspdf").jsPDF;
@@ -225,7 +226,7 @@ export async function exportGrowthPdf(
     doc.text("Growth Analysis Report", mx, 12);
 
     doc.setFont("helvetica", "normal").setFontSize(9).setTextColor(C.textLight);
-    doc.text(stockSymbol, mx, 20);
+    doc.text(sanitizePdfText(stockSymbol, 20), mx, 20);
 
     drawBadge(doc, W - mx - 46, 11, `${totalMetrics} METRICS`, C.success, C.white);
 
@@ -269,7 +270,7 @@ export async function exportGrowthPdf(
   doc.text("Overview", mx + 8, y + 7);
 
   doc.setFont("helvetica", "normal").setFontSize(8).setTextColor(C.textMedium);
-  const summaryLine = `${totalMetrics} Growth Metrics   |   ${totalPeriods} Period(s)   |   ${labels.join(", ")}`;
+  const summaryLine = `${totalMetrics} Growth Metrics   |   ${totalPeriods} Period(s)   |   ${labels.map((l) => sanitizePdfText(l, 40)).join(", ")}`;
   doc.text(summaryLine, mx + 8, y + 15, { maxWidth: cw - 16 });
 
   y += overviewH + SECTION_GAP;

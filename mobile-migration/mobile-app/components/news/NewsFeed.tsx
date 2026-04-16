@@ -273,6 +273,7 @@ export function NewsFeed({
       <FlashList
         data={newsItems}
         keyExtractor={(item) => item.id}
+        drawDistance={200}
         renderItem={({ item }) => (
           <NewsCard
             item={item}

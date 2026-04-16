@@ -13,8 +13,8 @@ import type { ThemePalette } from "@/constants/theme";
 import { analysisKeys, usePeerMultiples, useStockList, useStockListSearch, useValuations } from "@/hooks/queries";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { showErrorAlert } from "@/lib/errorHandling";
-import { exportCSV, exportExcel, exportPDF, TableData } from "@/lib/exportAnalysis";
-import { buildValuationExcelTables, exportValuationPdf, type ValuationSummaryData } from "@/lib/exportValuationPdf";
+import type { TableData } from "@/lib/exportAnalysis";
+import type { ValuationSummaryData } from "@/lib/exportValuationPdf";
 import { addPeerCompany, deletePeerCompany, deleteValuation, updateAnalysisStock, type PeerMultiple, type ValuationRunResult } from "@/services/api";
 import { useValuationCalculations } from "../hooks/useValuationCalculations";
 import { st } from "../styles";
@@ -614,8 +614,11 @@ export function ValuationsPanel({ stockId, stockSymbol, colors, isDesktop }: Pan
                     assumptions: v.assumptions ?? undefined,
                   }));
                   if (fmt === "pdf") {
+                    const { exportValuationPdf } = await import("@/lib/exportValuationPdf");
                     await exportValuationPdf(summaryData, entries);
                   } else {
+                    const { buildValuationExcelTables } = await import("@/lib/exportValuationPdf");
+                    const { exportExcel, exportCSV } = await import("@/lib/exportAnalysis");
                     const tables = buildValuationExcelTables(summaryData, entries);
                     if (fmt === "xlsx") await exportExcel(tables, stockSymbol, "Valuation-Report");
                     else await exportCSV(tables, stockSymbol, "Valuation-Report");
@@ -1265,6 +1268,7 @@ export function ValuationsPanel({ stockId, stockSymbol, colors, isDesktop }: Pan
             </Pressable>
             <ExportBar
               onExport={async (fmt) => {
+                const { exportExcel, exportCSV, exportPDF } = await import("@/lib/exportAnalysis");
                 const t = exportTables();
                 if (fmt === "xlsx") await exportExcel(t, stockSymbol, "Valuations");
                 else if (fmt === "csv") await exportCSV(t, stockSymbol, "Valuations");

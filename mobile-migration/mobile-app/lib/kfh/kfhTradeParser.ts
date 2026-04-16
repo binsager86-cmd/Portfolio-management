@@ -6,13 +6,27 @@
  * Normalizes dates, amounts, transaction types, and extracts trade details.
  */
 
-import * as XLSX from "xlsx";
 import type {
     KfhColumnMap,
     KfhHeaderDetection,
     KfhNormalizedRow,
     KfhTransactionType,
 } from "./kfhTradeTypes";
+import { z } from "zod";
+
+// ── Post-parse validation schema ────────────────────────────────────
+
+const KfhRowSchema = z.object({
+  source: z.literal("kfh_trade_statement"),
+  normalizedDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(),
+  normalizedType: z.enum(["buy", "sell", "cash_dividend", "deposit", "withdrawal", "ignored", "unknown"]),
+  cashAmount: z.number().finite().nullable(),
+  ticker: z.string().max(20).nullable(),
+  quantity: z.number().finite().nonnegative().nullable(),
+  price: z.number().finite().nonnegative().nullable(),
+  importStatus: z.enum(["ready", "ignored", "error"]),
+  fingerprint: z.string().min(1),
+});
 
 // ── Header aliases ──────────────────────────────────────────────────
 
@@ -74,15 +88,17 @@ export function isHtmlMaskedAsXls(content: string): boolean {
 
 // ── Parse file to raw sheet rows ────────────────────────────────────
 
-export function parseFileToRows(
+export async function parseFileToRows(
   arrayBuffer: ArrayBuffer
-): { rows: unknown[][]; error?: string } {
+): Promise<{ rows: unknown[][]; error?: string }> {
   try {
+    const XLSX = await import("xlsx");
+
     // Check if content is HTML disguised as .xls
     const textDecoder = new TextDecoder("utf-8", { fatal: false });
     const textSample = textDecoder.decode(new Uint8Array(arrayBuffer).slice(0, 2000));
 
-    let workbook: XLSX.WorkBook;
+    let workbook: ReturnType<typeof XLSX.read>;
 
     if (isHtmlMaskedAsXls(textSample)) {
       const fullText = textDecoder.decode(new Uint8Array(arrayBuffer));
@@ -395,7 +411,7 @@ export async function parseKfhStatement(
   headerInfo?: KfhHeaderDetection;
 }> {
   // 1. Parse file to raw rows
-  const { rows: rawRows, error: parseError } = parseFileToRows(arrayBuffer);
+  const { rows: rawRows, error: parseError } = await parseFileToRows(arrayBuffer);
   if (parseError) return { rows: [], error: parseError };
   if (rawRows.length === 0) return { rows: [], error: "The file appears to be empty." };
 
@@ -535,6 +551,16 @@ export async function parseKfhStatement(
     );
 
     normalized.push(row);
+  }
+
+  // Validate all "ready" rows against schema — demote invalid rows to "error"
+  for (const row of normalized) {
+    if (row.importStatus !== "ready") continue;
+    const result = KfhRowSchema.safeParse(row);
+    if (!result.success) {
+      row.importStatus = "error";
+      row.errorReason = `Validation failed: ${result.error.issues.map((i) => i.message).join("; ")}`;
+    }
   }
 
   return { rows: normalized, headerInfo };

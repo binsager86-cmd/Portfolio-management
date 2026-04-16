@@ -17,6 +17,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { AppErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { ToastProvider } from "@/components/ui/ToastProvider";
+import { useAuthCacheSync } from "@/hooks/useAuthCacheSync";
 import { useSessionGuard } from "@/hooks/useSessionGuard";
 import i18n from "@/lib/i18n/config";
 import { queryClient } from "@/lib/queryClient";
@@ -101,6 +102,9 @@ function RootLayoutNav() {
   // ── Session guard: periodic heartbeat + focus re-validation ────
   useSessionGuard();
 
+  // ── Auth → query cache sync (logout clears, login invalidates) ──
+  useAuthCacheSync();
+
   // ── Single init effect: theme → OAuth hash check → hydration ───
   // Must be one sequential async flow so nothing can redirect
   // before auth state is fully resolved.
@@ -148,6 +152,8 @@ function RootLayoutNav() {
       I18nManager.forceRTL(shouldBeRTL);
     }
   }, [language]);
+
+
 
   // Prefetch stock reference lists (static data) so dropdowns load instantly
   useEffect(() => {

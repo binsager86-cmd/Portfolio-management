@@ -19,8 +19,7 @@ import {
 
 import { FAPanelSkeleton } from "@/components/ui/PageSkeletons";
 import { useGrowthAnalysis } from "@/hooks/queries";
-import { exportCSV, exportExcel, TableData } from "@/lib/exportAnalysis";
-import { exportGrowthPdf } from "@/lib/exportGrowthPdf";
+import type { TableData } from "@/lib/exportAnalysis";
 import { st } from "../styles";
 import { type GrowthEntry, type PanelWithSymbolProps } from "../types";
 import { GrowthChart, type ChartMode, type GrowthChartPoint } from "./GrowthChart";
@@ -402,10 +401,15 @@ export function GrowthPanel({ stockId, stockSymbol, colors, isDesktop }: PanelWi
 
             <ExportBar
               onExport={async (fmt) => {
-                const t = exportTables();
-                if (fmt === "xlsx") await exportExcel(t, stockSymbol, "Growth");
-                else if (fmt === "csv") await exportCSV(t, stockSymbol, "Growth");
-                else await exportGrowthPdf(growth, labels, stockSymbol);
+                if (fmt === "pdf") {
+                  const { exportGrowthPdf } = await import("@/lib/exportGrowthPdf");
+                  await exportGrowthPdf(growth, labels, stockSymbol);
+                } else {
+                  const { exportExcel, exportCSV } = await import("@/lib/exportAnalysis");
+                  const t = exportTables();
+                  if (fmt === "xlsx") await exportExcel(t, stockSymbol, "Growth");
+                  else await exportCSV(t, stockSymbol, "Growth");
+                }
               }}
               colors={colors}
             />

@@ -563,6 +563,14 @@ export default React.memo(function SnapshotLineChart({
       )}
     </View>
   );
+}, (prev, next) => {
+  if (prev.title !== next.title || prev.lineColor !== next.lineColor || prev.height !== next.height) return false;
+  if (prev.width !== next.width || prev.colors !== next.colors || prev.palette !== next.palette) return false;
+  if (prev.data.length !== next.data.length) return false;
+  for (let i = 0; i < prev.data.length; i++) {
+    if (prev.data[i].label !== next.data[i].label || prev.data[i].value !== next.data[i].value) return false;
+  }
+  return true;
 });
 
 // ── Styles ──────────────────────────────────────────────────────────

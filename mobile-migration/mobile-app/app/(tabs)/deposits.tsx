@@ -620,6 +620,7 @@ export default function DepositsScreen() {
         <FlashList
           data={deposits}
           keyExtractor={(item) => String(item.id)}
+          drawDistance={200}
           renderItem={({ item }) => <DepositRow item={item} colors={colors} onEdit={handleEdit} onDelete={handleDelete} />}
           ListHeaderComponent={
             <>

@@ -306,6 +306,14 @@ export const AllocationDonut = React.memo(function AllocationDonut({
       </View>
     </Animated.View>
   );
+}, (prev, next) => {
+  if (prev.title !== next.title || prev.size !== next.size || prev.showLegend !== next.showLegend) return false;
+  if (prev.colors !== next.colors) return false;
+  if (prev.data.length !== next.data.length) return false;
+  for (let i = 0; i < prev.data.length; i++) {
+    if (prev.data[i].company !== next.data[i].company || prev.data[i].weight !== next.data[i].weight) return false;
+  }
+  return true;
 });
 
 // ── Styles ──────────────────────────────────────────────────────────

@@ -3,7 +3,6 @@
  */
 
 import { extractErrorMessage } from "@/lib/errorHandling";
-import { executeImport, parseAndPreview } from "@/lib/kfh/kfhTradeImportService";
 import type { KfhImportPreview, KfhImportResult } from "@/lib/kfh/kfhTradeTypes";
 import { setCashOverride } from "@/services/api";
 import { useThemeStore } from "@/services/themeStore";
@@ -75,6 +74,7 @@ export default function KfhTradeImportButton({ portfolio = "KFH", onImportComple
         arrayBuffer = bytes.buffer as ArrayBuffer;
       }
 
+      const { parseAndPreview } = await import("@/lib/kfh/kfhTradeImportService");
       const { preview: p, error } = await parseAndPreview(arrayBuffer, fileName);
 
       if (error) {
@@ -95,6 +95,7 @@ export default function KfhTradeImportButton({ portfolio = "KFH", onImportComple
 
   const handleImport = useCallback(
     async (p: KfhImportPreview): Promise<KfhImportResult> => {
+      const { executeImport } = await import("@/lib/kfh/kfhTradeImportService");
       const result = await executeImport(p.readyRows, portfolio);
       if (result.imported > 0) {
         // Save cash position if user entered one

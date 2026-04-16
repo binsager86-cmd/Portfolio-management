@@ -14,6 +14,7 @@ import {
     Pressable,
     RefreshControl,
     ScrollView,
+    StyleSheet,
     Text,
     TextInput,
     View,
@@ -34,6 +35,19 @@ import {
 import { st } from "../styles";
 import { getApiErrorMessage } from "../types";
 import { ActionButton, Card, Chip, FadeIn, LabeledInput } from "./shared";
+
+// ── Static styles (no theme dependency) ─────────────────────────────
+const S = StyleSheet.create({
+  flex1: { flex: 1 },
+  contentWrap: { flex: 1, marginLeft: 12 },
+  tagsGap: { gap: 6, marginTop: 4 },
+  actionsCol: { alignItems: "flex-end" as const, gap: 8 },
+  actionsRow: { flexDirection: "row" as const, gap: 10 },
+  addBtnText: { color: "#fff", fontSize: 13, fontWeight: "700", marginLeft: 6 },
+  addStockBtnText: { color: "#fff", fontSize: 14, fontWeight: "700", marginLeft: 8 },
+  formFieldRow: { flexDirection: "row" as const, gap: 10 },
+  formBtnRow: { flexDirection: "row" as const, gap: 10, marginTop: 8 },
+});
 
 /* ═══════════════════════════════════════════════════════════════════ */
 
@@ -56,6 +70,25 @@ export function StocksPanel({
 
   const stocks = data?.stocks ?? [];
 
+  // ── Pre-computed themed styles for renderItem ───────────────────
+  const ts = useMemo(() => ({
+    symbolBadgeBg: { backgroundColor: colors.accentPrimary + "15" },
+    symbolText: { color: colors.accentPrimary, fontSize: 14, fontWeight: "800" as const, letterSpacing: 0.5 },
+    symbolName: { color: colors.textPrimary, fontSize: 15, fontWeight: "700" as const },
+    companyName: { color: colors.textSecondary, fontSize: 13, marginTop: 1 },
+    tagBg: { backgroundColor: colors.bgInput },
+    tagText: { color: colors.textMuted, fontSize: 10, fontWeight: "600" as const },
+    sectorTagBg: { backgroundColor: colors.accentPrimary + "10" },
+    sectorTagText: { color: colors.accentPrimary, fontSize: 10, fontWeight: "600" as const },
+    editBtnBg: { backgroundColor: colors.accentPrimary + "12" },
+    deleteBtnBg: { backgroundColor: colors.danger + "12" },
+    emptyIconBg: { backgroundColor: colors.accentPrimary + "10" },
+    emptyTitle: { color: colors.textPrimary },
+    emptySubtitle: { color: colors.textMuted, textAlign: "center" as const },
+    addStockBtn: { backgroundColor: colors.accentPrimary, marginTop: 20, paddingHorizontal: 24 },
+    desktopList: isDesktop ? { maxWidth: 900, alignSelf: "center" as const, width: "100%" as const } : undefined,
+  }), [colors, isDesktop]);
+
   const handleDelete = (stock: AnalysisStock) => {
     const msg = `Delete ${stock.symbol} and all related data?`;
     if (Platform.OS === "web") {
@@ -69,7 +102,7 @@ export function StocksPanel({
   };
 
   return (
-    <View style={{ flex: 1 }}>
+    <View style={S.flex1}>
       {/* Search + Add */}
       <View style={[st.searchRow, { borderBottomColor: colors.borderColor }]}>
         <View style={[st.searchBox, { backgroundColor: colors.bgInput, borderColor: colors.borderColor }]}>
@@ -89,7 +122,7 @@ export function StocksPanel({
         </View>
         <Pressable onPress={() => setShowAdd(true)} style={[st.addBtn, { backgroundColor: colors.accentPrimary }]}>
           <FontAwesome name="plus" size={12} color="#fff" />
-          <Text style={{ color: "#fff", fontSize: 13, fontWeight: "700", marginLeft: 6 }}>Add</Text>
+          <Text style={S.addBtnText}>Add</Text>
         </Pressable>
       </View>
 
@@ -99,42 +132,43 @@ export function StocksPanel({
         <FlashList
           data={stocks}
           keyExtractor={(item) => String(item.id)}
-          contentContainerStyle={[st.listContent, isDesktop && { maxWidth: 900, alignSelf: "center", width: "100%" }]}
+          drawDistance={200}
+          contentContainerStyle={[st.listContent, ts.desktopList]}
           refreshControl={<RefreshControl refreshing={isFetching && !isLoading} onRefresh={refetch} tintColor={colors.accentPrimary} />}
           renderItem={({ item, index }) => (
             <FadeIn delay={index * 40}>
               <Pressable onPress={() => onSelect(item)}>
                 <Card colors={colors} style={st.rowCenter}>
-                  <View style={[st.symbolBadge, { backgroundColor: colors.accentPrimary + "15" }]}>
-                    <Text style={{ color: colors.accentPrimary, fontSize: 14, fontWeight: "800", letterSpacing: 0.5 }}>
+                  <View style={[st.symbolBadge, ts.symbolBadgeBg]}>
+                    <Text style={ts.symbolText}>
                       {item.symbol.slice(0, 3)}
                     </Text>
                   </View>
-                  <View style={{ flex: 1, marginLeft: 12 }}>
-                    <Text style={{ color: colors.textPrimary, fontSize: 15, fontWeight: "700" }}>{item.symbol}</Text>
-                    <Text style={{ color: colors.textSecondary, fontSize: 13, marginTop: 1 }} numberOfLines={1}>
+                  <View style={S.contentWrap}>
+                    <Text style={ts.symbolName}>{item.symbol}</Text>
+                    <Text style={ts.companyName} numberOfLines={1}>
                       {item.company_name}
                     </Text>
-                    <View style={[st.rowCenter, { gap: 6, marginTop: 4 }]}>
-                      <View style={[st.tagPill, { backgroundColor: colors.bgInput }]}>
-                        <Text style={{ color: colors.textMuted, fontSize: 10, fontWeight: "600" }}>{item.exchange}</Text>
+                    <View style={[st.rowCenter, S.tagsGap]}>
+                      <View style={[st.tagPill, ts.tagBg]}>
+                        <Text style={ts.tagText}>{item.exchange}</Text>
                       </View>
-                      <View style={[st.tagPill, { backgroundColor: colors.bgInput }]}>
-                        <Text style={{ color: colors.textMuted, fontSize: 10, fontWeight: "600" }}>{item.currency}</Text>
+                      <View style={[st.tagPill, ts.tagBg]}>
+                        <Text style={ts.tagText}>{item.currency}</Text>
                       </View>
                       {item.sector && (
-                        <View style={[st.tagPill, { backgroundColor: colors.accentPrimary + "10" }]}>
-                          <Text style={{ color: colors.accentPrimary, fontSize: 10, fontWeight: "600" }}>{item.sector}</Text>
+                        <View style={[st.tagPill, ts.sectorTagBg]}>
+                          <Text style={ts.sectorTagText}>{item.sector}</Text>
                         </View>
                       )}
                     </View>
                   </View>
-                  <View style={{ alignItems: "flex-end", gap: 8 }}>
-                    <View style={{ flexDirection: "row", gap: 10 }}>
-                      <Pressable onPress={() => setEditStock(item)} hitSlop={10} style={[st.iconBtn, { backgroundColor: colors.accentPrimary + "12" }]}>
+                  <View style={S.actionsCol}>
+                    <View style={S.actionsRow}>
+                      <Pressable onPress={() => setEditStock(item)} hitSlop={10} style={[st.iconBtn, ts.editBtnBg]}>
                         <FontAwesome name="pencil" size={12} color={colors.accentPrimary} />
                       </Pressable>
-                      <Pressable onPress={() => handleDelete(item)} hitSlop={10} style={[st.iconBtn, { backgroundColor: colors.danger + "12" }]}>
+                      <Pressable onPress={() => handleDelete(item)} hitSlop={10} style={[st.iconBtn, ts.deleteBtnBg]}>
                         <FontAwesome name="trash-o" size={12} color={colors.danger} />
                       </Pressable>
                     </View>
@@ -146,16 +180,16 @@ export function StocksPanel({
           )}
           ListEmptyComponent={
             <View style={st.empty}>
-              <View style={[st.emptyIcon, { backgroundColor: colors.accentPrimary + "10" }]}>
+              <View style={[st.emptyIcon, ts.emptyIconBg]}>
                 <FontAwesome name="flask" size={32} color={colors.accentPrimary} />
               </View>
-              <Text style={[st.emptyTitle, { color: colors.textPrimary }]}>No stocks yet</Text>
-              <Text style={[st.emptySubtitle, { color: colors.textMuted, textAlign: "center" }]}>
+              <Text style={[st.emptyTitle, ts.emptyTitle]}>No stocks yet</Text>
+              <Text style={[st.emptySubtitle, ts.emptySubtitle]}>
                 Add your first stock profile to begin{"\n"}fundamental analysis
               </Text>
-              <Pressable onPress={() => setShowAdd(true)} style={[st.addBtn, { backgroundColor: colors.accentPrimary, marginTop: 20, paddingHorizontal: 24 }]}>
+              <Pressable onPress={() => setShowAdd(true)} style={[st.addBtn, ts.addStockBtn]}>
                 <FontAwesome name="plus" size={12} color="#fff" />
-                <Text style={{ color: "#fff", fontSize: 14, fontWeight: "700", marginLeft: 8 }}>Add Stock</Text>
+                <Text style={S.addStockBtnText}>Add Stock</Text>
               </Pressable>
             </View>
           }
@@ -355,11 +389,11 @@ function StockFormModal({ stock, colors, onClose }: { stock?: AnalysisStock; col
               <>
                 {selectedEntry && <LabeledInput label="COMPANY NAME" value={companyName} onChangeText={setCompanyName} colors={colors} />}
                 {isEdit && <LabeledInput label="COMPANY NAME *" value={companyName} onChangeText={setCompanyName} colors={colors} />}
-                <View style={{ flexDirection: "row", gap: 10 }}>
+                <View style={S.formFieldRow}>
                   <LabeledInput label="EXCHANGE" value={exchange} onChangeText={setExchange} colors={colors} flex={1} />
                   <LabeledInput label="CURRENCY" value={currency} onChangeText={setCurrency} colors={colors} flex={1} />
                 </View>
-                <View style={{ flexDirection: "row", gap: 10 }}>
+                <View style={S.formFieldRow}>
                   <LabeledInput label="SECTOR" value={sector} onChangeText={setSector} colors={colors} flex={1} />
                   <LabeledInput label="INDUSTRY" value={industry} onChangeText={setIndustry} colors={colors} flex={1} />
                 </View>
@@ -378,7 +412,7 @@ function StockFormModal({ stock, colors, onClose }: { stock?: AnalysisStock; col
               </View>
             )}
 
-            <View style={{ flexDirection: "row", gap: 10, marginTop: 8 }}>
+            <View style={S.formBtnRow}>
               <ActionButton label="Cancel" onPress={onClose} colors={colors} variant="secondary" flex={1} />
               <ActionButton
                 label={mutation.isPending ? (isEdit ? "Saving..." : "Creating...") : (isEdit ? "Save Changes" : "Create Stock")}

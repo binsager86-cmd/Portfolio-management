@@ -51,6 +51,15 @@ interface AuthState {
   error: string | null;
   /** Structured error for analytics/Sentry (null = no error). */
   lastAuthError: AuthError | null;
+  /** True while a token refresh is in-flight. */
+  isRefreshing: boolean;
+  /** Consecutive refresh attempt counter (circuit breaker). */
+  refreshAttemptCount: number;
+  /** Refresh attempt counter used by api/client.ts circuit breaker. */
+  refreshAttempts: number;
+
+  /** Update refresh state (used by api/client.ts interceptor). */
+  setRefreshState: (isRefreshing: boolean, attempts?: number) => void;
 
   /** Hydrate tokens from storage on app start. */
   hydrate: () => Promise<void>;
@@ -110,8 +119,14 @@ export const useAuthStore = create<AuthState>((set) => ({
   isLoading: true, // start true — wait for hydration before navigating
   error: null,
   lastAuthError: null,
+  isRefreshing: false,
+  refreshAttemptCount: 0,
+  refreshAttempts: 0,
 
   clearError: () => set({ error: null, lastAuthError: null }),
+
+  setRefreshState: (isRefreshing, attempts = 0) =>
+    set({ isRefreshing, refreshAttempts: attempts }),
 
   // ── Hydrate ─────────────────────────────────────────────────────
 

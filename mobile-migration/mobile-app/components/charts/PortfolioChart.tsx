@@ -553,6 +553,13 @@ export const PortfolioChart = React.memo(function PortfolioChart({
       )}
     </View>
   );
+}, (prev, next) => {
+  if (prev.height !== next.height || prev.title !== next.title || prev.style !== next.style) return false;
+  if (prev.data.length !== next.data.length) return false;
+  for (let i = 0; i < prev.data.length; i++) {
+    if (prev.data[i].date !== next.data[i].date || prev.data[i].value !== next.data[i].value) return false;
+  }
+  return true;
 });
 
 // ── Styles ──────────────────────────────────────────────────────────

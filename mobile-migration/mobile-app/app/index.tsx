@@ -13,6 +13,7 @@ import { Redirect } from "expo-router";
 import { useEffect, useState } from "react";
 import { Platform } from "react-native";
 
+import { queryClient } from "@/lib/queryClient";
 import { useAuthStore } from "@/services/authStore";
 
 const ONBOARDING_KEY = "onboarding_seen";
@@ -74,6 +75,13 @@ export default function Index() {
     }
     check();
   }, []);
+
+  // Clear stale authenticated cache when session is gone (e.g. web tab reopen)
+  useEffect(() => {
+    if (!isLoading && !token) {
+      queryClient.clear();
+    }
+  }, [token, isLoading]);
 
   // Wait for auth hydration + onboarding check before redirecting
   if (isLoading || onboardingSeen === null) {

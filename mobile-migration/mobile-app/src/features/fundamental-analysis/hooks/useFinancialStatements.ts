@@ -109,6 +109,8 @@ export function useFinancialStatements(stockId: number, selectedModel: GeminiMod
   const elapsedTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pollActiveRef = useRef(false);
+  const lastUploadAtRef = useRef(0);
+  const UPLOAD_COOLDOWN_MS = 1_000;
 
   // Cleanup all timers on unmount
   useEffect(() => {
@@ -208,6 +210,11 @@ export function useFinancialStatements(stockId: number, selectedModel: GeminiMod
 
   /** Pick and upload a PDF — fast upload then poll for extraction status. */
   const handlePickAndUpload = useCallback(async () => {
+    // Prevent rapid re-triggers and concurrent uploads
+    const now = Date.now();
+    if (now - lastUploadAtRef.current < UPLOAD_COOLDOWN_MS) return;
+    if (uploading) return;
+    lastUploadAtRef.current = now;
     try {
       const result = await DocumentPicker.getDocumentAsync({
         type: "application/pdf",
@@ -314,7 +321,7 @@ export function useFinancialStatements(stockId: number, selectedModel: GeminiMod
         s.status === "running" || s.status === "pending" ? { ...s, status: "error" as const, detail: msg } : s
       ));
     }
-  }, [stockId, selectedModel, queryClient, updateStep, startPolling, stopTimers]);
+  }, [stockId, selectedModel, queryClient, updateStep, startPolling, stopTimers, uploading]);
 
   /** Cancel any in-flight upload or polling. */
   const cancelUpload = useCallback(() => {

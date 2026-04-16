@@ -9,6 +9,7 @@
 
 import type { AISummary } from "@/lib/aiSummaryGenerator";
 import { todayISO } from "@/lib/dateUtils";
+import { sanitizePdfText } from "@/lib/sanitizePdf";
 import { Platform } from "react-native";
 
 type jsPDF = import("jspdf").jsPDF;
@@ -230,7 +231,7 @@ export async function exportMetricsPdf(
     doc.text("Financial Metrics Report", mx, 12);
 
     doc.setFont("helvetica", "normal").setFontSize(9).setTextColor(C.textLight);
-    doc.text(stockSymbol, mx, 20);
+    doc.text(sanitizePdfText(stockSymbol, 20), mx, 20);
 
     drawBadge(doc, W - mx - 46, 11, `${totalMetrics} METRICS`, C.primary, C.white);
 
@@ -302,19 +303,19 @@ export async function exportMetricsPdf(
     drawRoundedRect(doc, mx, y, cw, aiCardH, 3, C.cardBg, riskColor);
 
     doc.setFont("helvetica", "bold").setFontSize(9).setTextColor(C.textDark);
-    doc.text(`${aiSummary.headline}`, mx + 8, y + 7);
+    doc.text(sanitizePdfText(aiSummary.headline, 200), mx + 8, y + 7);
 
-    drawBadge(doc, mx + cw - 32, y + 6, `RISK: ${aiSummary.riskLevel.toUpperCase()}`, riskColor + "22", riskColor);
+    drawBadge(doc, mx + cw - 32, y + 6, `RISK: ${sanitizePdfText(aiSummary.riskLevel, 20).toUpperCase()}`, riskColor + "22", riskColor);
 
     let bulletY = y + 14;
     doc.setFont("helvetica", "normal").setFontSize(7.5).setTextColor(C.textMedium);
     for (const b of aiSummary.bullets) {
-      doc.text(`\u2022  ${b}`, mx + 10, bulletY);
+      doc.text(`\u2022  ${sanitizePdfText(b, 300)}`, mx + 10, bulletY);
       bulletY += 5;
     }
     if (aiSummary.actionHint) {
       doc.setFont("helvetica", "bold").setFontSize(7.5).setTextColor(C.primary);
-      doc.text(`\u27A4  ${aiSummary.actionHint}`, mx + 10, bulletY);
+      doc.text(`\u27A4  ${sanitizePdfText(aiSummary.actionHint, 300)}`, mx + 10, bulletY);
     }
 
     y += aiCardH + SECTION_GAP;

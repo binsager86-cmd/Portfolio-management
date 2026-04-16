@@ -10,6 +10,7 @@
 
 import type { AISummary } from "@/lib/aiSummaryGenerator";
 import { todayISO } from "@/lib/dateUtils";
+import { sanitizePdfText } from "@/lib/sanitizePdf";
 import { Platform } from "react-native";
 
 // ── Types ────────────────────────────────────────────────────────────
@@ -177,7 +178,7 @@ async function tablesToPdf(tables: TableData[], stockSymbol: string, panelName: 
     doc.setFillColor(C.headerBg);
     doc.rect(0, 0, W, headerH, "F");
     doc.setFont("helvetica", "bold").setFontSize(14).setTextColor(C.white);
-    doc.text(`${stockSymbol} — ${panelName}`, mx, 13);
+    doc.text(`${sanitizePdfText(stockSymbol, 20)} — ${sanitizePdfText(panelName, 60)}`, mx, 13);
     doc.setFontSize(8).setTextColor(C.textLight);
     doc.text(`Exported ${todayISO()}`, W - mx, 13, { align: "right" });
   };
@@ -203,20 +204,20 @@ async function tablesToPdf(tables: TableData[], stockSymbol: string, panelName: 
     doc.roundedRect(mx, y, W - mx * 2, cardH, 2, 2, "FD");
 
     doc.setFont("helvetica", "bold").setFontSize(9).setTextColor(C.textDark);
-    doc.text(`${aiSummary.headline}`, mx + 6, y + 7);
+    doc.text(sanitizePdfText(aiSummary.headline, 200), mx + 6, y + 7);
 
     doc.setFont("helvetica", "normal").setFontSize(7).setTextColor(riskColor);
-    doc.text(`RISK: ${aiSummary.riskLevel.toUpperCase()}`, W - mx - 6, y + 7, { align: "right" });
+    doc.text(`RISK: ${sanitizePdfText(aiSummary.riskLevel, 20).toUpperCase()}`, W - mx - 6, y + 7, { align: "right" });
 
     let bulletY = y + 13;
     doc.setFont("helvetica", "normal").setFontSize(7.5).setTextColor(C.textMedium);
     for (const b of aiSummary.bullets) {
-      doc.text(`\u2022  ${b}`, mx + 8, bulletY);
+      doc.text(`\u2022  ${sanitizePdfText(b, 300)}`, mx + 8, bulletY);
       bulletY += 5;
     }
     if (aiSummary.actionHint) {
       doc.setFont("helvetica", "bold").setFontSize(7.5).setTextColor(C.primary);
-      doc.text(`\u27A4  ${aiSummary.actionHint}`, mx + 8, bulletY);
+      doc.text(`\u27A4  ${sanitizePdfText(aiSummary.actionHint, 300)}`, mx + 8, bulletY);
     }
 
     y += cardH + 6;
@@ -230,13 +231,13 @@ async function tablesToPdf(tables: TableData[], stockSymbol: string, panelName: 
     if (y + lineH * 2 > H - 14) { drawFooter(page); doc.addPage(); page++; drawHeader(); y = headerH + 6; }
 
     doc.setFont("helvetica", "bold").setFontSize(10).setTextColor(C.primary);
-    doc.text(table.title, mx, y);
+    doc.text(sanitizePdfText(table.title, 100), mx, y);
     y += 6;
 
     doc.setFillColor(C.primaryLight);
     doc.rect(mx, y - 4, availW, lineH, "F");
     doc.setFont("helvetica", "bold").setFontSize(7.5).setTextColor(C.textDark);
-    for (let ci = 0; ci < colCount; ci++) doc.text(table.headers[ci], mx + ci * colW + 2, y, { maxWidth: colW - 4 });
+    for (let ci = 0; ci < colCount; ci++) doc.text(sanitizePdfText(table.headers[ci], 80), mx + ci * colW + 2, y, { maxWidth: colW - 4 });
     y += lineH;
 
     doc.setFont("helvetica", "normal").setFontSize(7);
@@ -245,7 +246,7 @@ async function tablesToPdf(tables: TableData[], stockSymbol: string, panelName: 
       if (ri % 2 === 1) { doc.setFillColor(C.altRow); doc.rect(mx, y - 4, availW, lineH, "F"); }
       doc.setTextColor(C.textMedium);
       for (let ci = 0; ci < colCount; ci++) {
-        doc.text(table.rows[ri][ci] != null ? String(table.rows[ri][ci]) : "–", mx + ci * colW + 2, y, { maxWidth: colW - 4 });
+        doc.text(table.rows[ri][ci] != null ? sanitizePdfText(table.rows[ri][ci], 200) : "–", mx + ci * colW + 2, y, { maxWidth: colW - 4 });
       }
       y += lineH;
     }

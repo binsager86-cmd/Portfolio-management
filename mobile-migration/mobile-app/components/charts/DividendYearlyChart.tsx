@@ -72,9 +72,26 @@ function fmtVal(v: number): string {
   return v.toFixed(v < 10 ? 2 : 0);
 }
 
+// ── Comparator — skip re-render when data hasn't actually changed ───
+
+function propsAreEqual(prev: Props, next: Props): boolean {
+  if (prev.currency !== next.currency || prev.height !== next.height) return false;
+  if (prev.data.length !== next.data.length) return false;
+  if ((prev.projectedData?.length ?? 0) !== (next.projectedData?.length ?? 0)) return false;
+  for (let i = 0; i < prev.data.length; i++) {
+    if (prev.data[i].year !== next.data[i].year || prev.data[i].amount !== next.data[i].amount) return false;
+  }
+  if (prev.projectedData && next.projectedData) {
+    for (let i = 0; i < prev.projectedData.length; i++) {
+      if (prev.projectedData[i].year !== next.projectedData[i].year || prev.projectedData[i].amount !== next.projectedData[i].amount) return false;
+    }
+  }
+  return true;
+}
+
 // ── Component ───────────────────────────────────────────────────────
 
-export default function DividendYearlyChart({
+export default React.memo(function DividendYearlyChart({
   data,
   projectedData,
   currency = "KWD",
@@ -378,7 +395,7 @@ export default function DividendYearlyChart({
       </View>
     </Animated.View>
   );
-}
+}, propsAreEqual);
 
 const s = StyleSheet.create({
   container: {

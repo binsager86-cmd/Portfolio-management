@@ -6,6 +6,7 @@
  */
 
 import { todayISO } from "@/lib/dateUtils";
+import { sanitizePdfText } from "@/lib/sanitizePdf";
 import { Platform } from "react-native";
 
 type jsPDF = import("jspdf").jsPDF;
@@ -128,9 +129,9 @@ function fmtPct(v: number | null | undefined): string {
 function kvRow(doc: jsPDF, x: number, y: number, label: string, value: string, w: number, bold = false) {
   doc.setFontSize(9);
   doc.setFont("helvetica", "normal").setTextColor(C.textMedium);
-  doc.text(label, x, y);
+  doc.text(sanitizePdfText(label, 80), x, y);
   doc.setFont("helvetica", bold ? "bold" : "normal").setTextColor(C.textDark);
-  doc.text(value, x + w, y, { align: "right" });
+  doc.text(sanitizePdfText(value, 80), x + w, y, { align: "right" });
 }
 
 // ── DCF-specific parameter formatting ────────────────────────────
@@ -156,7 +157,7 @@ function paramLabel(key: string): string {
 
 function fmtParamValue(model: string, key: string, val: unknown): string {
   if (val == null) return "—";
-  if (typeof val !== "number") return String(val);
+  if (typeof val !== "number") return sanitizePdfText(val, 100);
   if (_PCT_KEYS.has(key)) return (val * 100).toFixed(2) + "%";
   if (_BIG_KEYS.has(key)) return fmtBig(val);
   if (_INT_KEYS.has(key)) return String(Math.round(val));
@@ -188,7 +189,7 @@ export async function exportValuationPdf(
     doc.rect(0, PAGE_HEADER_H, W, 1.5, "F");
 
     doc.setFont("helvetica", "bold").setFontSize(17).setTextColor(C.white);
-    doc.text(summary.stockSymbol, mx, 14);
+    doc.text(sanitizePdfText(summary.stockSymbol, 20), mx, 14);
 
     doc.setFont("helvetica", "normal").setFontSize(9).setTextColor(C.textLight);
     doc.text("Valuation Analysis Report", mx, 22);
@@ -237,7 +238,7 @@ export async function exportValuationPdf(
     doc.setFillColor(color);
     doc.rect(mx + 0.5, y + 1.5, 3, barH - 3, "F");
     doc.setFont("helvetica", "bold").setFontSize(13).setTextColor(color);
-    doc.text(title, mx + 10, y + 9.5);
+    doc.text(sanitizePdfText(title, 60), mx + 10, y + 9.5);
     y += barH + 6;
   }
 
@@ -290,7 +291,7 @@ export async function exportValuationPdf(
       doc.setFillColor(mColor);
       doc.circle(cardX + 2, y - 1.5, 1.5, "F");
       doc.setFontSize(9).setFont("helvetica", "bold").setTextColor(C.textDark);
-      doc.text(m.toUpperCase(), cardX + 7, y);
+      doc.text(sanitizePdfText(m.toUpperCase(), 40), cardX + 7, y);
 
       // Values
       doc.setFont("helvetica", "bold").setTextColor(C.textDark);
@@ -413,7 +414,7 @@ export async function exportValuationPdf(
     let ly = y + 5;
     doc.setFontSize(7.5).setFont("helvetica", "italic").setTextColor(C.muted);
     for (const line of lines) {
-      doc.text(line, mx + 8, ly);
+      doc.text(sanitizePdfText(line, 200), mx + 8, ly);
       ly += 5;
     }
     y += h + 2;
@@ -433,7 +434,7 @@ export async function exportValuationPdf(
 
     // Date
     doc.setFontSize(8).setFont("helvetica", "normal").setTextColor(C.textLight);
-    doc.text(`Calculated: ${entry.valuation_date}`, mx, y);
+    doc.text(`Calculated: ${sanitizePdfText(entry.valuation_date, 40)}`, mx, y);
     y += 6;
 
     // ═════════════════════════════════════════════════════════════

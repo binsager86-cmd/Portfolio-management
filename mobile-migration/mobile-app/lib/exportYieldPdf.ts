@@ -11,6 +11,7 @@
  */
 
 import { todayISO } from "@/lib/dateUtils";
+import { sanitizePdfText } from "@/lib/sanitizePdf";
 
 // jsPDF is imported dynamically inside the export function
 // to avoid SSR/Metro node-bundle resolution issues.
@@ -185,10 +186,10 @@ export async function exportYieldCalcPdf(
     doc.setFontSize(9.5);
     doc.setFont("helvetica", bold ? "bold" : "normal");
     doc.setTextColor(bold ? C.textDark : C.textMedium);
-    doc.text(label, mx + 10, y);
+    doc.text(sanitizePdfText(label, 80), mx + 10, y);
     doc.setFont("helvetica", "bold");
     doc.setTextColor(valueColor);
-    doc.text(value, mx + cw - 10, y, { align: "right" });
+    doc.text(sanitizePdfText(value, 80), mx + cw - 10, y, { align: "right" });
     y += ROW_H;
   }
 
@@ -233,9 +234,9 @@ export async function exportYieldCalcPdf(
     doc.setFontSize(16);
     doc.setFont("helvetica", "normal");
     doc.setTextColor(C.textDark);
-    doc.text(input.companyName, W / 2, y, { align: "center" });
+    doc.text(sanitizePdfText(input.companyName, 100), W / 2, y, { align: "center" });
     // Subtle underline
-    const tw = doc.getTextWidth(input.companyName);
+    const tw = doc.getTextWidth(sanitizePdfText(input.companyName, 100));
     doc.setDrawColor(C.primary);
     doc.setLineWidth(0.5);
     doc.line(W / 2 - tw / 2, y + 2, W / 2 + tw / 2, y + 2);

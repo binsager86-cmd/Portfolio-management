@@ -472,7 +472,7 @@ export async function getTransactions(params?: {
   portfolio?: string;
   symbol?: string;
   page?: number;
-  per_page?: number;
+  page_size?: number;
 }): Promise<TransactionListResponse> {
   const { data } = await api.get<{ status: string; data: TransactionListResponse }>(
     "/api/v1/portfolio/transactions",

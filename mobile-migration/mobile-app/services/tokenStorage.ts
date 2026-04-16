@@ -1,140 +1,205 @@
 /**
  * Token storage abstraction.
  *
- * Web    → sessionStorage (cleared when tab closes — limits XSS window).
- *          NOTE: For maximum security, migrate to httpOnly cookies via a
- *          backend proxy so tokens never touch JS at all.
+ * Web    → sessionStorage for access tokens (cleared when tab closes),
+ *          localStorage for refresh tokens (persistent across tabs).
  * Native → expo-secure-store (encrypted on-device keychain/keystore)
+ *
+ * Uses crash-safe timestamp-based expiry tracking instead of JWT decode.
+ * Clock-skew tolerance: 60 s buffer for network/device clock drift.
  */
 
+import * as SecureStore from "expo-secure-store";
 import { Platform } from "react-native";
 
-const TOKEN_KEY = "auth_token";
-const REFRESH_TOKEN_KEY = "refresh_token";
-const TOKEN_EXPIRY_KEY = "auth_token_expiry";
-const REFRESH_EXPIRY_KEY = "refresh_token_expiry";
+// ── Constants ───────────────────────────────────────────────────────
 
-// ── Token expiration helpers ────────────────────────────────────────
+const CLOCK_SKEW_MS = 60_000; // 60s buffer for network/device clock drift
 
+// SSR guards — sessionStorage/localStorage may not exist during
+// Expo Router's Node.js server-side render pass.
+const hasSessionStorage = typeof sessionStorage !== "undefined";
+const hasLocalStorage = typeof localStorage !== "undefined";
+
+// ── New API ─────────────────────────────────────────────────────────
+
+export const setTokens = async (
+  access: string,
+  refresh: string,
+  expiresIn?: number,
+): Promise<void> => {
+  if (Platform.OS === "web") {
+    if (hasSessionStorage) sessionStorage.setItem("access_token", access);
+    if (hasLocalStorage) {
+      localStorage.setItem("refresh_token", refresh);
+      if (expiresIn)
+        localStorage.setItem(
+          "token_expires_at",
+          String(Date.now() + expiresIn * 1000),
+        );
+    }
+  } else {
+    await SecureStore.setItemAsync("access_token", access);
+    await SecureStore.setItemAsync("refresh_token", refresh);
+    if (expiresIn)
+      await SecureStore.setItemAsync(
+        "token_expires_at",
+        String(Date.now() + expiresIn * 1000),
+      );
+  }
+};
+
+export const getTokens = async () => {
+  if (Platform.OS === "web") {
+    return {
+      access: hasSessionStorage
+        ? sessionStorage.getItem("access_token")
+        : null,
+      refresh: hasLocalStorage
+        ? localStorage.getItem("refresh_token")
+        : null,
+      expiresAt: hasLocalStorage
+        ? localStorage.getItem("token_expires_at")
+        : null,
+    };
+  }
+  return {
+    access: await SecureStore.getItemAsync("access_token"),
+    refresh: await SecureStore.getItemAsync("refresh_token"),
+    expiresAt: await SecureStore.getItemAsync("token_expires_at"),
+  };
+};
+
+export const clearTokens = async (): Promise<void> => {
+  if (Platform.OS === "web") {
+    if (hasSessionStorage) sessionStorage.removeItem("access_token");
+    if (hasLocalStorage) {
+      localStorage.removeItem("refresh_token");
+      localStorage.removeItem("token_expires_at");
+    }
+  } else {
+    await SecureStore.deleteItemAsync("access_token");
+    await SecureStore.deleteItemAsync("refresh_token");
+    await SecureStore.deleteItemAsync("token_expires_at");
+  }
+};
+
+export const getStoredAccessToken = async (): Promise<string | null> => {
+  if (Platform.OS === "web") {
+    return hasSessionStorage
+      ? sessionStorage.getItem("access_token")
+      : null;
+  }
+  return SecureStore.getItemAsync("access_token");
+};
+
+// ── Expiry checking ─────────────────────────────────────────────────
+
+// Legacy JWT decode helper — kept for backward compat with hydrate/session guard.
 interface JwtPayload {
   exp: number;
   iat: number;
 }
 
-/**
- * Decode the payload section of a JWT (no signature verification —
- * the backend is the authority; this is only for expiry timing).
- */
 function decodeJwtPayload(token: string): JwtPayload | null {
   try {
-    const base64 = token.split(".")[1];
+    const parts = token.split(".");
+    if (parts.length !== 3) return null;
+    const base64 = parts[1];
     if (!base64) return null;
-    // Handle URL-safe base64
-    const padded = base64.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = base64
+      .replace(/-/g, "+")
+      .replace(/_/g, "/")
+      .padEnd(base64.length + ((4 - (base64.length % 4)) % 4), "=");
     const json = atob(padded);
-    return JSON.parse(json) as JwtPayload;
+    const parsed = JSON.parse(json);
+    if (typeof parsed?.exp !== "number") return null;
+    return parsed as JwtPayload;
   } catch {
     return null;
   }
 }
 
+const CLOCK_SKEW_SECONDS = 30;
+
 /**
- * Returns `true` if the token is expired **or** will expire within
- * `bufferSeconds` (default 60 s).  Also returns `true` for un-parseable tokens.
+ * Check if a token or expiry timestamp indicates expiration.
+ *
+ * Supports two calling conventions:
+ *   - `isTokenExpired(expiresAt)` — new: checks a stored ms-timestamp string
+ *   - `isTokenExpired(jwt, bufferSeconds)` — legacy: decodes a JWT payload
+ *
+ * Detection: if `bufferSeconds` is provided or the string contains dots
+ * (JWT format), uses JWT decode. Otherwise treats as a numeric timestamp.
  */
 export function isTokenExpired(
-  token: string | null,
-  bufferSeconds = 60,
+  tokenOrExpiresAt: string | null,
+  bufferSeconds?: number,
 ): boolean {
-  if (!token) return true;
-  const payload = decodeJwtPayload(token);
-  if (!payload?.exp) return true;
-  const nowSec = Date.now() / 1000;
-  return payload.exp - nowSec < bufferSeconds;
-}
+  if (!tokenOrExpiresAt) return true;
 
-// ── Platform-adaptive helpers ───────────────────────────────────────
-
-/** Map token key → its expiry-timestamp key. */
-function expiryKeyFor(key: string): string | null {
-  if (key === TOKEN_KEY) return TOKEN_EXPIRY_KEY;
-  if (key === REFRESH_TOKEN_KEY) return REFRESH_EXPIRY_KEY;
-  return null;
-}
-
-async function getItem(key: string): Promise<string | null> {
-  if (Platform.OS === "web") {
-    const value = sessionStorage.getItem(key);
-    if (!value) return null;
-
-    // Auto-evict if the stored expiry has passed (defense-in-depth).
-    const ek = expiryKeyFor(key);
-    if (ek) {
-      const storedExpiry = sessionStorage.getItem(ek);
-      if (storedExpiry && Date.now() > Number(storedExpiry)) {
-        sessionStorage.removeItem(key);
-        sessionStorage.removeItem(ek);
-        return null;
-      }
-    }
-
-    return value;
+  // Legacy path: JWT decode (when bufferSeconds given, or string looks like JWT)
+  if (bufferSeconds !== undefined || tokenOrExpiresAt.includes(".")) {
+    const payload = decodeJwtPayload(tokenOrExpiresAt);
+    if (!payload?.exp) return true;
+    const nowSec = Date.now() / 1000;
+    const buffer = bufferSeconds ?? 60;
+    return payload.exp - nowSec < buffer + CLOCK_SKEW_SECONDS;
   }
-  const SecureStore = await import("expo-secure-store");
-  return SecureStore.getItemAsync(key);
+
+  // New path: stored timestamp
+  const expiry = Number(tokenOrExpiresAt);
+  if (isNaN(expiry)) return true;
+  return Date.now() >= expiry - CLOCK_SKEW_MS;
 }
 
-async function setItem(key: string, value: string): Promise<void> {
-  if (Platform.OS === "web") {
-    sessionStorage.setItem(key, value);
-
-    // Persist the JWT expiry so getItem can auto-evict stale tokens.
-    const ek = expiryKeyFor(key);
-    if (ek) {
-      const payload = decodeJwtPayload(value);
-      if (payload?.exp) {
-        sessionStorage.setItem(ek, String(payload.exp * 1000));
-      }
-    }
-    return;
-  }
-  const SecureStore = await import("expo-secure-store");
-  await SecureStore.setItemAsync(key, value);
-}
-
-async function removeItem(key: string): Promise<void> {
-  if (Platform.OS === "web") {
-    sessionStorage.removeItem(key);
-    const ek = expiryKeyFor(key);
-    if (ek) sessionStorage.removeItem(ek);
-    return;
-  }
-  const SecureStore = await import("expo-secure-store");
-  await SecureStore.deleteItemAsync(key);
-}
-
-// ── Public API ──────────────────────────────────────────────────────
+// ── Backward-compatible API ─────────────────────────────────────────
+// These aliases allow existing consumers (authStore hydrate, useSessionGuard,
+// newsApi, marketApi, etc.) to work without changes.
 
 export async function getToken(): Promise<string | null> {
-  return getItem(TOKEN_KEY);
+  return getStoredAccessToken();
 }
 
 export async function setToken(token: string): Promise<void> {
-  await setItem(TOKEN_KEY, token);
+  if (Platform.OS === "web") {
+    if (hasSessionStorage) sessionStorage.setItem("access_token", token);
+  } else {
+    await SecureStore.setItemAsync("access_token", token);
+  }
 }
 
 export async function removeToken(): Promise<void> {
-  await removeItem(TOKEN_KEY);
+  if (Platform.OS === "web") {
+    if (hasSessionStorage) sessionStorage.removeItem("access_token");
+  } else {
+    await SecureStore.deleteItemAsync("access_token");
+  }
 }
 
 export async function getRefreshToken(): Promise<string | null> {
-  return getItem(REFRESH_TOKEN_KEY);
+  if (Platform.OS === "web") {
+    return hasLocalStorage ? localStorage.getItem("refresh_token") : null;
+  }
+  return SecureStore.getItemAsync("refresh_token");
 }
 
 export async function setRefreshToken(token: string): Promise<void> {
-  await setItem(REFRESH_TOKEN_KEY, token);
+  if (Platform.OS === "web") {
+    if (hasLocalStorage) localStorage.setItem("refresh_token", token);
+  } else {
+    await SecureStore.setItemAsync("refresh_token", token);
+  }
 }
 
 export async function removeRefreshToken(): Promise<void> {
-  await removeItem(REFRESH_TOKEN_KEY);
+  if (Platform.OS === "web") {
+    if (hasLocalStorage) {
+      localStorage.removeItem("refresh_token");
+      localStorage.removeItem("token_expires_at");
+    }
+  } else {
+    await SecureStore.deleteItemAsync("refresh_token");
+    await SecureStore.deleteItemAsync("token_expires_at");
+  }
 }

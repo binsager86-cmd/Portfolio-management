@@ -19,7 +19,7 @@ import DividendYearlyChart from "@/components/charts/DividendYearlyChart";
 import SnapshotLineChart, { type ChartDataPoint } from "@/components/charts/SnapshotLineChart";
 import { MetricCard } from "@/components/ui/MetricCard";
 import { useAllDividends } from "@/hooks/queries/useDividendQueries";
-import { useTransactions } from "@/hooks/queries/useTransactionQueries";
+import { useAllTransactions } from "@/hooks/queries/useTransactionQueries";
 import { useResponsive } from "@/hooks/useResponsive";
 import { formatCurrency, formatSignedCurrency } from "@/lib/currency";
 import type { RealizedProfitDetail, SnapshotRecord } from "@/services/api";
@@ -65,7 +65,7 @@ export function HistoricalPerformance({ snapshotData, realizedData }: Props) {
   const { data: allDivData } = useAllDividends();
 
   // Fetch all transactions (buy/sell/dividend — spans full history)
-  const { data: allTxnData } = useTransactions({ perPage: 9999 });
+  const { data: allTxnData } = useAllTransactions();
 
   // ── Compute yearly data ─────────────────────────────────────────
 

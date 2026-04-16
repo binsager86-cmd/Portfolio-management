@@ -1,247 +1,191 @@
 /**
- * Shared Axios instance with JWT auth & silent 401 refresh.
+ * Shared Axios instance with JWT auth, promise-queue token refresh,
+ * and circuit-breaker forced logout.
+ *
+ * Architecture:
+ *   - Request interceptor: attaches access token, rate-limits
+ *   - Response interceptor: reactive 401 handling with promise queue
+ *   - Promise queue: concurrent 401s wait for a single refresh call,
+ *     then all retry with the fresh token.
+ *   - Circuit breaker: MAX_REFRESH_ATTEMPTS consecutive failures → forced logout.
+ *   - No external mutex dependency.
  */
 
 import axios, {
-    AxiosError,
-    AxiosResponse,
-    InternalAxiosRequestConfig,
+    type AxiosError,
+    type InternalAxiosRequestConfig,
 } from "axios";
 
 import { API_BASE_URL, API_TIMEOUT } from "@/constants/Config";
 import {
-    getRefreshToken,
-    getToken,
-    isTokenExpired,
-    removeRefreshToken,
-    removeToken,
-    setRefreshToken,
-    setToken,
-} from "../tokenStorage";
+    clearTokens,
+    getStoredAccessToken,
+    getTokens,
+    setTokens,
+} from "@/services/tokenStorage";
+import { useAuthStore } from "@/services/authStore";
 import type { RefreshResponse } from "./types";
 
-// ── Rate limiter — prevents request spam from UI rapid interactions ──
+// ── Constants ───────────────────────────────────────────────────────
 
-class RateLimiter {
-  private timestamps: number[] = [];
-  private readonly maxRequests: number;
-  private readonly windowMs: number;
+const MAX_REFRESH_ATTEMPTS = 2;
+const RATE_LIMIT_WINDOW = 10_000; // 10s
+const RATE_LIMIT_MAX = 30;
 
-  constructor(maxRequests = 30, windowMs = 10_000) {
-    this.maxRequests = maxRequests;
-    this.windowMs = windowMs;
-  }
+// ── Rate limiter ────────────────────────────────────────────────────
 
-  check(): void {
-    const now = Date.now();
-    this.timestamps = this.timestamps.filter((t) => now - t < this.windowMs);
-    if (this.timestamps.length >= this.maxRequests) {
-      const waitSec = Math.ceil((this.windowMs - (now - this.timestamps[0])) / 1000);
-      throw new Error(`Rate limited — too many requests. Please wait ${waitSec}s.`);
-    }
-    this.timestamps.push(now);
-  }
+let requestTimestamps: number[] = [];
+
+function isRateLimited(): boolean {
+  const now = Date.now();
+  requestTimestamps = requestTimestamps.filter((t) => now - t < RATE_LIMIT_WINDOW);
+  if (requestTimestamps.length >= RATE_LIMIT_MAX) return true;
+  requestTimestamps.push(now);
+  return false;
 }
 
-const rateLimiter = new RateLimiter();
+// ── Promise queue for concurrent 401s ───────────────────────────────
+
+type QueueItem = {
+  resolve: (token: string) => void;
+  reject: (error: Error) => void;
+};
+let failedQueue: QueueItem[] = [];
+
+function processQueue(error: Error | null, token: string | null = null): void {
+  failedQueue.forEach((prom) =>
+    error ? prom.reject(error) : prom.resolve(token!),
+  );
+  failedQueue = [];
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────
+
+function isAuthEndpoint(url: string): boolean {
+  return (
+    url.includes("/auth/login") ||
+    url.includes("/auth/register") ||
+    url.includes("/auth/refresh")
+  );
+}
 
 // ── Axios instance ──────────────────────────────────────────────────
 
-const api = axios.create({
+const client = axios.create({
   baseURL: API_BASE_URL,
   timeout: API_TIMEOUT,
   headers: { "Content-Type": "application/json" },
 });
 
-// ── Proactive token refresh helper ──────────────────────────────────
+// ── Request interceptor: attach access token + rate-limit ───────────
 
-let proactiveRefreshPromise: Promise<string | null> | null = null;
-
-/**
- * If the access token is expired (or within 60 s of expiring), attempt
- * a silent refresh and return the new token.  Returns null if refresh
- * is unavailable or fails.  De-duplicates concurrent calls.
- */
-async function ensureFreshToken(): Promise<string | null> {
-  const token = await getToken();
-
-  // Token is still valid — nothing to do
-  if (!isTokenExpired(token)) return token;
-
-  // No refresh token — can't refresh
-  const refreshTok = await getRefreshToken();
-  if (!refreshTok) return token; // return stale token; 401 interceptor will handle
-
-  // De-duplicate: if a refresh is already in-flight, wait for it
-  if (proactiveRefreshPromise) return proactiveRefreshPromise;
-
-  proactiveRefreshPromise = (async () => {
-    try {
-      const { data } = await axios.post<RefreshResponse>(
-        `${API_BASE_URL}/api/v1/auth/refresh`,
-        { refresh_token: refreshTok },
-        { headers: { "Content-Type": "application/json" } },
-      );
-      await setToken(data.access_token);
-      if (data.refresh_token) await setRefreshToken(data.refresh_token);
-      return data.access_token;
-    } catch {
-      // Proactive refresh failed — let the request go with the stale token;
-      // the 401 response interceptor will handle full logout if needed.
-      return token;
-    } finally {
-      proactiveRefreshPromise = null;
+client.interceptors.request.use(
+  async (config: InternalAxiosRequestConfig) => {
+    if (isRateLimited()) {
+      throw new Error("Too many requests. Please wait a moment.");
     }
-  })();
 
-  return proactiveRefreshPromise;
-}
+    const url = config.url ?? "";
+    if (!isAuthEndpoint(url)) {
+      const token = await getStoredAccessToken();
+      if (token && config.headers) {
+        config.headers.Authorization = `Bearer ${token}`;
+      }
+    }
 
-// ── Request interceptor: attach access token (with expiry check) ────
-
-api.interceptors.request.use(async (config: InternalAxiosRequestConfig) => {
-  // Skip token logic for auth endpoints that don't need it
-  const url = config.url ?? "";
-  if (url.includes("/auth/login") || url.includes("/auth/register") || url.includes("/auth/refresh")) {
     return config;
-  }
-
-  // Rate-limit non-auth requests to prevent UI spam
-  rateLimiter.check();
-
-  const token = await ensureFreshToken();
-  if (token && config.headers) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
-  return config;
-});
-
-// ── Network-error tracker — force logout after repeated failures ────
-
-let consecutiveNetworkErrors = 0;
-const MAX_NETWORK_ERRORS = 3;
-
-function resetNetworkErrors() {
-  consecutiveNetworkErrors = 0;
-}
-
-// ── Response interceptor: silent refresh on 401 ─────────────────────
-
-let isRefreshing = false;
-let refreshSubscribers: Array<(token: string) => void> = [];
-
-function subscribeTokenRefresh(cb: (token: string) => void) {
-  refreshSubscribers.push(cb);
-}
-
-function onTokenRefreshed(newToken: string) {
-  refreshSubscribers.forEach((cb) => cb(newToken));
-  refreshSubscribers = [];
-}
-
-api.interceptors.response.use(
-  (response: AxiosResponse) => {
-    // Any successful response resets the network-error counter
-    resetNetworkErrors();
-    return response;
   },
+  (error) => Promise.reject(error),
+);
+
+// ── Response interceptor: promise-queued 401 refresh ────────────────
+
+client.interceptors.response.use(
+  (res) => res,
   async (error: AxiosError) => {
-    const originalRequest = error.config as InternalAxiosRequestConfig & {
+    const original = error.config as InternalAxiosRequestConfig & {
       _retry?: boolean;
     };
 
-    // ── Network error (no response — backend down / timeout) ────
-    if (!error.response) {
-      consecutiveNetworkErrors++;
-      if (__DEV__) {
-        console.log(
-          `[API] Network error #${consecutiveNetworkErrors}/${MAX_NETWORK_ERRORS}:`,
-          error.message,
-        );
-      }
-
-      // After MAX_NETWORK_ERRORS consecutive failures, check if the
-      // token is already expired.  If so, force logout immediately
-      // rather than leaving the user on a broken page.
-      if (consecutiveNetworkErrors >= MAX_NETWORK_ERRORS) {
-        const token = await getToken();
-        if (isTokenExpired(token, 0)) {
-          if (__DEV__) console.log("[API] Token expired + backend unreachable — logging out");
-          await removeToken();
-          await removeRefreshToken();
-          const { useAuthStore } = require("../authStore");
-          useAuthStore.getState().logout();
-          consecutiveNetworkErrors = 0;
-        }
-      }
+    if (!original || error.response?.status !== 401 || original._retry) {
       return Promise.reject(error);
     }
 
-    // Any server response (even errors) means the network is alive
-    resetNetworkErrors();
-
-    // Only attempt refresh on 401 and if we haven't retried yet
-    if (error.response?.status !== 401 || originalRequest._retry) {
+    // Don't retry auth endpoints (login/register/refresh failures are final)
+    if (isAuthEndpoint(original.url ?? "")) {
       return Promise.reject(error);
     }
 
-    // Don't refresh on auth endpoints themselves
-    const url = originalRequest.url ?? "";
-    if (url.includes("/auth/login") || url.includes("/auth/refresh")) {
-      return Promise.reject(error);
+    original._retry = true;
+
+    const { isRefreshing, refreshAttempts, setRefreshState } =
+      useAuthStore.getState();
+
+    // ── Circuit breaker ──
+    if (refreshAttempts >= MAX_REFRESH_ATTEMPTS) {
+      await clearTokens();
+      setRefreshState(false, 0);
+      await useAuthStore.getState().logout();
+      return Promise.reject(
+        new Error("Session expired. Please login again."),
+      );
     }
 
-    originalRequest._retry = true;
-
-    if (!isRefreshing) {
-      isRefreshing = true;
-      try {
-        const refreshTok = await getRefreshToken();
-        if (!refreshTok) {
-          throw new Error("No refresh token");
-        }
-
-        const { data } = await axios.post<RefreshResponse>(
-          `${API_BASE_URL}/api/v1/auth/refresh`,
-          { refresh_token: refreshTok },
-          { headers: { "Content-Type": "application/json" } }
-        );
-
-        await setToken(data.access_token);
-        if (data.refresh_token) {
-          await setRefreshToken(data.refresh_token);
-        }
-        onTokenRefreshed(data.access_token);
-
-        // Retry the original request with the new token
-        if (originalRequest.headers) {
-          originalRequest.headers.Authorization = `Bearer ${data.access_token}`;
-        }
-        return api(originalRequest);
-      } catch {
-        // Refresh failed — clear tokens and reset auth state
-        await removeToken();
-        await removeRefreshToken();
-        // Lazy import to break circular dependency
-        const { useAuthStore } = require("../authStore");
-        useAuthStore.getState().logout();
-        refreshSubscribers = [];
-        return Promise.reject(error);
-      } finally {
-        isRefreshing = false;
-      }
-    }
-
-    // Another request is already refreshing — queue and wait
-    return new Promise<AxiosResponse>((resolve) => {
-      subscribeTokenRefresh((newToken: string) => {
-        if (originalRequest.headers) {
-          originalRequest.headers.Authorization = `Bearer ${newToken}`;
-        }
-        resolve(api(originalRequest));
+    // ── Queue behind in-flight refresh ──
+    if (isRefreshing) {
+      return new Promise((resolve, reject) => {
+        failedQueue.push({
+          resolve: (token) => {
+            if (original.headers) {
+              original.headers.Authorization = `Bearer ${token}`;
+            }
+            resolve(client(original));
+          },
+          reject,
+        });
       });
-    });
-  }
+    }
+
+    // ── Perform refresh ──
+    setRefreshState(true, refreshAttempts + 1);
+
+    try {
+      const { refresh } = await getTokens();
+      if (!refresh) throw new Error("No refresh token available.");
+
+      const { data } = await axios.post<RefreshResponse>(
+        `${API_BASE_URL}/api/v1/auth/refresh`,
+        { refresh_token: refresh },
+        { headers: { "Content-Type": "application/json" } },
+      );
+
+      // Persist new tokens
+      await setTokens(
+        data.access_token,
+        data.refresh_token ?? refresh,
+        data.expires_in,
+      );
+
+      // Update store state (without triggering full re-login)
+      useAuthStore.setState({
+        token: data.access_token,
+        refreshToken: data.refresh_token ?? refresh,
+      });
+
+      processQueue(null, data.access_token);
+      if (original.headers) {
+        original.headers.Authorization = `Bearer ${data.access_token}`;
+      }
+      setRefreshState(false, 0);
+      return client(original);
+    } catch (refreshError) {
+      processQueue(refreshError as Error, null);
+      await clearTokens();
+      setRefreshState(false, 0);
+      await useAuthStore.getState().logout();
+      return Promise.reject(refreshError);
+    }
+  },
 );
 
-export default api;
+export default client;

@@ -12,7 +12,7 @@ import { FAPanelSkeleton } from "@/components/ui/PageSkeletons";
 import type { ThemePalette } from "@/constants/theme";
 import { useScoreHistory, useStockScore, useValuations } from "@/hooks/queries";
 import { generateStockSummary, type AISummary } from "@/lib/aiSummaryGenerator";
-import { exportCSV, exportExcel, exportPDF, TableData } from "@/lib/exportAnalysis";
+import type { TableData } from "@/lib/exportAnalysis";
 import type { CategoryBreakdown } from "@/services/api";
 import { useUserPrefsStore } from "@/src/store/userPrefsStore";
 import { st } from "../styles";
@@ -156,6 +156,7 @@ export const ScorePanel = React.memo(function ScorePanel({ stockId, stockSymbol,
           <View style={{ alignItems: "flex-end", marginBottom: 2 }}>
             <ExportBar
               onExport={async (fmt) => {
+                const { exportExcel, exportCSV, exportPDF } = await import("@/lib/exportAnalysis");
                 const t = exportTables();
                 if (fmt === "xlsx") await exportExcel(t, stockSymbol, "Score");
                 else if (fmt === "csv") await exportCSV(t, stockSymbol, "Score");
@@ -376,6 +377,7 @@ export const ScorePanel = React.memo(function ScorePanel({ stockId, stockSymbol,
                       data={scoreHistory}
                       renderItem={renderHistoryRow}
                       estimatedItemSize={36}
+                      drawDistance={200}
                       keyExtractor={(sh) => String(sh.id)}
                     />
                   </View>

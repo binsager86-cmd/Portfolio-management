@@ -27,7 +27,7 @@ import { FAPanelSkeleton } from "@/components/ui/PageSkeletons";
 import type { ThemePalette } from "@/constants/theme";
 import { useStatements } from "@/hooks/queries";
 import { showErrorAlert } from "@/lib/errorHandling";
-import { exportCSV, exportExcel, exportPDF, TableData } from "@/lib/exportAnalysis";
+import type { TableData } from "@/lib/exportAnalysis";
 import { mergeLineItems, reorderLineItems } from "@/services/api";
 import { st } from "../styles";
 import { STMNT_META, type PanelWithSymbolProps } from "../types";
@@ -242,6 +242,7 @@ export function ComparisonPanel({ stockId, stockSymbol, colors, isDesktop: _isDe
             <View style={{ flex: 1 }} />
             <ExportBar
               onExport={async (fmt) => {
+                const { exportExcel, exportCSV, exportPDF } = await import("@/lib/exportAnalysis");
                 const t = exportTables();
                 if (fmt === "xlsx") await exportExcel(t, stockSymbol, "Comparison");
                 else if (fmt === "csv") await exportCSV(t, stockSymbol, "Comparison");

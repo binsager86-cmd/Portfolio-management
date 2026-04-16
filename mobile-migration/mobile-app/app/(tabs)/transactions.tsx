@@ -492,6 +492,7 @@ function TransactionsScreen() {
         data={transactions}
         keyExtractor={(item) => String(item.id)}
         estimatedItemSize={80}
+        drawDistance={200}
         renderItem={({ item }) => <TxnRow txn={item} colors={colors} onEdit={handleEdit} onDelete={handleDelete} />}
         contentContainerStyle={[
           styles.list,
