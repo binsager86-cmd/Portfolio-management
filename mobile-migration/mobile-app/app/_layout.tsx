@@ -102,9 +102,6 @@ function RootLayoutNav() {
   // ── Session guard: periodic heartbeat + focus re-validation ────
   useSessionGuard();
 
-  // ── Auth → query cache sync (logout clears, login invalidates) ──
-  useAuthCacheSync();
-
   // ── Single init effect: theme → OAuth hash check → hydration ───
   // Must be one sequential async flow so nothing can redirect
   // before auth state is fully resolved.
@@ -214,6 +211,7 @@ function RootLayoutNav() {
     <View style={{ flex: 1, direction: language === "ar" ? "rtl" : "ltr" }}>
     <StatusBar style={themeMode === "dark" ? "light" : "dark"} />
     <QueryClientProvider client={queryClient}>
+      <AuthCacheSyncProvider />
       <PaperProvider theme={paperTheme}>
         <ThemeProvider value={buildNavTheme(themeMode)}>
           <AppErrorBoundary>
@@ -233,4 +231,10 @@ function RootLayoutNav() {
     </View>
     </SafeAreaProvider>
   );
+}
+
+/** Runs useAuthCacheSync inside the QueryClientProvider tree. */
+function AuthCacheSyncProvider() {
+  useAuthCacheSync();
+  return null;
 }

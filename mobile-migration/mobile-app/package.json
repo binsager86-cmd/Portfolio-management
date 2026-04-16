@@ -10,9 +10,10 @@
     "build:web": "expo export --platform web --clear && node scripts/create-spa-redirects.js",
     "build:ios": "eas build --platform ios",
     "build:android": "eas build --platform android",
-    "lint": "eslint . --ext .ts,.tsx",
+    "lint": "eslint . --ext .ts,.tsx --max-warnings=0",
     "typecheck": "tsc --noEmit",
     "test": "jest --forceExit --detectOpenHandles",
+    "test:ci": "jest --forceExit --detectOpenHandles --coverage --passWithNoTests --coverageThreshold='{\"global\":{\"branches\":80,\"functions\":80,\"lines\":80,\"statements\":80}}'",
     "test:coverage": "jest --forceExit --detectOpenHandles --coverage",
     "test:watch": "jest --watch",
     "analyze": "expo export --platform web --dump-sourcemap && source-map-explorer dist/_expo/static/js/web/*.js"
@@ -84,6 +85,7 @@
     "jest-expo": "~54.0.0",
     "react-test-renderer": "19.1.0",
     "source-map-explorer": "^2.5.3",
+    "terser": "^5.31.0",
     "typescript": "~5.9.2"
   },
   "private": true

@@ -144,10 +144,10 @@ export function MobileDrawer({ visible, onClose }: MobileDrawerProps) {
   const levelOrder: ExpertiseLevel[] = ["normal", "intermediate", "advanced"];
 
   const navItems = useMemo(
-    () => (isAdmin
-      ? NAV_ITEMS.filter((item) => item.adminOnly)
-      : NAV_ITEMS.filter((item) => !item.adminOnly)
-    ).filter((item) => {
+    () => NAV_ITEMS.filter((item) => {
+      // Hide admin-only items from non-admin users
+      if (item.adminOnly && !isAdmin) return false;
+      // Check expertise level
       const minLevel = item.minLevel ?? "normal";
       return levelOrder.indexOf(expertiseLevel) >= levelOrder.indexOf(minLevel);
     }),

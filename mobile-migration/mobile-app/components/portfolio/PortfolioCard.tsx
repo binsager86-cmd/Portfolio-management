@@ -46,6 +46,7 @@ export const PortfolioCard = React.memo(function PortfolioCard({ name, data, onP
           borderColor: colors.borderColor,
           padding: spacing.cardPadding,
           flex: isPhone ? undefined : 1,
+          width: isPhone ? "100%" : undefined,
           minWidth: isPhone ? undefined : 240,
         },
       ]}

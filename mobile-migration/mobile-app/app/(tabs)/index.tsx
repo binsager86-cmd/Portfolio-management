@@ -419,7 +419,7 @@ function OverviewScreen() {
         </Text>
 
         {/* Action buttons */}
-        <View style={{ flexDirection: "row", gap: 10, marginTop: 14 }}>
+        <View style={{ flexDirection: "row", gap: 10, marginTop: 16 }}>
           <Pressable
             onPress={onRefresh}
             disabled={refreshing || savingSnapshot}
@@ -497,14 +497,14 @@ function OverviewScreen() {
               >
                 <FontAwesome
                   name={tab.icon}
-                  size={12}
+                  size={13}
                   color={active ? colors.accentPrimary : colors.textMuted}
-                  style={{ marginRight: 5 }}
+                  style={{ marginRight: 6 }}
                 />
                 <Text style={{
                   color: active ? colors.accentPrimary : colors.textSecondary,
                   fontWeight: active ? "700" : "500",
-                  fontSize: 12,
+                  fontSize: 13,
                 }}>
                   {tab.label}
                 </Text>
@@ -916,7 +916,7 @@ const styles = StyleSheet.create({
   },
   bannerGain: { fontSize: 17, fontWeight: "600" },
   bannerRoi: { fontSize: 17, fontWeight: "600" },
-  bannerSub: { fontSize: 13, marginTop: 8 },
+  bannerSub: { fontSize: 13, marginTop: 10 },
 
   // Section title
   sectionTitle: {
@@ -965,7 +965,6 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     borderWidth: 1,
     marginBottom: 14,
-    marginTop: -6,
   },
   rfLabelRow: { flexDirection: "row", alignItems: "center", gap: 8, flex: 1 },
   rfLabel: { fontSize: 13, fontWeight: "600" },

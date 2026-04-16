@@ -51,7 +51,7 @@ function fmtInt(n: number | null | undefined): string {
 
 function changeColor(val: number | null | undefined, colors: any): string {
   if (val == null || val === 0) return colors.textMuted;
-  return val > 0 ? "#22c55e" : "#ef4444";
+  return val > 0 ? colors.success : colors.danger;
 }
 
 function changePrefix(val: number | null | undefined): string {
@@ -268,31 +268,31 @@ function GainersLosersBar({
       </Text>
       <View style={s.glBar}>
         {gainers > 0 && (
-          <View style={[s.glSegment, { flex: gainers / total, backgroundColor: "#22c55e", borderTopLeftRadius: 5, borderBottomLeftRadius: 5 }]} />
+          <View style={[s.glSegment, { flex: gainers / total, backgroundColor: colors.success, borderTopLeftRadius: 5, borderBottomLeftRadius: 5 }]} />
         )}
         {neutral > 0 && (
-          <View style={[s.glSegment, { flex: neutral / total, backgroundColor: "#94a3b8" }]} />
+          <View style={[s.glSegment, { flex: neutral / total, backgroundColor: colors.textMuted }]} />
         )}
         {losers > 0 && (
-          <View style={[s.glSegment, { flex: losers / total, backgroundColor: "#ef4444", borderTopRightRadius: 5, borderBottomRightRadius: 5 }]} />
+          <View style={[s.glSegment, { flex: losers / total, backgroundColor: colors.danger, borderTopRightRadius: 5, borderBottomRightRadius: 5 }]} />
         )}
       </View>
       <View style={s.glLabels}>
         <View style={s.glLabelItem}>
-          <View style={[s.glDot, { backgroundColor: "#22c55e" }]} />
-          <Text style={[s.glLabelText, { color: "#22c55e" }]}>
+          <View style={[s.glDot, { backgroundColor: colors.success }]} />
+          <Text style={[s.glLabelText, { color: colors.success }]}>
             {gainers} {t("market.up")} ({gPct}%)
           </Text>
         </View>
         <View style={s.glLabelItem}>
-          <View style={[s.glDot, { backgroundColor: "#94a3b8" }]} />
+          <View style={[s.glDot, { backgroundColor: colors.textMuted }]} />
           <Text style={[s.glLabelText, { color: colors.textMuted }]}>
             {neutral} {t("market.flat")} ({nPct}%)
           </Text>
         </View>
         <View style={s.glLabelItem}>
-          <View style={[s.glDot, { backgroundColor: "#ef4444" }]} />
-          <Text style={[s.glLabelText, { color: "#ef4444" }]}>
+          <View style={[s.glDot, { backgroundColor: colors.danger }]} />
+          <Text style={[s.glLabelText, { color: colors.danger }]}>
             {losers} {t("market.down")} ({lPct}%)
           </Text>
         </View>
@@ -533,7 +533,7 @@ export default function MarketScreen() {
             {t("market.title")}
           </Text>
           <View style={s.headerMeta}>
-            <View style={[s.statusDot, { backgroundColor: data.status === "open" ? "#22c55e" : "#ef4444" }]} />
+            <View style={[s.statusDot, { backgroundColor: data.status === "open" ? colors.success : colors.danger }]} />
             <Text style={[s.headerDate, { color: colors.textMuted }]}>
               {data.status === "open" ? t("market.marketOpen") : t("market.marketClosed")} · {data.date || "—"}
             </Text>
@@ -618,7 +618,7 @@ export default function MarketScreen() {
           subtitle={t("market.risersSubtitle")}
           movers={data.top_gainers}
           icon="arrow-up"
-          accentColor="#22c55e"
+          accentColor={colors.success}
           colors={colors}
           t={t}
         />
@@ -627,7 +627,7 @@ export default function MarketScreen() {
           subtitle={t("market.dropsSubtitle")}
           movers={data.top_losers}
           icon="arrow-down"
-          accentColor="#ef4444"
+          accentColor={colors.danger}
           colors={colors}
           t={t}
         />

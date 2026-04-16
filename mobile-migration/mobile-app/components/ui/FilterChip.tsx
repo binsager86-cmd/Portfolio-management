@@ -30,10 +30,12 @@ export const FilterChip = React.memo(function FilterChip({
 
 const styles = StyleSheet.create({
   chip: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 20,
     borderWidth: 1,
+    minHeight: 44,
+    justifyContent: "center",
   },
-  chipText: { fontSize: 12, fontWeight: "600" },
+  chipText: { fontSize: 13, fontWeight: "600" },
 });

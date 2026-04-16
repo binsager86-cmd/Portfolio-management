@@ -655,9 +655,9 @@ const styles = StyleSheet.create({
     gap: 16,
   },
   pageBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
@@ -672,7 +672,11 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
   },
   actionBtn: {
-    padding: 8,
+    padding: 12,
+    minWidth: 44,
+    minHeight: 44,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
   },
   fab: {
     position: "absolute",

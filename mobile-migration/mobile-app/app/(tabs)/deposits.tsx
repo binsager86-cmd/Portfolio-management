@@ -115,7 +115,7 @@ const DepositRow = React.memo(function DepositRow({
         {onEdit && (
           <Pressable
             onPress={() => onEdit(item)}
-            style={({ pressed }) => [{ padding: 8, opacity: pressed ? 0.5 : 0.7 }]}
+            style={({ pressed }) => [{ padding: 12, minWidth: 44, minHeight: 44, alignItems: "center" as const, justifyContent: "center" as const, opacity: pressed ? 0.5 : 0.7 }]}
           >
             <FontAwesome name="pencil" size={16} color={colors.accentPrimary} />
           </Pressable>
@@ -123,7 +123,7 @@ const DepositRow = React.memo(function DepositRow({
         {onDelete && (
           <Pressable
             onPress={() => onDelete(item)}
-            style={({ pressed }) => [{ padding: 8, opacity: pressed ? 0.5 : 0.7 }]}
+            style={({ pressed }) => [{ padding: 12, minWidth: 44, minHeight: 44, alignItems: "center" as const, justifyContent: "center" as const, opacity: pressed ? 0.5 : 0.7 }]}
           >
             <FontAwesome name="trash-o" size={16} color={colors.danger} />
           </Pressable>

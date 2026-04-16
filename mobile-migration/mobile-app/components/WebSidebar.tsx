@@ -82,10 +82,10 @@ export default function WebSidebar({ collapsed: collapsedProp, onToggleCollapse 
   const expertiseLevel = useUserPrefsStore((s) => s.preferences.expertiseLevel);
 
   const levelOrder: ExpertiseLevel[] = ["normal", "intermediate", "advanced"];
-  const navItems = (isAdmin
-    ? NAV_ITEMS.filter((item) => item.adminOnly)
-    : NAV_ITEMS.filter((item) => !item.adminOnly)
-  ).filter((item) => {
+  const navItems = NAV_ITEMS.filter((item) => {
+    // Hide admin-only items from non-admin users
+    if (item.adminOnly && !isAdmin) return false;
+    // Check expertise level
     const minLevel = item.minLevel ?? "normal";
     return levelOrder.indexOf(expertiseLevel) >= levelOrder.indexOf(minLevel);
   });

@@ -236,7 +236,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
   },
   label: {
-    fontSize: 11,
+    fontSize: 12,
     marginTop: 2,
     letterSpacing: 0.2,
   },

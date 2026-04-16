@@ -93,7 +93,7 @@ export const MetricCard = React.memo(function MetricCard({
           styles.label,
           {
             color: colors.textSecondary,
-            fontSize: isPhone ? 12 : 11,
+            fontSize: isPhone ? 11 : 12,
           },
         ]}
       >
@@ -106,7 +106,7 @@ export const MetricCard = React.memo(function MetricCard({
           styles.value,
           {
             color: trend ? trendColor(trend, colors) : colors.textPrimary,
-            fontSize: isPhone ? 16 : 17,
+            fontSize: isPhone ? 15 : 17,
           },
         ]}
         numberOfLines={1}
@@ -123,7 +123,7 @@ export const MetricCard = React.memo(function MetricCard({
             styles.subline,
             {
               color: colors.textMuted,
-              fontSize: isPhone ? 12 : 12,
+              fontSize: isPhone ? 11 : 12,
             },
           ]}
         >
