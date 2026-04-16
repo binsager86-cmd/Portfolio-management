@@ -16,6 +16,7 @@ import "react-native-reanimated";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { AppErrorBoundary } from "@/components/ui/ErrorBoundary";
+import { NetworkBanner } from "@/components/ui/NetworkBanner";
 import { ToastProvider } from "@/components/ui/ToastProvider";
 import { useAuthCacheSync } from "@/hooks/useAuthCacheSync";
 import { useSessionGuard } from "@/hooks/useSessionGuard";
@@ -210,6 +211,7 @@ function RootLayoutNav() {
     <SafeAreaProvider>
     <View style={{ flex: 1, direction: language === "ar" ? "rtl" : "ltr" }}>
     <StatusBar style={themeMode === "dark" ? "light" : "dark"} />
+    <NetworkBanner />
     <QueryClientProvider client={queryClient}>
       <AuthCacheSyncProvider />
       <PaperProvider theme={paperTheme}>

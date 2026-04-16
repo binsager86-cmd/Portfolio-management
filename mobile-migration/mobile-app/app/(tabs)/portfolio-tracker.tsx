@@ -461,7 +461,6 @@ export default function PortfolioTrackerScreen() {
               <Text style={[st.th, st.colSmall, { color: colors.textSecondary }]}>{t('tracker.accumCash')}</Text>
               <Text style={[st.th, st.colMoney, { color: colors.textSecondary }]}>{t('tracker.netGain')}</Text>
               <Text style={[st.th, st.colPct, { color: colors.textSecondary }]}>{t('tracker.changePct')}</Text>
-              <Text style={[st.th, st.colPct, { color: colors.textSecondary }]}>{t('tracker.roiPct')}</Text>
               <Text style={[st.th, st.colAction, { color: colors.textSecondary }]}></Text>
             </View>
             {/* Table Rows — most recent first */}
@@ -472,7 +471,6 @@ export default function PortfolioTrackerScreen() {
                 const bd = snap.beginning_difference ?? 0;
                 const ng = snap.net_gain ?? 0;
                 const cp = snap.change_percent ?? 0;
-                const rp = snap.roi_percent ?? 0;
                 return (
                   <View key={snap.id} style={[st.tableRow, { borderBottomColor: colors.borderColor }]}>
                     <Text style={[st.td, st.colDate, { color: colors.textPrimary }]}>{snap.snapshot_date}</Text>
@@ -483,7 +481,6 @@ export default function PortfolioTrackerScreen() {
                     <Text style={[st.td, st.colSmall, { color: colors.textPrimary }]}>{fmtNum(snap.accumulated_cash ?? 0, 0)}</Text>
                     <Text style={[st.td, st.colMoney, { color: ng >= 0 ? colors.success : colors.danger, fontWeight: "600" }]}>{fmtNum(ng)}</Text>
                     <Text style={[st.td, st.colPct, { color: cp >= 0 ? colors.success : colors.danger, fontWeight: "600" }]}>{formatPercent(cp)}</Text>
-                    <Text style={[st.td, st.colPct, { color: rp >= 0 ? colors.success : colors.danger, fontWeight: "600" }]}>{formatPercent(rp)}</Text>
                     <View style={st.colAction}>
                       <Pressable onPress={() => handleDeleteOne(snap)} style={{ padding: 4 }}>
                         <FontAwesome name="trash-o" size={14} color={colors.danger} />

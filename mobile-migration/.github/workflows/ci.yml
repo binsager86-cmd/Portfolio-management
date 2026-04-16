@@ -47,20 +47,25 @@ jobs:
           CI: true
 
       # ── Web bundle + source-map analysis ────────────────────────
-      - name: Build Web & Analyze Bundle
+      - name: Build Web
+        run: npx expo export --platform web
+
+      # ── Performance Regression Check ────────────────────────────
+      - name: Performance Budget Gate
         run: |
-          npx expo export --platform web
+          # Check multiple possible bundle output paths
           BUNDLE_SIZE=$(du -sk dist/assets/*bundle*.js 2>/dev/null | cut -f1)
           if [ -z "$BUNDLE_SIZE" ]; then
             BUNDLE=$(find dist/_expo/static/js/web -name '*.js' -type f 2>/dev/null | head -1)
             if [ -z "$BUNDLE" ]; then echo "No bundle found — skipping size check"; exit 0; fi
             BUNDLE_SIZE=$(du -k "$BUNDLE" | cut -f1)
           fi
-          echo "Bundle size: ${BUNDLE_SIZE}KB"
+          echo "::notice::JS Bundle size: ${BUNDLE_SIZE}KB"
           if [ "$BUNDLE_SIZE" -gt 5120 ]; then
-            echo "❌ Bundle exceeds 5MB limit (${BUNDLE_SIZE}KB)"
+            echo "::error::❌ JS Bundle ${BUNDLE_SIZE}KB exceeds 5MB budget"
             exit 1
           fi
+          echo "✅ Bundle within 5MB budget"
 
       # ── Upload coverage report ──────────────────────────────────
       - name: Upload Coverage

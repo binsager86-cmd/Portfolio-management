@@ -209,7 +209,7 @@ export function MetricsPanel({ stockId, stockSymbol, colors, isDesktop }: PanelW
                   <Card colors={colors} noPadding style={{ marginBottom: 16 }}>
                     <View style={{ flexDirection: "row" }}>
                       {/* Frozen first column */}
-                      <View style={{ width: 150, borderRightWidth: 1, borderRightColor: colors.borderColor }}>
+                      <View style={{ width: 180, borderRightWidth: 1, borderRightColor: colors.borderColor }}>
                         {/* Header */}
                         <View style={[st.metricTableHeader, { borderBottomColor: colors.borderColor }]}>
                           <Text style={[st.metricTableNameCell, { color: colors.textPrimary, fontWeight: "800" }]}>Metric</Text>

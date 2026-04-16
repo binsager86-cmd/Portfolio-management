@@ -119,6 +119,40 @@ export async function executeImport(
   return { imported, skipped, errors, details };
 }
 
+// ── Chunked import (throttled batches) ──────────────────────────────
+
+const CHUNK_SIZE = 50;
+
+export async function chunkedImport(
+  readyRows: KfhNormalizedRow[],
+  portfolio: string = "KFH",
+  onProgress?: (current: number, total: number) => void,
+): Promise<KfhImportResult> {
+  let imported = 0;
+  let skipped = 0;
+  let errors = 0;
+  const details: string[] = [];
+  const total = readyRows.length;
+
+  for (let i = 0; i < total; i += CHUNK_SIZE) {
+    const chunk = readyRows.slice(i, i + CHUNK_SIZE);
+    const result = await executeImport(chunk, portfolio, (cur, _tot) => {
+      onProgress?.(i + cur, total);
+    });
+    imported += result.imported;
+    skipped += result.skipped;
+    errors += result.errors;
+    details.push(...result.details);
+
+    // Throttle between chunks to avoid overloading the backend
+    if (i + CHUNK_SIZE < total) {
+      await new Promise((r) => setTimeout(r, 300));
+    }
+  }
+
+  return { imported, skipped, errors, details };
+}
+
 // ── Full pipeline: parse file → build preview ───────────────────────
 
 export async function parseAndPreview(

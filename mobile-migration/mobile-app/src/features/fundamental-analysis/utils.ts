@@ -33,7 +33,7 @@ export function formatNumber(n: number): string {
 export function formatMetricValue(name: string, value: number): string {
   const lc = name.toLowerCase();
   // True percentage metrics (stored as decimals, display ×100 as %)
-  const isPct = ["margin", "roe", "roa", "growth", "payout", "retention"].some((k) => lc.includes(k))
+  const isPct = ["margin", "roe", "roa", "growth", "payout", "retention", "cagr"].some((k) => lc.includes(k))
     || lc.includes("dupont") || lc.includes("sustainable");
   if (isPct) return (value * 100).toFixed(1) + "%";
   // Days metrics

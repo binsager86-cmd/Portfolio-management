@@ -70,13 +70,19 @@ export function NewsCard({ item, colors, expertiseLevel, onPress, compact }: New
         },
       ]}
     >
-      {/* ── Header: source + time + impact ── */}
+      {/* ── Header: symbol + time + impact ── */}
       <View style={s.header}>
-        <View style={[s.sourcePill, { backgroundColor: colors.bgSecondary }]}>
-          <Text style={{ color: colors.textMuted, fontSize: 10, fontWeight: "600" }}>
-            {sourceLabel(item.source)}
-          </Text>
-        </View>
+        {item.relatedSymbols.length > 0 ? (
+          <View style={[s.symbolChip, { backgroundColor: colors.accentPrimary + "20", borderColor: colors.accentPrimary + "40", borderWidth: 1 }]}>
+            <Text style={{ color: colors.accentPrimary, fontSize: 11, fontWeight: "700", letterSpacing: 0.5 }}>{item.relatedSymbols[0]}</Text>
+          </View>
+        ) : (
+          <View style={[s.sourcePill, { backgroundColor: colors.bgSecondary }]}>
+            <Text style={{ color: colors.textMuted, fontSize: 10, fontWeight: "600" }}>
+              {sourceLabel(item.source)}
+            </Text>
+          </View>
+        )}
         <Text style={{ color: colors.textMuted, fontSize: 11, flex: 1 }}>
           {timeAgo(item.publishedAt)}
         </Text>
@@ -116,21 +122,20 @@ export function NewsCard({ item, colors, expertiseLevel, onPress, compact }: New
         </Text>
       )}
 
-      {/* ── Related symbols ── */}
-      {item.relatedSymbols.length > 0 && (
-        <View style={s.symbolsRow}>
-          {item.relatedSymbols.slice(0, 4).map((sym) => (
+      {/* ── Related symbols + source ── */}
+      <View style={s.symbolsRow}>
+        {item.relatedSymbols.length > 1 &&
+          item.relatedSymbols.slice(1, 5).map((sym) => (
             <View key={sym} style={[s.symbolChip, { backgroundColor: colors.accentPrimary + "20", borderColor: colors.accentPrimary + "40", borderWidth: 1 }]}>
               <Text style={{ color: colors.accentPrimary, fontSize: 13, fontWeight: "700", letterSpacing: 0.5 }}>{sym}</Text>
             </View>
           ))}
-          {item.relatedSymbols.length > 4 && (
-            <Text style={{ color: colors.textMuted, fontSize: 11 }}>
-              +{item.relatedSymbols.length - 4}
-            </Text>
-          )}
-        </View>
-      )}
+        {item.relatedSymbols.length > 5 && (
+          <Text style={{ color: colors.textMuted, fontSize: 11 }}>
+            +{item.relatedSymbols.length - 5}
+          </Text>
+        )}
+      </View>
 
       {/* ── Attribution (compliance) ── */}
       {!compact && expertiseLevel !== "normal" && (

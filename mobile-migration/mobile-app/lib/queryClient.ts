@@ -2,10 +2,10 @@
  * React Query client — shared singleton with MMKV offline persistence.
  *
  * Default options:
- *  - staleTime: 30s (data stays "fresh" for 30s before background refetch)
+ *  - staleTime: 60s (data stays "fresh" for 60s before background refetch)
  *  - gcTime: 24h  (keep unused cache entries for offline resilience)
- *  - retry: skip 401s (auth errors redirect to login, not retry)
- *  - refetchOnWindowFocus: true (web) / ignored (native)
+ *  - retry: skip 401/403s, max 2 attempts for transient errors
+ *  - refetchOnWindowFocus: false (avoid jarring refetches on tab switch)
  *
  * Persistence: MMKV on native, localStorage on web — queries survive
  * app restarts so screens render immediately while background refetches.
@@ -53,19 +53,23 @@ const ONE_DAY_MS = 1000 * 60 * 60 * 24;
 export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      staleTime: 30_000,
+      staleTime: 60_000,
       gcTime: ONE_DAY_MS,
       retry: (failureCount, error) => {
-        // Never retry 401 — the interceptor handles refresh/logout
-        if ((error as AxiosError)?.response?.status === 401) return false;
-        return failureCount < 1;
+        const status = (error as AxiosError)?.response?.status;
+        // Never retry auth errors — interceptor handles refresh/logout
+        if (status === 401 || status === 403) return false;
+        return failureCount < 2;
       },
-      refetchOnWindowFocus: true,
+      refetchOnWindowFocus: false,
     },
   },
 });
 
 // ── Persist cache to storage ────────────────────────────────────────
 
-const persister = createSyncStoragePersister({ storage: createStorage() });
+const persister = createSyncStoragePersister({
+  storage: createStorage(),
+  throttleTime: 500,
+});
 persistQueryClient({ queryClient, persister, maxAge: ONE_DAY_MS });

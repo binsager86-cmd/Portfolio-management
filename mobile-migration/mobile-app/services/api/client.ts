@@ -188,4 +188,16 @@ client.interceptors.response.use(
   },
 );
 
+// ── Generic retry for network / idempotent errors ───────────────────
+import axiosRetry from "axios-retry";
+
+axiosRetry(client, {
+  retries: 3,
+  retryCondition: (error) => axiosRetry.isNetworkOrIdempotentRequestError(error),
+  retryDelay: axiosRetry.exponentialDelay,
+  onRetry: (count, error) => {
+    if (__DEV__) console.warn(`[API Retry] Attempt ${count} for ${error.config?.url}`);
+  },
+});
+
 export default client;

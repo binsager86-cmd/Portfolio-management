@@ -1,0 +1,49 @@
+appId: com.portfolio.mobileapp
+---
+# Transaction Flow — E2E test
+# Verifies complete buy transaction journey from tab navigation to confirmation.
+
+- launchApp
+
+# Login first
+- tapOn:
+    id: "login-email"
+- inputText: "test@example.com"
+- tapOn:
+    id: "login-password"
+- inputText: "TestPass1!"
+- tapOn:
+    id: "login-button"
+- assertVisible:
+    text: "Overview"
+    timeout: 10000
+
+# Navigate to Transactions tab
+- tapOn: "Transactions"
+- assertVisible: "Transactions"
+
+# Open Add Transaction form
+- tapOn: "Add Transaction"
+
+# Select Buy type
+- tapOn: "Buy"
+
+# Search and select stock
+- tapOn: "Stock Search"
+- inputText: "AAPL"
+- tapOn:
+    text: "Apple Inc."
+    timeout: 5000
+
+# Enter quantity
+- tapOn:
+    id: "quantity-input"
+- inputText: "10"
+
+# Save the transaction
+- tapOn: "Save"
+
+# Verify confirmation
+- assertVisible:
+    text: "Transaction created"
+    timeout: 5000

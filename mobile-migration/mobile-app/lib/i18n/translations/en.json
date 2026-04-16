@@ -862,7 +862,11 @@
     "importError": "Import Error",
     "uploadFailed": "Upload failed",
     "deleteFailed": "Delete failed",
-    "noFileSelected": "No file selected"
+    "noFileSelected": "No file selected",
+    "next": "Next",
+    "back": "Back",
+    "editDetails": "Edit Details",
+    "review": "Review"
   },
   "addStock": {
     "title": "Add Stock",

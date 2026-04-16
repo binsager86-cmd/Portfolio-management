@@ -85,8 +85,6 @@ export function TradingSummaryCards({ summary, dateFrom, dateTo }: { summary: Tr
 
       <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>{t("trading.capitalFlow")}</Text>
       <ResponsiveGrid columns={{ phone: 2, tablet: 4, desktop: 4 }}>
-        <Card icon="arrow-circle-down" iconColor="#10b981" label={t("trading.totalBuys")} value={formatCurrency(summary.total_buys, "KWD")} sub={t("trading.transactionsCount", { count: summary.buy_count })} borderAccent="#10b981" />
-        <Card icon="arrow-circle-up" iconColor="#f59e0b" label={t("trading.totalSells")} value={formatCurrency(summary.total_sells, "KWD")} sub={t("trading.transactionsCount", { count: summary.sell_count })} borderAccent="#f59e0b" />
         <Card icon="bank" iconColor="#3b82f6" label={t("trading.deposits")} value={formatCurrency(summary.total_deposits, "KWD")} sub={t("trading.depositsCount", { count: summary.deposit_count })} borderAccent="#3b82f6" />
         <Card icon="sign-out" iconColor="#ef4444" label={t("trading.withdrawals")} value={formatCurrency(summary.total_withdrawals, "KWD")} sub={t("trading.transactionsCount", { count: summary.withdrawal_count })} borderAccent="#ef4444" />
       </ResponsiveGrid>
@@ -103,7 +101,6 @@ export function TradingSummaryCards({ summary, dateFrom, dateTo }: { summary: Tr
       <ResponsiveGrid columns={{ phone: 2, tablet: 4, desktop: 4 }}>
         <Card icon="money" iconColor="#8b5cf6" label={t("trading.cashDividends")} value={formatCurrency(summary.total_dividends, "KWD")} sub={t("trading.recordsCount", { count: summary.dividend_count })} borderAccent="#8b5cf6" />
         <Card icon="percent" iconColor="#6366f1" label={t("trading.totalFees")} value={formatCurrency(summary.total_fees, "KWD")} sub={t("trading.brokerageCommissions")} borderAccent="#6366f1" />
-        <Card icon="exchange" iconColor={pnlColor(summary.net_cash_flow)} label={t("trading.netCashFlow")} value={formatSignedCurrency(summary.net_cash_flow, "KWD")} sub={t("trading.netCashFlowFormula")} valueColor={pnlColor(summary.net_cash_flow)} borderAccent={pnlColor(summary.net_cash_flow)} />
         <Card icon="area-chart" iconColor={pnlColor(summary.total_return_pct)} label={t("trading.totalReturn")} value={summary.total_buys > 0 ? formatPercent(summary.total_return_pct) : "N/A"} sub={t("trading.includingDividends")} valueColor={pnlColor(summary.total_return_pct)} borderAccent={pnlColor(summary.total_return_pct)} />
       </ResponsiveGrid>
     </View>

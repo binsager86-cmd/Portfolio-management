@@ -1,184 +1,44 @@
 /**
- * Add Transaction — form screen using react-hook-form + zod.
+ * Add Transaction — multi-step wizard using react-hook-form + zod.
  *
- * Fields adapt based on txn_type:
- *   Buy  → purchase_cost (required)
- *   Sell → sell_value   (required)
+ * Step 1 → Portfolio + Transaction Type
+ * Step 2 → Stock, Date, Amounts, Dividends, Advanced, Notes
+ * Step 3 → Review summary with edit-back buttons
  *
- * Optional fields collapsed behind an "Advanced" toggle.
- * Submits via React Query mutation + invalidates caches.
+ * Import / Danger-zone UI shown in footer on step 1.
  */
 
-import {
-    DateInput,
-    FormField,
-    NumberInput,
-    SegmentedControl,
-    TextInput,
-} from "@/components/form";
 import { FormScreen } from "@/components/screens";
 import { useToast } from "@/components/ui/ToastProvider";
 import { useStockList, useStocks, useTransaction } from "@/hooks/queries";
-import { TXN_DEPENDENT_QUERY_KEYS, useCreateTransaction, useUpdateTransaction } from "@/hooks/useTransactionMutations";
+import { useCreateTransaction, useUpdateTransaction } from "@/hooks/useTransactionMutations";
 import { todayISO } from "@/lib/dateUtils";
-import { showErrorAlert } from "@/lib/errorHandling";
-import {
-    StockListEntry,
-    TransactionCreate,
-    createStock,
-    deleteAllTransactions,
-    fetchStockPrice,
-    importTransactions,
-} from "@/services/api";
+import type { StockListEntry } from "@/services/api";
+import { createStock, fetchStockPrice } from "@/services/api";
 import { useThemeStore } from "@/services/themeStore";
+import { Step1Type } from "@/src/features/transactions/components/Step1Type";
+import { Step2Details } from "@/src/features/transactions/components/Step2Details";
+import { Step3Review } from "@/src/features/transactions/components/Step3Review";
+import { TransactionImport } from "@/src/features/transactions/components/TransactionImport";
+import {
+  PORTFOLIOS,
+  STEP1_FIELDS,
+  STEP2_FIELDS,
+  toPayload,
+  txnSchema,
+  type TxnFormValues,
+  type TxnTypeLabel,
+} from "@/src/features/transactions/transactionSchema";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import * as DocumentPicker from "expo-document-picker";
+import { useQueryClient } from "@tanstack/react-query";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useMemo, useState } from "react";
-import { Controller, useForm } from "react-hook-form";
+import { FormProvider, useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
-import {
-    ActivityIndicator,
-    Alert,
-    Platform,
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Text,
-    View,
-} from "react-native";
-import { z } from "zod";
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 
-// ── Schema ──────────────────────────────────────────────────────────
-
-const PORTFOLIOS = ["KFH", "BBYN", "USA"] as const;
-const TXN_TYPES = ["Buy", "Sell", "Dividend Only"] as const;
-type TxnTypeLabel = (typeof TXN_TYPES)[number];
-
-/** Map UI label → API value */
-function txnTypeToApi(label: TxnTypeLabel): "Buy" | "Sell" | "DIVIDEND_ONLY" {
-  if (label === "Dividend Only") return "DIVIDEND_ONLY";
-  return label;
-}
-
-const MAX_FINANCIAL_VALUE = 1_000_000_000; // 1 billion — sane upper bound
-
-const txnSchema = z
-  .object({
-    portfolio: z.enum(PORTFOLIOS),
-    stock_symbol: z
-      .string()
-      .min(1, "Symbol is required")
-      .max(50)
-      .transform((v) => v.toUpperCase().trim()),
-    txn_date: z
-      .string()
-      .regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be YYYY-MM-DD")
-      .refine((v) => !isNaN(new Date(v).getTime()), "Invalid date")
-      .refine((v) => new Date(v) <= new Date(), "Date cannot be in the future"),
-    txn_type: z.enum(TXN_TYPES),
-    shares: z.coerce
-      .number({ invalid_type_error: "Enter a number" })
-      .nonnegative("Shares must be >= 0")
-      .max(MAX_FINANCIAL_VALUE, "Shares exceed maximum")
-      .optional()
-      .or(z.literal("")),
-    purchase_cost: z.coerce.number().nonnegative().max(MAX_FINANCIAL_VALUE, "Cost exceeds maximum").optional().or(z.literal("")),
-    sell_value: z.coerce.number().nonnegative().max(MAX_FINANCIAL_VALUE, "Value exceeds maximum").optional().or(z.literal("")),
-    // Financial fields
-    bonus_shares: z.coerce.number().nonnegative().max(MAX_FINANCIAL_VALUE, "Shares exceed maximum").optional().or(z.literal("")),
-    cash_dividend: z.coerce.number().nonnegative().max(MAX_FINANCIAL_VALUE, "Amount exceeds maximum").optional().or(z.literal("")),
-    reinvested_dividend: z.coerce.number().nonnegative().max(MAX_FINANCIAL_VALUE, "Amount exceeds maximum").optional().or(z.literal("")),
-    fees: z.coerce.number().nonnegative().max(MAX_FINANCIAL_VALUE, "Fees exceed maximum").optional().or(z.literal("")),
-    price_override: z.coerce.number().nonnegative().max(MAX_FINANCIAL_VALUE, "Price exceeds maximum").optional().or(z.literal("")),
-    planned_cum_shares: z.coerce.number().nonnegative().max(MAX_FINANCIAL_VALUE, "Shares exceed maximum").optional().or(z.literal("")),
-    broker: z.string().max(100).optional(),
-    reference: z.string().max(100).optional(),
-    notes: z.string().max(1000, "Notes cannot exceed 1000 characters").optional(),
-  })
-  .superRefine((data, ctx) => {
-    if (data.txn_type === "Buy") {
-      const shares = typeof data.shares === "number" ? data.shares : 0;
-      if (shares <= 0) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "Shares must be > 0 for Buy",
-          path: ["shares"],
-        });
-      }
-      const cost = typeof data.purchase_cost === "number" ? data.purchase_cost : undefined;
-      if (cost == null || cost <= 0) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "Purchase cost is required for Buy",
-          path: ["purchase_cost"],
-        });
-      }
-    }
-    if (data.txn_type === "Sell") {
-      const shares = typeof data.shares === "number" ? data.shares : 0;
-      if (shares <= 0) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "Shares must be > 0 for Sell",
-          path: ["shares"],
-        });
-      }
-      const val = typeof data.sell_value === "number" ? data.sell_value : undefined;
-      if (val == null || val <= 0) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "Sell value is required for Sell",
-          path: ["sell_value"],
-        });
-      }
-    }
-    if (data.txn_type === "Dividend Only") {
-      const cd = typeof data.cash_dividend === "number" ? data.cash_dividend : 0;
-      const rd = typeof data.reinvested_dividend === "number" ? data.reinvested_dividend : 0;
-      const bs = typeof data.bonus_shares === "number" ? data.bonus_shares : 0;
-      if (cd <= 0 && rd <= 0 && bs <= 0) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "At least one of Cash Dividend, Reinvested Dividend, or Bonus Shares is required",
-          path: ["cash_dividend"],
-        });
-      }
-    }
-  });
-
-type TxnFormValues = z.infer<typeof txnSchema>;
-
-// ── Helpers ─────────────────────────────────────────────────────────
-
-/** Convert zod form values → API payload (strip empty strings etc.) */
-function toPayload(values: TxnFormValues): TransactionCreate {
-  const clean = (v: unknown): number | undefined => {
-    if (typeof v === "number" && !isNaN(v)) return v;
-    return undefined;
-  };
-  const isDividendOnly = values.txn_type === "Dividend Only";
-  return {
-    portfolio: values.portfolio,
-    stock_symbol: values.stock_symbol,
-    txn_date: values.txn_date,
-    txn_type: txnTypeToApi(values.txn_type),
-    shares: isDividendOnly ? 0 : (clean(values.shares) ?? 0),
-    purchase_cost: isDividendOnly ? null : (clean(values.purchase_cost) ?? null),
-    sell_value: isDividendOnly ? null : (clean(values.sell_value) ?? null),
-    bonus_shares: clean(values.bonus_shares) ?? null,
-    cash_dividend: clean(values.cash_dividend) ?? null,
-    reinvested_dividend: clean(values.reinvested_dividend) ?? null,
-    fees: isDividendOnly ? null : (clean(values.fees) ?? null),
-    price_override: isDividendOnly ? null : (clean(values.price_override) ?? null),
-    planned_cum_shares: isDividendOnly ? null : (clean(values.planned_cum_shares) ?? null),
-    broker: isDividendOnly ? null : (values.broker || null),
-    reference: isDividendOnly ? null : (values.reference || null),
-    notes: values.notes || null,
-  };
-}
+const TOTAL_STEPS = 3;
 
 // ── Component ───────────────────────────────────────────────────────
 
@@ -190,33 +50,20 @@ export default function AddTransactionScreen() {
   const toast = useToast();
   const params = useLocalSearchParams<{ symbol?: string; portfolio?: string; editId?: string }>();
   const isEditMode = !!params.editId;
+
+  const [step, setStep] = useState(1);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [stockSearchText, setStockSearchText] = useState(params.symbol ?? "");
-  const [showStockDropdown, setShowStockDropdown] = useState(false);
   const [selectedRefStock, setSelectedRefStock] = useState<StockListEntry | null>(null);
-
-  // ── Upload / Bulk state ──────────────────────────────────────────
-  const [uploadPortfolio, setUploadPortfolio] = useState<"KFH" | "BBYN" | "USA">("KFH");
-  const [uploadMode, setUploadMode] = useState<"merge" | "replace">("merge");
-  const [selectedFile, setSelectedFile] = useState<{ name: string; file: File } | null>(null);
-  const [uploadResult, setUploadResult] = useState<any>(null);
 
   // ── Fetch existing transaction in edit mode ────────────────────
   const { data: editTxn, isLoading: isLoadingEdit } = useTransaction(params.editId);
-
-  // ── Also fetch user's existing stocks (for potential enrichment) ─
   const { data: stocksData } = useStocks();
 
-  const {
-    control,
-    handleSubmit,
-    watch,
-    reset,
-    formState: { errors },
-  } = useForm<TxnFormValues>({
+  const methods = useForm<TxnFormValues>({
     resolver: zodResolver(txnSchema),
     defaultValues: {
-      portfolio: (params.portfolio as "KFH" | "BBYN" | "USA") ?? "KFH",
+      portfolio: (params.portfolio as (typeof PORTFOLIOS)[number]) ?? "KFH",
       stock_symbol: params.symbol ?? "",
       txn_date: todayISO(),
       txn_type: "Buy",
@@ -235,16 +82,18 @@ export default function AddTransactionScreen() {
     },
   });
 
+  const { handleSubmit, reset, watch, trigger } = methods;
+
   // ── Pre-fill form in edit mode ────────────────────────────────
   useEffect(() => {
     if (!editTxn) return;
-    const apiTypeToLabel = (t: string): TxnTypeLabel => {
-      if (t === "DIVIDEND_ONLY") return "Dividend Only";
-      return t as TxnTypeLabel;
+    const apiTypeToLabel = (val: string): TxnTypeLabel => {
+      if (val === "DIVIDEND_ONLY") return "Dividend Only";
+      return val as TxnTypeLabel;
     };
     const n = (v: number | null | undefined) => (v != null ? v : ("" as unknown as number));
     reset({
-      portfolio: editTxn.portfolio as typeof PORTFOLIOS[number],
+      portfolio: editTxn.portfolio as (typeof PORTFOLIOS)[number],
       stock_symbol: editTxn.stock_symbol,
       txn_date: editTxn.txn_date,
       txn_type: apiTypeToLabel(editTxn.txn_type),
@@ -262,35 +111,20 @@ export default function AddTransactionScreen() {
       notes: editTxn.notes ?? "",
     });
     setStockSearchText(editTxn.stock_symbol);
-    // Expand advanced section if any advanced field has data
     if (editTxn.fees || editTxn.price_override || editTxn.planned_cum_shares || editTxn.broker || editTxn.reference) {
       setShowAdvanced(true);
     }
   }, [editTxn, reset]);
 
-  const txnType = watch("txn_type");
   const currentPortfolio = watch("portfolio");
-  const isDividendOnly = txnType === "Dividend Only";
-  const isBuy = txnType === "Buy";
-  const isSell = txnType === "Sell";
-
-  // ── Market derived from portfolio ──────────────────────────────
   const market = currentPortfolio === "USA" ? "us" : "kuwait";
-
-  // ── Fetch full reference stock list (yfinance) for dropdown ────
-  // These are static hardcoded lists – cache aggressively (never refetch)
   const { data: refStocksData } = useStockList(market);
 
-  // Filter reference stocks by search text (market already filtered by query)
   const filteredStocks = useMemo(() => {
     const all: StockListEntry[] = refStocksData?.stocks ?? [];
     if (!stockSearchText.trim()) return all;
     const q = stockSearchText.toLowerCase();
-    return all.filter(
-      (s) =>
-        s.symbol.toLowerCase().includes(q) ||
-        s.name.toLowerCase().includes(q)
-    );
+    return all.filter((s) => s.symbol.toLowerCase().includes(q) || s.name.toLowerCase().includes(q));
   }, [refStocksData, stockSearchText]);
 
   const navigateToTransactions = () => {
@@ -303,19 +137,17 @@ export default function AddTransactionScreen() {
   const activeMutation = isEditMode ? updateMutation : createMutation;
 
   const onSubmit = async (values: TxnFormValues) => {
-    // Auto-create stock record (with yf_ticker) if it doesn't exist yet
     const existingStocks = stocksData?.stocks ?? [];
     const alreadyExists = existingStocks.some(
       (s) => s.symbol.toUpperCase() === values.stock_symbol.toUpperCase()
     );
     if (!alreadyExists && values.stock_symbol) {
-      // Find matching ref stock for yf_ticker
       const refList = refStocksData?.stocks ?? [];
-      const refMatch = selectedRefStock?.symbol.toUpperCase() === values.stock_symbol.toUpperCase()
-        ? selectedRefStock
-        : refList.find((r) => r.symbol.toUpperCase() === values.stock_symbol.toUpperCase());
+      const refMatch =
+        selectedRefStock?.symbol.toUpperCase() === values.stock_symbol.toUpperCase()
+          ? selectedRefStock
+          : refList.find((r) => r.symbol.toUpperCase() === values.stock_symbol.toUpperCase());
       try {
-        // Fetch live price so holdings show correct market value immediately
         const currency = values.portfolio === "USA" ? "USD" : "KWD";
         let price: number | undefined;
         if (refMatch?.yf_ticker) {
@@ -346,890 +178,104 @@ export default function AddTransactionScreen() {
     }
   };
 
-  // ── Upload mutation ─────────────────────────────────────────────
-  const uploadMutation = useMutation({
-    mutationFn: () => {
-      if (!selectedFile) throw new Error(t('addTransaction.noFileSelected'));
-      return importTransactions(selectedFile.file, uploadPortfolio, uploadMode);
-    },
-    onSuccess: async (result) => {
-      setUploadResult(result);
-      setSelectedFile(null);
-      await Promise.all(
-        [...TXN_DEPENDENT_QUERY_KEYS, "stocks-list"].map((key) =>
-          queryClient.invalidateQueries({ queryKey: [key] })
-        )
-      );
-      const msg = t('addTransaction.importedMsg', { count: result?.imported ?? 0, mode: uploadMode });
-      toast.success(msg);
-    },
-    onError: (err) => showErrorAlert(t('addTransaction.importError'), err, t('addTransaction.uploadFailed')),
-  });
+  // ── Step navigation ─────────────────────────────────────────────
 
-  // ── Delete-all mutation ─────────────────────────────────────────
-  const deleteMutation = useMutation({
-    mutationFn: () => deleteAllTransactions(),
-    onSuccess: async (result) => {
-      await Promise.all(
-        TXN_DEPENDENT_QUERY_KEYS.map((key) =>
-          queryClient.invalidateQueries({ queryKey: [key] })
-        )
-      );
-      const msg = result?.message ?? t('addTransaction.deletedMsg', { count: result?.deleted_count ?? 0 });
-      toast.info(msg);
-    },
-    onError: (err) => showErrorAlert(t('app.error'), err, t('addTransaction.deleteFailed')),
-  });
-
-  // ── File picker handler ─────────────────────────────────────────
-  const pickFile = async () => {
-    try {
-      const result = await DocumentPicker.getDocumentAsync({
-        type: [
-          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-          "application/vnd.ms-excel",
-        ],
-        copyToCacheDirectory: true,
-      });
-
-      if (result.canceled || !result.assets?.length) return;
-
-      const asset = result.assets[0];
-
-      if (Platform.OS === "web") {
-        // On web the asset has a file property or we can fetch the uri
-        const response = await fetch(asset.uri);
-        const blob = await response.blob();
-        const file = new File([blob], asset.name, { type: asset.mimeType ?? "application/octet-stream" });
-        setSelectedFile({ name: asset.name, file });
-      } else {
-        // On native, create a File-like object from the URI
-        const response = await fetch(asset.uri);
-        const blob = await response.blob();
-        const file = new File([blob], asset.name, { type: asset.mimeType ?? "application/octet-stream" });
-        setSelectedFile({ name: asset.name, file });
-      }
-    } catch (error) {
-      console.error("File picker error:", error);
-    }
+  const handleNext = async () => {
+    const fieldsToValidate = step === 1 ? STEP1_FIELDS : STEP2_FIELDS;
+    const valid = await trigger(fieldsToValidate);
+    if (valid) setStep((s) => Math.min(s + 1, TOTAL_STEPS));
   };
 
-  const confirmDeleteAll = () => {
-    if (Platform.OS === "web") {
-      // eslint-disable-next-line no-restricted-globals
-      if (confirm(t('addTransaction.confirmDeleteAllRestore'))) {
-        deleteMutation.mutate();
-      }
-    } else {
-      Alert.alert(
-        t('addTransaction.deleteAllTransactions'),
-        t('addTransaction.confirmDeleteAllBody'),
-        [
-          { text: t('app.cancel'), style: "cancel" },
-          { text: t('addTransaction.deleteAll'), style: "destructive", onPress: () => deleteMutation.mutate() },
-        ]
-      );
-    }
-  };
+  const handleBack = () => setStep((s) => Math.max(s - 1, 1));
 
-  // ── Footer (import + danger zone, edit-mode hides these) ──────
-  const footerContent = !isEditMode ? (
-    <>
-      <View style={[styles.divider, { borderColor: colors.borderColor }]} />
+  const submitLabel =
+    step < TOTAL_STEPS
+      ? t("addTransaction.next")
+      : isEditMode
+        ? t("addTransaction.updateTransaction")
+        : t("addTransaction.title");
 
-      <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>
-        <FontAwesome name="upload" size={16} color={colors.textPrimary} />{" "}
-        {t('addTransaction.importFromExcel')}
-      </Text>
-      <Text style={[styles.sectionHint, { color: colors.textSecondary }]}>
-        {t('addTransaction.importHintBulk')}
-      </Text>
+  const onFormSubmit = step < TOTAL_STEPS ? handleNext : handleSubmit(onSubmit);
 
-      {/* Portfolio selector */}
-      <View style={styles.uploadRow}>
-        <Text style={[styles.uploadLabel, { color: colors.textSecondary }]}>{t('addTransaction.portfolio')}</Text>
-        <View style={styles.segmentRow}>
-          {(["KFH", "BBYN", "USA"] as const).map((p) => (
-            <Pressable
-              key={p}
-              onPress={() => setUploadPortfolio(p)}
-              style={[
-                styles.segmentBtn,
-                {
-                  backgroundColor: uploadPortfolio === p ? colors.accentPrimary : colors.bgSecondary,
-                  borderColor: colors.borderColor,
-                },
-              ]}
-            >
-              <Text
-                style={[
-                  styles.segmentText,
-                  { color: uploadPortfolio === p ? "#fff" : colors.textPrimary },
-                ]}
-              >
-                {p}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
-      </View>
-
-      {/* Mode selector */}
-      <View style={styles.uploadRow}>
-        <Text style={[styles.uploadLabel, { color: colors.textSecondary }]}>{t('addTransaction.mode')}</Text>
-        <View style={styles.segmentRow}>
-          {([
-            { key: "merge" as const, label: t('addTransaction.mergeAppend'), icon: "plus" as const },
-            { key: "replace" as const, label: t('addTransaction.replaceAll'), icon: "refresh" as const },
-          ]).map((m) => (
-            <Pressable
-              key={m.key}
-              onPress={() => setUploadMode(m.key)}
-              style={[
-                styles.segmentBtn,
-                {
-                  backgroundColor: uploadMode === m.key ? colors.accentPrimary : colors.bgSecondary,
-                  borderColor: colors.borderColor,
-                  flex: 1,
-                },
-              ]}
-            >
-              <Text
-                style={[
-                  styles.segmentText,
-                  { color: uploadMode === m.key ? "#fff" : colors.textPrimary },
-                ]}
-              >
-                <FontAwesome
-                  name={m.icon}
-                  size={12}
-                  color={uploadMode === m.key ? "#fff" : colors.textPrimary}
-                />{" "}
-                {m.label}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
-      </View>
-      {uploadMode === "replace" && (
-        <Text style={[styles.warningText, { color: colors.warning ?? "#e67e22" }]}>
-          {t('addTransaction.replaceWarningPortfolio', { portfolio: uploadPortfolio })}
-        </Text>
-      )}
-
-      {/* File picker */}
-      <Pressable
-        onPress={pickFile}
-        style={[
-          styles.filePickBtn,
-          { backgroundColor: colors.bgSecondary, borderColor: colors.borderColor },
-        ]}
-      >
-        <FontAwesome name="file-excel-o" size={20} color={colors.accentPrimary} />
-        <Text style={[styles.filePickText, { color: colors.textPrimary }]}>
-          {selectedFile ? selectedFile.name : t('addTransaction.chooseExcelFile')}
-        </Text>
-      </Pressable>
-
-      {/* Upload button */}
-      <Pressable
-        onPress={() => uploadMutation.mutate()}
-        disabled={!selectedFile || uploadMutation.isPending}
-        style={({ pressed }) => [
-          styles.submitBtn,
-          {
-            backgroundColor: !selectedFile ? colors.textMuted ?? "#888" : colors.accentPrimary,
-            opacity: pressed || uploadMutation.isPending ? 0.7 : 1,
-          },
-        ]}
-      >
-        {uploadMutation.isPending ? (
-          <View style={styles.loadingRow}>
-            <ActivityIndicator size="small" color="#fff" />
-            <Text style={[styles.submitText, { marginLeft: 8 }]}>{t('addTransaction.importing')}</Text>
-          </View>
-        ) : (
-          <Text style={styles.submitText}>
-            <FontAwesome name="cloud-upload" size={16} color="#fff" /> {t('addTransaction.uploadImport')}
-          </Text>
-        )}
-      </Pressable>
-
-      {/* Upload result */}
-      {uploadResult && (
-        <View style={[styles.resultBox, { backgroundColor: colors.bgSecondary, borderColor: colors.borderColor }]}>
-          <Text style={[styles.resultTitle, { color: colors.accentPrimary }]}>{t('addTransaction.importResult')}</Text>
-          <Text style={{ color: colors.textPrimary }}>
-            {t('addTransaction.importedStats', { imported: uploadResult.imported ?? 0, skipped: uploadResult.skipped ?? 0, errors: uploadResult.errors ?? 0 })}
-          </Text>
-          {uploadResult.mode && (
-            <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 4 }}>
-              {t('addTransaction.mode')}: {uploadResult.mode}
-            </Text>
-          )}
-        </View>
-      )}
-
-      {/* ── Danger Zone ─────────────────────────────────────── */}
-      <View style={[styles.divider, { borderColor: colors.borderColor }]} />
-
-      <Text style={[styles.sectionTitle, { color: colors.danger ?? "#e74c3c" }]}>
-        <FontAwesome name="exclamation-triangle" size={16} color={colors.danger ?? "#e74c3c"} />{" "}
-        {t('addTransaction.dangerZone')}
-      </Text>
-
-      <Pressable
-        onPress={confirmDeleteAll}
-        disabled={deleteMutation.isPending}
-        style={({ pressed }) => [
-          styles.deleteAllBtn,
-          {
-            borderColor: colors.danger ?? "#e74c3c",
-            opacity: pressed || deleteMutation.isPending ? 0.7 : 1,
-          },
-        ]}
-      >
-        {deleteMutation.isPending ? (
-          <View style={styles.loadingRow}>
-            <ActivityIndicator size="small" color={colors.danger ?? "#e74c3c"} />
-            <Text style={[styles.deleteAllText, { color: colors.danger ?? "#e74c3c", marginLeft: 8 }]}>
-              {t('addTransaction.deleting')}
-            </Text>
-          </View>
-        ) : (
-          <Text style={[styles.deleteAllText, { color: colors.danger ?? "#e74c3c" }]}>
-            <FontAwesome name="trash" size={14} color={colors.danger ?? "#e74c3c"} />{" "}
-            {t('addTransaction.deleteAllTransactions')}
-          </Text>
-        )}
-      </Pressable>
-      <Text style={[styles.sectionHint, { color: colors.textSecondary }]}>
-        {t('addTransaction.deleteAllHintFull')}
-      </Text>
-    </>
-  ) : undefined;
+  const footerContent = !isEditMode && step === 1 ? <TransactionImport /> : undefined;
 
   // ── Render ──────────────────────────────────────────────────────
 
   return (
-    <FormScreen
-      title={isEditMode ? t('addTransaction.editTitle') : t('addTransaction.title')}
-      onSubmit={handleSubmit(onSubmit)}
-      isSubmitting={activeMutation.isPending || (isEditMode && isLoadingEdit)}
-      submitLabel={isEditMode ? t('addTransaction.updateTransaction') : t('addTransaction.title')}
-      footer={footerContent}
-    >
+    <FormProvider {...methods}>
+      <FormScreen
+        title={isEditMode ? t("addTransaction.editTitle") : t("addTransaction.title")}
+        onSubmit={onFormSubmit}
+        isSubmitting={activeMutation.isPending || (isEditMode && isLoadingEdit)}
+        submitLabel={submitLabel}
+        footer={footerContent}
+      >
+        {/* ── Step indicator ── */}
+        <View style={styles.stepRow}>
+          {[1, 2, 3].map((s) => (
+            <View
+              key={s}
+              style={[styles.stepDot, { backgroundColor: s <= step ? colors.accentPrimary : colors.bgSecondary }]}
+            >
+              <Text style={[styles.stepNum, { color: s <= step ? "#fff" : colors.textMuted }]}>{s}</Text>
+            </View>
+          ))}
+          <View style={[styles.stepLine, { backgroundColor: colors.borderColor }]} />
+        </View>
+
+        {/* ── Back button (steps 2+) ── */}
+        {step > 1 && (
+          <Pressable onPress={handleBack} style={styles.backBtn}>
+            <FontAwesome name="arrow-left" size={14} color={colors.accentPrimary} />
+            <Text style={[styles.backText, { color: colors.accentPrimary }]}>{t("addTransaction.back")}</Text>
+          </Pressable>
+        )}
+
         {/* ── Loading spinner for edit mode ──── */}
         {isEditMode && isLoadingEdit && (
           <View style={{ alignItems: "center", paddingVertical: 40 }}>
             <ActivityIndicator size="large" color={colors.accentPrimary} />
             <Text style={{ color: colors.textSecondary, marginTop: 12, fontSize: 14 }}>
-              {t('addTransaction.loading')}
+              {t("addTransaction.loading")}
             </Text>
           </View>
         )}
 
-        {/* ── Form (hidden until loaded in edit mode) ── */}
+        {/* ── Wizard steps ── */}
         {(!isEditMode || (isEditMode && editTxn)) && (
-        <>
-        {/* ── Portfolio ─────────────────────────── */}
-        <FormField label={t('addTransaction.portfolio')} required error={errors.portfolio?.message}>
-          <Controller
-            control={control}
-            name="portfolio"
-            render={({ field: { value, onChange } }) => (
-              <SegmentedControl
-                options={[...PORTFOLIOS]}
-                value={value}
-                onChange={onChange}
-              />
-            )}
-          />
-        </FormField>
-
-        {/* ── Transaction Type ──────────────────── */}
-        <FormField
-          label={t('addTransaction.transactionType')}
-          required
-          error={errors.txn_type?.message}
-        >
-          <Controller
-            control={control}
-            name="txn_type"
-            render={({ field: { value, onChange } }) => (
-              <SegmentedControl
-                options={[...TXN_TYPES]}
-                value={value}
-                onChange={onChange}
-              />
-            )}
-          />
-        </FormField>
-
-        {/* ── Symbol (Dropdown + Text Input) ────── */}
-        <FormField
-          label={t('addTransaction.stockSymbol')}
-          required
-          error={errors.stock_symbol?.message}
-        >
-          <Controller
-            control={control}
-            name="stock_symbol"
-            render={({ field: { value, onChange } }) => (
-              <View>
-                <Pressable
-                  onPress={() => setShowStockDropdown(!showStockDropdown)}
-                  style={[
-                    styles.stockPickerBtn,
-                    {
-                      backgroundColor: colors.bgInput ?? colors.bgSecondary,
-                      borderColor: errors.stock_symbol ? colors.danger : colors.borderColor,
-                    },
-                  ]}
-                >
-                  <FontAwesome name="search" size={14} color={colors.textMuted} />
-                  <Text
-                    style={[
-                      styles.stockPickerText,
-                      { color: value ? colors.textPrimary : colors.textMuted },
-                    ]}
-                    numberOfLines={1}
-                  >
-                    {value || t('addTransaction.selectOrType')}
-                  </Text>
-                  <FontAwesome
-                    name={showStockDropdown ? "chevron-up" : "chevron-down"}
-                    size={12}
-                    color={colors.textMuted}
-                  />
-                </Pressable>
-
-                {showStockDropdown && (
-                  <View
-                    style={[
-                      styles.stockDropdown,
-                      { backgroundColor: colors.bgCard, borderColor: colors.borderColor },
-                    ]}
-                  >
-                    {/* Search within stocks */}
-                    <TextInput
-                      value={stockSearchText}
-                      onChangeText={setStockSearchText}
-                      placeholder={t('addTransaction.searchStocks')}
-                      autoFocus
-                      autoCapitalize="characters"
-                    />
-
-                    {filteredStocks.length > 0 ? (
-                      <ScrollView
-                        style={{ maxHeight: 220 }}
-                        nestedScrollEnabled
-                        keyboardShouldPersistTaps="handled"
-                      >
-                        {filteredStocks.map((stock) => (
-                          <Pressable
-                            key={stock.symbol}
-                            onPress={() => {
-                              onChange(stock.symbol);
-                              setSelectedRefStock(stock);
-                              setShowStockDropdown(false);
-                              setStockSearchText("");
-                            }}
-                            style={[
-                              styles.stockOption,
-                              {
-                                backgroundColor:
-                                  value === stock.symbol
-                                    ? colors.accentPrimary + "18"
-                                    : "transparent",
-                                borderBottomColor: colors.borderColor,
-                              },
-                            ]}
-                          >
-                            <Text
-                              style={[
-                                styles.stockSymbol,
-                                { color: colors.textPrimary },
-                              ]}
-                            >
-                              {stock.symbol}
-                            </Text>
-                            <Text
-                              style={[
-                                styles.stockName,
-                                { color: colors.textSecondary },
-                              ]}
-                              numberOfLines={1}
-                            >
-                              {stock.name}
-                            </Text>
-                          </Pressable>
-                        ))}
-                      </ScrollView>
-                    ) : (
-                      <Text
-                        style={[
-                          styles.stockEmpty,
-                          { color: colors.textMuted },
-                        ]}
-                      >
-                        {t('addTransaction.noStocksFound')}
-                      </Text>
-                    )}
-
-                    {/* Manual entry fallback */}
-                    <View style={styles.manualRow}>
-                      <TextInput
-                        value={value}
-                        onChangeText={(tx) => onChange(tx.toUpperCase().trim())}
-                        placeholder={t('addTransaction.typeManually')}
-                        autoCapitalize="characters"
-                        hasError={!!errors.stock_symbol}
-                      />
-                    </View>
-                  </View>
-                )}
-              </View>
-            )}
-          />
-        </FormField>
-
-        {/* ── Date ──────────────────────────────── */}
-        <FormField label={t('addTransaction.date')} required error={errors.txn_date?.message}>
-          <Controller
-            control={control}
-            name="txn_date"
-            render={({ field: { value, onChange } }) => (
-              <DateInput
-                value={value}
-                onChangeText={onChange}
-                hasError={!!errors.txn_date}
-              />
-            )}
-          />
-        </FormField>
-
-        {/* ── Shares (Buy/Sell only) ──────────── */}
-        {!isDividendOnly && (
-          <FormField label={t('addTransaction.shares')} required error={errors.shares?.message}>
-            <Controller
-              control={control}
-              name="shares"
-              render={({ field: { value, onChange } }) => (
-                <NumberInput
-                  value={value != null ? String(value) : ""}
-                  onChangeText={(tx) => onChange(tx === "" ? undefined : tx)}
-                  placeholder="0"
-                  hasError={!!errors.shares}
-                />
-              )}
-            />
-          </FormField>
-        )}
-
-        {/* ── Purchase Cost (Buy only) ──────────── */}
-        {isBuy && (
-          <FormField
-            label={t('addTransaction.purchaseCost')}
-            required
-            error={errors.purchase_cost?.message}
-          >
-            <Controller
-              control={control}
-              name="purchase_cost"
-              render={({ field: { value, onChange } }) => (
-                <NumberInput
-                  value={value != null && value !== ("" as any) ? String(value) : ""}
-                  onChangeText={(tx) => onChange(tx)}
-                  placeholder={t('addTransaction.totalCost')}
-                  suffix="KWD"
-                  hasError={!!errors.purchase_cost}
-                />
-              )}
-            />
-          </FormField>
-        )}
-
-        {/* ── Sell Value (Sell only) ────────────── */}
-        {isSell && (
-          <FormField
-            label={t('addTransaction.sellValue')}
-            required
-            error={errors.sell_value?.message}
-          >
-            <Controller
-              control={control}
-              name="sell_value"
-              render={({ field: { value, onChange } }) => (
-                <NumberInput
-                  value={value != null && value !== ("" as any) ? String(value) : ""}
-                  onChangeText={(tx) => onChange(tx)}
-                  placeholder={t('addTransaction.totalProceeds')}
-                  suffix="KWD"
-                  hasError={!!errors.sell_value}
-                />
-              )}
-            />
-          </FormField>
-        )}
-
-        {/* ══════════════════════════════════════════════════════
-            ── Dividend / Income Fields (all types) ──────────
-            ══════════════════════════════════════════════════════ */}
-        <View style={[styles.fieldGroupHeader, { borderColor: colors.borderColor }]}>
-          <FontAwesome name="money" size={13} color={colors.accentTertiary ?? colors.accentSecondary} />
-          <Text style={[styles.fieldGroupTitle, { color: colors.textPrimary }]}>
-            {isDividendOnly ? t('addTransaction.dividendDetails') : t('addTransaction.dividendBonusOptional')}
-          </Text>
-        </View>
-
-        {/* Cash Dividend */}
-        <FormField
-          label={isDividendOnly ? t('addTransaction.cashDividendKD') : t('addTransaction.cashDividend')}
-          required={isDividendOnly}
-          error={errors.cash_dividend?.message}
-        >
-          <Controller
-            control={control}
-            name="cash_dividend"
-            render={({ field: { value, onChange } }) => (
-              <NumberInput
-                value={value != null && value !== ("" as any) ? String(value) : ""}
-                onChangeText={(tx) => onChange(tx)}
-                placeholder="0.000"
-                suffix="KWD"
-                hasError={!!errors.cash_dividend}
-              />
-            )}
-          />
-        </FormField>
-
-        {/* Reinvested Dividend */}
-        <FormField label={t('addTransaction.reinvestedDividend')} error={errors.reinvested_dividend?.message}>
-          <Controller
-            control={control}
-            name="reinvested_dividend"
-            render={({ field: { value, onChange } }) => (
-              <NumberInput
-                value={value != null && value !== ("" as any) ? String(value) : ""}
-                onChangeText={(tx) => onChange(tx)}
-                placeholder="0.000"
-                suffix="KWD"
-              />
-            )}
-          />
-        </FormField>
-
-        {/* Bonus Shares */}
-        <FormField label={t('addTransaction.bonusShares')} error={errors.bonus_shares?.message}>
-          <Controller
-            control={control}
-            name="bonus_shares"
-            render={({ field: { value, onChange } }) => (
-              <NumberInput
-                value={value != null && value !== ("" as any) ? String(value) : ""}
-                onChangeText={(tx) => onChange(tx)}
-                placeholder="0"
-              />
-            )}
-          />
-        </FormField>
-
-        {/* ══════════════════════════════════════════════════════
-            ── Advanced Section (Buy/Sell only) ──────────────
-            ══════════════════════════════════════════════════════ */}
-        {!isDividendOnly && (
           <>
-            <Pressable
-              onPress={() => setShowAdvanced(!showAdvanced)}
-              style={[
-                styles.advancedToggle,
-                { borderColor: colors.borderColor },
-              ]}
-            >
-              <Text style={[styles.advancedLabel, { color: colors.textSecondary }]}>
-                {t('addTransaction.advancedFields')}
-              </Text>
-              <FontAwesome
-                name={showAdvanced ? "chevron-up" : "chevron-down"}
-                size={14}
-                color={colors.textSecondary}
+            {step === 1 && <Step1Type />}
+            {step === 2 && (
+              <Step2Details
+                filteredStocks={filteredStocks}
+                onSelectStock={setSelectedRefStock}
+                searchText={stockSearchText}
+                onSearchTextChange={setStockSearchText}
+                showAdvanced={showAdvanced}
+                onToggleAdvanced={() => setShowAdvanced(!showAdvanced)}
               />
-            </Pressable>
-
-            {showAdvanced && (
-              <View style={styles.advancedSection}>
-                {/* Fees */}
-                <FormField label={t('addTransaction.fees')} error={errors.fees?.message}>
-                  <Controller
-                    control={control}
-                    name="fees"
-                    render={({ field: { value, onChange } }) => (
-                      <NumberInput
-                        value={value != null && value !== ("" as any) ? String(value) : ""}
-                        onChangeText={(tx) => onChange(tx)}
-                        placeholder="0.000"
-                        suffix="KWD"
-                      />
-                    )}
-                  />
-                </FormField>
-
-                {/* Price Override */}
-                <FormField label={t('addTransaction.priceOverride')} error={errors.price_override?.message}>
-                  <Controller
-                    control={control}
-                    name="price_override"
-                    render={({ field: { value, onChange } }) => (
-                      <NumberInput
-                        value={value != null && value !== ("" as any) ? String(value) : ""}
-                        onChangeText={(tx) => onChange(tx)}
-                        placeholder="0.000000"
-                      />
-                    )}
-                  />
-                </FormField>
-
-                {/* Planned Cum Shares */}
-                <FormField label={t('addTransaction.plannedCumShares')} error={errors.planned_cum_shares?.message}>
-                  <Controller
-                    control={control}
-                    name="planned_cum_shares"
-                    render={({ field: { value, onChange } }) => (
-                      <NumberInput
-                        value={value != null && value !== ("" as any) ? String(value) : ""}
-                        onChangeText={(tx) => onChange(tx)}
-                        placeholder="0"
-                      />
-                    )}
-                  />
-                </FormField>
-
-                {/* Broker */}
-                <FormField label={t('addTransaction.broker')} error={errors.broker?.message}>
-                  <Controller
-                    control={control}
-                    name="broker"
-                    render={({ field: { value, onChange } }) => (
-                      <TextInput
-                        value={value ?? ""}
-                        onChangeText={onChange}
-                        placeholder={t('addTransaction.brokerExample')}
-                      />
-                    )}
-                  />
-                </FormField>
-
-                {/* Reference */}
-                <FormField label={t('addTransaction.reference')} error={errors.reference?.message}>
-                  <Controller
-                    control={control}
-                    name="reference"
-                    render={({ field: { value, onChange } }) => (
-                      <TextInput
-                        value={value ?? ""}
-                        onChangeText={onChange}
-                        placeholder={t('addTransaction.orderReceipt')}
-                      />
-                    )}
-                  />
-                </FormField>
-              </View>
             )}
+            {step === 3 && <Step3Review onEditStep={setStep} />}
           </>
         )}
-
-        {/* ── Notes (all types) ──────────────── */}
-        <FormField label={t('addTransaction.notesLabel')} error={errors.notes?.message}>
-          <Controller
-            control={control}
-            name="notes"
-            render={({ field: { value, onChange } }) => (
-              <TextInput
-                value={value ?? ""}
-                onChangeText={onChange}
-                placeholder={t('addTransaction.optionalNotes')}
-                multiline
-                numberOfLines={3}
-              />
-            )}
-          />
-        </FormField>
-        </>)}
-    </FormScreen>
+      </FormScreen>
+    </FormProvider>
   );
 }
 
 // ── Styles ──────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  // Stock picker / dropdown
-  stockPickerBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    borderRadius: 10,
-    borderWidth: 1,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    gap: 8,
+  stepRow: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center",
+    gap: 16, marginBottom: 20, position: "relative",
   },
-  stockPickerText: {
-    flex: 1,
-    fontSize: 14,
-    fontWeight: "500",
+  stepDot: {
+    width: 28, height: 28, borderRadius: 14,
+    alignItems: "center", justifyContent: "center", zIndex: 1,
   },
-  stockDropdown: {
-    borderRadius: 10,
-    borderWidth: 1,
-    marginTop: 6,
-    padding: 10,
-    gap: 6,
-  },
-  stockOption: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: 10,
-    paddingHorizontal: 8,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    gap: 8,
-  },
-  stockSymbol: {
-    fontSize: 14,
-    fontWeight: "700",
-    minWidth: 80,
-  },
-  stockName: {
-    flex: 1,
-    fontSize: 12,
-  },
-  stockEmpty: {
-    fontSize: 13,
-    textAlign: "center",
-    paddingVertical: 12,
-    fontStyle: "italic",
-  },
-  manualRow: {
-    marginTop: 6,
-  },
-  // Field group header
-  fieldGroupHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    paddingVertical: 10,
-    marginTop: 8,
-    borderTopWidth: 1,
-    marginBottom: 4,
-  },
-  fieldGroupTitle: {
-    fontSize: 14,
-    fontWeight: "700",
-  },
-  advancedToggle: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingVertical: 12,
-    borderTopWidth: 1,
-    marginTop: 8,
-    marginBottom: 8,
-  },
-  advancedLabel: { fontSize: 14, fontWeight: "600" },
-  advancedSection: { marginBottom: 8 },
-  submitBtn: {
-    paddingVertical: 16,
-    borderRadius: 12,
-    alignItems: "center",
-    marginTop: 12,
-  },
-  submitText: {
-    color: "#fff",
-    fontSize: 16,
-    fontWeight: "700",
-  },
-  // ── Upload / Bulk styles ──────────────────────────────────────
-  divider: {
-    borderTopWidth: 1,
-    marginTop: 28,
-    marginBottom: 20,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: "700",
-    marginBottom: 6,
-  },
-  sectionHint: {
-    fontSize: 13,
-    marginBottom: 16,
-    lineHeight: 18,
-  },
-  uploadRow: {
-    marginBottom: 12,
-  },
-  uploadLabel: {
-    fontSize: 13,
-    fontWeight: "600",
-    marginBottom: 6,
-  },
-  segmentRow: {
-    flexDirection: "row",
-    gap: 8,
-  },
-  segmentBtn: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 8,
-    borderWidth: 1,
-    alignItems: "center",
-  },
-  segmentText: {
-    fontSize: 13,
-    fontWeight: "600",
-  },
-  warningText: {
-    fontSize: 12,
-    marginBottom: 12,
-    fontStyle: "italic",
-  },
-  filePickBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    padding: 14,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderStyle: "dashed",
-    marginBottom: 12,
-  },
-  filePickText: {
-    fontSize: 14,
-    fontWeight: "500",
-  },
-  loadingRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  resultBox: {
-    padding: 14,
-    borderRadius: 10,
-    borderWidth: 1,
-    marginTop: 12,
-  },
-  resultTitle: {
-    fontSize: 14,
-    fontWeight: "700",
-    marginBottom: 4,
-  },
-  deleteAllBtn: {
-    paddingVertical: 14,
-    borderRadius: 12,
-    alignItems: "center",
-    borderWidth: 2,
-    marginBottom: 6,
-  },
-  deleteAllText: {
-    fontSize: 15,
-    fontWeight: "700",
-  },
+  stepNum: { fontSize: 13, fontWeight: "700" },
+  stepLine: { position: "absolute", height: 2, left: "20%", right: "20%", top: 13 },
+  backBtn: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 12 },
+  backText: { fontSize: 14, fontWeight: "600" },
 });

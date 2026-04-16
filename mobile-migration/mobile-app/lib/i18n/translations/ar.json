@@ -862,7 +862,11 @@
     "importError": "خطأ في الاستيراد",
     "uploadFailed": "فشل الرفع",
     "deleteFailed": "فشل الحذف",
-    "noFileSelected": "لم يتم اختيار ملف"
+    "noFileSelected": "لم يتم اختيار ملف",
+    "next": "التالي",
+    "back": "رجوع",
+    "editDetails": "تعديل التفاصيل",
+    "review": "مراجعة"
   },
   "addStock": {
     "title": "إضافة سهم",
