@@ -1,6 +1,7 @@
 import { markOnboardingSeen } from "@/app/index";
 import { useAuthStore } from "@/services/authStore";
 import { useThemeStore } from "@/services/themeStore";
+import { useWebMeta } from "@/hooks/useWebMeta";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import { useRouter } from "expo-router";
 import React, { useRef } from "react";
@@ -42,6 +43,11 @@ export default function FeaturesScreen() {
   const fadeAnims = useRef(FEATURES.map(() => new Animated.Value(0))).current;
   const slideAnims = useRef(FEATURES.map(() => new Animated.Value(40))).current;
 
+  useWebMeta(
+    "Features — Portfolio Tracker",
+    "AI statement extraction, DCF and Graham valuations, real-time tracking, and full portfolio analytics.",
+  );
+
   React.useEffect(() => {
     const animations = FEATURES.map((_, i) =>
       Animated.parallel([
@@ -67,7 +73,12 @@ export default function FeaturesScreen() {
     <View style={[styles.container, { backgroundColor: colors.bgPrimary }]}>
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         {/* Section Header */}
-        <Text style={[styles.heading, { color: colors.textPrimary }]}>{t('onboarding.whatYouCanDo')}</Text>
+        <Text
+          style={[styles.heading, { color: colors.textPrimary }]}
+          accessibilityRole="header"
+        >
+          {t('onboarding.whatYouCanDo')}
+        </Text>
         <Text style={[styles.sub, { color: colors.textSecondary }]}>
           {t('onboarding.everythingYouNeed')}
         </Text>

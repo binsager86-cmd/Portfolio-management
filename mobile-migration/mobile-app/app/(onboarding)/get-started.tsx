@@ -1,5 +1,6 @@
 import { useAuthStore } from "@/services/authStore";
 import { useThemeStore } from "@/services/themeStore";
+import { useWebMeta } from "@/hooks/useWebMeta";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import { useRouter } from "expo-router";
 import React, { useRef } from "react";
@@ -20,6 +21,11 @@ export default function GetStartedScreen() {
   const { t } = useTranslation();
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(0.9)).current;
+
+  useWebMeta(
+    "Get Started — Portfolio Tracker",
+    "Set up your portfolio in minutes: create an account, import your first statement, and explore your dashboard.",
+  );
 
   React.useEffect(() => {
     Animated.parallel([
@@ -50,7 +56,12 @@ export default function GetStartedScreen() {
             <FontAwesome name="rocket" size={48} color={colors.accentPrimary} />
           </View>
 
-          <Text style={[styles.heading, { color: colors.textPrimary }]}>{t('onboarding.quickStartChecklist')}</Text>
+          <Text
+            style={[styles.heading, { color: colors.textPrimary }]}
+            accessibilityRole="header"
+          >
+            {t('onboarding.quickStartChecklist')}
+          </Text>
           <Text style={[styles.sub, { color: colors.textSecondary }]}>
             {t('onboarding.checklistSubtitle')}
           </Text>

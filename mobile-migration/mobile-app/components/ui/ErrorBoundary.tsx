@@ -9,6 +9,8 @@
 import React, { Component } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
+import { analytics } from "@/lib/analytics";
+
 interface Props {
   children: React.ReactNode;
   /** Optional context-specific message shown below the title. */
@@ -31,6 +33,9 @@ export class AppErrorBoundary extends Component<Props, State> {
     if (__DEV__) {
       console.error("[ErrorBoundary]", error, info.componentStack);
     }
+    analytics.captureError(error, {
+      componentStack: info.componentStack ?? "",
+    });
   }
 
   private handleReset = () => {

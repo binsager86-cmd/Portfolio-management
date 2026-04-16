@@ -10,6 +10,7 @@
 
 import { FormScreen } from "@/components/screens";
 import { useToast } from "@/components/ui/ToastProvider";
+import { UITokens } from "@/constants/uiTokens";
 import { useStockList, useStocks, useTransaction } from "@/hooks/queries";
 import { useCreateTransaction, useUpdateTransaction } from "@/hooks/useTransactionMutations";
 import { todayISO } from "@/lib/dateUtils";
@@ -36,7 +37,8 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useMemo, useState } from "react";
 import { FormProvider, useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import { ProgressBar } from "react-native-paper";
 
 const TOTAL_STEPS = 3;
 
@@ -180,10 +182,26 @@ export default function AddTransactionScreen() {
 
   // ── Step navigation ─────────────────────────────────────────────
 
+  const triggerHaptic = (style: "light" | "error") => {
+    if (Platform.OS === "web") return;
+    import("expo-haptics").then((h) => {
+      if (style === "error") {
+        h.notificationAsync(h.NotificationFeedbackType.Error);
+      } else {
+        h.impactAsync(h.ImpactFeedbackStyle.Light);
+      }
+    });
+  };
+
   const handleNext = async () => {
     const fieldsToValidate = step === 1 ? STEP1_FIELDS : STEP2_FIELDS;
     const valid = await trigger(fieldsToValidate);
-    if (valid) setStep((s) => Math.min(s + 1, TOTAL_STEPS));
+    if (!valid) {
+      triggerHaptic("error");
+      return;
+    }
+    triggerHaptic("light");
+    setStep((s) => Math.min(s + 1, TOTAL_STEPS));
   };
 
   const handleBack = () => setStep((s) => Math.max(s - 1, 1));
@@ -210,6 +228,13 @@ export default function AddTransactionScreen() {
         submitLabel={submitLabel}
         footer={footerContent}
       >
+        {/* ── Progress bar ── */}
+        <ProgressBar
+          progress={step / TOTAL_STEPS}
+          color={colors.accentPrimary}
+          style={styles.progressBar}
+        />
+
         {/* ── Step indicator ── */}
         <View style={styles.stepRow}>
           {[1, 2, 3].map((s) => (
@@ -266,6 +291,11 @@ export default function AddTransactionScreen() {
 // ── Styles ──────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
+  progressBar: {
+    height: 4,
+    borderRadius: 2,
+    marginBottom: UITokens.spacing.md,
+  },
   stepRow: {
     flexDirection: "row", alignItems: "center", justifyContent: "center",
     gap: 16, marginBottom: 20, position: "relative",

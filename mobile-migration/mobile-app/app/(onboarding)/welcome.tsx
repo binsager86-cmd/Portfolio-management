@@ -1,6 +1,7 @@
 import { markOnboardingSeen } from "@/app/index";
 import { useAuthStore } from "@/services/authStore";
 import { useThemeStore } from "@/services/themeStore";
+import { useWebMeta } from "@/hooks/useWebMeta";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import { useRouter } from "expo-router";
 import React, { useRef } from "react";
@@ -14,6 +15,11 @@ export default function WelcomeScreen() {
   const { t } = useTranslation();
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(50)).current;
+
+  useWebMeta(
+    "Welcome — Portfolio Tracker",
+    "Import your brokerage statements, run AI-powered analysis, and track your portfolio like a pro.",
+  );
 
   React.useEffect(() => {
     Animated.parallel([
@@ -45,7 +51,10 @@ export default function WelcomeScreen() {
         </View>
 
         {/* Title */}
-        <Text style={[styles.title, { color: colors.textPrimary }]}>
+        <Text
+          style={[styles.title, { color: colors.textPrimary }]}
+          accessibilityRole="header"
+        >
           {t('onboarding.trackLikePro')}
         </Text>
 

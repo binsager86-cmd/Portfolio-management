@@ -12,9 +12,11 @@ import { KpiCard } from "@/components/portfolio/KpiWidgets";
 import { DataScreen } from "@/components/screens";
 import { FilterChip } from "@/components/ui/FilterChip";
 import { HoldingsTableSkeleton } from "@/components/ui/PageSkeletons";
+import { ResponsiveDataTable, type DataColumn } from "@/components/ui/ResponsiveDataTable";
+import { UITokens } from "@/constants/uiTokens";
 import { useCashBalances } from "@/hooks/queries";
 import { useResponsive } from "@/hooks/useResponsive";
-import { fmtNum } from "@/lib/currency";
+import { fmtNum, formatCurrency } from "@/lib/currency";
 import { todayISO } from "@/lib/dateUtils";
 import { showErrorAlert } from "@/lib/errorHandling";
 import { exportHoldingsExcel, type Holding } from "@/services/api";
@@ -35,7 +37,7 @@ import {
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Alert,
@@ -68,6 +70,15 @@ export default function HoldingsScreen() {
   const [selectedHolding, setSelectedHolding] = useState<Holding | null>(null);
 
   const { data: cashData, refetch: refetchCash } = useCashBalances();
+
+  // ── Mobile card columns (priority-filtered on phone) ────────────
+  const mobileColumns = useMemo<DataColumn<Holding>[]>(() => [
+    { key: "symbol", label: t("holdings.symbol", "Symbol"), render: (h) => `${h.symbol} — ${h.company}`, priority: "high" },
+    { key: "value", label: t("holdings.marketValue", "Market Value"), render: (h) => formatCurrency(h.market_value_kwd), priority: "high" },
+    { key: "pnl", label: t("dashboard.unrealizedPL", "Unrealized P&L"), render: (h) => formatCurrency(h.unrealized_pnl_kwd), priority: "high" },
+    { key: "pnl_pct", label: t("holdings.pnlPct", "P&L %"), render: (h) => `${h.pnl_pct >= 0 ? "+" : ""}${h.pnl_pct.toFixed(2)}%`, priority: "medium" },
+    { key: "cost", label: t("holdings.avgCost", "Avg Cost"), render: (h) => fmtNum(h.total_cost_kwd), priority: "low" },
+  ], [t]);
 
   const portfolios = [undefined, "KFH", "BBYN", "USA"];
   const filterLabels = ["All", "KFH", "BBYN", "USA"];
@@ -159,78 +170,86 @@ export default function HoldingsScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* Holdings table */}
-          <View
-            style={[
-              ts.tableOuter,
-              {
-                borderColor: colors.borderColor,
-                backgroundColor: colors.bgCard,
-                marginHorizontal: spacing.pagePx,
-                marginTop: 4,
-                marginBottom: 24,
-              },
-            ]}
-          >
-            <ScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={{ minWidth: TOTAL_TABLE_WIDTH }}>
-              <View style={{ width: TOTAL_TABLE_WIDTH }}>
-                {/* Header */}
-                <View style={[ts.headerRow, { borderBottomColor: colors.borderColor, backgroundColor: colors.bgSecondary }]}>
-                  {TABLE_COLUMNS.map((col) => (
-                    <HeaderCell key={col.key} col={col} colors={colors} sortCol={sortCol} sortDir={sortDir} onSort={onSort} />
-                  ))}
+          {/* Holdings table — ResponsiveDataTable auto-switches to cards on phone */}
+          <View style={{ marginHorizontal: spacing.pagePx, marginTop: 4, marginBottom: UITokens.spacing.lg }}>
+            <ResponsiveDataTable<Holding>
+              data={sortedHoldings}
+              columns={mobileColumns}
+              keyExtractor={(h) => h.symbol}
+              onPressItem={(h) => setSelectedHolding(h)}
+              itemA11yLabel={(h) => `${h.symbol} ${h.company}, value ${formatCurrency(h.market_value_kwd)}`}
+              desktopTable={
+                <View
+                  style={[
+                    ts.tableOuter,
+                    {
+                      borderColor: colors.borderColor,
+                      backgroundColor: colors.bgCard,
+                    },
+                  ]}
+                >
+                  <ScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={{ minWidth: TOTAL_TABLE_WIDTH }}>
+                    <View style={{ width: TOTAL_TABLE_WIDTH }}>
+                      {/* Header */}
+                      <View style={[ts.headerRow, { borderBottomColor: colors.borderColor, backgroundColor: colors.bgSecondary }]}>
+                        {TABLE_COLUMNS.map((col) => (
+                          <HeaderCell key={col.key} col={col} colors={colors} sortCol={sortCol} sortDir={sortDir} onSort={onSort} />
+                        ))}
+                      </View>
+
+                      {/* Data rows */}
+                      {sortedHoldings.map((h, idx) => (
+                        <HoldingRow
+                          key={h.symbol}
+                          holding={h}
+                          colors={colors}
+                          isEven={idx % 2 === 0}
+                          onCompanyPress={(holding) => setSelectedHolding(holding)}
+                        />
+                      ))}
+
+                      {/* TOTAL row */}
+                      {sortedHoldings.length > 0 && (
+                        <View
+                          style={[
+                            ts.dataRow,
+                            ts.totalRow,
+                            {
+                              borderBottomColor: colors.borderColor,
+                              backgroundColor: colors.accentPrimary + "18",
+                              borderTopColor: colors.accentPrimary,
+                            },
+                          ]}
+                        >
+                          {TABLE_COLUMNS.map((col) => (
+                            <TotalCell key={col.key} col={col} totals={totals} colors={colors} />
+                          ))}
+                        </View>
+                      )}
+
+                      {/* Empty state */}
+                      {sortedHoldings.length === 0 && (
+                        <View style={ts.emptyRow}>
+                          <FontAwesome name="briefcase" size={36} color={colors.textMuted} style={{ marginBottom: 8 }} />
+                          <Text style={{ color: colors.textMuted, fontSize: 14, marginBottom: 12 }}>
+                            {t("holdingsScreen.noActiveHoldings")}
+                          </Text>
+                          <Pressable
+                            onPress={() => router.push("/(tabs)/add-stock" as any)}
+                            style={[
+                              { backgroundColor: colors.accentPrimary, paddingHorizontal: 18, paddingVertical: 8, borderRadius: 8 },
+                              Platform.OS === "web" ? ({ cursor: "pointer" } as any) : undefined,
+                            ]}
+                          >
+                            <Text style={{ color: "#fff", fontWeight: "600", fontSize: 13 }}>{t("holdingsScreen.addFirstStock")}</Text>
+                          </Pressable>
+                        </View>
+                      )}
+                    </View>
+                  </ScrollView>
                 </View>
-
-                {/* Data rows */}
-                {sortedHoldings.map((h, idx) => (
-                  <HoldingRow
-                    key={h.symbol}
-                    holding={h}
-                    colors={colors}
-                    isEven={idx % 2 === 0}
-                    onCompanyPress={(holding) => setSelectedHolding(holding)}
-                  />
-                ))}
-
-                {/* TOTAL row */}
-                {sortedHoldings.length > 0 && (
-                  <View
-                    style={[
-                      ts.dataRow,
-                      ts.totalRow,
-                      {
-                        borderBottomColor: colors.borderColor,
-                        backgroundColor: colors.accentPrimary + "18",
-                        borderTopColor: colors.accentPrimary,
-                      },
-                    ]}
-                  >
-                    {TABLE_COLUMNS.map((col) => (
-                      <TotalCell key={col.key} col={col} totals={totals} colors={colors} />
-                    ))}
-                  </View>
-                )}
-
-                {/* Empty state */}
-                {sortedHoldings.length === 0 && (
-                  <View style={ts.emptyRow}>
-                    <FontAwesome name="briefcase" size={36} color={colors.textMuted} style={{ marginBottom: 8 }} />
-                    <Text style={{ color: colors.textMuted, fontSize: 14, marginBottom: 12 }}>
-                      {t("holdingsScreen.noActiveHoldings")}
-                    </Text>
-                    <Pressable
-                      onPress={() => router.push("/(tabs)/add-stock" as any)}
-                      style={[
-                        { backgroundColor: colors.accentPrimary, paddingHorizontal: 18, paddingVertical: 8, borderRadius: 8 },
-                        Platform.OS === "web" ? ({ cursor: "pointer" } as any) : undefined,
-                      ]}
-                    >
-                      <Text style={{ color: "#fff", fontWeight: "600", fontSize: 13 }}>{t("holdingsScreen.addFirstStock")}</Text>
-                    </Pressable>
-                  </View>
-                )}
-              </View>
-            </ScrollView>
+              }
+            />
           </View>
 
           {/* Allocation Donut Chart */}

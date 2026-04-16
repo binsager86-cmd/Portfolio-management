@@ -30,8 +30,17 @@ export interface ThemePalette {
 
   // Semantic
   success: string;
+  successBg: string;
+  successText: string;
   warning: string;
+  warningBg: string;
+  warningText: string;
   danger: string;
+  dangerBg: string;
+  dangerText: string;
+
+  // Chart palette
+  chart: string[];
 
   // Chrome
   borderColor: string;
@@ -60,8 +69,16 @@ export const LightTheme: ThemePalette = {
   accentTertiary: "#ec4899",
 
   success: "#10b981",
+  successBg: "#d1fae5",
+  successText: "#065f46",
   warning: "#f59e0b",
+  warningBg: "#fef3c7",
+  warningText: "#92400e",
   danger: "#ef4444",
+  dangerBg: "#fee2e2",
+  dangerText: "#991b1b",
+
+  chart: ["#2563eb", "#7c3aed", "#db2777", "#ea580c", "#16a34a", "#0891b2", "#4f46e5", "#be123c"],
 
   borderColor: "rgba(203,213,225,0.6)",
   cardShadowColor: "rgba(0,0,0,0.06)",
@@ -89,8 +106,16 @@ export const DarkTheme: ThemePalette = {
   accentTertiary: "#ff00cc",
 
   success: "#00d4ff",
+  successBg: "#064e3b",
+  successText: "#6ee7b7",
   warning: "#ff9e00",
+  warningBg: "#78350f",
+  warningText: "#fcd34d",
   danger: "#ff4757",
+  dangerBg: "#7f1d1d",
+  dangerText: "#fca5a5",
+
+  chart: ["#60a5fa", "#a78bfa", "#f472b6", "#fb923c", "#4ade80", "#22d3ee", "#818cf8", "#fb7185"],
 
   borderColor: "rgba(255,255,255,0.08)",
   cardShadowColor: "rgba(0,0,0,0.4)",

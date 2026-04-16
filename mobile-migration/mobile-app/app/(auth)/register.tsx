@@ -29,6 +29,7 @@ import {
 
 import { useGoogleSignIn } from "@/hooks/useGoogleSignIn";
 import { useResponsive } from "@/hooks/useResponsive";
+import { useWebMeta } from "@/hooks/useWebMeta";
 import { analytics } from "@/lib/analytics";
 import { validateEnv } from "@/lib/env";
 import { registerSchema, type RegisterFormData } from "@/lib/validationSchemas";
@@ -59,6 +60,11 @@ export default function RegisterScreen() {
 
   const [showPassword, setShowPassword] = useState(false);
   const isSubmittingRef = useRef(false);
+
+  useWebMeta(
+    "Create Account — Portfolio Tracker",
+    "Sign up for Portfolio Tracker to track stocks, run valuations, and analyze your investment portfolio.",
+  );
 
   // Google Sign-In hook (handles popup + redirect flows on web, native on mobile)
   const { signIn: googlePrompt, isLoading: googleLoading } = useGoogleSignIn();
@@ -228,7 +234,10 @@ export default function RegisterScreen() {
         {/* Logo / Title */}
         <View style={styles.header}>
           <Text style={styles.icon}>📊</Text>
-          <Text style={[styles.title, { color: colors.textPrimary }]}>
+          <Text
+            style={[styles.title, { color: colors.textPrimary }]}
+            accessibilityRole="header"
+          >
             {t('auth.createAccount')}
           </Text>
           <Text style={[styles.subtitle, { color: colors.textSecondary }]}>

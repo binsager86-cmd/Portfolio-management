@@ -1,17 +1,29 @@
 import { Link, Stack } from 'expo-router';
-import { StyleSheet } from 'react-native';
+import { useEffect } from 'react';
+import { Platform, StyleSheet } from 'react-native';
 
 import { Text, View } from '@/components/Themed';
 
 export default function NotFoundScreen() {
+  useEffect(() => {
+    if (Platform.OS === 'web' && typeof document !== 'undefined') {
+      document.title = 'Page Not Found — Portfolio Tracker';
+    }
+  }, []);
+
   return (
     <>
-      <Stack.Screen options={{ title: 'Oops!' }} />
+      <Stack.Screen options={{ title: 'Page Not Found' }} />
       <View style={styles.container}>
-        <Text style={styles.title}>This screen doesn't exist.</Text>
+        <Text style={styles.title} accessibilityRole="header">
+          This screen doesn&apos;t exist.
+        </Text>
+        <Text style={styles.body}>
+          The page you're looking for may have been moved or no longer exists.
+        </Text>
 
         <Link href="/" style={styles.link}>
-          <Text style={styles.linkText}>Go to home screen!</Text>
+          <Text style={styles.linkText}>Go to home screen</Text>
         </Link>
       </View>
     </>
@@ -28,6 +40,12 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 20,
     fontWeight: 'bold',
+  },
+  body: {
+    fontSize: 14,
+    marginTop: 8,
+    textAlign: 'center',
+    opacity: 0.7,
   },
   link: {
     marginTop: 15,

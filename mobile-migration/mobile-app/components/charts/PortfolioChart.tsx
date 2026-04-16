@@ -44,6 +44,7 @@ import Svg, {
 } from "react-native-svg";
 
 import { CHART_WIDE_LABEL_MIN } from "@/constants/layout";
+import { useA11yChart } from "@/hooks/useA11yChart";
 import { formatCurrency } from "@/lib/currency";
 import { formatFullDate, formatShortDate } from "@/lib/dateUtils";
 import { fmtAxisVal } from "@/lib/formatting";
@@ -285,6 +286,12 @@ export const PortfolioChart = React.memo(function PortfolioChart({
 
   const clearActive = useCallback(() => setActiveIdx(null), []);
 
+  const a11yData = useMemo(
+    () => data.map((d) => ({ label: d.date, value: d.value })),
+    [data],
+  );
+  const a11yProps = useA11yChart(a11yData);
+
   const responders = useMemo(
     () => ({
       onStartShouldSetResponder: () => true,
@@ -362,7 +369,7 @@ export const PortfolioChart = React.memo(function PortfolioChart({
   // ── Render ───────────────────────────────────────────────────────
 
   return (
-    <View style={[{ width: "100%" }, style]} onLayout={onLayout}>
+    <View style={[{ width: "100%" }, style]} onLayout={onLayout} {...a11yProps}>
       {title && (
         <Text style={[chartS.title, { color: colors.textSecondary }]}>
           {title}

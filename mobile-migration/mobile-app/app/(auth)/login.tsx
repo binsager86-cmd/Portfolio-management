@@ -30,6 +30,7 @@ import {
 
 import { useGoogleSignIn } from "@/hooks/useGoogleSignIn";
 import { useResponsive } from "@/hooks/useResponsive";
+import { useWebMeta } from "@/hooks/useWebMeta";
 import { loginSchema, type LoginFormData } from "@/lib/validationSchemas";
 import { useAuthStore } from "@/services/authStore";
 import { useThemeStore } from "@/services/themeStore";
@@ -44,6 +45,11 @@ export default function LoginScreen() {
 
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+
+  useWebMeta(
+    "Sign In — Portfolio Tracker",
+    "Log in to Portfolio Tracker to monitor your investments, track dividends, and run stock valuations.",
+  );
 
   // Animated shake + fade for error banner
   const errorOpacity = useRef(new Animated.Value(0)).current;
@@ -185,7 +191,10 @@ export default function LoginScreen() {
         {/* Logo / Title */}
         <View style={styles.header}>
           <Text style={styles.icon}>📊</Text>
-          <Text style={[styles.title, { color: colors.textPrimary }]}>
+          <Text
+            style={[styles.title, { color: colors.textPrimary }]}
+            accessibilityRole="header"
+          >
             {t('app.title')}
           </Text>
           <Text style={[styles.subtitle, { color: colors.textSecondary }]}>

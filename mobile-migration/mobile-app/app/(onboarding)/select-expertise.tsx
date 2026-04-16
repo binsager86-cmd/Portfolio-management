@@ -1,6 +1,7 @@
 import { markOnboardingSeen } from "@/app/index";
 import { useAuthStore } from "@/services/authStore";
 import { useThemeStore } from "@/services/themeStore";
+import { useWebMeta } from "@/hooks/useWebMeta";
 import {
     EXPERTISE_LEVELS,
     ExpertiseLevel,
@@ -29,6 +30,11 @@ export default function SelectExpertiseScreen() {
 
   const [selected, setSelected] = useState<ExpertiseLevel>(currentLevel);
   const fadeAnim = useRef(new Animated.Value(0)).current;
+
+  useWebMeta(
+    "Choose Experience Level — Portfolio Tracker",
+    "Select your investing experience level to customize your Portfolio Tracker dashboard.",
+  );
 
   React.useEffect(() => {
     Animated.timing(fadeAnim, {
@@ -68,7 +74,10 @@ export default function SelectExpertiseScreen() {
               color={colors.accentPrimary}
             />
           </View>
-          <Text style={[styles.title, { color: colors.textPrimary }]}>
+          <Text
+            style={[styles.title, { color: colors.textPrimary }]}
+            accessibilityRole="header"
+          >
             {t('onboarding.chooseExperience')}
           </Text>
           <Text style={[styles.subtitle, { color: colors.textSecondary }]}>

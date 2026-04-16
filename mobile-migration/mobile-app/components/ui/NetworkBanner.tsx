@@ -2,17 +2,25 @@ import { useEffect, useState } from "react";
 import { View, Text, StyleSheet } from "react-native";
 import NetInfo from "@react-native-community/netinfo";
 
-export function NetworkBanner() {
-  const [isOffline, setIsOffline] = useState(false);
+interface NetworkBannerProps {
+  /** Override from useOfflineSync — when provided, skips internal NetInfo subscription. */
+  isOffline?: boolean;
+}
 
+export function NetworkBanner({ isOffline: externalOffline }: NetworkBannerProps) {
+  const [internalOffline, setInternalOffline] = useState(false);
+
+  // Only subscribe if no external signal is provided
   useEffect(() => {
+    if (externalOffline !== undefined) return;
     const unsubscribe = NetInfo.addEventListener((state) => {
-      setIsOffline(!state.isConnected);
+      setInternalOffline(!state.isConnected);
     });
     return unsubscribe;
-  }, []);
+  }, [externalOffline]);
 
-  if (!isOffline) return null;
+  const offline = externalOffline ?? internalOffline;
+  if (!offline) return null;
 
   return (
     <View style={styles.banner}>

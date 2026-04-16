@@ -12,6 +12,19 @@ export default function Root({ children }: { children: React.ReactNode }) {
         <meta httpEquiv="X-UA-Compatible" content="IE=edge" />
         <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
 
+        <title>Portfolio Tracker — Monitor, Analyze &amp; Optimize Your Investments</title>
+        <meta name="description" content="Track your stock portfolio, run DCF and Graham valuations, analyze financial statements, and monitor dividends — all in one app." />
+
+        {/* Open Graph */}
+        <meta property="og:type" content="website" />
+        <meta property="og:title" content="Portfolio Tracker" />
+        <meta property="og:description" content="Track your stock portfolio, run DCF and Graham valuations, analyze financial statements, and monitor dividends." />
+        <meta property="og:site_name" content="Portfolio Tracker" />
+
+        {/* Indexing */}
+        <meta name="robots" content="index, follow" />
+        <meta name="google-site-verification" content="KeR7f3qPReAU2SpQNa_JjjV8JZsXm_5XWDOtbpq7nuU" />
+
         {/* 
           Disable body scrolling on web. This makes ScrollView components work closer to how they do on native. 
           However, body scrolling is often nice to have for mobile web. If you want to enable it, remove this line.
@@ -20,7 +33,6 @@ export default function Root({ children }: { children: React.ReactNode }) {
 
         {/* Using raw CSS styles as an escape-hatch to ensure the background color never flickers in dark-mode. */}
         <style dangerouslySetInnerHTML={{ __html: responsiveBackground }} />
-        {/* Add any additional <head> elements that you want globally available on web... */}
       </head>
       <body>{children}</body>
     </html>

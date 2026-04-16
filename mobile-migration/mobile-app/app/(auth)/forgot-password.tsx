@@ -26,6 +26,7 @@ import {
 } from "react-native-paper";
 
 import { useResponsive } from "@/hooks/useResponsive";
+import { useWebMeta } from "@/hooks/useWebMeta";
 import { extractErrorMessage } from "@/lib/errorHandling";
 import { forgotPassword, resetPassword, verifyOtp } from "@/services/api";
 import { useThemeStore } from "@/services/themeStore";
@@ -65,6 +66,11 @@ export default function ForgotPasswordScreen() {
   const [success, setSuccess] = useState<string | null>(null);
 
   const [countdown, setCountdown] = useState(0);
+
+  useWebMeta(
+    "Reset Password — Portfolio Tracker",
+    "Forgot your password? Reset it securely with a one-time code sent to your email.",
+  );
 
   // Animated error
   const errorOpacity = useRef(new Animated.Value(0)).current;
@@ -256,7 +262,10 @@ export default function ForgotPasswordScreen() {
         {/* Header */}
         <View style={styles.header}>
           <Text style={styles.icon}>{stepIcon}</Text>
-          <Text style={[styles.title, { color: colors.textPrimary }]}>
+          <Text
+            style={[styles.title, { color: colors.textPrimary }]}
+            accessibilityRole="header"
+          >
             {stepTitle}
           </Text>
           <Text style={[styles.subtitle, { color: colors.textSecondary }]}>

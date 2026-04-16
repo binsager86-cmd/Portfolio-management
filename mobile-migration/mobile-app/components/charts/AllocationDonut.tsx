@@ -15,8 +15,9 @@
  */
 
 import type { ThemePalette } from "@/constants/theme";
-import React, { useEffect, useMemo } from "react";
-import { ScrollView, StyleSheet, Text, View } from "react-native";
+import { useA11yChart } from "@/hooks/useA11yChart";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import Animated, {
     Easing,
     useAnimatedStyle,
@@ -117,6 +118,9 @@ export const AllocationDonut = React.memo(function AllocationDonut({
   showLegend = true,
 }: AllocationDonutProps) {
   const isDark = colors.mode === "dark";
+  const [activeSlice, setActiveSlice] = useState<number | null>(null);
+
+  const dismissTooltip = useCallback(() => setActiveSlice(null), []);
 
   // ── Entrance animation (matches PortfolioChart) ─────────────────
 
@@ -148,6 +152,12 @@ export const AllocationDonut = React.memo(function AllocationDonut({
     () => filteredData.reduce((s, d) => s + d.weight, 0),
     [filteredData],
   );
+
+  const a11yData = useMemo(
+    () => filteredData.map((d) => ({ label: d.company, value: d.weight })),
+    [filteredData],
+  );
+  const a11yProps = useA11yChart(a11yData);
 
   const maxWeight = useMemo(
     () => Math.max(...filteredData.map((d) => d.weight), 0),
@@ -197,14 +207,14 @@ export const AllocationDonut = React.memo(function AllocationDonut({
   const labelR = outerR + 18;
 
   return (
-    <Animated.View style={[styles.wrapper, animStyle]}>
+    <Animated.View style={[styles.wrapper, animStyle]} {...a11yProps}>
       {/* Title — matches PortfolioChart typography */}
       <Text style={[styles.title, { color: colors.textSecondary }]}>{title}</Text>
 
       <View style={[styles.chartBackground, { backgroundColor: isDark ? "#0F0F0F" : "#F7F8FC", borderWidth: isDark ? 0 : 1, borderColor: isDark ? "transparent" : colors.borderColor }]}>
         <View style={styles.chartRow}>
           {/* Donut */}
-          <View style={styles.chartContainer}>
+          <Pressable style={styles.chartContainer} onPress={dismissTooltip}>
             <Svg
               width={size}
               height={size}
@@ -228,6 +238,7 @@ export const AllocationDonut = React.memo(function AllocationDonut({
                     fill={`url(#sliceGrad${i})`}
                     stroke={isDark ? "#0F0F0F" : "#F7F8FC"}
                     strokeWidth={1.5}
+                    onPress={() => setActiveSlice(activeSlice === i ? null : i)}
                   />
                 ))}
 
@@ -279,7 +290,15 @@ export const AllocationDonut = React.memo(function AllocationDonut({
                 })}
               </G>
             </Svg>
-          </View>
+
+            {/* Tooltip overlay */}
+            {activeSlice != null && arcs[activeSlice] && (
+              <View style={styles.tooltip} pointerEvents="none">
+                <Text style={styles.tooltipCompany}>{arcs[activeSlice].company}</Text>
+                <Text style={styles.tooltipPct}>{arcs[activeSlice].pct}%</Text>
+              </View>
+            )}
+          </Pressable>
 
           {/* Legend table */}
           {showLegend && (
@@ -342,6 +361,29 @@ const styles = StyleSheet.create({
   chartContainer: {
     alignItems: "center",
     justifyContent: "center",
+    position: "relative",
+  },
+  tooltip: {
+    position: "absolute",
+    backgroundColor: "rgba(15,23,42,0.92)",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    alignItems: "center",
+    alignSelf: "center",
+    top: "50%",
+    transform: [{ translateY: -20 }],
+  },
+  tooltipCompany: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  tooltipPct: {
+    color: "rgba(255,255,255,0.75)",
+    fontSize: 11,
+    fontWeight: "500",
+    marginTop: 2,
   },
   legendContainer: {
     flex: 1,

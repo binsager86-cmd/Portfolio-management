@@ -19,7 +19,9 @@ import { AppErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { NetworkBanner } from "@/components/ui/NetworkBanner";
 import { ToastProvider } from "@/components/ui/ToastProvider";
 import { useAuthCacheSync } from "@/hooks/useAuthCacheSync";
+import { useOfflineSync } from "@/hooks/useOfflineSync";
 import { useSessionGuard } from "@/hooks/useSessionGuard";
+import { analytics } from "@/lib/analytics";
 import i18n from "@/lib/i18n/config";
 import { queryClient } from "@/lib/queryClient";
 import { getStockList } from "@/services/api";
@@ -110,6 +112,7 @@ function RootLayoutNav() {
     async function init() {
       hydrateTheme();
       hydrateUserPrefs();
+      analytics.init();
 
       // Check for Google OAuth redirect (web only)
       if (Platform.OS === "web" && typeof window !== "undefined") {
@@ -211,8 +214,8 @@ function RootLayoutNav() {
     <SafeAreaProvider>
     <View style={{ flex: 1, direction: language === "ar" ? "rtl" : "ltr" }}>
     <StatusBar style={themeMode === "dark" ? "light" : "dark"} />
-    <NetworkBanner />
     <QueryClientProvider client={queryClient}>
+      <OfflineSyncProvider />
       <AuthCacheSyncProvider />
       <PaperProvider theme={paperTheme}>
         <ThemeProvider value={buildNavTheme(themeMode)}>
@@ -239,4 +242,10 @@ function RootLayoutNav() {
 function AuthCacheSyncProvider() {
   useAuthCacheSync();
   return null;
+}
+
+/** Runs useOfflineSync + renders NetworkBanner inside QueryClientProvider. */
+function OfflineSyncProvider() {
+  const isOffline = useOfflineSync();
+  return <NetworkBanner isOffline={isOffline} />;
 }
