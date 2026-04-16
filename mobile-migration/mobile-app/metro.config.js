@@ -6,7 +6,7 @@ const path = require("path");
 const config = getDefaultConfig(__dirname);
 
 // Optimize JS transformer for production builds
-config.transformer.minifierPath = "terser";
+config.transformer.minifierPath = require.resolve("./metro-terser-minifier");
 config.transformer.minifierConfig = {
   compress: { drop_console: true, drop_debugger: true },
   mangle: { toplevel: true },
