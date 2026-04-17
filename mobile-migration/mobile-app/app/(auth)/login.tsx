@@ -31,6 +31,7 @@ import {
 import { useGoogleSignIn } from "@/hooks/useGoogleSignIn";
 import { useResponsive } from "@/hooks/useResponsive";
 import { useWebMeta } from "@/hooks/useWebMeta";
+import { trackLogin } from "@/lib/gtag";
 import { loginSchema, type LoginFormData } from "@/lib/validationSchemas";
 import { useAuthStore } from "@/services/authStore";
 import { useThemeStore } from "@/services/themeStore";
@@ -109,6 +110,7 @@ export default function LoginScreen() {
     try {
       const ok = await login(data.email.trim(), data.password);
       if (ok) {
+        trackLogin("email");
         router.replace("/(tabs)");
       }
     } finally {
@@ -137,6 +139,7 @@ export default function LoginScreen() {
         if (__DEV__) console.log("[Login] Got token, sending to backend…");
         const ok = await googleSignIn(result.token);
         if (ok) {
+          trackLogin("google");
           router.replace("/(tabs)");
         }
       } else if (!result.cancelled) {

@@ -19,6 +19,7 @@ import { MobileDrawer } from "@/components/MobileDrawer";
 import WebSidebar from "@/components/WebSidebar";
 import { AnimatedTabBar } from "@/components/ui/AnimatedTabBar";
 import { useResponsive } from "@/hooks/useResponsive";
+import { trackEvent } from "@/lib/gtag";
 import { useAuthStore } from "@/services/authStore";
 import { useThemeStore } from "@/services/themeStore";
 import { ExpertiseLevel, useUserPrefsStore } from "@/src/store/userPrefsStore";
@@ -93,6 +94,11 @@ export default function TabLayout() {
               />
             )
           }
+          screenListeners={{
+            tabPress: (e) => {
+              trackEvent("tab_press", "navigation", e.target?.split("-")[0]);
+            },
+          }}
           screenOptions={{
             // Hide default tab bar (we use custom AnimatedTabBar)
             tabBarStyle: showSidebar || Platform.OS === "web"

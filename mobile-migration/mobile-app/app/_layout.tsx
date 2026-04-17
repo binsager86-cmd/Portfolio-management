@@ -20,6 +20,7 @@ import { NetworkBanner } from "@/components/ui/NetworkBanner";
 import { ToastProvider } from "@/components/ui/ToastProvider";
 import { useAuthCacheSync } from "@/hooks/useAuthCacheSync";
 import { useOfflineSync } from "@/hooks/useOfflineSync";
+import { usePageViewTracking } from "@/hooks/usePageViewTracking";
 import { useSessionGuard } from "@/hooks/useSessionGuard";
 import { analytics } from "@/lib/analytics";
 import i18n from "@/lib/i18n/config";
@@ -104,6 +105,9 @@ function RootLayoutNav() {
 
   // ── Session guard: periodic heartbeat + focus re-validation ────
   useSessionGuard();
+
+  // ── Google Analytics: track page views on route changes (web) ──
+  usePageViewTracking();
 
   // ── Single init effect: theme → OAuth hash check → hydration ───
   // Must be one sequential async flow so nothing can redirect

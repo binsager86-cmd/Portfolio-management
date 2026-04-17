@@ -32,6 +32,7 @@ import { useResponsive } from "@/hooks/useResponsive";
 import { useWebMeta } from "@/hooks/useWebMeta";
 import { analytics } from "@/lib/analytics";
 import { validateEnv } from "@/lib/env";
+import { trackSignUp } from "@/lib/gtag";
 import { registerSchema, type RegisterFormData } from "@/lib/validationSchemas";
 import { useAuthStore } from "@/services/authStore";
 import { useThemeStore } from "@/services/themeStore";
@@ -149,6 +150,7 @@ export default function RegisterScreen() {
       );
       if (ok) {
         analytics.logEvent("registration_completed", { method: "email" });
+        trackSignUp("email");
         try {
           // On web, new users see onboarding after registration (not before).
           // On native, onboarding was already shown pre-auth so go to root.
@@ -178,6 +180,7 @@ export default function RegisterScreen() {
         const ok = await googleSignIn(result.token);
         if (ok) {
           analytics.logEvent("registration_completed", { method: "google" });
+          trackSignUp("google");
           router.replace(Platform.OS === "web" ? "/(onboarding)/welcome" : "/");
         }
       } else if (!result.cancelled) {
