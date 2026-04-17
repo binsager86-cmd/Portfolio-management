@@ -1,0 +1,58 @@
+# Python virtual environment
+.venv/
+
+# dependencies
+node_modules/
+
+# Expo
+.expo/
+dist/
+web-build/
+
+# Native
+.kotlin/
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# Metro
+.metro-health-check*
+
+# debug
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# macOS
+.DS_Store
+*.pem
+
+# Environment variables
+.env
+.env.*
+.env*.local
+!.env.example
+
+# typescript
+*.tsbuildinfo
+
+# generated native folders
+/ios
+/android
+
+# test / debug scripts
+_*.py
+_*.mjs
+*-audit.txt
+
+# misc
+dist_test/
+__tests__/
+__mocks__/
+e2e/
+jest.config.js
+jest.setup.js
+test-results.json

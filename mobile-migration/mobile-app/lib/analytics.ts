@@ -1,8 +1,13 @@
 /**
  * Analytics & Error Tracking
  *
- * Uses @sentry/react-native when installed and configured via
- * EXPO_PUBLIC_SENTRY_DSN. Falls back to console-only logging.
+ * Provides a unified analytics API. When @sentry/react-native is
+ * installed and EXPO_PUBLIC_SENTRY_DSN is set, errors and breadcrumbs
+ * are forwarded to Sentry. Otherwise everything is console-only.
+ *
+ * To enable Sentry:
+ *   1. npm install @sentry/react-native @sentry/core
+ *   2. Set EXPO_PUBLIC_SENTRY_DSN in your env
  *
  * Usage:
  *   analytics.logEvent("registration_attempted", { method: "email" });
@@ -11,7 +16,8 @@
 
 type EventParams = Record<string, string | number | boolean | undefined>;
 
-let Sentry: typeof import("@sentry/react-native") | null = null;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let Sentry: any = null;
 
 /** Call once at app startup (before navigation mounts). */
 async function init(): Promise<void> {
@@ -22,7 +28,8 @@ async function init(): Promise<void> {
   }
 
   try {
-    Sentry = await import("@sentry/react-native");
+    // Dynamic require so Metro doesn't fail when the package isn't installed
+    Sentry = require("@sentry/react-native");
     Sentry.init({
       dsn,
       tracesSampleRate: __DEV__ ? 1.0 : 0.2,

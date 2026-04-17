@@ -15,7 +15,7 @@
 import { withErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { ErrorScreen } from "@/components/ui/ErrorScreen";
 import { TradingSkeleton } from "@/components/ui/PageSkeletons";
-import { useTradingSummary } from "@/hooks/queries";
+import { useRealizedProfit, useRiskMetrics, useTradingSummary } from "@/hooks/queries";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { useResponsive } from "@/hooks/useResponsive";
 import { fmtNum } from "@/lib/currency";
@@ -59,6 +59,9 @@ import {
 } from "@/components/trading/TradingEditableRow";
 import { FilterChip, PORTFOLIOS, TXN_TYPES } from "@/components/trading/TradingFilters";
 import { TradingSummaryCards } from "@/components/trading/TradingSummary";
+import { KpiCard } from "@/components/portfolio/KpiWidgets";
+import { GLOSSARY, InfoTip } from "@/components/ui/InfoTip";
+import { formatCurrency } from "@/lib/currency";
 import type { SortDir } from "@/components/trading/TradingTable";
 import {
     HeaderCell,
@@ -73,7 +76,7 @@ import {
 
 function TradingScreen() {
   const { colors } = useThemeStore();
-  const { isDesktop, fonts } = useResponsive();
+  const { isDesktop, fonts, spacing } = useResponsive();
   const { t } = useTranslation();
   const queryClient = useQueryClient();
 
@@ -89,6 +92,9 @@ function TradingScreen() {
   const debouncedDateTo = useDebouncedValue(dateTo);
 
   const hasActiveFilters = !!(portfolios.length || txnTypes.length || dateFrom || dateTo || search);
+
+  const { data: riskData } = useRiskMetrics();
+  const { data: realizedData } = useRealizedProfit();
 
   const clearAllFilters = useCallback(() => {
     setPortfolios([]);
@@ -400,6 +406,52 @@ function TradingScreen() {
 
       {/* Summary metrics */}
       {summary && <TradingSummaryCards summary={summary} dateFrom={dateFrom} dateTo={dateTo} />}
+
+      {/* ── Risk Metrics ──────────────────────────────────── */}
+      {riskData && (
+        <View style={{ paddingHorizontal: spacing?.pagePx ?? 16 }}>
+          <Text style={[s.sectionTitle, { color: colors.textPrimary }]}>
+            <FontAwesome name="shield" size={16} color={colors.accentPrimary} /> {t('portfolioAnalysis.riskMetrics')}
+          </Text>
+          <View style={s.kpiGrid}>
+            <KpiCard label={t('portfolioAnalysis.sharpeRatio')} value={riskData.sharpe_ratio.toFixed(3)} colors={colors} />
+            <InfoTip term="Sharpe Ratio" definition={GLOSSARY["Sharpe Ratio"]} />
+            <KpiCard label={t('portfolioAnalysis.sortinoRatio')} value={riskData.sortino_ratio.toFixed(3)} colors={colors} />
+            <InfoTip term="Sortino Ratio" definition={GLOSSARY["Sortino Ratio"]} />
+          </View>
+        </View>
+      )}
+
+      {/* ── Realized Profit ───────────────────────────────── */}
+      {realizedData && (
+        <View style={{ paddingHorizontal: spacing?.pagePx ?? 16 }}>
+          <Text style={[s.sectionTitle, { color: colors.textPrimary }]}>
+            <FontAwesome name="check-circle" size={16} color={colors.accentPrimary} /> {t('portfolioAnalysis.realizedProfit')}
+          </Text>
+          <View style={s.kpiGrid}>
+            <KpiCard label={t('portfolioAnalysis.totalRealized')} value={formatCurrency(realizedData.total_realized_kwd, "KWD")} color={realizedData.total_realized_kwd >= 0 ? colors.success : colors.danger} colors={colors} />
+            <KpiCard label={t('portfolioAnalysis.profit')} value={formatCurrency(realizedData.total_profit_kwd, "KWD")} color={colors.success} colors={colors} />
+            <KpiCard label={t('portfolioAnalysis.loss')} value={formatCurrency(realizedData.total_loss_kwd, "KWD")} color={colors.danger} colors={colors} />
+          </View>
+
+          {realizedData.details.length > 0 && (
+            <View style={[s.detailTable, { borderColor: colors.borderColor, marginTop: 8 }]}>
+              <View style={[s.detailRow, { backgroundColor: colors.bgSecondary, borderBottomColor: colors.borderColor }]}>
+                <Text style={[s.detailCell, { color: colors.textSecondary, fontWeight: "700", flex: 2 }]}>{t('portfolioAnalysis.symbol')}</Text>
+                <Text style={[s.detailCell, { color: colors.textSecondary, fontWeight: "700" }]}>{t('portfolioAnalysis.date')}</Text>
+                <Text style={[s.detailCell, { color: colors.textSecondary, fontWeight: "700" }]}>{t('portfolioAnalysis.plKWD')}</Text>
+              </View>
+              {realizedData.details.slice(0, 30).map((d) => (
+                <View key={d.id} style={[s.detailRow, { borderBottomColor: colors.borderColor }]}>
+                  <Text style={[s.detailCell, { color: colors.textPrimary, flex: 2 }]}>{d.symbol}</Text>
+                  <Text style={[s.detailCell, { color: colors.textSecondary }]}>{d.txn_date}</Text>
+                  <Text style={[s.detailCell, { color: d.realized_pnl_kwd >= 0 ? colors.success : colors.danger }]}>{formatCurrency(d.realized_pnl_kwd, "KWD")}</Text>
+                </View>
+              ))}
+            </View>
+          )}
+        </View>
+      )}
 
       {/* Section header: Filters */}
       <View style={[s.sectionHeader, { borderBottomColor: colors.borderColor }]}>
@@ -1089,6 +1141,12 @@ const s = StyleSheet.create({
   footerValue: { fontSize: 16, fontWeight: "700" },
   footerLabel: { fontSize: 10, marginTop: 1 },
   footerDivider: { width: 1, height: 24 },
+
+  // Risk Metrics / Realized Profit
+  kpiGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  detailTable: { borderWidth: 1, borderRadius: 8, overflow: "hidden" as const },
+  detailRow: { flexDirection: "row", paddingVertical: 10, paddingHorizontal: 12, borderBottomWidth: StyleSheet.hairlineWidth },
+  detailCell: { flex: 1, fontSize: 13 },
 });
 
 export default withErrorBoundary(TradingScreen, "Unable to load Trading. Please try again.");

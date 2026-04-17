@@ -167,13 +167,16 @@ export function HoldingRow({
   colors,
   isEven,
   onCompanyPress,
+  columns,
 }: {
   holding: Holding;
   colors: ThemePalette;
   isEven: boolean;
   onCompanyPress?: (holding: Holding) => void;
+  columns?: ColDef[];
 }) {
   const { t } = useTranslation();
+  const cols = columns ?? TABLE_COLUMNS;
   const rowBg = isEven ? "transparent" : colors.bgCardHover + "30";
   return (
     <View
@@ -182,7 +185,7 @@ export function HoldingRow({
         { backgroundColor: rowBg, borderBottomColor: colors.borderColor },
       ]}
     >
-      {TABLE_COLUMNS.map((col) =>
+      {cols.map((col) =>
         col.key === "company" && onCompanyPress ? (
           <Pressable
             key={col.key}

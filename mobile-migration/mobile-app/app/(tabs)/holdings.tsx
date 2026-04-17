@@ -30,6 +30,8 @@ import {
 } from "@/src/features/holdings/components/HoldingsDataGrid";
 import { StockMergeModal } from "@/src/features/holdings/components/StockMergeModal";
 import {
+  SUMMARY_COLUMNS,
+  SUMMARY_TABLE_WIDTH,
   TABLE_COLUMNS,
   TOTAL_TABLE_WIDTH,
   useHoldingsView,
@@ -68,6 +70,10 @@ export default function HoldingsScreen() {
   } = useHoldingsView();
 
   const [selectedHolding, setSelectedHolding] = useState<Holding | null>(null);
+  const [viewMode, setViewMode] = useState<"summary" | "detailed">("summary");
+
+  const activeColumns = viewMode === "summary" ? SUMMARY_COLUMNS : TABLE_COLUMNS;
+  const activeTableWidth = viewMode === "summary" ? SUMMARY_TABLE_WIDTH : TOTAL_TABLE_WIDTH;
 
   const { data: cashData, refetch: refetchCash } = useCashBalances();
 
@@ -170,6 +176,33 @@ export default function HoldingsScreen() {
             </TouchableOpacity>
           </View>
 
+          {/* Summary / Detailed view toggle */}
+          <View style={[s.viewToggleRow, { marginHorizontal: spacing.pagePx }]}>
+            {(["summary", "detailed"] as const).map((mode) => (
+              <Pressable
+                key={mode}
+                onPress={() => setViewMode(mode)}
+                style={[
+                  s.viewToggleBtn,
+                  {
+                    backgroundColor: viewMode === mode ? colors.accentPrimary : colors.bgCard,
+                    borderColor: viewMode === mode ? colors.accentPrimary : colors.borderColor,
+                  },
+                ]}
+              >
+                <FontAwesome
+                  name={mode === "summary" ? "list" : "table"}
+                  size={12}
+                  color={viewMode === mode ? "#fff" : colors.textMuted}
+                  style={{ marginRight: 6 }}
+                />
+                <Text style={{ color: viewMode === mode ? "#fff" : colors.textSecondary, fontSize: 13, fontWeight: "600" }}>
+                  {mode === "summary" ? t("holdings.summary", "Summary") : t("holdings.detailed", "Detailed")}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+
           {/* Holdings table — ResponsiveDataTable auto-switches to cards on phone */}
           <View style={{ marginHorizontal: spacing.pagePx, marginTop: 4, marginBottom: UITokens.spacing.lg }}>
             <ResponsiveDataTable<Holding>
@@ -188,11 +221,11 @@ export default function HoldingsScreen() {
                     },
                   ]}
                 >
-                  <ScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={{ minWidth: TOTAL_TABLE_WIDTH }}>
-                    <View style={{ width: TOTAL_TABLE_WIDTH }}>
+                  <ScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={{ minWidth: activeTableWidth }}>
+                    <View style={{ width: activeTableWidth }}>
                       {/* Header */}
                       <View style={[ts.headerRow, { borderBottomColor: colors.borderColor, backgroundColor: colors.bgSecondary }]}>
-                        {TABLE_COLUMNS.map((col) => (
+                        {activeColumns.map((col) => (
                           <HeaderCell key={col.key} col={col} colors={colors} sortCol={sortCol} sortDir={sortDir} onSort={onSort} />
                         ))}
                       </View>
@@ -205,6 +238,7 @@ export default function HoldingsScreen() {
                           colors={colors}
                           isEven={idx % 2 === 0}
                           onCompanyPress={(holding) => setSelectedHolding(holding)}
+                          columns={activeColumns}
                         />
                       ))}
 
@@ -221,7 +255,7 @@ export default function HoldingsScreen() {
                             },
                           ]}
                         >
-                          {TABLE_COLUMNS.map((col) => (
+                          {activeColumns.map((col) => (
                             <TotalCell key={col.key} col={col} totals={totals} colors={colors} />
                           ))}
                         </View>
@@ -338,6 +372,20 @@ const s = StyleSheet.create({
     minHeight: 36,
   },
   holdingsExportText: { color: "#10b981", fontSize: 13, fontWeight: "700" as const },
+  viewToggleRow: {
+    flexDirection: "row" as const,
+    gap: 8,
+    marginTop: 8,
+    marginBottom: 4,
+  },
+  viewToggleBtn: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
 });
 
 const donutStyles = StyleSheet.create({

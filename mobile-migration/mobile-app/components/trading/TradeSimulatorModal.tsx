@@ -6,7 +6,7 @@
  */
 
 import type { ThemePalette } from "@/constants/theme";
-import { useHoldings, usePortfolioOverview } from "@/hooks/queries";
+import { useHoldings, usePortfolioOverview, useStockList } from "@/hooks/queries";
 import { useAuth } from "@/hooks/useAuth";
 import { analytics } from "@/lib/analytics";
 import {
@@ -66,7 +66,9 @@ export function TradeSimulatorModal({ visible, onClose, initialSymbol }: Props) 
 
   const { data: holdingsResp } = useHoldings();
   const { data: overviewData } = usePortfolioOverview(user?.id);
+  const { data: stockListData } = useStockList("kuwait");
   const holdings = holdingsResp?.holdings ?? [];
+  const allStocks = stockListData?.stocks ?? [];
 
   const [symbol, setSymbol] = useState(initialSymbol ?? "");
   const [direction, setDirection] = useState<TradeDirection>("buy");
@@ -81,26 +83,28 @@ export function TradeSimulatorModal({ visible, onClose, initialSymbol }: Props) 
     [holdings, symbol],
   );
 
-  // Filter & sort holdings by search text
-  const filteredHoldings = useMemo(() => {
-    const sorted = [...holdings].sort((a, b) => a.symbol.localeCompare(b.symbol));
+  // Filter & sort all stocks by search text
+  const filteredStocks = useMemo(() => {
+    const sorted = [...allStocks].sort((a, b) => a.symbol.localeCompare(b.symbol));
     if (!stockSearchText.trim()) return sorted;
     const q = stockSearchText.toLowerCase();
     return sorted.filter(
-      (h) =>
-        h.symbol.toLowerCase().includes(q) ||
-        h.company.toLowerCase().includes(q),
+      (s) =>
+        s.symbol.toLowerCase().includes(q) ||
+        s.name.toLowerCase().includes(q),
     );
-  }, [holdings, stockSearchText]);
+  }, [allStocks, stockSearchText]);
 
-  const handleSelectHolding = useCallback(
-    (holding: typeof holdings[number]) => {
-      setSymbol(holding.symbol);
-      setPriceStr(String(holding.market_price));
+  const handleSelectStock = useCallback(
+    (stock: typeof allStocks[number]) => {
+      setSymbol(stock.symbol);
+      // Auto-fill price if user already holds this stock
+      const held = holdings.find((h) => h.symbol.toLowerCase() === stock.symbol.toLowerCase());
+      if (held) setPriceStr(String(held.market_price));
       setShowStockPicker(false);
       setStockSearchText("");
     },
-    [],
+    [holdings],
   );
 
   const result: SimulationResult | null = useMemo(() => {
@@ -244,55 +248,60 @@ export function TradeSimulatorModal({ visible, onClose, initialSymbol }: Props) 
                   nestedScrollEnabled
                   keyboardShouldPersistTaps="handled"
                 >
-                  {filteredHoldings.length === 0 ? (
+                  {filteredStocks.length === 0 ? (
                     <Text style={[s.stockListEmpty, { color: colors.textMuted }]}>
                       No stocks found
                     </Text>
                   ) : (
-                    filteredHoldings.map((h) => (
-                      <Pressable
-                        key={h.symbol}
-                        onPress={() => handleSelectHolding(h)}
-                        style={[
-                          s.stockListItem,
-                          {
-                            backgroundColor:
-                              h.symbol === symbol ? colors.accentPrimary + "15" : "transparent",
-                            borderBottomColor: colors.borderColor,
-                            flexDirection: isRTL ? "row-reverse" : "row",
-                          },
-                        ]}
-                        accessibilityRole="button"
-                      >
-                        <View style={{ flex: 1 }}>
-                          <Text
-                            style={[s.stockListSymbol, { color: colors.textPrimary }]}
-                            numberOfLines={1}
-                          >
-                            {h.symbol}
-                          </Text>
-                          <Text
-                            style={[s.stockListCompany, { color: colors.textMuted }]}
-                            numberOfLines={1}
-                          >
-                            {h.company}
-                          </Text>
-                        </View>
-                        <View style={{ alignItems: isRTL ? "flex-start" : "flex-end" }}>
-                          <Text style={[s.stockListPrice, { color: colors.textPrimary }]}>
-                            {fmt(h.market_price, 3)}
-                          </Text>
-                          <Text
-                            style={[
-                              s.stockListYield,
-                              { color: h.dividend_yield_on_cost_pct > 0 ? colors.success : colors.textMuted },
-                            ]}
-                          >
-                            Yield: {(h.dividend_yield_on_cost_pct ?? 0).toFixed(2)}%
-                          </Text>
-                        </View>
-                      </Pressable>
-                    ))
+                    filteredStocks.map((stock) => {
+                      const held = holdings.find((h) => h.symbol.toLowerCase() === stock.symbol.toLowerCase());
+                      return (
+                        <Pressable
+                          key={stock.symbol}
+                          onPress={() => handleSelectStock(stock)}
+                          style={[
+                            s.stockListItem,
+                            {
+                              backgroundColor:
+                                stock.symbol === symbol ? colors.accentPrimary + "15" : "transparent",
+                              borderBottomColor: colors.borderColor,
+                              flexDirection: isRTL ? "row-reverse" : "row",
+                            },
+                          ]}
+                          accessibilityRole="button"
+                        >
+                          <View style={{ flex: 1 }}>
+                            <Text
+                              style={[s.stockListSymbol, { color: colors.textPrimary }]}
+                              numberOfLines={1}
+                            >
+                              {stock.symbol}
+                            </Text>
+                            <Text
+                              style={[s.stockListCompany, { color: colors.textMuted }]}
+                              numberOfLines={1}
+                            >
+                              {stock.yf_ticker} - {stock.name}
+                            </Text>
+                          </View>
+                          {held && (
+                            <View style={{ alignItems: isRTL ? "flex-start" : "flex-end" }}>
+                              <Text style={[s.stockListPrice, { color: colors.textPrimary }]}>
+                                {fmt(held.market_price, 3)}
+                              </Text>
+                              <Text
+                                style={[
+                                  s.stockListYield,
+                                  { color: held.dividend_yield_on_cost_pct > 0 ? colors.success : colors.textMuted },
+                                ]}
+                              >
+                                Yield: {(held.dividend_yield_on_cost_pct ?? 0).toFixed(2)}%
+                              </Text>
+                            </View>
+                          )}
+                        </Pressable>
+                      );
+                    })
                   )}
                 </ScrollView>
               </View>

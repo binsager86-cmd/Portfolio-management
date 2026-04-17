@@ -19,7 +19,6 @@
     },
     "android": {
       "package": "com.portfoliotracker.app",
-      "usesCleartextTraffic": true,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
@@ -35,17 +34,17 @@
     "plugins": [
       "expo-router",
       "expo-secure-store",
-      "expo-localization",
-      "@react-native-firebase/app"
+      "expo-localization"
     ],
     "experiments": {
       "typedRoutes": true
     },
     "extra": {
       "eas": {
-        "projectId": "YOUR_EAS_PROJECT_ID"
-      }
+        "projectId": "1e834458-c512-4eef-8b3d-f092ef8c2e60"
+      },
+      "router": {}
     },
-    "owner": "YOUR_EXPO_USERNAME"
+    "owner": "sagerhalsager"
   }
 }
