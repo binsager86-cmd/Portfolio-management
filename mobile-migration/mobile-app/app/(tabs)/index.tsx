@@ -24,6 +24,7 @@ import { PortfolioCard } from "@/components/portfolio/PortfolioCard";
 import { TradeSimulatorModal } from "@/components/trading/TradeSimulatorModal";
 import { withErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { ErrorScreen } from "@/components/ui/ErrorScreen";
+import { LastUpdated } from "@/components/ui/LastUpdated";
 import { MetricCard } from "@/components/ui/MetricCard";
 import { OverviewSkeleton } from "@/components/ui/OverviewSkeleton";
 import {
@@ -191,6 +192,8 @@ function OverviewScreen() {
     isError,
     error,
     refetch,
+    dataUpdatedAt,
+    isFetching,
   } = usePortfolioOverview(user?.id);
 
   // Additional data for parity with Streamlit — fire in parallel once overview loads
@@ -384,9 +387,12 @@ function OverviewScreen() {
     >
       {/* ── Inline scrollable header ── */}
       <View style={styles.inlineHeader}>
-        <Text style={[styles.inlineHeaderTitle, { color: colors.textPrimary }]}>
-          {t('nav.overview')}
-        </Text>
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.inlineHeaderTitle, { color: colors.textPrimary }]}>
+            {t('nav.overview')}
+          </Text>
+          <LastUpdated timestamp={dataUpdatedAt} isFetching={isFetching} />
+        </View>
         <Pressable onPress={toggle} style={styles.inlineHeaderBtn}>
           {({ pressed }) => (
             <FontAwesome
@@ -931,9 +937,9 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   inlineHeaderBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     justifyContent: "center",
     alignItems: "center",
   },

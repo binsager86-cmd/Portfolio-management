@@ -1021,10 +1021,12 @@ const s = StyleSheet.create({
     marginBottom: 8,
   },
   chip: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
     borderRadius: 16,
     borderWidth: 1,
+    minHeight: 44,
+    justifyContent: "center",
   },
   chipText: { fontSize: 12, fontWeight: "600" },
 
@@ -1118,9 +1120,9 @@ const s = StyleSheet.create({
     gap: 16,
   },
   pageBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",

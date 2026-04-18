@@ -316,7 +316,7 @@ export default function AddStockScreen() {
                 <FlatList
                   data={filteredStocks.slice(0, 50)}
                   keyExtractor={(item) => item.symbol}
-                  style={{ maxHeight: 260 }}
+                  style={{ maxHeight: 300 }}
                   keyboardShouldPersistTaps="handled"
                   renderItem={({ item }) => {
                     const dup = existingSymbols.has(item.symbol.toUpperCase());

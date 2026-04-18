@@ -235,14 +235,26 @@ export default function AddTransactionScreen() {
           style={styles.progressBar}
         />
 
-        {/* ── Step indicator ── */}
+        {/* ── Step indicator with labels ── */}
         <View style={styles.stepRow}>
-          {[1, 2, 3].map((s) => (
-            <View
-              key={s}
-              style={[styles.stepDot, { backgroundColor: s <= step ? colors.accentPrimary : colors.bgSecondary }]}
-            >
-              <Text style={[styles.stepNum, { color: s <= step ? "#fff" : colors.textMuted }]}>{s}</Text>
+          {([
+            { num: 1, label: t("addTransaction.stepPortfolio", "Portfolio") },
+            { num: 2, label: t("addTransaction.stepDetails", "Details") },
+            { num: 3, label: t("addTransaction.stepReview", "Review") },
+          ] as const).map(({ num, label }) => (
+            <View key={num} style={styles.stepItem}>
+              <View
+                style={[styles.stepDot, { backgroundColor: num <= step ? colors.accentPrimary : colors.bgSecondary }]}
+              >
+                {num < step ? (
+                  <FontAwesome name="check" size={12} color="#fff" />
+                ) : (
+                  <Text style={[styles.stepNum, { color: num <= step ? "#fff" : colors.textMuted }]}>{num}</Text>
+                )}
+              </View>
+              <Text style={[styles.stepLabel, { color: num <= step ? colors.textPrimary : colors.textMuted }]}>
+                {label}
+              </Text>
             </View>
           ))}
           <View style={[styles.stepLine, { backgroundColor: colors.borderColor }]} />
@@ -292,20 +304,24 @@ export default function AddTransactionScreen() {
 
 const styles = StyleSheet.create({
   progressBar: {
-    height: 4,
-    borderRadius: 2,
+    height: 6,
+    borderRadius: 3,
     marginBottom: UITokens.spacing.md,
   },
   stepRow: {
-    flexDirection: "row", alignItems: "center", justifyContent: "center",
-    gap: 16, marginBottom: 20, position: "relative",
+    flexDirection: "row", alignItems: "flex-start", justifyContent: "center",
+    gap: 32, marginBottom: 20, position: "relative",
+  },
+  stepItem: {
+    alignItems: "center", zIndex: 1, gap: 4,
   },
   stepDot: {
-    width: 28, height: 28, borderRadius: 14,
-    alignItems: "center", justifyContent: "center", zIndex: 1,
+    width: 32, height: 32, borderRadius: 16,
+    alignItems: "center", justifyContent: "center",
   },
-  stepNum: { fontSize: 13, fontWeight: "700" },
-  stepLine: { position: "absolute", height: 2, left: "20%", right: "20%", top: 13 },
+  stepNum: { fontSize: 14, fontWeight: "700" },
+  stepLabel: { fontSize: 11, fontWeight: "600" },
+  stepLine: { position: "absolute", height: 2, left: "20%", right: "20%", top: 16 },
   backBtn: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 12 },
   backText: { fontSize: 14, fontWeight: "600" },
 });

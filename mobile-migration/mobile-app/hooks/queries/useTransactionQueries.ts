@@ -38,6 +38,7 @@ export function useTransactions(params: {
         portfolio: params.portfolio,
         symbol: params.symbol,
       }),
+    placeholderData: (prev) => prev,
   });
 }
 

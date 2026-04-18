@@ -227,7 +227,7 @@ export function useHoldingsView() {
   const [sortCol, setSortCol] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<SortDir>("asc");
 
-  const { data: resp, isLoading, isError, error, refetch, isRefetching } = useHoldings(filter);
+  const { data: resp, isLoading, isError, error, refetch, isRefetching, isFetching, dataUpdatedAt } = useHoldings(filter);
 
   const onSort = useCallback((key: string) => {
     if (sortCol === key) {
@@ -268,7 +268,7 @@ export function useHoldingsView() {
   return {
     filter, setFilter,
     sortCol, sortDir, onSort,
-    resp, isLoading, isError, error, refetch, isRefetching,
+    resp, isLoading, isError, error, refetch, isRefetching, isFetching, dataUpdatedAt,
     sortedHoldings, totals, allocationData, depositTotals,
   };
 }

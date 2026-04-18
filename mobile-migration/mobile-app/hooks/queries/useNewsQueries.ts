@@ -90,6 +90,7 @@ export function useNewsHistory(options: {
     gcTime: 15 * 60_000,
     retry: 2,
     enabled: options.enabled !== false,
+    placeholderData: (prev) => prev,
   });
 }
 

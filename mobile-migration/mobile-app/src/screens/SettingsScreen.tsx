@@ -9,6 +9,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
 import React, { useState } from "react";
 import {
+    ActivityIndicator,
     Alert,
     Modal,
     Platform,
@@ -246,8 +247,12 @@ export default function SettingsScreen() {
                 placeholder={t('settings.name')}
                 placeholderTextColor={colors.textSecondary}
               />
-              <Pressable onPress={handleSaveName} disabled={nameMutation.isPending}>
-                <FontAwesome name="check" size={16} color={colors.accentPrimary} />
+              <Pressable onPress={handleSaveName} disabled={nameMutation.isPending} style={{ opacity: nameMutation.isPending ? 0.5 : 1 }}>
+                {nameMutation.isPending ? (
+                  <ActivityIndicator size="small" color={colors.accentPrimary} />
+                ) : (
+                  <FontAwesome name="check" size={16} color={colors.accentPrimary} />
+                )}
               </Pressable>
               <Pressable onPress={() => setIsEditingName(false)}>
                 <FontAwesome name="times" size={16} color={colors.textSecondary} />

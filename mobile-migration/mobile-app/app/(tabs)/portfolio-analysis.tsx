@@ -26,6 +26,7 @@ import {
 
 import { AllocationDonut, AllocationSlice } from "@/components/charts/AllocationDonut";
 import { withErrorBoundary } from "@/components/ui/ErrorBoundary";
+import { LastUpdated } from "@/components/ui/LastUpdated";
 import { ErrorScreen } from "@/components/ui/ErrorScreen";
 import { PortfolioAnalysisSkeleton } from "@/components/ui/PageSkeletons";
 import {
@@ -92,6 +93,8 @@ function PortfolioAnalysisScreen() {
     error: holdingsErr,
     refetch: refetchHoldings,
     isRefetching,
+    isFetching: holdingsFetching,
+    dataUpdatedAt: holdingsUpdatedAt,
   } = useHoldings(portfolioParam);
 
   usePerformance(portfolioParam, period);
@@ -201,6 +204,7 @@ function PortfolioAnalysisScreen() {
             colors={colors}
           />
         ))}
+        <LastUpdated timestamp={holdingsUpdatedAt} isFetching={holdingsFetching} />
       </View>
 
       {/* ── Scrollable content ───────────────────────────────────── */}

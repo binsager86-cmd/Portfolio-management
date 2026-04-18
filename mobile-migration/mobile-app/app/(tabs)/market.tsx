@@ -9,6 +9,7 @@
  *  • Sector Performance table
  */
 
+import { LastUpdated } from "@/components/ui/LastUpdated";
 import { useMarketRefresh, useMarketSummary } from "@/hooks/queries/useMarketQueries";
 import { useResponsive } from "@/hooks/useResponsive";
 import type { MarketIndex, MarketMover, PerMarketSummary, SectorIndex } from "@/services/market/marketApi";
@@ -471,7 +472,7 @@ function SectorTable({
 export default function MarketScreen() {
   const { colors } = useThemeStore();
   const { isDesktop, isPhone, spacing, maxContentWidth } = useResponsive();
-  const { data, isLoading, isError, refetch, isFetching } = useMarketSummary();
+  const { data, isLoading, isError, refetch, isFetching, dataUpdatedAt } = useMarketSummary();
   const refreshMarket = useMarketRefresh();
   const [refreshing, setRefreshing] = useState(false);
   const { t } = useTranslation();
@@ -538,6 +539,7 @@ export default function MarketScreen() {
               {data.status === "open" ? t("market.marketOpen") : t("market.marketClosed")} · {data.date || "—"}
             </Text>
           </View>
+          <LastUpdated timestamp={dataUpdatedAt} isFetching={isFetching} />
         </View>
         <Pressable
           onPress={onRefresh}
@@ -693,9 +695,9 @@ const s = StyleSheet.create({
     fontWeight: "500",
   },
   refreshBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     alignItems: "center",
     justifyContent: "center",
   },

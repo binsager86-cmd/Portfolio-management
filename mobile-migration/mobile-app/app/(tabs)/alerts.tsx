@@ -421,7 +421,7 @@ function AddAlertModal({
 
                           {filteredStocks.length > 0 ? (
                             <ScrollView
-                              style={{ maxHeight: 220 }}
+                              style={{ maxHeight: 280 }}
                               nestedScrollEnabled
                               keyboardShouldPersistTaps="handled"
                             >
@@ -652,8 +652,8 @@ const st = StyleSheet.create({
     fontStyle: "italic",
   },
   deleteBtn: {
-    width: 40,
-    height: 40,
+    width: 44,
+    height: 44,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -696,8 +696,8 @@ const st = StyleSheet.create({
     fontWeight: "700",
   },
   modalCloseBtn: {
-    width: 36,
-    height: 36,
+    width: 44,
+    height: 44,
     alignItems: "center",
     justifyContent: "center",
   },

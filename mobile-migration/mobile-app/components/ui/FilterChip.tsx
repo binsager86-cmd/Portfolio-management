@@ -35,7 +35,7 @@ const styles = StyleSheet.create({
     paddingVertical: UITokens.spacing.sm,
     borderRadius: UITokens.filter.chipRadius,
     borderWidth: UITokens.card.borderWidth,
-    minHeight: UITokens.filter.chipHeight,
+    minHeight: 44,
     justifyContent: "center",
   },
   chipText: { fontSize: UITokens.filter.chipFontSize, fontWeight: UITokens.filter.chipFontWeight },

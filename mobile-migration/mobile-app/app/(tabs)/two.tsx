@@ -405,7 +405,7 @@ const st = StyleSheet.create({
     borderBottomWidth: 1,
   },
   sortLabel: { fontSize: 12, marginRight: 2 },
-  sortChip: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12, borderWidth: 1, minHeight: 36 },
+  sortChip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12, borderWidth: 1, minHeight: 44 },
   sortChipText: { fontSize: 12, fontWeight: "600" },
 
   viewToggle: {

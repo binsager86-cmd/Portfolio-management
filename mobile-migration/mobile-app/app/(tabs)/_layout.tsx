@@ -12,7 +12,7 @@
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import { Tabs, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Platform, Pressable, StyleSheet, View } from "react-native";
+import { BackHandler, Platform, Pressable, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { MobileDrawer } from "@/components/MobileDrawer";
@@ -109,6 +109,23 @@ export default function TabLayout() {
     }
   }, [token, isLoading]);
 
+  // Android hardware back — go back if possible, otherwise let system handle
+  useEffect(() => {
+    if (Platform.OS !== "android") return;
+    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+      if (drawerOpen) {
+        setDrawerOpen(false);
+        return true;
+      }
+      if (router.canGoBack()) {
+        router.back();
+        return true;
+      }
+      return false; // let Android handle (exit app)
+    });
+    return () => sub.remove();
+  }, [drawerOpen, router]);
+
   return (
     <View style={[ls.root, { backgroundColor: colors.bgPrimary }]}>
       {/* ── Sidebar (web tablet/desktop only) ── */}
@@ -122,27 +139,19 @@ export default function TabLayout() {
       {/* ── Content area ── */}
       <View style={ls.content}>
         <Tabs
-          tabBar={(props) =>
-            showSidebar || Platform.OS === "web" ? null : (
-              <AnimatedTabBar
-                {...props}
-                colors={colors}
-                insetBottom={insets.bottom}
-              />
-            )
-          }
+          tabBar={(props) => null}
           screenListeners={{
             tabPress: (e) => {
               trackEvent("tab_press", "navigation", e.target?.split("-")[0]);
             },
           }}
           screenOptions={{
-            // Hide default tab bar (we use custom AnimatedTabBar)
-            tabBarStyle: showSidebar || Platform.OS === "web"
-              ? { display: "none", height: 0, overflow: "hidden" as const }
-              : undefined,
+            // Bottom tabs are always hidden — navigation via sidebar (web) or drawer (native)
+            tabBarStyle: { display: "none", height: 0, overflow: "hidden" as const },
             tabBarHideOnKeyboard: true,
             lazy: true,
+            // Keep screens alive when switching tabs — preserves scroll position & state
+            freezeOnBlur: true,
             tabBarActiveTintColor: colors.accentPrimary,
             tabBarInactiveTintColor: colors.textMuted,
             // Screen transition animation

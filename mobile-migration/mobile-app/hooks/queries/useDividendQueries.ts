@@ -27,6 +27,7 @@ export function useDividends(page = 1, pageSize = 50) {
   return useQuery<DividendListResponse>({
     queryKey: dividendKeys.list(page),
     queryFn: () => getDividends({ page, page_size: pageSize }),
+    placeholderData: (prev) => prev,
   });
 }
 

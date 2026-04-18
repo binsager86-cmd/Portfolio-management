@@ -5,7 +5,11 @@
  *  - staleTime: 60s (data stays "fresh" for 60s before background refetch)
  *  - gcTime: 24h  (keep unused cache entries for offline resilience)
  *  - retry: skip 401/403s, max 2 attempts for transient errors
- *  - refetchOnWindowFocus: false (avoid jarring refetches on tab switch)
+ *  - refetchOnWindowFocus: "always" (refetch stale data when app gains focus)
+ *
+ * Stale-while-revalidate: screens render cached data instantly from MMKV,
+ * then silently refresh in the background. Combined with placeholderData
+ * on filtered queries, users almost never see blank screens.
  *
  * Persistence: MMKV on native, localStorage on web — queries survive
  * app restarts so screens render immediately while background refetches.

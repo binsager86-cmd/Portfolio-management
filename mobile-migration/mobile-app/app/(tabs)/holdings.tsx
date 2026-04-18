@@ -11,6 +11,7 @@ import { CashBalancesSection } from "@/components/portfolio/CashBalancesSection"
 import { KpiCard } from "@/components/portfolio/KpiWidgets";
 import { DataScreen } from "@/components/screens";
 import { FilterChip } from "@/components/ui/FilterChip";
+import { LastUpdated } from "@/components/ui/LastUpdated";
 import { HoldingsTableSkeleton } from "@/components/ui/PageSkeletons";
 import { ResponsiveDataTable, type DataColumn } from "@/components/ui/ResponsiveDataTable";
 import { UITokens } from "@/constants/uiTokens";
@@ -65,7 +66,7 @@ export default function HoldingsScreen() {
   const {
     filter, setFilter,
     sortCol, sortDir, onSort,
-    resp, isLoading, isError, error, refetch, isRefetching,
+    resp, isLoading, isError, error, refetch, isRefetching, isFetching, dataUpdatedAt,
     sortedHoldings, totals, allocationData, depositTotals,
   } = useHoldingsView();
 
@@ -109,7 +110,7 @@ export default function HoldingsScreen() {
               colors={colors}
             />
           ))}
-        </View>
+          <LastUpdated timestamp={dataUpdatedAt} isFetching={isFetching} />        </View>
 
         {/* ── Summary KPI Cards ───────────────────────────────── */}
         {resp && (
@@ -369,7 +370,7 @@ const s = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 8,
-    minHeight: 36,
+    minHeight: 44,
   },
   holdingsExportText: { color: "#10b981", fontSize: 13, fontWeight: "700" as const },
   viewToggleRow: {

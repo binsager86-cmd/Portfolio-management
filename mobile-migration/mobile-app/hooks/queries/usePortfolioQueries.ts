@@ -61,6 +61,7 @@ export function useHoldings(portfolio?: string) {
     refetchOnWindowFocus: true,
     retry: 2,
     retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 30_000),
+    placeholderData: (prev) => prev,
   });
 }
 
@@ -125,6 +126,7 @@ export function usePerformance(portfolio?: string, period?: string) {
   return useQuery<PerformanceData>({
     queryKey: portfolioKeys.performance(portfolio, period),
     queryFn: () => getPerformance({ portfolio, period }),
+    placeholderData: (prev) => prev,
   });
 }
 
