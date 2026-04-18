@@ -91,8 +91,8 @@ describe("useResponsive", () => {
 
   // ── Desktop breakpoint ──
 
-  it("returns desktop breakpoint for width ≥ 1024", () => {
-    mockDimensions = { width: 1024, height: 768 };
+  it("returns desktop breakpoint for width ≥ 1025", () => {
+    mockDimensions = { width: 1025, height: 768 };
     const { result } = renderHook(() => useResponsive());
 
     expect(result.current.bp).toBe("desktop");

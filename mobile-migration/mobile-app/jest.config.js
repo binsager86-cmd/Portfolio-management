@@ -8,6 +8,8 @@ module.exports = {
   moduleNameMapper: {
     "^@/(.*)$": "<rootDir>/$1",
     "^@react-native-async-storage/async-storage$": "<rootDir>/__mocks__/@react-native-async-storage/async-storage.js",
+    // expo/virtual/streams has a bug with Node 24 ReadableStream.cancel — use native Node streams
+    "expo/virtual/streams": "<rootDir>/__mocks__/expo-streams-shim.js",
   },
   testMatch: [
     "**/__tests__/**/*.(test|spec).(ts|tsx|js|jsx)",

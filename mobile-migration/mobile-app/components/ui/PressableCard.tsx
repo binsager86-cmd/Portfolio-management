@@ -7,6 +7,7 @@ import Animated, {
 } from "react-native-reanimated";
 
 import { UITokens } from "@/constants/uiTokens";
+import { useHaptics } from "@/hooks/useHaptics";
 import { useThemeStore } from "@/services/themeStore";
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
@@ -20,6 +21,7 @@ export const PressableCard: React.FC<{
   accessibilityLabel?: string;
 }> = ({ onPress, children, style, disabled, testID, accessibilityLabel }) => {
   const { colors } = useThemeStore();
+  const haptics = useHaptics();
   const scale = useSharedValue(1);
 
   const animatedStyle = useAnimatedStyle(() => ({
@@ -29,11 +31,7 @@ export const PressableCard: React.FC<{
   const handlePressIn = () => {
     if (disabled) return;
     scale.value = withSpring(0.97, { damping: 15, stiffness: 300 });
-    if (Platform.OS !== "web") {
-      import("expo-haptics").then((h) =>
-        h.impactAsync(h.ImpactFeedbackStyle.Light),
-      );
-    }
+    haptics.light();
   };
 
   const handlePressOut = () => {
@@ -49,11 +47,15 @@ export const PressableCard: React.FC<{
       testID={testID}
       accessibilityLabel={accessibilityLabel}
       accessibilityRole="button"
-      style={[
+      style={({ hovered }: any) => [
         styles.base,
         UITokens.shadows.card,
-        { backgroundColor: colors.bgCard },
+        { backgroundColor: hovered && !disabled ? colors.bgCardHover : colors.bgCard },
         animatedStyle,
+        Platform.OS === "web" && ({
+          cursor: onPress && !disabled ? "pointer" : "default",
+          transition: "background-color 0.15s, transform 0.15s",
+        } as any),
         style,
       ]}
     >

@@ -9,6 +9,7 @@
 import React from "react";
 import { View, Text, StyleSheet } from "react-native";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
+import { UITokens } from "@/constants/uiTokens";
 import { useThemeStore } from "@/services/themeStore";
 import { useResponsive } from "@/hooks/useResponsive";
 import type { ThemePalette } from "@/constants/theme";
@@ -79,7 +80,7 @@ export const MetricCard = React.memo(function MetricCard({
       {icon ? (
         <FontAwesome
           name={icon}
-          size={isPhone ? 18 : 20}
+          size={isPhone ? UITokens.metric.iconSize.phone : UITokens.metric.iconSize.desktop}
           color={accent}
           style={styles.icon}
         />
@@ -93,7 +94,7 @@ export const MetricCard = React.memo(function MetricCard({
           styles.label,
           {
             color: colors.textSecondary,
-            fontSize: isPhone ? 11 : 12,
+            fontSize: isPhone ? UITokens.metric.labelSize.phone : UITokens.metric.labelSize.desktop,
           },
         ]}
       >
@@ -106,7 +107,7 @@ export const MetricCard = React.memo(function MetricCard({
           styles.value,
           {
             color: trend ? trendColor(trend, colors) : colors.textPrimary,
-            fontSize: isPhone ? 15 : 17,
+            fontSize: isPhone ? UITokens.metric.valueSize.phone : UITokens.metric.valueSize.desktop,
           },
         ]}
         numberOfLines={1}
@@ -136,10 +137,10 @@ export const MetricCard = React.memo(function MetricCard({
 
 const styles = StyleSheet.create({
   card: {
-    borderRadius: 12,
-    padding: 16,
-    borderWidth: 1,
-    minHeight: 110,
+    borderRadius: UITokens.card.borderRadius,
+    padding: UITokens.card.padding,
+    borderWidth: UITokens.card.borderWidth,
+    minHeight: UITokens.metric.minHeight,
     overflow: "hidden",
   },
   accentBar: {
@@ -147,9 +148,9 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
     right: 0,
-    height: 3,
-    borderTopLeftRadius: 12,
-    borderTopRightRadius: 12,
+    height: UITokens.metric.accentBarHeight,
+    borderTopLeftRadius: UITokens.card.borderRadius,
+    borderTopRightRadius: UITokens.card.borderRadius,
   },
   icon: {
     marginBottom: 6,

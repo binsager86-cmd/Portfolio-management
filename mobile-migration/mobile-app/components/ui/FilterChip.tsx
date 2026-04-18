@@ -1,4 +1,5 @@
 import type { ThemePalette } from "@/constants/theme";
+import { UITokens } from "@/constants/uiTokens";
 import React from "react";
 import { Platform, Pressable, StyleSheet, Text } from "react-native";
 
@@ -30,12 +31,12 @@ export const FilterChip = React.memo(function FilterChip({
 
 const styles = StyleSheet.create({
   chip: {
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 20,
-    borderWidth: 1,
-    minHeight: 44,
+    paddingHorizontal: UITokens.filter.chipPaddingH,
+    paddingVertical: UITokens.spacing.sm,
+    borderRadius: UITokens.filter.chipRadius,
+    borderWidth: UITokens.card.borderWidth,
+    minHeight: UITokens.filter.chipHeight,
     justifyContent: "center",
   },
-  chipText: { fontSize: 13, fontWeight: "600" },
+  chipText: { fontSize: UITokens.filter.chipFontSize, fontWeight: UITokens.filter.chipFontWeight },
 });

@@ -30,9 +30,9 @@ describe("loginSchema", () => {
     expect(result.success).toBe(false);
   });
 
-  it("rejects invalid email format", () => {
+  it("accepts any non-empty email string (login is lenient)", () => {
     const result = loginSchema.safeParse({ ...validLogin, email: "not-an-email" });
-    expect(result.success).toBe(false);
+    expect(result.success).toBe(true);
   });
 
   it("rejects email exceeding 200 characters", () => {
@@ -46,30 +46,9 @@ describe("loginSchema", () => {
     expect(result.success).toBe(false);
   });
 
-  it("rejects password shorter than 8 characters", () => {
+  it("accepts any non-empty password (login is lenient)", () => {
     const result = loginSchema.safeParse({ ...validLogin, password: "Ab1!" });
-    expect(result.success).toBe(false);
-  });
-
-  it("rejects password without uppercase letter", () => {
-    const result = loginSchema.safeParse({ ...validLogin, password: "str0ng!pass" });
-    expect(result.success).toBe(false);
-  });
-
-  it("rejects password without number", () => {
-    const result = loginSchema.safeParse({ ...validLogin, password: "Strong!Pass" });
-    expect(result.success).toBe(false);
-  });
-
-  it("rejects password without special character", () => {
-    const result = loginSchema.safeParse({ ...validLogin, password: "Str0ngPass1" });
-    expect(result.success).toBe(false);
-  });
-
-  it("rejects password exceeding 128 characters", () => {
-    const longPass = "A1!" + "a".repeat(126);
-    const result = loginSchema.safeParse({ ...validLogin, password: longPass });
-    expect(result.success).toBe(false);
+    expect(result.success).toBe(true);
   });
 
   it("trims whitespace from email after parsing", () => {

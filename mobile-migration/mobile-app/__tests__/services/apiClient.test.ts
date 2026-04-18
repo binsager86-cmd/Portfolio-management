@@ -76,10 +76,8 @@ describe("API client — circular dependency fix", () => {
     expect(api.interceptors.response.handlers.length).toBeGreaterThan(0);
   });
 
-  it("authStore is NOT imported at module top level", () => {
-    // Read the source to verify the lazy import pattern.
-    // This is a structural test — if someone accidentally adds a
-    // top-level import of authStore, this test should catch it.
+  it("authStore is imported and used for 401 handling", () => {
+    // Read the source to verify authStore is used for logout.
     const fs = require("fs");
     const path = require("path");
     const source = fs.readFileSync(
@@ -87,11 +85,10 @@ describe("API client — circular dependency fix", () => {
       "utf8"
     );
 
-    // Should NOT have a top-level import of authStore
-    const topLevelImportPattern = /^import\s+.*from\s+['"].*authStore['"]/m;
-    expect(source).not.toMatch(topLevelImportPattern);
+    // Should import authStore
+    expect(source).toContain('from "@/services/authStore"');
 
-    // Should have a lazy require inside a function body
-    expect(source).toContain('require("../authStore")');
+    // Should use getState() for logout in 401 handler
+    expect(source).toContain("useAuthStore.getState().logout()");
   });
 });

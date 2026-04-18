@@ -25,7 +25,7 @@ import { useSessionGuard } from "@/hooks/useSessionGuard";
 import { analytics } from "@/lib/analytics";
 import i18n from "@/lib/i18n/config";
 import { queryClient } from "@/lib/queryClient";
-import { getStockList } from "@/services/api";
+import { getOverview, getStockList } from "@/services/api";
 import { useAuthStore } from "@/services/authStore";
 import { registerPushToken } from "@/services/notifications/pushTokenService";
 import { useThemeStore } from "@/services/themeStore";
@@ -160,9 +160,18 @@ function RootLayoutNav() {
 
 
 
-  // Prefetch stock reference lists (static data) so dropdowns load instantly
+  // Prefetch critical data on login so first screens render instantly
   useEffect(() => {
     if (!token) return; // only after login
+
+    // Portfolio overview — the first thing the user sees
+    queryClient.prefetchQuery({
+      queryKey: ["portfolio-overview", undefined],
+      queryFn: getOverview,
+      staleTime: 30_000,
+    });
+
+    // Stock reference lists (static data) so dropdowns load instantly
     queryClient.prefetchQuery({
       queryKey: ["stock-list", "kuwait"],
       queryFn: () => getStockList({ market: "kuwait" }),

@@ -87,6 +87,13 @@ jest.mock("@/components/ui/ErrorScreen", () => ({
   },
 }));
 
+jest.mock("@/components/ui/PageSkeletons", () => ({
+  TransactionsSkeleton: () => {
+    const { Text } = require("react-native");
+    return <Text testID="loading-screen">Loading…</Text>;
+  },
+}));
+
 // ── Import after mocks ──────────────────────────────────────────────
 
 import TransactionsScreen from "@/app/(tabs)/transactions";
@@ -168,7 +175,7 @@ describe("TransactionsScreen", () => {
       expect(screen.getAllByText("KFH").length).toBeGreaterThanOrEqual(2);
     });
 
-    expect(screen.getByText("BBYN")).toBeTruthy();
+    expect(screen.getAllByText("BBYN").length).toBeGreaterThanOrEqual(1);
   });
 
   // ── Error state ──
@@ -244,7 +251,9 @@ describe("TransactionsScreen", () => {
     await waitFor(() => {
       expect(mockGetTransactions).toHaveBeenCalledWith({
         page: 1,
-        per_page: 50,
+        page_size: 50,
+        portfolio: undefined,
+        symbol: undefined,
       });
     });
   });

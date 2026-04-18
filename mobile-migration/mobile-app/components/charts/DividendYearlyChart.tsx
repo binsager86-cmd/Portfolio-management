@@ -238,7 +238,10 @@ export default React.memo(function DividendYearlyChart({
       </View>
 
       <View
-        style={{ height: chartHeight }}
+        style={[
+          { height: chartHeight },
+          Platform.OS === "web" ? ({ cursor: "crosshair" } as any) : {},
+        ]}
         {...(Platform.OS === "web"
           ? { onMouseMove: handleMouseMove, onMouseLeave: () => setActiveIdx(null) }
           : {})}

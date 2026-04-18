@@ -70,6 +70,7 @@ import {
     TextInput,
     View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 // ── Sub-tab type ─────────────────────────────────────────────────────
 
@@ -79,8 +80,9 @@ type OverviewTab = "dashboard" | "historical";
 
 function OverviewScreen() {
   const { user } = useAuth();
-  const { colors } = useThemeStore();
+  const { colors, toggle, mode } = useThemeStore();
   const { t } = useTranslation();
+  const insets = useSafeAreaInsets();
   const { metricCols, isDesktop, isPhone, spacing, fonts, maxContentWidth } = useResponsive();
   const { refresh: refreshPrices } = usePriceRefresh();
   const queryClient = useQueryClient();
@@ -365,6 +367,7 @@ function OverviewScreen() {
       contentContainerStyle={[
         styles.content,
         {
+          paddingTop: insets.top + 8,
           paddingHorizontal: spacing.pagePx,
           maxWidth: maxContentWidth,
           alignSelf: isDesktop ? "center" as const : undefined,
@@ -379,6 +382,23 @@ function OverviewScreen() {
         />
       }
     >
+      {/* ── Inline scrollable header ── */}
+      <View style={styles.inlineHeader}>
+        <Text style={[styles.inlineHeaderTitle, { color: colors.textPrimary }]}>
+          {t('nav.overview')}
+        </Text>
+        <Pressable onPress={toggle} style={styles.inlineHeaderBtn}>
+          {({ pressed }) => (
+            <FontAwesome
+              name={mode === "dark" ? "lightbulb-o" : "moon-o"}
+              size={20}
+              color={colors.textSecondary}
+              style={{ opacity: pressed ? 0.5 : 1 }}
+            />
+          )}
+        </Pressable>
+      </View>
+
       {/* ── Hero Banner ── */}
       <View
         style={[
@@ -898,6 +918,25 @@ function OverviewScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   content: { paddingVertical: 16, paddingBottom: 40 },
+
+  // Inline scrollable header
+  inlineHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 16,
+  },
+  inlineHeaderTitle: {
+    fontSize: 20,
+    fontWeight: "700",
+  },
+  inlineHeaderBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: "center",
+    alignItems: "center",
+  },
 
   // Banner
   banner: {

@@ -2,6 +2,7 @@ import React from "react";
 import { View, Text, StyleSheet, Pressable } from "react-native";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import { useRouter } from "expo-router";
+import { UITokens } from "@/constants/uiTokens";
 import { useThemeStore } from "@/services/themeStore";
 
 interface EmptyStateProps {
@@ -89,15 +90,15 @@ export function EmptyState({ type, onPrimaryAction }: EmptyStateProps) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, alignItems: "center", justifyContent: "center", padding: 32 },
-  iconBox: { width: 100, height: 100, borderRadius: 50, alignItems: "center", justifyContent: "center", marginBottom: 24 },
-  title: { fontSize: 20, fontWeight: "700", textAlign: "center", marginBottom: 8 },
-  description: { fontSize: 15, textAlign: "center", lineHeight: 22, marginBottom: 24, paddingHorizontal: 20 },
-  actions: { width: "100%", gap: 12, marginBottom: 24 },
-  primaryButton: { flexDirection: "row", alignItems: "center", justifyContent: "center", paddingHorizontal: 24, paddingVertical: 14, borderRadius: 12 },
-  primaryButtonText: { color: "#fff", fontSize: 16, fontWeight: "700" },
-  secondaryButton: { flexDirection: "row", alignItems: "center", justifyContent: "center", paddingHorizontal: 24, paddingVertical: 14, borderRadius: 12, borderWidth: 1.5, borderStyle: "dashed" },
-  secondaryButtonText: { fontSize: 15, fontWeight: "600" },
-  tipsCard: { flexDirection: "row", alignItems: "center", gap: 10, padding: 14, borderRadius: 10, borderWidth: 1, maxWidth: 320 },
-  tipsText: { flex: 1, fontSize: 13, lineHeight: 18 },
+  container: { flex: 1, alignItems: "center", justifyContent: "center", padding: UITokens.empty.padding },
+  iconBox: { width: UITokens.empty.iconBoxSize, height: UITokens.empty.iconBoxSize, borderRadius: UITokens.empty.iconBoxSize / 2, alignItems: "center", justifyContent: "center", marginBottom: UITokens.spacing.lg },
+  title: { fontSize: UITokens.empty.titleSize, fontWeight: "700", textAlign: "center", marginBottom: UITokens.spacing.sm },
+  description: { fontSize: UITokens.empty.descSize, textAlign: "center", lineHeight: UITokens.empty.descLineHeight, marginBottom: UITokens.spacing.lg, paddingHorizontal: UITokens.spacing.xl },
+  actions: { width: "100%", gap: UITokens.spacing.md, marginBottom: UITokens.spacing.lg },
+  primaryButton: { flexDirection: "row", alignItems: "center", justifyContent: "center", paddingHorizontal: UITokens.button.primary.paddingHorizontal, paddingVertical: 14, borderRadius: UITokens.button.primary.borderRadius },
+  primaryButtonText: { color: "#fff", fontSize: UITokens.button.primary.fontSize, fontWeight: UITokens.button.primary.fontWeight },
+  secondaryButton: { flexDirection: "row", alignItems: "center", justifyContent: "center", paddingHorizontal: UITokens.button.secondary.paddingHorizontal, paddingVertical: 14, borderRadius: UITokens.button.secondary.borderRadius, borderWidth: UITokens.button.secondary.borderWidth, borderStyle: "dashed" },
+  secondaryButtonText: { fontSize: UITokens.button.secondary.fontSize, fontWeight: UITokens.button.secondary.fontWeight },
+  tipsCard: { flexDirection: "row", alignItems: "center", gap: 10, padding: 14, borderRadius: UITokens.radius.sm + 4, borderWidth: UITokens.card.borderWidth, maxWidth: UITokens.empty.maxTipWidth },
+  tipsText: { flex: 1, fontSize: UITokens.typography.caption.size + 1, lineHeight: 18 },
 });

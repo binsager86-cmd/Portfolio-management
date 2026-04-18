@@ -20,6 +20,7 @@ import {
     View,
 } from "react-native";
 
+import { useHaptics } from "@/hooks/useHaptics";
 import { useToast } from "@/components/ui/ToastProvider";
 import { useApiKey, useMe } from "@/hooks/queries";
 import { useResponsive } from "@/hooks/useResponsive";
@@ -45,6 +46,7 @@ export default function SettingsScreen() {
   const authName = useAuthStore((s) => s.name);
   const { t } = useTranslation();
   const toast = useToast();
+  const haptics = useHaptics();
   const {
     preferences,
     setExpertiseLevel,
@@ -267,7 +269,7 @@ export default function SettingsScreen() {
           <Text style={[s.cardTitle, { color: colors.textPrimary }]}>{t('settings.appearance')}</Text>
         </View>
         <Pressable
-          onPress={toggle}
+          onPress={() => { haptics.light(); toggle(); }}
           style={[s.settingBtn, { backgroundColor: colors.bgPrimary, borderColor: colors.borderColor }]}
         >
           <Text style={{ color: colors.textPrimary, fontSize: 14, fontWeight: "600" }}>
@@ -285,7 +287,7 @@ export default function SettingsScreen() {
 
         {/* Expertise Level */}
         <Text style={[s.prefLabel, { color: colors.textSecondary }]}>{t('settings.expertiseLevel')}</Text>
-        <View style={{ gap: 8, marginBottom: 14 }}>
+        <View style={{ gap: 4, marginBottom: 6 }}>
           {EXPERTISE_LEVELS.map((level) => (
             <Pressable
               key={level.key}
@@ -400,7 +402,7 @@ export default function SettingsScreen() {
 
         {/* Show Advanced Metrics (only if not normal) */}
         {preferences.expertiseLevel !== "normal" && (
-          <Pressable onPress={toggleAdvancedMetrics} style={s.switchRow}>
+          <Pressable onPress={() => { haptics.selection(); toggleAdvancedMetrics(); }} style={s.switchRow}>
             <Text style={[s.prefLabel, { color: colors.textSecondary, flex: 1, marginBottom: 0 }]}>
               {t('settingsScreen.showAdvancedMetrics')}
             </Text>
@@ -421,7 +423,7 @@ export default function SettingsScreen() {
         )}
 
         {/* Enable Sharia Filter */}
-        <Pressable onPress={toggleShariaFilter} style={s.switchRow}>
+        <Pressable onPress={() => { haptics.selection(); toggleShariaFilter(); }} style={s.switchRow}>
           <Text style={[s.prefLabel, { color: colors.textSecondary, flex: 1, marginBottom: 0 }]}>
             {t('settingsScreen.enableShariaFilter')}
           </Text>
@@ -441,7 +443,7 @@ export default function SettingsScreen() {
         </Pressable>
 
         {/* Dividend Focus Mode */}
-        <Pressable onPress={toggleDividendFocus} style={s.switchRow}>
+        <Pressable onPress={() => { haptics.selection(); toggleDividendFocus(); }} style={s.switchRow}>
           <Text style={[s.prefLabel, { color: colors.textSecondary, flex: 1, marginBottom: 0 }]}>
             {t('settingsScreen.dividendFocusMode')}
           </Text>
@@ -482,7 +484,7 @@ export default function SettingsScreen() {
         </Text>
 
         {/* News Notifications */}
-        <Pressable onPress={() => toggleNotification("newsNotifications")} style={s.switchRow}>
+        <Pressable onPress={() => { haptics.selection(); toggleNotification("newsNotifications"); }} style={s.switchRow}>
           <View style={{ flex: 1 }}>
             <Text style={[s.prefLabel, { color: colors.textSecondary, marginBottom: 0 }]}>
               {t('settingsScreen.newsNotifications')}
@@ -497,7 +499,7 @@ export default function SettingsScreen() {
         </Pressable>
 
         {/* Portfolio Updates */}
-        <Pressable onPress={() => toggleNotification("portfolioUpdates")} style={s.switchRow}>
+        <Pressable onPress={() => { haptics.selection(); toggleNotification("portfolioUpdates"); }} style={s.switchRow}>
           <View style={{ flex: 1 }}>
             <Text style={[s.prefLabel, { color: colors.textSecondary, marginBottom: 0 }]}>
               {t('settingsScreen.portfolioUpdates')}
@@ -512,7 +514,7 @@ export default function SettingsScreen() {
         </Pressable>
 
         {/* Price Alerts */}
-        <Pressable onPress={() => toggleNotification("priceAlerts")} style={s.switchRow}>
+        <Pressable onPress={() => { haptics.selection(); toggleNotification("priceAlerts"); }} style={s.switchRow}>
           <View style={{ flex: 1 }}>
             <Text style={[s.prefLabel, { color: colors.textSecondary, marginBottom: 0 }]}>
               {t('settingsScreen.priceAlertsLabel')}
@@ -527,7 +529,7 @@ export default function SettingsScreen() {
         </Pressable>
 
         {/* Daily Price Updates */}
-        <Pressable onPress={() => toggleNotification("dailyPriceUpdates")} style={s.switchRow}>
+        <Pressable onPress={() => { haptics.selection(); toggleNotification("dailyPriceUpdates"); }} style={s.switchRow}>
           <View style={{ flex: 1 }}>
             <Text style={[s.prefLabel, { color: colors.textSecondary, marginBottom: 0 }]}>
               {t('settingsScreen.dailyPriceUpdates')}
@@ -815,19 +817,19 @@ export default function SettingsScreen() {
 
 const s = StyleSheet.create({
   card: {
-    padding: 16,
+    padding: 12,
     borderRadius: 14,
     borderWidth: 1,
-    marginBottom: 14,
+    marginBottom: 10,
   },
   cardHeader: {
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
-    marginBottom: 12,
+    marginBottom: 8,
   },
   cardTitle: { fontSize: 16, fontWeight: "700" },
-  cardDesc: { fontSize: 13, marginBottom: 12 },
+  cardDesc: { fontSize: 13, marginBottom: 8 },
   infoRow: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -860,8 +862,8 @@ const s = StyleSheet.create({
     marginTop: 8,
   },
   btnText: { color: "#fff", fontSize: 14, fontWeight: "600" as const },
-  prefLabel: { fontSize: 14, fontWeight: "500" as const, marginBottom: 8 },
-  segmentRow: { flexDirection: "row" as const, gap: 6, marginBottom: 14 },
+  prefLabel: { fontSize: 14, fontWeight: "500" as const, marginBottom: 4 },
+  segmentRow: { flexDirection: "row" as const, gap: 6, marginBottom: 2 },
   segmentBtn: {
     flex: 1,
     alignItems: "center" as const,
@@ -873,8 +875,8 @@ const s = StyleSheet.create({
     flexDirection: "row" as const,
     alignItems: "center" as const,
     justifyContent: "space-between" as const,
-    paddingVertical: 10,
-    marginBottom: 4,
+    paddingVertical: 6,
+    marginBottom: 2,
   },
   toggleTrack: {
     width: 44,
@@ -890,7 +892,7 @@ const s = StyleSheet.create({
     backgroundColor: "#fff",
   },
   levelCard: {
-    padding: 12,
+    padding: 10,
     borderRadius: 10,
   },
   radioOuter: {

@@ -17,6 +17,7 @@ import { usePathname, useRouter } from "expo-router";
 import React from "react";
 import { useTranslation } from "react-i18next";
 import {
+    Platform,
     Pressable,
     ScrollView,
     StyleSheet,
@@ -151,19 +152,23 @@ export default function WebSidebar({ collapsed: collapsedProp, onToggleCollapse 
               )}
               <Pressable
                 onPress={() => handleNav(item.path)}
-                style={({ pressed }) => [
+                style={({ pressed, hovered }: any) => [
                   s.navItem,
                   isCollapsed && s.navItemCollapsed,
                   {
                     backgroundColor: active
                       ? colors.accentPrimary + "18"
+                      : hovered
+                      ? colors.bgCardHover
                       : pressed
                       ? colors.bgCardHover
                       : "transparent",
                     borderStartColor: active ? colors.accentPrimary : "transparent",
                   },
+                  Platform.OS === "web" && ({ cursor: "pointer", transition: "background-color 0.15s" } as any),
                 ]}
                 accessibilityLabel={t('nav.' + item.label)}
+                accessibilityRole="link"
               >
                 <FontAwesome
                   name={item.icon}
@@ -194,10 +199,11 @@ export default function WebSidebar({ collapsed: collapsedProp, onToggleCollapse 
       <View style={[s.bottomSection, { borderTopColor: colors.borderColor }]}>
         <Pressable
           onPress={toggle}
-          style={({ pressed }) => [
+          style={({ pressed, hovered }: any) => [
             s.actionBtn,
             isCollapsed && s.actionBtnCollapsed,
-            { backgroundColor: pressed ? colors.bgCardHover : "transparent" },
+            { backgroundColor: hovered ? colors.bgCardHover : pressed ? colors.bgCardHover : "transparent" },
+            Platform.OS === "web" && ({ cursor: "pointer", transition: "background-color 0.15s" } as any),
           ]}
           accessibilityLabel={mode === "dark" ? "Switch to light mode" : "Switch to dark mode"}
         >
@@ -216,10 +222,11 @@ export default function WebSidebar({ collapsed: collapsedProp, onToggleCollapse 
 
         <Pressable
           onPress={handleLogout}
-          style={({ pressed }) => [
+          style={({ pressed, hovered }: any) => [
             s.actionBtn,
             isCollapsed && s.actionBtnCollapsed,
-            { backgroundColor: pressed ? colors.bgCardHover : "transparent" },
+            { backgroundColor: hovered ? colors.bgCardHover : pressed ? colors.bgCardHover : "transparent" },
+            Platform.OS === "web" && ({ cursor: "pointer", transition: "background-color 0.15s" } as any),
           ]}
           accessibilityLabel={t('nav.signOut')}
         >

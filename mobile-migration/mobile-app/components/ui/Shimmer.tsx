@@ -10,6 +10,7 @@
  *   PageShell      – full-page wrapper with theme bg + responsive centering
  */
 
+import { UITokens } from "@/constants/uiTokens";
 import { useResponsive } from "@/hooks/useResponsive";
 import { useThemeStore } from "@/services/themeStore";
 import React, { useEffect, useRef } from "react";
@@ -229,8 +230,8 @@ export function Grid({
 
 const s = StyleSheet.create({
   card: {
-    borderRadius: 12,
-    borderWidth: 1,
+    borderRadius: UITokens.card.borderRadius,
+    borderWidth: UITokens.card.borderWidth,
     minHeight: 90,
   },
   listItem: {

@@ -5,6 +5,7 @@
 
 import React from "react";
 import { View, Text, StyleSheet, Pressable } from "react-native";
+import { UITokens } from "@/constants/uiTokens";
 import { useThemeStore } from "@/services/themeStore";
 
 interface ErrorScreenProps {
@@ -36,25 +37,25 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    paddingHorizontal: 24,
+    paddingHorizontal: UITokens.spacing.lg,
   },
   emoji: {
-    fontSize: 48,
-    marginBottom: 12,
+    fontSize: UITokens.error.iconSize,
+    marginBottom: UITokens.spacing.md,
   },
   text: {
-    fontSize: 16,
+    fontSize: UITokens.error.titleSize,
     textAlign: "center",
   },
   button: {
-    marginTop: 20,
-    paddingHorizontal: 24,
-    paddingVertical: 10,
-    borderRadius: 8,
+    marginTop: UITokens.spacing.xl - UITokens.spacing.md,
+    paddingHorizontal: UITokens.error.retryButtonPaddingH,
+    paddingVertical: UITokens.error.retryButtonPaddingV,
+    borderRadius: UITokens.error.retryButtonRadius,
   },
   buttonText: {
     color: "#ffffff",
     fontWeight: "600",
-    fontSize: 15,
+    fontSize: UITokens.typography.body.size,
   },
 });

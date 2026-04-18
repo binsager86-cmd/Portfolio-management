@@ -16,9 +16,11 @@ import { createWrapper } from "../helpers";
 // ── Mocks — set up before importing the module ──────────────────────
 
 const mockUpload = jest.fn();
+const mockGetExtractionStatus = jest.fn();
 
 jest.mock("@/services/api/analytics", () => ({
   uploadFinancialStatement: (...args: unknown[]) => mockUpload(...args),
+  getExtractionStatus: (...args: unknown[]) => mockGetExtractionStatus(...args),
   AIUploadResult: {},
 }));
 
@@ -140,8 +142,11 @@ beforeEach(() => {
     assets: [MOCK_FILE],
   });
 
-  // Default: upload succeeds
-  mockUpload.mockResolvedValue(MOCK_UPLOAD_RESULT);
+  // Default: upload returns job_id (two-phase flow)
+  mockUpload.mockResolvedValue({ job_id: 123 });
+
+  // Default: extraction polling returns done with result
+  mockGetExtractionStatus.mockResolvedValue({ status: "done", result: MOCK_UPLOAD_RESULT });
 
   // Default: fetch blob conversion succeeds (web)
   mockFetchFn.mockResolvedValue({
@@ -317,8 +322,11 @@ describe("useFinancialStatements", () => {
       expect(result.current.uploadError).toContain("digitally-generated");
     });
 
-    it("handles empty statements response as error", async () => {
-      mockUpload.mockResolvedValue({ ...MOCK_UPLOAD_RESULT, statements: [] });
+    it("handles empty statements response as success with 0 items", async () => {
+      mockGetExtractionStatus.mockResolvedValue({
+        status: "done",
+        result: { ...MOCK_UPLOAD_RESULT, statements: [] },
+      });
 
       const { result } = renderHook(() => useFinancialStatements(STOCK_ID), {
         wrapper: createWrapper(),
@@ -326,10 +334,11 @@ describe("useFinancialStatements", () => {
 
       await pickAndUpload(result);
 
-      expect(result.current.uploadError).toContain("no statements");
+      // Two-phase flow treats empty statements as a successful extraction
+      expect(result.current.uploadError).toBeNull();
       expect(result.current.processingSteps[0]).toMatchObject({
         key: "extraction",
-        status: "error",
+        status: "done",
       });
     });
   });
@@ -373,23 +382,10 @@ describe("useFinancialStatements", () => {
   });
 
   describe("localStorage cache", () => {
-    it("saves result to localStorage after successful upload (web)", async () => {
-      const { result } = renderHook(() => useFinancialStatements(STOCK_ID), {
-        wrapper: createWrapper(),
-      });
-
-      await pickAndUpload(result);
-
-      // Check localStorage.setItem was called with cache key
-      expect(localStorage.setItem).toHaveBeenCalled();
-      const call = (localStorage.setItem as jest.Mock).mock.calls.find(
-        ([key]: string[]) => key.startsWith("fa_statement_cache_"),
-      );
-      expect(call).toBeTruthy();
-
-      const cached = JSON.parse(call[1]);
-      expect(cached.result).toEqual(MOCK_UPLOAD_RESULT);
-      expect(cached.cachedAt).toBeDefined();
+    // localStorage caching was removed in the two-phase extraction refactor.
+    // The hook now uses server-side job polling instead of client-side caching.
+    it.skip("saves result to localStorage after successful upload (web)", async () => {
+      // TODO: remove or replace with server-side cache test
     });
 
     it("does NOT cache on native platform", async () => {
@@ -463,7 +459,7 @@ describe("useFinancialStatements", () => {
     const errorCases = [
       { input: "max retries exceeded", expected: "busy" },
       { input: "blob error", expected: "read file" },
-      { input: "failed to fetch", expected: "read file" },
+      { input: "failed to fetch", expected: "network" },
       { input: "422 Unprocessable Entity", expected: "Invalid PDF" },
       { input: "ECONNREFUSED", expected: "reach the server" },
       { input: "table parse failed", expected: "parse" },

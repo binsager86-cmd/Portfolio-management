@@ -1,3 +1,4 @@
+import { UITokens } from "@/constants/uiTokens";
 import { useThemeStore } from "@/services/themeStore";
 import { useMemo } from "react";
 import { I18nManager, StyleSheet } from "react-native";
@@ -96,14 +97,14 @@ export function useScreenStyles() {
           textAlign: "auto" as const,
         },
 
-        /** Themed card container */
+        /** Themed card container — uses design system card tokens */
         card: {
           backgroundColor: colors.bgCard,
           borderColor: colors.borderColor,
-          borderWidth: 1,
-          borderRadius: 14,
-          padding: 16,
-          marginBottom: 14,
+          borderWidth: UITokens.card.borderWidth,
+          borderRadius: UITokens.card.borderRadius,
+          padding: UITokens.card.padding,
+          marginBottom: UITokens.card.marginBottom,
         },
       }),
     [colors, isRTL],

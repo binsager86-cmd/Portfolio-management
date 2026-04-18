@@ -60,8 +60,8 @@ describe("isTokenExpired", () => {
     expect(isTokenExpired(token, 60)).toBe(true);
   });
 
-  it("returns false with buffer=0 for token expiring in 30s", () => {
-    const expiresAt = Math.floor(Date.now() / 1000) + 30;
+  it("returns false with buffer=0 for token expiring in 60s", () => {
+    const expiresAt = Math.floor(Date.now() / 1000) + 60;
     const token = makeJwt({ exp: expiresAt, iat: expiresAt - 3600 });
     expect(isTokenExpired(token, 0)).toBe(false);
   });

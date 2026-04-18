@@ -1,5 +1,5 @@
 import React from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { Platform, StyleSheet, Text, View } from "react-native";
 import { FlashList } from "@shopify/flash-list";
 
 import { UITokens } from "@/constants/uiTokens";
@@ -50,12 +50,12 @@ export function ResponsiveDataTable<T extends Record<string, any>>({
   return (
     <FlashList
       data={data}
-      estimatedItemSize={88}
+      estimatedItemSize={isPhone ? 100 : 88}
       keyExtractor={keyExtractor ?? ((item, i) => String((item as any).id ?? i))}
       renderItem={({ item }) => (
         <PressableCard
           onPress={onPressItem ? () => onPressItem(item) : undefined}
-          style={styles.mobileCard}
+          style={[styles.mobileCard, isPhone && styles.mobileCardPhone]}
           accessibilityLabel={itemA11yLabel?.(item)}
         >
           {visibleCols.map((col) => (
@@ -63,9 +63,14 @@ export function ResponsiveDataTable<T extends Record<string, any>>({
               <Text style={[styles.label, { color: colors.textMuted }]}>
                 {col.label}
               </Text>
-              <Text style={[styles.value, { color: colors.textPrimary }]}>
-                {col.render(item)}
-              </Text>
+              <View style={styles.valueWrap}>
+                <Text
+                  style={[styles.value, { color: colors.textPrimary }]}
+                  numberOfLines={1}
+                >
+                  {col.render(item)}
+                </Text>
+              </View>
             </View>
           ))}
           {extraCount > 0 && (
@@ -81,18 +86,32 @@ export function ResponsiveDataTable<T extends Record<string, any>>({
 
 const styles = StyleSheet.create({
   mobileCard: { marginVertical: UITokens.spacing.xs },
+  mobileCardPhone: {
+    paddingVertical: UITokens.spacing.md,
+    paddingHorizontal: UITokens.spacing.md,
+    minHeight: UITokens.touchTarget.mobile,
+  },
   row: {
     flexDirection: "row",
     justifyContent: "space-between",
+    alignItems: "center",
     paddingVertical: 6,
+    minHeight: 32,
   },
   label: {
     fontSize: UITokens.typography.caption.size,
     opacity: 0.7,
+    flexShrink: 0,
+    marginRight: UITokens.spacing.sm,
+  },
+  valueWrap: {
+    flex: 1,
+    alignItems: "flex-end",
   },
   value: {
     fontSize: UITokens.typography.body.size,
     fontWeight: "500",
+    textAlign: "right",
   },
   expansion: {
     marginTop: UITokens.spacing.sm,

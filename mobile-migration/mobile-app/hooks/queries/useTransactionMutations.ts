@@ -45,7 +45,11 @@ export function useCreateTransaction() {
       }
     },
     onSettled: () => {
+      // Invalidate all data that depends on transactions
       qc.invalidateQueries({ queryKey: ["transactions"] });
+      qc.invalidateQueries({ queryKey: ["portfolio-overview"] });
+      qc.invalidateQueries({ queryKey: ["holdings"] });
+      qc.invalidateQueries({ queryKey: ["cash-balances"] });
     },
   });
 }
@@ -59,6 +63,8 @@ export function useUpdateTransaction() {
       updateTransaction(id, payload),
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ["transactions"] });
+      qc.invalidateQueries({ queryKey: ["portfolio-overview"] });
+      qc.invalidateQueries({ queryKey: ["holdings"] });
     },
   });
 }
@@ -96,6 +102,9 @@ export function useDeleteTransaction() {
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ["transactions"] });
+      qc.invalidateQueries({ queryKey: ["portfolio-overview"] });
+      qc.invalidateQueries({ queryKey: ["holdings"] });
+      qc.invalidateQueries({ queryKey: ["cash-balances"] });
     },
   });
 }

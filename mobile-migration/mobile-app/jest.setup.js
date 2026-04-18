@@ -69,3 +69,37 @@ jest.mock("@react-native-async-storage/async-storage", () => ({
     removeItem: jest.fn().mockResolvedValue(undefined),
   },
 }));
+
+// ── Mock react-i18next ──────────────────────────────────────────────
+jest.mock("react-i18next", () => {
+  const en = require("./lib/i18n/translations/en.json");
+  function t(key, params) {
+    const parts = key.split(".");
+    let val = en;
+    for (const p of parts) {
+      if (val == null) break;
+      val = val[p];
+    }
+    if (typeof val !== "string") return key;
+    if (params) {
+      Object.entries(params).forEach(([k, v]) => {
+        val = val.replace(new RegExp(`\\{\\{${k}\\}\\}`, "g"), v);
+      });
+    }
+    return val;
+  }
+  return {
+    useTranslation: () => ({ t, i18n: { language: "en", changeLanguage: jest.fn() } }),
+    Trans: ({ children }) => children,
+    initReactI18next: { type: "3rdParty", init: jest.fn() },
+  };
+});
+
+// ── Mock react-native-safe-area-context ─────────────────────────────
+jest.mock("react-native-safe-area-context", () => ({
+  useSafeAreaInsets: () => ({ top: 0, right: 0, bottom: 0, left: 0 }),
+  SafeAreaProvider: ({ children }) => children,
+  SafeAreaView: ({ children }) => children,
+}));
+
+// (expo streams compat handled via jest.config.js moduleNameMapper)
