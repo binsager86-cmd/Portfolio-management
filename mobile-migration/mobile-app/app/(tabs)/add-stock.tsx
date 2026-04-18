@@ -18,6 +18,7 @@ import {
     fetchStockPrice,
     StockListEntry,
 } from "@/services/api";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { useThemeStore } from "@/services/themeStore";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -68,6 +69,7 @@ export default function AddStockScreen() {
   const [portfolio, setPortfolio] = useState<string>("KFH");
   const [currency, setCurrency] = useState<string>("KWD");
   const [showDropdown, setShowDropdown] = useState(false);
+  const debouncedSearch = useDebouncedValue(searchQuery, 250);
 
   // ── Fetch reference stock list ──────────────────────────────────
   const marketKey = market === "Kuwait Market" ? "kuwait" : "us";
@@ -84,12 +86,12 @@ export default function AddStockScreen() {
 
   // ── Filter stock list by search query ───────────────────────────
   const filteredStocks = useMemo(() => {
-    if (!searchQuery.trim()) return allStocks;
-    const q = searchQuery.toUpperCase();
+    if (!debouncedSearch.trim()) return allStocks;
+    const q = debouncedSearch.toUpperCase();
     return allStocks.filter(
       (s) => s.symbol.toUpperCase().includes(q) || s.name.toUpperCase().includes(q)
     );
-  }, [allStocks, searchQuery]);
+  }, [allStocks, debouncedSearch]);
 
   // ── Market change handler ───────────────────────────────────────
   const handleMarketChange = useCallback((m: MarketLabel) => {

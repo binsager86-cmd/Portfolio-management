@@ -26,12 +26,14 @@ import {
     ViewStyle,
 } from "react-native";
 import Animated, {
-    Easing,
     useAnimatedStyle,
     useSharedValue,
     withDelay,
     withTiming,
 } from "react-native-reanimated";
+
+import { Motion } from "@/constants/motion";
+import { useShouldAnimate } from "@/hooks/useShouldAnimate";
 import Svg, {
     Circle,
     Defs,
@@ -72,7 +74,7 @@ interface PortfolioChartProps {
 
 const PAD = { top: 24, right: 20, bottom: 44, left: 62 };
 const Y_TICK_COUNT = 5;
-const ANIM_MS = 1200;
+const ANIM_MS = Motion.duration.chart;
 
 // Theme-adaptive gradient palettes
 const GRAD_DARK = {
@@ -199,21 +201,27 @@ export const PortfolioChart = React.memo(function PortfolioChart({
 
   const progress = useSharedValue(0);
   const labelAlpha = useSharedValue(0);
+  const shouldAnimate = useShouldAnimate(data?.length ?? 0, 180);
 
   useEffect(() => {
     if (containerWidth > 0 && data?.length >= 2) {
+      if (!shouldAnimate) {
+        progress.value = 1;
+        labelAlpha.value = 1;
+        return;
+      }
       progress.value = 0;
       labelAlpha.value = 0;
       progress.value = withTiming(1, {
         duration: ANIM_MS,
-        easing: Easing.out(Easing.cubic),
+        easing: Motion.easing.standard,
       });
       labelAlpha.value = withDelay(
         ANIM_MS * 0.55,
-        withTiming(1, { duration: 500, easing: Easing.in(Easing.quad) })
+        withTiming(1, { duration: Motion.duration.entrance, easing: Motion.easing.enter })
       );
     }
-  }, [containerWidth, data?.length, dataVersion]);
+  }, [containerWidth, data?.length, dataVersion, shouldAnimate]);
 
   const chartAnimStyle = useAnimatedStyle(() => ({
     opacity: progress.value,

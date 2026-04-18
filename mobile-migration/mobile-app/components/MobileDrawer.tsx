@@ -31,8 +31,9 @@ import Animated, {
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { Motion } from "@/constants/motion";
+
 const DRAWER_WIDTH = 280;
-const SPRING_CONFIG = { damping: 22, stiffness: 200, mass: 0.8 };
 
 interface MobileDrawerProps {
   visible: boolean;
@@ -64,8 +65,8 @@ function DrawerNavItem({
   useEffect(() => {
     if (visible) {
       const delay = 60 + index * 35;
-      translateX.value = withDelay(delay, withSpring(0, SPRING_CONFIG));
-      opacity.value = withDelay(delay, withTiming(1, { duration: 200 }));
+      translateX.value = withDelay(delay, withSpring(0, Motion.spring.gentle));
+      opacity.value = withDelay(delay, withTiming(1, { duration: Motion.duration.normal }));
     } else {
       translateX.value = -40;
       opacity.value = 0;
@@ -78,10 +79,10 @@ function DrawerNavItem({
   }));
 
   const handlePressIn = useCallback(() => {
-    pressScale.value = withSpring(0.97, { damping: 15, stiffness: 300 });
+    pressScale.value = withSpring(0.97, Motion.spring.snappy);
   }, []);
   const handlePressOut = useCallback(() => {
-    pressScale.value = withSpring(1, SPRING_CONFIG);
+    pressScale.value = withSpring(1, Motion.spring.gentle);
   }, []);
 
   return (
@@ -160,11 +161,11 @@ export function MobileDrawer({ visible, onClose }: MobileDrawerProps) {
 
   useEffect(() => {
     if (visible) {
-      drawerX.value = withSpring(0, SPRING_CONFIG);
-      backdropOpacity.value = withTiming(1, { duration: 250 });
+      drawerX.value = withSpring(0, Motion.spring.gentle);
+      backdropOpacity.value = withTiming(1, { duration: Motion.duration.normal });
     } else {
-      drawerX.value = withSpring(-DRAWER_WIDTH, { damping: 25, stiffness: 250 });
-      backdropOpacity.value = withTiming(0, { duration: 200 });
+      drawerX.value = withSpring(-DRAWER_WIDTH, Motion.spring.smooth);
+      backdropOpacity.value = withTiming(0, { duration: Motion.duration.normal });
     }
   }, [visible]);
 

@@ -26,6 +26,7 @@ import Animated, {
     withTiming,
 } from "react-native-reanimated";
 
+import { Motion } from "@/constants/motion";
 import { useThemeStore } from "@/services/themeStore";
 
 // ── Types ───────────────────────────────────────────────────────────
@@ -59,7 +60,7 @@ export function useToast() {
 // ── Constants ───────────────────────────────────────────────────────
 
 const TOAST_DURATION_MS = 3000;
-const SLIDE_MS = 280;
+const SLIDE_MS = Motion.duration.entrance;
 
 const VARIANT_CONFIG: Record<
   ToastVariant,

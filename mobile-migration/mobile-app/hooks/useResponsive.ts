@@ -108,8 +108,8 @@ export function useResponsive(): ResponsiveInfo {
   // Sidebar: only on web when ≥ tablet
   const showSidebar = Platform.OS === "web" && (isDesktop || isTablet);
 
-  // Hamburger: shown on phone (any platform)
-  const showHamburger = isPhone;
+  // Hamburger: shown whenever there's no sidebar (native phone/tablet, or narrow web)
+  const showHamburger = !showSidebar;
 
   return {
     width,

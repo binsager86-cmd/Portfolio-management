@@ -10,6 +10,7 @@
  */
 
 import FontAwesome from "@expo/vector-icons/FontAwesome";
+import { FlashList } from "@shopify/flash-list";
 import { useQueryClient } from "@tanstack/react-query";
 import React, { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -125,6 +126,14 @@ function PortfolioAnalysisScreen() {
   const sortedHoldings = useMemo(
     () => sortHoldings(holdingsResp?.holdings ?? [], sortCol, sortDir),
     [holdingsResp?.holdings, sortCol, sortDir],
+  );
+
+  const holdingKeyExtractor = useCallback((item: (typeof sortedHoldings)[number]) => item.symbol, []);
+  const renderHoldingRow = useCallback(
+    ({ item, index }: { item: (typeof sortedHoldings)[number]; index: number }) => (
+      <HoldingRow holding={item} colors={colors} isEven={index % 2 === 0} />
+    ),
+    [colors],
   );
 
   // Keep module-level refs in sync so getCellValue can compute allocation
@@ -285,9 +294,12 @@ function PortfolioAnalysisScreen() {
               </View>
 
               {/* Data rows */}
-              {sortedHoldings.map((h, idx) => (
-                <HoldingRow key={h.symbol} holding={h} colors={colors} isEven={idx % 2 === 0} />
-              ))}
+              <FlashList
+                data={sortedHoldings}
+                renderItem={renderHoldingRow}
+                keyExtractor={holdingKeyExtractor}
+                scrollEnabled={false}
+              />
 
               {/* TOTAL row */}
               {sortedHoldings.length > 0 && (

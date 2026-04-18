@@ -22,12 +22,14 @@ import {
     View,
 } from "react-native";
 import Animated, {
-    Easing,
     useAnimatedStyle,
     useSharedValue,
     withDelay,
     withTiming,
 } from "react-native-reanimated";
+
+import { Motion } from "@/constants/motion";
+import { useShouldAnimate } from "@/hooks/useShouldAnimate";
 import Svg, {
     Defs,
     G,
@@ -103,17 +105,22 @@ export default React.memo(function DividendYearlyChart({
 
   // Entrance animation
   const animProgress = useSharedValue(0);
+  const shouldAnimate = useShouldAnimate(data?.length ?? 0, 60);
   useEffect(() => {
+    if (!shouldAnimate) {
+      animProgress.value = 1;
+      return;
+    }
     // Brief fade-out then staggered re-entrance
-    animProgress.value = withTiming(0, { duration: 180 }, (finished) => {
+    animProgress.value = withTiming(0, { duration: Motion.duration.reset }, (finished) => {
       if (finished) {
         animProgress.value = withDelay(
-          200,
-          withTiming(1, { duration: 800, easing: Easing.out(Easing.cubic) })
+          Motion.stagger.section,
+          withTiming(1, { duration: Motion.duration.chart, easing: Motion.easing.standard })
         );
       }
     });
-  }, [data]);
+  }, [data, shouldAnimate]);
 
   const containerStyle = useAnimatedStyle(() => ({
     opacity: animProgress.value,

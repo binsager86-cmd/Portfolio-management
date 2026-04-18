@@ -31,6 +31,7 @@ import {
 } from "@/services/api";
 import { useThemeStore } from "@/services/themeStore";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
+import { FlashList } from "@shopify/flash-list";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import React, { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -381,6 +382,31 @@ function TradingScreen() {
     return <ErrorScreen message={error?.message ?? t('app.failedToLoad')} onRetry={refetch} />;
 
   const summary = data?.summary;
+
+  const tradingTxnKeyExtractor = useCallback((item: TradingTransaction) => String(item.id), []);
+  const renderTradingRow = useCallback(
+    ({ item, index }: { item: TradingTransaction; index: number }) => (
+      <TableRow txn={item} colors={colors} isEven={index % 2 === 0} onRename={handleRename} />
+    ),
+    [colors, handleRename],
+  );
+  const renderEditableTradingRow = useCallback(
+    ({ item, index }: { item: TradingTransaction; index: number }) => {
+      const row = editRows[item.id];
+      if (!row) return null;
+      return (
+        <EditableTableRow
+          row={row}
+          isSelected={selectedIds.has(item.id)}
+          onToggleSelect={handleToggleSelect}
+          onUpdateField={handleUpdateField}
+          colors={colors}
+          isEven={index % 2 === 0}
+        />
+      );
+    },
+    [colors, editRows, handleToggleSelect, handleUpdateField, selectedIds],
+  );
 
   // ── Render helpers ──────────────────────────────────────────────
 
@@ -855,21 +881,12 @@ function TradingScreen() {
                 </View>
 
                 {/* Editable data rows */}
-                {sortedTransactions.map((txn, idx) => {
-                  const row = editRows[txn.id];
-                  if (!row) return null;
-                  return (
-                    <EditableTableRow
-                      key={txn.id}
-                      row={row}
-                      isSelected={selectedIds.has(txn.id)}
-                      onToggleSelect={handleToggleSelect}
-                      onUpdateField={handleUpdateField}
-                      colors={colors}
-                      isEven={idx % 2 === 0}
-                    />
-                  );
-                })}
+                <FlashList
+                  data={sortedTransactions}
+                  renderItem={renderEditableTradingRow}
+                  keyExtractor={tradingTxnKeyExtractor}
+                  scrollEnabled={false}
+                />
               </View>
             </ScrollView>
           </View>
@@ -898,9 +915,12 @@ function TradingScreen() {
                 </View>
 
                 {/* Data rows */}
-                {sortedTransactions.map((txn, idx) => (
-                  <TableRow key={txn.id} txn={txn} colors={colors} isEven={idx % 2 === 0} onRename={handleRename} />
-                ))}
+                <FlashList
+                  data={sortedTransactions}
+                  renderItem={renderTradingRow}
+                  keyExtractor={tradingTxnKeyExtractor}
+                  scrollEnabled={false}
+                />
               </View>
             </ScrollView>
           </View>

@@ -6,6 +6,7 @@ import Animated, {
   withSpring,
 } from "react-native-reanimated";
 
+import { Motion } from "@/constants/motion";
 import { UITokens } from "@/constants/uiTokens";
 import { useHaptics } from "@/hooks/useHaptics";
 import { useThemeStore } from "@/services/themeStore";
@@ -30,12 +31,12 @@ export const PressableCard: React.FC<{
 
   const handlePressIn = () => {
     if (disabled) return;
-    scale.value = withSpring(0.97, { damping: 15, stiffness: 300 });
+    scale.value = withSpring(0.97, Motion.spring.snappy);
     haptics.light();
   };
 
   const handlePressOut = () => {
-    scale.value = withSpring(1, { damping: 15, stiffness: 300 });
+    scale.value = withSpring(1, Motion.spring.snappy);
   };
 
   return (

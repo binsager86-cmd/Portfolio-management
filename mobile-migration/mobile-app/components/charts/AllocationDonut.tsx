@@ -19,11 +19,13 @@ import { useA11yChart } from "@/hooks/useA11yChart";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import Animated, {
-    Easing,
     useAnimatedStyle,
     useSharedValue,
     withTiming,
 } from "react-native-reanimated";
+
+import { Motion } from "@/constants/motion";
+import { useShouldAnimate } from "@/hooks/useShouldAnimate";
 import Svg, { Defs, G, LinearGradient, Path, Stop, Text as SvgText } from "react-native-svg";
 
 // ── Gradient slice palettes (matches PortfolioChart purple→blue language) ──
@@ -47,7 +49,7 @@ const SLICE_PALETTE = [
   { from: "#38BDF8", to: "#0EA5E9" }, // light blue
 ];
 
-const ANIM_MS = 800;
+const ANIM_MS = Motion.duration.chart;
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -125,18 +127,23 @@ export const AllocationDonut = React.memo(function AllocationDonut({
   // ── Entrance animation (matches PortfolioChart) ─────────────────
 
   const progress = useSharedValue(0);
+  const shouldAnimate = useShouldAnimate(data?.length ?? 0, 40);
 
   useEffect(() => {
+    if (!shouldAnimate) {
+      progress.value = 1;
+      return;
+    }
     // Fade out briefly, then re-enter with new data
-    progress.value = withTiming(0, { duration: 180 }, (finished) => {
+    progress.value = withTiming(0, { duration: Motion.duration.reset }, (finished) => {
       if (finished) {
         progress.value = withTiming(1, {
           duration: ANIM_MS,
-          easing: Easing.out(Easing.cubic),
+          easing: Motion.easing.standard,
         });
       }
     });
-  }, [data]);
+  }, [data, shouldAnimate]);
 
   const animStyle = useAnimatedStyle(() => ({
     opacity: progress.value,

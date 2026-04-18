@@ -162,7 +162,7 @@ export function TotalCell({
 
 // ── Holding row ─────────────────────────────────────────────────────
 
-export function HoldingRow({
+export const HoldingRow = React.memo(function HoldingRow({
   holding,
   colors,
   isEven,
@@ -218,7 +218,7 @@ export function HoldingRow({
       )}
     </View>
   );
-}
+});
 
 // ── Table styles ────────────────────────────────────────────────────
 

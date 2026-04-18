@@ -9,7 +9,10 @@
  *  • Sector Performance table
  */
 
+import { withErrorBoundary } from "@/components/ui/ErrorBoundary";
+import { ErrorScreen } from "@/components/ui/ErrorScreen";
 import { LastUpdated } from "@/components/ui/LastUpdated";
+import { MarketSkeleton } from "@/components/ui/PageSkeletons";
 import { useMarketRefresh, useMarketSummary } from "@/hooks/queries/useMarketQueries";
 import { useResponsive } from "@/hooks/useResponsive";
 import type { MarketIndex, MarketMover, PerMarketSummary, SectorIndex } from "@/services/market/marketApi";
@@ -17,7 +20,6 @@ import { useThemeStore } from "@/services/themeStore";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import React, { useCallback, useState } from "react";
 import {
-    ActivityIndicator,
     Pressable,
     RefreshControl,
     ScrollView,
@@ -469,7 +471,7 @@ function SectorTable({
 
 // ── Main Screen ─────────────────────────────────────────────────────
 
-export default function MarketScreen() {
+export default withErrorBoundary(function MarketScreen() {
   const { colors } = useThemeStore();
   const { isDesktop, isPhone, spacing, maxContentWidth } = useResponsive();
   const { data, isLoading, isError, refetch, isFetching, dataUpdatedAt } = useMarketSummary();
@@ -488,23 +490,11 @@ export default function MarketScreen() {
   }, [refreshMarket]);
 
   if (isLoading) {
-    return (
-      <View style={[s.center, { backgroundColor: colors.bgPrimary }]}>
-        <ActivityIndicator size="large" color={colors.accentPrimary} />
-        <Text style={{ color: colors.textMuted, marginTop: 12 }}>{t("market.loadingMarket")}</Text>
-      </View>
-    );
+    return <MarketSkeleton />;
   }
 
   if (isError || !data) {
-    return (
-      <View style={[s.center, { backgroundColor: colors.bgPrimary }]}>
-        <FontAwesome name="exclamation-triangle" size={32} color={colors.textMuted} />
-        <Text style={{ color: colors.textMuted, marginTop: 12, textAlign: "center" }}>
-          {t("market.marketUnavailable")}{"\n"}{t("market.pullToRetry")}
-        </Text>
-      </View>
-    );
+    return <ErrorScreen message={t("market.marketUnavailable")} onRetry={refetch} />;
   }
 
   const premierIndex = data.indices.find((idx) => idx.name === "Premier Market");
@@ -653,7 +643,7 @@ export default function MarketScreen() {
       <View style={{ height: 40 }} />
     </ScrollView>
   );
-}
+}, "Unable to load Market. Please try again.");
 
 // ── Styles ──────────────────────────────────────────────────────────
 

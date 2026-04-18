@@ -38,9 +38,10 @@ import {
   useHoldingsView,
 } from "@/src/features/holdings/hooks/useHoldingsView";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
+import { FlashList } from "@shopify/flash-list";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
-import React, { useMemo, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Alert,
@@ -86,6 +87,21 @@ export default function HoldingsScreen() {
     { key: "pnl_pct", label: t("holdings.pnlPct", "P&L %"), render: (h) => `${h.pnl_pct >= 0 ? "+" : ""}${h.pnl_pct.toFixed(2)}%`, priority: "medium" },
     { key: "cost", label: t("holdings.avgCost", "Avg Cost"), render: (h) => fmtNum(h.total_cost_kwd), priority: "low" },
   ], [t]);
+
+  const holdingKeyExtractor = useCallback((item: Holding) => item.symbol, []);
+  const mobileHoldingKeyExtractor = useCallback((item: Holding) => item.symbol, []);
+  const renderDesktopHoldingRow = useCallback(
+    ({ item, index }: { item: Holding; index: number }) => (
+      <HoldingRow
+        holding={item}
+        colors={colors}
+        isEven={index % 2 === 0}
+        onCompanyPress={setSelectedHolding}
+        columns={activeColumns}
+      />
+    ),
+    [activeColumns, colors],
+  );
 
   const portfolios = [undefined, "KFH", "BBYN", "USA"];
   const filterLabels = ["All", "KFH", "BBYN", "USA"];
@@ -209,8 +225,8 @@ export default function HoldingsScreen() {
             <ResponsiveDataTable<Holding>
               data={sortedHoldings}
               columns={mobileColumns}
-              keyExtractor={(h) => h.symbol}
-              onPressItem={(h) => setSelectedHolding(h)}
+              keyExtractor={mobileHoldingKeyExtractor}
+              onPressItem={setSelectedHolding}
               itemA11yLabel={(h) => `${h.symbol} ${h.company}, value ${formatCurrency(h.market_value_kwd)}`}
               desktopTable={
                 <View
@@ -232,16 +248,12 @@ export default function HoldingsScreen() {
                       </View>
 
                       {/* Data rows */}
-                      {sortedHoldings.map((h, idx) => (
-                        <HoldingRow
-                          key={h.symbol}
-                          holding={h}
-                          colors={colors}
-                          isEven={idx % 2 === 0}
-                          onCompanyPress={(holding) => setSelectedHolding(holding)}
-                          columns={activeColumns}
-                        />
-                      ))}
+                      <FlashList
+                        data={sortedHoldings}
+                        renderItem={renderDesktopHoldingRow}
+                        keyExtractor={holdingKeyExtractor}
+                        scrollEnabled={false}
+                      />
 
                       {/* TOTAL row */}
                       {sortedHoldings.length > 0 && (

@@ -10,6 +10,7 @@
 
 import { SegmentedControl } from "@/components/form";
 import { useStockList } from "@/hooks/queries";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { useScreenStyles } from "@/hooks/useScreenStyles";
 import {
     type AlertCondition,
@@ -300,18 +301,19 @@ function AddAlertModal({
   // ── Stock picker state ─────────────────────────────────
   const [stockSearchText, setStockSearchText] = useState(prefillSymbol ?? "");
   const [showStockDropdown, setShowStockDropdown] = useState(false);
+  const debouncedStockSearch = useDebouncedValue(stockSearchText, 250);
   const { data: refStocksData } = useStockList("kuwait");
 
   const filteredStocks = useMemo(() => {
     const all = refStocksData?.stocks ?? [];
-    if (!stockSearchText.trim()) return all;
-    const q = stockSearchText.toLowerCase();
+    if (!debouncedStockSearch.trim()) return all;
+    const q = debouncedStockSearch.toLowerCase();
     return all.filter(
       (s) =>
         s.symbol.toLowerCase().includes(q) ||
         s.name.toLowerCase().includes(q),
     );
-  }, [refStocksData, stockSearchText]);
+  }, [debouncedStockSearch, refStocksData]);
 
   const watchCondition = watch("condition");
   const isPortfolio =

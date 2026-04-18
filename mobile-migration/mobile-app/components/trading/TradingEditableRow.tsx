@@ -426,7 +426,7 @@ function PortfolioDropdown({
 // ── Editable Table Row ──────────────────────────────────────────────
 
 /** Inline-editable row with text inputs per field and a delete checkbox. */
-export function EditableTableRow({
+export const EditableTableRow = React.memo(function EditableTableRow({
   row,
   isSelected,
   onToggleSelect,
@@ -508,7 +508,7 @@ export function EditableTableRow({
       </View>
     </View>
   );
-}
+});
 
 // ── Edit Mode Styles ────────────────────────────────────────────────
 
