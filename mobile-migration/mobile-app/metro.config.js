@@ -15,9 +15,10 @@ config.transformer.minifierConfig = {
 // Enable package.json "exports" field resolution (needed by jspdf and others)
 config.resolver.unstable_enablePackageExports = true;
 config.resolver.unstable_conditionNames = [
+  "react-native",
   "browser",
   "require",
-  "react-native",
+  "default",
 ];
 
 // Force jspdf to always resolve to its browser (ES) build,

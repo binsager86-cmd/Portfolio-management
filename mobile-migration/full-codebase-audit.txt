@@ -2,10 +2,10 @@
 ##                                                                            ##
 ##        PORTFOLIO APP — FULL CODEBASE AUDIT (BACKEND + FRONTEND)            ##
 ##                                                                            ##
-##        Generated: 2026-04-15                                               ##
-##        Total Source Files: 340+                                            ##
-##        Total Production Lines: ~85,750                                     ##
-##        Total Test Lines: ~8,460                                            ##
+##        Generated: 2026-04-18                                               ##
+##        Total Source Files: 370+                                            ##
+##        Total Production Lines: ~92,800                                     ##
+##        Total Test Lines: ~9,240                                            ##
 ##                                                                            ##
 ################################################################################
 
@@ -21,36 +21,41 @@
 
   PART B — BACKEND API (FastAPI)
     4.  Configuration & Dependencies
-    5.  App Structure & File Inventory
-    6.  Database Schema (30+ Tables)
-    7.  API Endpoint Inventory (60+ Endpoints)
-    8.  Core Services & Business Logic
-    9.  Cron Jobs & Scheduling
-    10. Security Implementation
-    11. Testing (Backend)
+    5.  App Entry Point & Middleware
+    6.  API Endpoint Inventory (80+ Endpoints)
+    7.  Database Schema (30+ Tables)
+    8.  SQLAlchemy Models
+    9.  Pydantic Schemas
+    10. Core Services & Business Logic
+    11. Core Infrastructure
+    12. Cron Jobs & Scheduling
+    13. Utilities & Reference Data
+    14. Migrations & Scripts
+    15. Testing (Backend)
+    16. Deployment Configuration
 
   PART C — MOBILE APP (Expo / React Native)
-    12. Configuration & Dependencies
-    13. App Structure & Screens
-    14. Components (66 Files)
-    15. Hooks (25 Files)
-    16. Services & State Management
-    17. Lib Utilities (30 Files)
-    18. Feature Modules (Fundamental Analysis)
-    19. Internationalization & Theming
-    20. Security Implementation (Frontend)
-    21. Testing (Frontend)
+    17. Configuration & Dependencies
+    18. Build & Platform Configuration
+    19. App Screens & Routing (30+ Screens)
+    20. Components (88+ Files)
+    21. Custom Hooks (35+ Hooks)
+    22. Services & State Management (40+ Files)
+    23. Lib Utilities (37 Files)
+    24. Feature Modules (Fundamental Analysis, Holdings, Transactions)
+    25. Constants & Theming
+    26. Testing (Frontend)
+    27. Assets & Public Files
 
   PART D — DEVOPS & TOOLING
-    22. Root-Level Scripts
-    23. Deployment Configuration
-    24. Environment Variables
+    28. Root-Level Diagnostic Scripts
+    29. Environment Variables
 
   PART E — ANALYSIS
-    25. Feature Capability Matrix
-    26. Architecture Patterns & Design Decisions
-    27. Security Audit Summary
-    28. Strengths & Recommendations
+    30. Feature Capability Matrix
+    31. Architecture Patterns & Design Decisions
+    32. Security Audit Summary
+    33. Strengths & Recommendations
 
 
 ================================================================================
@@ -79,15 +84,13 @@ Architecture: Three-tier monorepo
   │  ├── FastAPI 0.111+, Python 3.12                           │
   │  ├── SQLAlchemy 2.0+ ORM + raw SQL helpers                 │
   │  ├── SQLite (dev) / PostgreSQL (prod)                      │
-  │  ├── APScheduler for cron jobs                             │
-  │  └── Google Gemini AI for PDF extraction                   │
+  │  └── Gunicorn + Uvicorn (ASGI)                             │
   ├─────────────────────────────────────────────────────────────┤
-  │  dev_portfolio.db  (SQLite database — development)         │
+  │  Deployment                                                 │
+  │  ├── Backend: Render / Docker / DigitalOcean               │
+  │  ├── Web: Vercel (static export)                           │
+  │  └── Mobile: Expo EAS Build (iOS + Android)                │
   └─────────────────────────────────────────────────────────────┘
-
-Communication: REST API over HTTPS (port 8004 dev, DigitalOcean prod)
-Auth:          JWT (access + refresh tokens) with Google OAuth
-Version:       1.0.0 / Phase 3
 
 
 ================================================================================
@@ -95,130 +98,141 @@ Version:       1.0.0 / Phase 3
 ================================================================================
 
 mobile-migration/
-├── backend-api/                    # FastAPI backend
+├── backend-api/                    # FastAPI backend (30,435 lines Python)
 │   ├── app/
-│   │   ├── api/                    #   Route handlers (legacy + v1)
-│   │   │   ├── auth.py             #     Legacy auth routes
-│   │   │   ├── portfolio.py        #     Legacy portfolio routes
-│   │   │   ├── cron.py             #     Legacy cron routes
-│   │   │   ├── deps.py             #     Dependency injection
-│   │   │   └── v1/                 #     Versioned API (20+ routers)
-│   │   ├── core/                   #   Framework config
-│   │   │   ├── config.py           #     Pydantic settings
-│   │   │   ├── database.py         #     SQLAlchemy engine + helpers
-│   │   │   ├── security.py         #     JWT + bcrypt
-│   │   │   ├── exceptions.py       #     Custom error hierarchy
-│   │   │   ├── encryption.py       #     Fernet field encryption
-│   │   │   ├── middleware.py       #     OWASP security headers
-│   │   │   ├── limiter.py          #     Rate limiting (slowapi)
-│   │   │   ├── json_response.py    #     NaN-safe JSON
-│   │   │   └── schema.py           #     Idempotent DDL
-│   │   ├── models/                 #   SQLAlchemy ORM (9 modules)
-│   │   ├── schemas/                #   Pydantic request/response (6 modules)
-│   │   ├── services/               #   Business logic (15+ modules)
-│   │   ├── cron/                   #   Scheduled tasks (4 modules)
-│   │   ├── utils/                  #   Validators, currency, dates
-│   │   ├── data/                   #   Hardcoded stock lists (KW + US)
-│   │   └── main.py                 #   App factory, lifespan, middleware
-│   ├── tests/                      #   pytest (unit/integration/e2e/contract)
-│   ├── scripts/                    #   Maintenance utilities
-│   ├── migrations/                 #   Manual migration scripts
-│   ├── alembic/                    #   Alembic migration framework
-│   ├── requirements.txt
-│   ├── Dockerfile
-│   ├── docker-compose.yml
-│   ├── render.yaml
-│   └── Procfile
-├── mobile-app/                     # Expo / React Native frontend
-│   ├── app/                        #   File-based routes (37 screens)
-│   │   ├── _layout.tsx             #     Root layout (auth, i18n, RTL)
-│   │   ├── index.tsx               #     Entry point (auth routing)
-│   │   ├── (auth)/                 #     Auth screens (login, register, forgot)
-│   │   ├── (onboarding)/           #     Onboarding (welcome, expertise, features)
-│   │   └── (tabs)/                 #     Main app (23 tab screens)
-│   ├── components/                 #   Reusable UI (66 files)
-│   │   ├── form/                   #     Form primitives
-│   │   ├── ui/                     #     Generic UI (ErrorBoundary, Shimmer, etc.)
-│   │   ├── screens/                #     Screen containers (FormScreen, DataScreen)
-│   │   ├── charts/                 #     Custom SVG charts
-│   │   ├── news/                   #     News feed components
-│   │   ├── trading/                #     Trading table + simulator
-│   │   ├── portfolio/              #     Portfolio cards + cash
-│   │   ├── overview/               #     Dashboard widgets (AI, health, insights)
-│   │   ├── onboarding/             #     Setup wizard
-│   │   └── settings/               #     User settings
-│   ├── hooks/                      #   Custom React hooks (25 files)
-│   │   ├── queries/                #     React Query wrappers (15 modules)
-│   │   └── (core hooks)            #     Auth, responsive, mutations, etc.
-│   ├── services/                   #   API clients & state stores (27 files)
-│   │   ├── api/                    #     Axios client + endpoint modules
-│   │   ├── alerts/                 #     Alert rules + notification
-│   │   ├── news/                   #     News API + types
-│   │   ├── market/                 #     Market data
-│   │   ├── notifications/          #     Push tokens
-│   │   ├── socialSignals/          #     Trending stocks
-│   │   └── briefings/              #     WhatsApp briefing
-│   ├── lib/                        #   Utilities (30 files)
-│   │   ├── kfh/                    #     KFH trade statement import
-│   │   ├── i18n/                   #     Internationalization config
-│   │   ├── strategies/             #     Investment strategy templates
-│   │   └── (core utils)            #     Currency, dates, validation, PDF export
-│   ├── constants/                  #   Theme, config, layout (4 files)
-│   ├── src/                        #   Feature modules
-│   │   ├── store/                  #     User preferences (Zustand)
-│   │   └── features/               #     Fundamental analysis (22 files)
-│   ├── __tests__/                  #   Jest tests (21 files)
-│   ├── e2e/                        #   Detox E2E tests
-│   ├── assets/                     #   Icons, splash, fonts
-│   ├── package.json
-│   ├── tsconfig.json
-│   ├── app.json
-│   ├── eas.json
-│   └── vercel.json
-├── _check_*.py                     # Data validation scripts (7)
-├── _debug_*.py                     # Debug/troubleshooting scripts (5)
-├── _fix_user_ids*.py               # Data repair scripts (3)
-├── _test_*.py / _e2e_test.py       # Integration test scripts (3)
-├── _verify_*.py                    # Verification scripts (2)
-├── _*.py                           # Other utility scripts (2)
-├── dev_portfolio.db                # Development SQLite database
-├── README.md                       # Project overview
-└── DEPLOYMENT.md                   # Deployment guide
+│   │   ├── api/                    # Route handlers (legacy + v1)
+│   │   │   ├── auth.py             # Legacy auth routes
+│   │   │   ├── cron.py             # Legacy cron routes
+│   │   │   ├── portfolio.py        # Legacy portfolio routes
+│   │   │   ├── deps.py             # Dependency injection
+│   │   │   └── v1/                 # Primary API (20 route modules)
+│   │   │       ├── admin.py        # Admin user management
+│   │   │       ├── ai.py           # AI analysis (Gemini)
+│   │   │       ├── analytics.py    # Performance metrics
+│   │   │       ├── auth.py         # Authentication
+│   │   │       ├── backup.py       # Backup/restore
+│   │   │       ├── cash.py         # Cash deposits
+│   │   │       ├── cron.py         # Scheduled tasks
+│   │   │       ├── dividends.py    # Dividend tracking
+│   │   │       ├── fundamental.py  # Fundamental analysis (6,122 lines)
+│   │   │       ├── integrity.py    # Data integrity checks
+│   │   │       ├── market.py       # Market data
+│   │   │       ├── news.py         # News feed
+│   │   │       ├── notifications.py # Push notifications
+│   │   │       ├── pfm.py          # Personal finance mgr
+│   │   │       ├── portfolio.py    # Portfolio management
+│   │   │       ├── securities.py   # Securities master
+│   │   │       ├── stocks.py       # Stock management
+│   │   │       ├── tracker.py      # Portfolio tracker
+│   │   │       └── trading.py      # Trading overview
+│   │   ├── core/                   # Infrastructure
+│   │   ├── cron/                   # Background tasks
+│   │   ├── data/                   # Reference data
+│   │   ├── models/                 # SQLAlchemy models
+│   │   ├── schemas/                # Pydantic schemas
+│   │   ├── services/               # Business logic
+│   │   └── utils/                  # Helpers
+│   ├── alembic/                    # DB migrations (unused)
+│   ├── migrations/                 # Python migration scripts
+│   ├── scripts/                    # Helper scripts
+│   ├── tests/                      # Pytest suite
+│   ├── Dockerfile                  # Docker build
+│   ├── docker-compose.yml          # Docker compose
+│   ├── Procfile                    # Render deploy
+│   ├── render.yaml                 # Render config
+│   └── requirements.txt           # Python deps
+│
+├── mobile-app/                     # Expo/React Native frontend (61,159 lines TS/JS)
+│   ├── app/                        # Expo Router screens
+│   │   ├── (auth)/                 # Auth screens (login, register, forgot-password)
+│   │   ├── (onboarding)/           # Onboarding flow
+│   │   └── (tabs)/                 # Main app tabs (23 screens)
+│   ├── components/                 # Reusable UI (88+ files)
+│   │   ├── charts/                 # Chart components
+│   │   ├── form/                   # Form controls
+│   │   ├── news/                   # News components
+│   │   ├── onboarding/             # Onboarding widgets
+│   │   ├── overview/               # Dashboard panels
+│   │   ├── portfolio/              # Portfolio widgets
+│   │   ├── screens/                # Screen wrappers
+│   │   ├── settings/               # Settings components
+│   │   ├── trading/                # Trading components
+│   │   └── ui/                     # UI primitives
+│   ├── hooks/                      # Custom hooks (35+)
+│   │   └── queries/                # React Query hooks
+│   ├── services/                   # API clients + stores
+│   │   ├── api/                    # Axios client + endpoints
+│   │   ├── alerts/                 # Alert rules
+│   │   ├── briefings/              # WhatsApp briefings
+│   │   ├── localInsights/          # Boursa Kuwait
+│   │   ├── market/                 # Market data
+│   │   ├── news/                   # News service
+│   │   ├── notifications/          # Push notifications
+│   │   └── socialSignals/          # Trending stocks
+│   ├── lib/                        # Utilities (37 files)
+│   │   ├── i18n/                   # Internationalization
+│   │   ├── kfh/                    # KFH bank integration
+│   │   ├── news/                   # News summarizer
+│   │   ├── reconciliation/         # Reconciliation
+│   │   └── strategies/             # Portfolio strategies
+│   ├── constants/                  # Theme, config, tokens
+│   ├── src/                        # Feature modules
+│   │   ├── features/               # Domain features
+│   │   │   ├── fundamental-analysis/  # 27 files
+│   │   │   ├── holdings/           # 3 files
+│   │   │   └── transactions/       # 6 files
+│   │   ├── screens/                # Feature screens
+│   │   └── store/                  # User prefs store
+│   ├── __tests__/                  # Jest test suite (26 files)
+│   ├── e2e/                        # E2E test definitions
+│   ├── assets/                     # Images & fonts
+│   └── public/                     # Web static files
+│
+└── _*.py                           # Root diagnostic scripts (22 files, 1,201 lines)
 
 
 ================================================================================
   3. CODEBASE STATISTICS
 ================================================================================
 
-  ┌───────────────────────────────────┬────────┬─────────┬──────────┐
-  │ Component                        │ Files  │ Lines   │ Language │
-  ├───────────────────────────────────┼────────┼─────────┼──────────┤
-  │ Backend API (app + scripts)      │   111  │  30,344 │ Python   │
-  │ Frontend App (production)        │   207  │  55,407 │ TS/TSX   │
-  │ Root Scripts                     │    22  │   1,201 │ Python   │
-  ├───────────────────────────────────┼────────┼─────────┼──────────┤
-  │ TOTAL PRODUCTION                 │   340  │  86,952 │          │
-  ├───────────────────────────────────┼────────┼─────────┼──────────┤
-  │ Backend Tests                    │    23  │   4,061 │ Python   │
-  │ Frontend Tests                   │    21  │   4,400 │ TS/TSX   │
-  ├───────────────────────────────────┼────────┼─────────┼──────────┤
-  │ TOTAL TESTS                      │    44  │   8,461 │          │
-  ├───────────────────────────────────┼────────┼─────────┼──────────┤
-  │ GRAND TOTAL                      │   384  │  95,413 │          │
-  └───────────────────────────────────┴────────┴─────────┴──────────┘
+  ┌─────────────────────────────────┬──────────┬────────────────┐
+  │ Component                       │ Files    │ Lines of Code  │
+  ├─────────────────────────────────┼──────────┼────────────────┤
+  │ Backend API (Python)            │   100+   │     30,435     │
+  │   ├── Routes (app/api/)         │    23    │     11,665     │
+  │   ├── Services                  │    16    │      8,462     │
+  │   ├── Core Infrastructure       │     9    │      1,675     │
+  │   ├── Models                    │     9    │        517     │
+  │   ├── Schemas                   │     7    │        468     │
+  │   ├── Cron Jobs                 │     5    │        652     │
+  │   ├── Data + Utils              │     5    │        375     │
+  │   ├── Migrations + Scripts      │     5    │        852     │
+  │   └── Tests                     │    21    │      3,962     │
+  ├─────────────────────────────────┼──────────┼────────────────┤
+  │ Mobile App (TypeScript/JS)      │   250+   │     61,159     │
+  │   ├── Screens (app/)            │    32    │     11,297     │
+  │   ├── Components                │    66    │     12,668     │
+  │   ├── Hooks                     │    33    │      2,318     │
+  │   ├── Services                  │    35    │      4,620     │
+  │   ├── Lib Utilities             │    37    │      5,502     │
+  │   ├── Feature Modules (src/)    │    39    │     12,882     │
+  │   ├── Constants                 │     5    │        235     │
+  │   └── Tests                     │    27    │      5,278     │
+  ├─────────────────────────────────┼──────────┼────────────────┤
+  │ Root Diagnostic Scripts         │    22    │      1,201     │
+  ├─────────────────────────────────┼──────────┼────────────────┤
+  │ GRAND TOTAL                     │   372+   │     92,795     │
+  └─────────────────────────────────┴──────────┴────────────────┘
 
-  Database Tables:       30+
-  API Endpoints:         60+
-  React Components:      66
-  Custom Hooks:          25
-  Pydantic Schemas:      6 modules
-  SQLAlchemy Models:     9 modules
-  Cron Jobs:             4
+  Test Coverage:
+    Backend Tests:  21 files, 3,962 lines (unit + integration + e2e + contract)
+    Frontend Tests: 27 files, 5,278 lines (unit + component + hook + e2e)
+    Total Tests:    48 files, 9,240 lines
 
 
 ================================================================================
 ================================================================================
-                   PART B — BACKEND API (FastAPI)
+                      PART B — BACKEND API (FastAPI)
 ================================================================================
 ================================================================================
 
@@ -227,1386 +241,1639 @@ mobile-migration/
   4. CONFIGURATION & DEPENDENCIES
 ================================================================================
 
-4.1 Python Dependencies (requirements.txt)
-───────────────────────────────────────────
+requirements.txt / pyproject.toml:
 
-  Category        Package                  Version
-  ──────────      ─────────────────        ──────────
-  Web             fastapi                  >=0.110
-  Web             uvicorn                  >=0.27
-  Database        sqlalchemy               >=2.0
-  Database        alembic                  >=1.13
-  Database        psycopg2-binary          >=2.9
-  Auth            python-jose              >=3.3
-  Auth            bcrypt                   >=4.0
-  Auth            python-multipart         (any)
-  Config          pydantic                 >=2.0
-  Config          pydantic-settings        >=2.0
-  Data            pandas                   >=2.0
-  Data            numpy                    >=1.26
-  Data            openpyxl                 >=3.1
-  Finance         yfinance                 >=0.2
-  Scheduling      APScheduler              >=3.10
-  Rate Limit      slowapi                  >=0.1.9
-  HTTP            requests                 >=2.31
-  HTTP            httpx                    >=0.27
-  AI              google-genai             >=1.0
-  AI              PyMuPDF                  >=1.24
-  AI              json-repair              >=0.30
-  Security        cryptography             (any)
+  Core Framework:
+    fastapi>=0.111.0             Web framework
+    uvicorn[standard]>=0.30.0    ASGI server
+    gunicorn>=21.2,<23.0         Production WSGI server
 
-4.2 Build & Deploy Configuration
-────────────────────────────────
+  Database:
+    sqlalchemy>=2.0.30           ORM
+    alembic>=1.13.0              Migrations
+    psycopg2-binary>=2.9.0       PostgreSQL driver
 
-  Dockerfile:       python:3.12-slim, Gunicorn + Uvicorn (2 workers)
-  Health Check:     GET /health every 30s, 5s timeout, 3 retries
-  Procfile:         gunicorn app.main:app --workers 2 --worker-class uvicorn.workers.UvicornWorker
-  render.yaml:      Frankfurt region, 1GB persistent disk, auto-deploy
-  docker-compose:   Single service, volume for DB persistence
-  alembic.ini:      Dual-mode (SQLite batch + PostgreSQL)
+  Authentication & Security:
+    python-jose[cryptography]>=3.3.0   JWT handling
+    passlib[bcrypt]>=1.7.4       Password hashing
+    bcrypt>=4.0.0                bcrypt crypto
+    python-multipart>=0.0.9      Form parsing
+    cryptography>=41.0,<44.0     Encryption
 
+  Data & Config:
+    pydantic>=2.7.0              Data validation
+    pydantic-settings>=2.3.0     Config management
+    python-dotenv>=1.0,<2.0      .env loading
 
-================================================================================
-  5. APP STRUCTURE & FILE INVENTORY
-================================================================================
+  Data Processing:
+    pandas>=2.2.0                Data frames
+    numpy>=1.26,<3.0             Numerics
+    openpyxl>=3.1.0              Excel I/O
+    python-dateutil>=2.8,<3.0    Date utilities
 
-5.1 Core Modules (app/core/) — 9 files
-───────────────────────────────────────
+  Finance & Market Data:
+    yfinance>=0.2.40             Yahoo Finance API
+    APScheduler>=3.10.0          Task scheduling
+    slowapi>=0.1.9               Rate limiting
 
-  File                  Lines   Purpose
-  ────────────          ─────   ──────────────────────────────────────────
-  config.py              120   Pydantic settings from .env (CORS, JWT, FX,
-                                cron, SMTP, encryption)
-  database.py            400+  SQLAlchemy engine, raw SQL helpers
-                                (query_df, query_one, exec_sql)
-  security.py            250   JWT (access + refresh), bcrypt hashing,
-                                token encoding/decoding
-  exceptions.py          180   Custom APIError hierarchy + exception handlers
-  encryption.py           80   Fernet field-level encryption
-  middleware.py          120   OWASP security headers, request size limits,
-                                Private Network Access
-  limiter.py              10   Slowapi rate limiter (120/min default)
-  json_response.py        40   SafeJSONResponse (handles NaN/Infinity)
-  schema.py              300+  Idempotent table creation for all domains
+  HTTP & Networking:
+    requests>=2.31.0             HTTP client
+    httpx>=0.27.0                Async HTTP client
 
-5.2 Models (app/models/) — 9 files
-──────────────────────────────────
+  AI (Optional):
+    google-generativeai>=0.5.0   Google Gemini API
 
-  File                  Lines   Purpose
-  ────────────          ─────   ──────────────────────────────────────────
-  user.py                 35   User (id, username, password_hash, is_admin,
-                                lockout fields)
-  portfolio.py           250   Portfolio, Stock, PortfolioTransaction,
-                                Transaction, legacy ledger
-  cash.py                 45   CashDeposit, ExternalAccount
-  news.py                 35   NewsArticle (Boursa Kuwait)
-  pfm.py                 130   PFM snapshots (assets, liabilities, income)
-  snapshot.py            100   PortfolioSnapshot, PositionSnapshot,
-                                PortfolioCash, StocksMaster
-  security.py             50   SecuritiesMaster (exchange-listed metadata)
-  audit.py                60   AuditLog (immutable), TokenBlacklist
-  push_token.py           15   PushToken (Expo push notifications)
+  PDF Processing:
+    PyMuPDF>=1.24.0              PDF extraction
+    Pillow>=10.0                 Image processing
+    json-repair>=0.30.0          JSON fixing
 
-5.3 Schemas (app/schemas/) — 6 files
-────────────────────────────────────
-
-  File                  Lines   Purpose
-  ────────────          ─────   ──────────────────────────────────────────
-  user.py                 90   Login/Register/ChangePassword requests,
-                                UserInfo, TokenResponse
-  portfolio.py           200   HoldingRow, HoldingsTotals, PortfolioOverview,
-                                Transaction CRUD
-  cash.py                 75   CashDeposit CRUD, CashBalance responses
-  analytics.py            80   Performance, Risk, Realized PnL, Cash Recon
-  common.py               40   ApiResponse, Pagination, Error envelope
-  integrity.py           130   CashCheck, PositionMismatch, AnomalyReport
-
-5.4 Services (app/services/) — 15+ files
-────────────────────────────────────────
-
-  File                      Lines   Purpose
-  ──────────────────        ─────   ──────────────────────────────────────
-  portfolio_service.py       800+   Core: holdings, WAC, performance, cash
-                                     reconciliation, overview calculations
-  extraction_service.py     1000+   AI pipeline: PDF→images, Gemini analysis,
-                                     scratchpad reasoning, validation, retry
-  integrity_service.py       400+   Financial verification: cash, positions,
-                                     snapshots, anomaly detection
-  price_service.py           300    yfinance integration, .KW suffix rules,
-                                     Kuwait stock normalization
-  twr_calculator.py          200    TWR (Modified Dietz), MWRR (Newton-Raphson
-                                     IRR), annualized returns
-  cashflow_reconciler.py     200    5-source cash balance reconciliation
-  fx_service.py              150    USD→KWD rate caching, portfolio CCY mapping
-  backup_service.py          150    Database backup, SQL dump, restore
-  audit_service.py           150    Immutable event logging (auth, CRUD, admin)
-  user_onboarding.py         150    New user setup (create portfolios, stocks)
-  email_service.py           100    SMTP OTP delivery for password reset
-  market_service.py          100    Market data, stock metadata
-  push_service.py            100    Expo push notification sending
-  ai_service.py              150    AI analysis helpers (Gemini API)
-  auth_service.py             50    authenticate_user(), token creation
-
-5.5 API Routes
-──────────────
-
-  Legacy (app/api/):
-    auth.py              100    POST /api/auth/login, GET /api/auth/me
-    portfolio.py         300+   GET /api/portfolio/overview, /holdings, /table
-    cron.py              120    POST /api/cron/update-prices
-    deps.py               50    get_current_user(), require_admin(), get_db()
-
-  Versioned (app/api/v1/) — 20+ routers:
-    auth.py              —      Login, register, refresh, me, change-password
-    portfolio.py         —      Overview, holdings, table, transactions CRUD
-    cash.py              —      Deposits CRUD, accounts, balances, import
-    analytics.py         —      Performance, risk, realized PnL, settings
-    pfm.py               —      PFM snapshots CRUD, net-worth trend
-    stocks.py            —      Stock list, search, CRUD
-    dividends.py         —      History, upcoming, record
-    fundamental.py       —      PDF extract, jobs, validate, ingest
-    ai.py                —      AI analyze, chat
-    news.py              —      Articles list/detail, by-stock
-    integrity.py         —      Full check, report
-    trading.py           —      Positions, orders CRUD
-    tracker.py           —      Snapshots, daily P&L
-    market.py            —      Quotes, watchlist
-    notifications.py     —      Push token registration
-    backup.py            —      Create, restore, list
-    admin.py             —      Users, audit log, settings (admin-only)
-    securities.py        —      Securities master, import
-    cron.py              —      Price update trigger, scheduler status
-
-5.6 Cron Jobs (app/cron/) — 4 files
-───────────────────────────────────
-
-  File                  Lines   Purpose
-  ────────────          ─────   ──────────────────────────────────────────
-  scheduler.py           250   APScheduler setup, file lock for multi-worker
-                                singleton, job definitions
-  price_updater.py        60   Execute yfinance price update, track results
-  snapshot_saver.py      150   Daily portfolio snapshots (value, cash, P&L,
-                                TWR/MWRR)
-  news_poller.py         300+  Adaptive polling (15s market / 5m off-hours),
-                                ETag caching, push notifications
-
-5.7 Utilities & Data
-────────────────────
-
-  app/utils/validators.py     50   Symbol, portfolio, txn type, currency, date
-  app/utils/currency.py       —    Currency conversion helpers
-  app/utils/date_parser.py    —    Date parsing utilities
-  app/data/stock_lists.py    350+  Hardcoded reference: 80+ KW stocks,
-                                    50+ US stocks with yfinance tickers
+  Dev Dependencies:
+    pytest>=8.2.0                Testing
+    pytest-asyncio>=0.23.0       Async testing
+    ruff>=0.4.0                  Linting
+    mypy>=1.10.0                 Type checking
 
 
 ================================================================================
-  6. DATABASE SCHEMA (30+ Tables)
+  5. APP ENTRY POINT & MIDDLEWARE
 ================================================================================
 
-6.1 Authentication & Security
-─────────────────────────────
+app/main.py (196 lines)
+
+  Startup Configuration:
+    • Database existence check (requires dev_portfolio.db)
+    • Schema initialization via ensure_all_tables()
+    • Extraction job recovery (fundamental analysis)
+    • yf_ticker backfill for existing stocks
+    • Production security audit (SECRET_KEY, CRON_SECRET_KEY, CORS)
+
+  Middleware Stack (in order):
+    1. SecurityHeadersMiddleware — X-Frame-Options, X-Content-Type-Options, etc.
+    2. RequestSizeLimitMiddleware — Limits payload to 50 MB
+    3. CORSMiddleware — Dev origins vs prod origin regex matching
+    4. PrivateNetworkAccessMiddleware — RFC1918 preflight support
+
+  Exception Handlers:
+    • RateLimitExceeded → via slowapi
+    • APIError → custom structured responses
+    • Exception → unhandled error logging
+
+  Routers Included:
+    • v1 (primary): /api/v1/* namespace with 20 sub-routers
+    • Legacy: /auth, /portfolio, /cron (backward-compat)
+
+  Health Endpoints:
+    • GET /health — Status + db_connected, db_mode, environment
+    • GET /api/health — Same (for Render routing)
+    • GET /health/tables — Diagnostic: lists all database tables
+
+
+================================================================================
+  6. API ENDPOINT INVENTORY (80+ Endpoints)
+================================================================================
+
+All v1 endpoints under /api/v1/* unless noted.
+Legacy endpoints (/auth/*, /portfolio/*, /cron/*) retained for backward compat.
+
+───────────────────────────────────────────────────────────────────────────────
+6.1  auth.py (619 lines) — /api/v1/auth/*
+───────────────────────────────────────────────────────────────────────────────
+
+  POST  /login               login_json()         JSON login (5/min rate limit)
+  POST  /login/form           login_form()         OAuth2 form login
+  POST  /refresh              refresh_token()      Exchange refresh → new access token (rotation)
+  GET   /me                   me()                 Current user info
+  POST  /register             register()           Create account + setup defaults (3/min)
+  POST  /google               google_sign_in()     Google Sign-In (ID token or access token)
+  PUT   /change-password      change_password()    Update password
+  PUT   /api-key              save_api_key()       Store Gemini API key (user-level)
+  GET   /api-key              get_api_key()        Retrieve Gemini API key
+
+  Security Features:
+    • Account lockout after 5 failed attempts (15 min lockout)
+    • Refresh token blacklist (JTI-based revocation)
+    • Token rotation (old refresh token invalidated on each refresh)
+    • Audit logging (AUTH_LOGIN, AUTH_LOGIN_FAILED, AUTH_REGISTER,
+      AUTH_GOOGLE_LOGIN, AUTH_PASSWORD_CHANGE, AUTH_LOCKOUT)
+
+───────────────────────────────────────────────────────────────────────────────
+6.2  portfolio.py (684 lines) — /api/v1/portfolio/*
+───────────────────────────────────────────────────────────────────────────────
+
+  GET   /overview                    portfolio_overview()     Complete overview (KWD-converted)
+  GET   /holdings                    portfolio_holdings()     Current holdings with P&L & allocation
+  GET   /table/{portfolio_name}      portfolio_table()        Single portfolio full table
+  GET   /accounts                    account_balances()       External account cash balances
+  GET   /fx-rate                     fx_rate()                Current USD→KWD rate (cached 1h)
+  GET   /transactions                list_transactions()      Paginated txn list (filters)
+  GET   /transactions/{txn_id}       get_transaction()        Single transaction detail
+  POST  /transactions                create_transaction()     Create Buy/Sell/DIVIDEND_ONLY txn
+  PUT   /transactions/{txn_id}       update_transaction()     Update txn (recomputes cash)
+  DELETE /transactions/{txn_id}      delete_transaction()     Soft-delete transaction
+
+  Key Features:
+    • All KWD-converted (USD holdings auto-converted)
+    • Soft-delete support (is_deleted flag)
+    • Auto-create stock records on txn creation
+    • Manual FX rate capture at transaction time
+    • Cash ledger auto-recalc on create/update/delete
+
+───────────────────────────────────────────────────────────────────────────────
+6.3  cash.py (596 lines) — /api/v1/cash/*
+───────────────────────────────────────────────────────────────────────────────
+
+  GET   /deposits                    list_deposits()         Paginated deposits (filter by portfolio)
+  GET   /deposits/{deposit_id}       get_deposit()           Single deposit detail
+  POST  /deposits                    create_deposit()        Create deposit/withdrawal
+  PUT   /deposits/{deposit_id}       update_deposit()        Update deposit
+  DELETE /deposits/{deposit_id}      delete_deposit()        Soft-delete deposit
+
+  Features:
+    • Separate currency tracking (KWD/USD/AED/etc.)
+    • Source tracking (bank, withdrawal, transfer)
+    • Manual override support
+    • Auto-sync to portfolio snapshots on deposit date
+    • Include-in-analysis toggle
+
+───────────────────────────────────────────────────────────────────────────────
+6.4  analytics.py (304 lines) — /api/v1/analytics/*
+───────────────────────────────────────────────────────────────────────────────
+
+  GET   /performance                 performance_metrics()   TWR, MWRR, ROI (all/ytd/1y/6m/3m/1m)
+  GET   /risk-metrics                risk_metrics()          Sharpe & Sortino ratios
+  GET   /settings/rf-rate            get_rf_rate()           Get stored risk-free rate
+  PUT   /settings/rf-rate            set_rf_rate()           Store risk-free rate
+  GET   /realized-profit             realized_profit()       Realized P&L (dual-path WAC)
+  GET   /cash-balances               cash_balances()         Per-portfolio cash
+  PUT   /cash-balances/{portfolio}   set_cash_override()     Override portfolio cash
+  DELETE /cash-balances/{port}/override  clear_cash_override()   Clear override
+  GET   /snapshots                   list_snapshots()        Portfolio snapshots (paginated)
+  GET   /position-snapshots          list_position_snapshots() Per-stock position snapshots
+
+  Calculations:
+    • TWR (Time-Weighted Return) — GIPS-compliant
+    • MWRR (Modified Dietz) — Newton-Raphson + bisection fallback
+    • Sharpe Ratio = (mean return − rf) / std dev × √N
+    • Sortino Ratio = (mean return − MAR) / downside std × √N
+
+───────────────────────────────────────────────────────────────────────────────
+6.5  stocks.py (400 lines) — /api/v1/stocks/*
+───────────────────────────────────────────────────────────────────────────────
+
+  GET   /                            list_stocks()           All stocks (filter by portfolio/search)
+  GET   /stock-list                  get_stock_list()        Reference list + live yfinance
+  POST  /fetch-price                 fetch_price()           Fetch ticker price via yfinance
+  GET   /{stock_id}                  get_stock()             Single stock by ID
+  GET   /by-symbol/{symbol}          get_stock_by_symbol()   Single stock by symbol
+  POST  /                            create_stock()          Create stock record
+  PUT   /{stock_id}                  update_stock()          Update stock metadata
+  DELETE /{stock_id}                 delete_stock()          Delete stock record
+
+  Features:
+    • Kuwait fils→KWD auto-correction (divide by 1000 if >50)
+    • yfinance ticker resolution with fallback suffix rules
+    • PE ratio tracking, TradingView symbol mapping
+    • Live search augmentation for US stocks
+
+───────────────────────────────────────────────────────────────────────────────
+6.6  news.py (964 lines) — /api/v1/news/*
+───────────────────────────────────────────────────────────────────────────────
+
+  GET   /feed                        (paginated feed)        Live Boursa announcements
+  GET   /history                     (paginated stored)      Persisted historical announcements
+  GET   /item/{id}                   (single item)           Single news item by NewsId
+  GET   /sources                     (sources list)          Available news sources
+  POST  /fetch-all                   (bulk fetch)            Fetch & persist all Boursa announcements
+
+  Categories: company_announcement, financial, dividend, earnings,
+              market_news, regulatory
+
+  Features:
+    • Arabic→English ticker normalization (AR_DISPLAY_TO_EN_TICKER map)
+    • NewsType code→category mapping (70+ types)
+    • Keyword-based fallback detection
+    • TitleTypeDesc mapping (Boursa RT=3516)
+    • Sentiment & impact scoring (stub)
+
+───────────────────────────────────────────────────────────────────────────────
+6.7  pfm.py (182 lines) — /api/v1/pfm/*
+───────────────────────────────────────────────────────────────────────────────
+
+  GET   /snapshots                   list_pfm_snapshots()    Net-worth snapshots (paginated)
+  GET   /snapshots/{snapshot_id}     get_pfm_snapshot()      Full detail (assets, liabilities)
+  POST  /snapshots                   create_pfm_snapshot()   Create PFM snapshot w/ line items
+  DELETE /snapshots/{snapshot_id}    delete_pfm_snapshot()   Delete snapshot & children
+
+  Data Model:
+    • Assets: real_estate, shares, gold, cash, crypto, other
+    • Liabilities: categorized, is_current / is_long_term
+    • Income/Expenses: kind (income/expense), is_finance_cost, is_gna
+
+───────────────────────────────────────────────────────────────────────────────
+6.8  ai.py (68 lines) — /api/v1/ai/*
+───────────────────────────────────────────────────────────────────────────────
+
+  POST  /analyze                     analyze_portfolio()     AI analysis via Gemini (en/ar)
+  GET   /status                      ai_status()             Check Gemini API config
+
+  Features:
+    • Per-user API key storage (gemini_api_key column)
+    • Server-wide fallback (GEMINI_API_KEY env var)
+    • Selective data inclusion (holdings, transactions, performance)
+    • English & Arabic response support
+
+───────────────────────────────────────────────────────────────────────────────
+6.9  admin.py (330 lines) — /api/v1/admin/*
+───────────────────────────────────────────────────────────────────────────────
+
+  GET   /users                       list_users()            All users w/ portfolio stats
+  GET   /activities                  list_activities()       All client transactions (paginated)
+  POST  /users                       create_user()           Create user account (admin-only)
+  PUT   /users/{user_id}             update_user()           Update user details
+  DELETE /users/{user_id}            delete_user()           Delete user (cascading)
+
+  Admin-Only: require is_admin=1
+
+  Tracked Fields:
+    Transaction count, portfolio value, cash balance, total value, growth,
+    last login timestamp, account creation date
+
+───────────────────────────────────────────────────────────────────────────────
+6.10 trading.py (865 lines) — /api/v1/portfolio/* (tag: Trading)
+───────────────────────────────────────────────────────────────────────────────
+
+  GET   /trading/summary             (summary view)          12-metric trading summary
+  GET   /trading/transactions        (enriched list)         Txn list w/ WAC, pnl, pnl_pct
+  POST  /trading/export              (CSV export)            Download as CSV
+
+  Metrics:
+    Total buys, sells, deposits, withdrawals, realized P&L, unrealized P&L,
+    dividends, fees, weighted average cost (CFA/IFRS-compliant)
+
+───────────────────────────────────────────────────────────────────────────────
+6.11 dividends.py (295 lines) — /api/v1/dividends/*
+───────────────────────────────────────────────────────────────────────────────
+
+  GET   /                            list_dividends()        All dividend entries
+  GET   /by-stock                    dividends_by_stock()    Grouped by stock
+  GET   /yield-summary               (summary stats)         Aggregate dividend yield metrics
+
+  Calculations:
+    Cash dividend (KWD-converted), bonus shares count,
+    reinvested dividend, yield-on-cost %
+
+───────────────────────────────────────────────────────────────────────────────
+6.12 fundamental.py (6,122 lines) — /api/v1/fundamental/*
+───────────────────────────────────────────────────────────────────────────────
+
+  POST  /stocks                      Create analysis stock profile
+  GET   /stocks/{stock_id}           Get stock profile
+  POST  /pdf-upload                  Upload financial PDF
+  GET   /extraction-jobs             List extraction jobs
+  GET   /cashflow                    Get cash flow statement
+  POST  /cashflow-staging/{run_id}   Review staged rows
+  GET   /metrics                     Get financial metrics
+  POST  /valuation-models            Create valuation (DCF, multiples)
+  GET   /scores                      Get stock scores
+
+  Database Tables:
+    analysis_stocks, financial_statements, financial_line_items,
+    stock_metrics, valuation_models, stock_scores,
+    cashflow_extraction_runs, cashflow_staged_rows,
+    extraction_jobs, pdf_uploads, analysis_audit_log
+
+───────────────────────────────────────────────────────────────────────────────
+6.13 market.py (52 lines) — /api/v1/market/*
+───────────────────────────────────────────────────────────────────────────────
+
+  GET   /summary                     market_summary()        Cached Boursa market data
+  GET   /refresh                     market_refresh()        Force re-scrape
+
+  Source: Boursa Kuwait website scraping
+
+───────────────────────────────────────────────────────────────────────────────
+6.14 tracker.py (445 lines) — /api/v1/tracker/*
+───────────────────────────────────────────────────────────────────────────────
+
+  POST  /snapshots                   save_snapshot()         Capture today's portfolio value
+  DELETE /snapshots                  delete_snapshots()      Wipe all user snapshots
+  GET   /recalculate                 recalculate_snapshots() Recompute derived columns
+
+  Snapshot Calculations:
+    daily_movement, beginning_difference, accumulated_cash,
+    net_gain, change_percent, roi_percent
+
+───────────────────────────────────────────────────────────────────────────────
+6.15 securities.py (271 lines) — /api/v1/securities/*
+───────────────────────────────────────────────────────────────────────────────
+
+  GET   /                            list_securities()       All securities (filter)
+  GET   /{security_id}               get_security()          Single w/ aliases
+  POST  /                            create_security()       New canonical security
+  PUT   /{security_id}               update_security()       Update master record
+  DELETE /                           (delete operation)      Remove security
+  POST  /{security_id}/aliases       Add alias               Link alternative ticker
+  DELETE /{security_id}/aliases/{id} Remove alias            Unlink alias
+
+  Security ID Format: EXCHANGE:TICKER (e.g., KSE:HUMANSOFT)
+
+───────────────────────────────────────────────────────────────────────────────
+6.16 integrity.py (72 lines) — /api/v1/integrity/*
+───────────────────────────────────────────────────────────────────────────────
+
+  GET   /check                       full_integrity_check()  Run ALL checks
+  GET   /cash/{portfolio}            check_cash_balance()    Verify cash per portfolio
+  GET   /positions/{portfolio}       check_positions()       Cross-check holdings
+  GET   /snapshots/{portfolio}       check_snapshots()       Verify snapshot consistency
+  GET   /anomalies                   check_anomalies()       Scan for duplicates, over-sells
+  GET   /completeness                check_completeness()    Missing stocks, zero prices
+
+───────────────────────────────────────────────────────────────────────────────
+6.17 backup.py (148 lines) — /api/v1/backup/*
+───────────────────────────────────────────────────────────────────────────────
+
+  GET   /export                      export_backup()         Download Excel backup (all tables)
+  POST  /import                      import_backup()         Restore from Excel (merge/replace)
+  GET   /data-check                  data_ownership_check()  Diagnose data by user_id
+  POST  /claim-data                  claim_orphaned_data()   Reassign data between users
+
+───────────────────────────────────────────────────────────────────────────────
+6.18 cron.py (166 lines) — /api/v1/cron/*
+───────────────────────────────────────────────────────────────────────────────
+
+  POST  /update-prices               trigger_price_update()  Refresh stock prices (cron-key)
+  GET   /status                      cron_status()           Last price/snapshot runs
+  POST  /save-snapshot               trigger_snapshot_save() Save portfolio snapshot (cron-key)
+
+  Auth: X-Cron-Key header OR ?key= query param
+
+───────────────────────────────────────────────────────────────────────────────
+6.19 notifications.py (83 lines) — /api/v1/notifications/*
+───────────────────────────────────────────────────────────────────────────────
+
+  POST  /register-token              register_push_token()   Register Expo push token
+  DELETE /unregister-token           unregister_push_token() Remove push token
+  GET   /status                      notification_status()   Push token count + health
+
+───────────────────────────────────────────────────────────────────────────────
+  ENDPOINT SUMMARY
+───────────────────────────────────────────────────────────────────────────────
+
+  Total v1 Endpoints: 80+
+  Authenticated: 95% (only /health, /auth/login, /cron/status are public)
+  Rate Limits: 5/min login, 10/min refresh, 3/min register
+  Soft-Delete: Transactions, cash deposits, PFM snapshots
+
+
+================================================================================
+  7. DATABASE SCHEMA (30+ Tables)
+================================================================================
+
+Core Tables:
 
   users
-    id, username, password_hash, name, is_admin,
-    failed_login_attempts, locked_until, last_failed_login, created_at
-
-  token_blacklist
-    jti (unique), user_id, blacklisted_at, expires_at
-
-  audit_log
-    id, user_id, action, resource_type, resource_id,
-    details (JSON), ip_address, user_agent, created_at
-
-6.2 Portfolio Data
-──────────────────
+  ├─ id (PK)
+  ├─ username (UNIQUE)
+  ├─ password_hash
+  ├─ name
+  ├─ is_admin
+  ├─ failed_login_attempts
+  ├─ locked_until
+  └─ created_at
 
   portfolios
-    id, user_id, name (KFH/BBYN/USA), currency, description, created_at
+  ├─ id (PK)
+  ├─ user_id (FK → users)
+  ├─ name (KFH, BBYN, USA)
+  ├─ currency
+  └─ created_at
 
   stocks
-    id, user_id, symbol, name, portfolio, currency, current_price,
-    last_updated, yf_ticker, market_cap, sector, industry
+  ├─ id (PK)
+  ├─ user_id (FK → users)
+  ├─ symbol
+  ├─ name
+  ├─ current_price
+  ├─ portfolio
+  ├─ currency
+  ├─ yf_ticker
+  ├─ pe_ratio
+  └─ last_updated
 
   transactions
-    id, user_id, portfolio, stock_symbol, txn_date, txn_type (Buy/Sell),
-    shares, purchase_cost, sell_value, bonus_shares, cash_dividend,
-    reinvested_dividend, fees, notes, is_deleted, deleted_at, created_at
-
-  portfolio_transactions
-    id, user_id, portfolio_id, stock_id, txn_type, txn_date, amount,
-    shares, currency, fx_rate, symbol, is_deleted, deleted_at,
-    created_at, updated_at
-
-6.3 Cash Management
-───────────────────
+  ├─ id (PK)
+  ├─ user_id (FK → users)
+  ├─ portfolio
+  ├─ stock_symbol
+  ├─ txn_date
+  ├─ txn_type (Buy, Sell, DIVIDEND_ONLY, etc.)
+  ├─ shares
+  ├─ purchase_cost
+  ├─ sell_value
+  ├─ cash_dividend
+  ├─ bonus_shares
+  ├─ reinvested_dividend
+  ├─ fees
+  ├─ fx_rate_at_txn
+  ├─ is_deleted
+  └─ created_at
 
   cash_deposits
-    id, user_id, portfolio, deposit_date, amount, currency, bank_name,
-    deposit_type (deposit/withdrawal), notes, is_deleted, created_at
-
-  external_accounts
-    id, user_id, portfolio_id, name, account_type, currency,
-    current_balance, last_reconciled_date, notes, created_at
+  ├─ id (PK)
+  ├─ user_id (FK → users)
+  ├─ portfolio
+  ├─ deposit_date
+  ├─ amount
+  ├─ currency
+  ├─ source
+  ├─ include_in_analysis
+  ├─ fx_rate_at_deposit
+  ├─ is_deleted
+  └─ created_at
 
   portfolio_cash
-    id, user_id, portfolio, balance, currency, last_updated,
-    manual_override (boolean)
-
-6.4 Snapshots & Analytics
-─────────────────────────
+  ├─ user_id (FK → users)
+  ├─ portfolio
+  ├─ balance
+  ├─ currency
+  ├─ manual_override
+  └─ last_updated
 
   portfolio_snapshots
-    id, user_id, portfolio, snapshot_date, portfolio_value,
-    daily_movement, deposit_cash, accumulated_cash, net_gain,
-    change_percent, roi_percent, twr_percent, mwrr_percent, created_at
+  ├─ id (PK)
+  ├─ user_id (FK → users)
+  ├─ snapshot_date
+  ├─ portfolio_value
+  ├─ daily_movement
+  ├─ beginning_difference
+  ├─ accumulated_cash
+  ├─ net_gain
+  ├─ change_percent
+  ├─ roi_percent
+  └─ created_at
 
-  position_snapshots
-    id, user_id, stock_id, stock_symbol, portfolio_id, snapshot_date,
-    total_shares, total_cost, avg_cost, realized_pnl,
-    cash_dividends_received, status
+  audit_log
+  ├─ id (PK)
+  ├─ user_id (FK → users)
+  ├─ action
+  ├─ resource_type
+  ├─ resource_id
+  ├─ details (JSON)
+  ├─ ip_address
+  ├─ user_agent
+  └─ created_at
 
-  ledger_entries (legacy)
-    asset_id, entry_date, entry_type, quantity, price_per_unit,
-    total_value, fees, notes
+  token_blacklist
+  ├─ id (PK)
+  ├─ jti (UNIQUE)
+  ├─ user_id (FK → users)
+  ├─ blacklisted_at
+  └─ expires_at
 
-6.5 Personal Finance (PFM)
-──────────────────────────
-
-  pfm_snapshots
-    id, user_id, snapshot_date, notes, total_assets,
-    total_liabilities, net_worth, created_at
-
-  pfm_assets
-    id, snapshot_id, user_id, asset_type (real_estate|shares|gold|
-    cash|crypto|other), category, name, quantity, price, currency,
-    value_kwd, created_at
-
-  pfm_liabilities
-    id, snapshot_id, user_id, category, amount_kwd, is_current,
-    is_long_term, created_at
-
-  pfm_income_expenses
-    id, snapshot_id, user_id, kind (income|expense), category,
-    monthly_amount, is_finance_cost, is_gna, sort_order, created_at
-
-6.6 News & Notifications
-─────────────────────────
+  pfm_snapshots            pfm_assets               pfm_liabilities
+  ├─ id (PK)               ├─ id (PK)               ├─ id (PK)
+  ├─ user_id (FK)          ├─ snapshot_id (FK)       ├─ snapshot_id (FK)
+  ├─ snapshot_date          ├─ asset_type             ├─ category
+  ├─ total_assets           ├─ value_kwd              ├─ amount_kwd
+  ├─ total_liabilities      └─ ...                    └─ is_current
+  ├─ net_worth
+  └─ created_at            pfm_income_expenses
+                            ├─ id (PK)
+                            ├─ snapshot_id (FK)
+                            ├─ kind (income/expense)
+                            ├─ category
+                            └─ monthly_amount
 
   news_articles
-    id, news_id (unique), title, summary, source (boursa_kuwait),
-    category, published_at, url, related_symbols (csv), sentiment,
-    impact, language, is_verified, attachments_json, fetched_at
+  ├─ id (PK)
+  ├─ news_id (UNIQUE)
+  ├─ title
+  ├─ category
+  ├─ published_at
+  ├─ related_symbols
+  ├─ sentiment
+  ├─ impact
+  ├─ is_verified
+  └─ fetched_at
 
   push_tokens
-    id, user_id, token (unique), platform (ios|android|web),
-    created_at, updated_at
+  ├─ id (PK)
+  ├─ user_id (FK → users)
+  ├─ token (UNIQUE)
+  ├─ platform (ios/android/web)
+  └─ created_at, updated_at
 
-6.7 Securities & Market
-───────────────────────
-
-  securities_master
-    id, symbol, name, exchange, currency, asset_type, sector,
-    industry, country, yahoo_symbol, tradingview_symbol,
-    tradingview_exchange, isin, market_cap, outstanding_shares,
-    is_active, created_at, updated_at
-
-  stocks_master
-    Global stock catalogue (independent of user positions)
+  Fundamental Analysis Tables (11):
+    analysis_stocks, financial_statements, financial_line_items,
+    stock_metrics, valuation_models, stock_scores,
+    cashflow_extraction_runs, cashflow_staged_rows,
+    extraction_jobs, pdf_uploads, analysis_audit_log
 
 
 ================================================================================
-  7. API ENDPOINT INVENTORY (60+ Endpoints)
+  8. SQLALCHEMY MODELS
 ================================================================================
 
-7.1 Authentication
-──────────────────
-  POST   /api/v1/auth/login              JSON body login
-  POST   /api/v1/auth/login/form         OAuth2 form login (Swagger)
-  POST   /api/v1/auth/register           New user signup
-  POST   /api/v1/auth/refresh            Exchange refresh token
-  GET    /api/v1/auth/me                 Current user info
-  POST   /api/v1/auth/change-password    Password change
-  Rate limits: login 5/min, register 3/min, refresh 10/min
-
-7.2 Portfolio & Holdings
-────────────────────────
-  GET    /api/v1/portfolio/overview            Aggregated data (all portfolios)
-  GET    /api/v1/portfolio/holdings            Current holdings with P&L
-  GET    /api/v1/portfolio/table/{portfolio}   Full detailed table (KFH/BBYN/USA)
-  POST   /api/v1/portfolio/transactions        Create transaction
-  GET    /api/v1/portfolio/transactions/{id}   Get transaction
-  PUT    /api/v1/portfolio/transactions/{id}   Update transaction
-  DELETE /api/v1/portfolio/transactions/{id}   Soft-delete transaction
-
-7.3 Cash Management
-───────────────────
-  GET    /api/v1/cash/deposits                 List deposits (paginated)
-  GET    /api/v1/cash/deposits/{id}            Get deposit
-  POST   /api/v1/cash/deposits                 Create deposit/withdrawal
-  PUT    /api/v1/cash/deposits/{id}            Update deposit
-  DELETE /api/v1/cash/deposits/{id}            Soft-delete deposit
-  GET    /api/v1/cash/balances                 Per-portfolio cash summary
-  PUT    /api/v1/cash/balances/{portfolio}     Manual override
-  POST   /api/v1/cash/deposits/import          CSV bulk import
-  GET    /api/v1/cash/reconciliation           5-source cash calculation
-
-7.4 Analytics
-─────────────
-  GET    /api/v1/analytics/performance         TWR, MWRR, ROI (configurable period)
-  GET    /api/v1/analytics/risk-metrics        Sharpe ratio, Sortino ratio
-  GET    /api/v1/analytics/realized-profit     Realized P&L breakdown
-  GET    /api/v1/analytics/cash-balances       Cash per portfolio
-  PUT    /api/v1/analytics/settings/rf-rate    Store risk-free rate
-  GET    /api/v1/analytics/settings/rf-rate    Get risk-free rate
-
-7.5 Fundamental Analysis
-────────────────────────
-  POST   /api/v1/fundamental/extract           Upload PDF, trigger AI extraction
-  GET    /api/v1/fundamental/jobs/{job_id}     Poll extraction job status
-  POST   /api/v1/fundamental/validate          Validate extracted statements
-  POST   /api/v1/fundamental/ingest            Import extracted data to DB
-
-7.6 Dividends
-──────────────
-  GET    /api/v1/dividends/history             Historical dividend payments
-  POST   /api/v1/dividends/record              Record dividend payment
-  GET    /api/v1/dividends/upcoming            Forecasted dividends
-
-7.7 News & Market Data
-──────────────────────
-  GET    /api/v1/news/articles                 List Boursa Kuwait announcements
-  GET    /api/v1/news/articles/{id}            Article details
-  GET    /api/v1/news/by-stock/{symbol}        Articles for a stock
-  GET    /api/v1/market/quotes                 Current stock prices
-  GET    /api/v1/market/watchlist              User watchlist
-  POST   /api/v1/market/watchlist              Add to watchlist
-
-7.8 Personal Finance (PFM)
-──────────────────────────
-  GET    /api/v1/pfm/snapshots                 List monthly net-worth snapshots
-  POST   /api/v1/pfm/snapshots                 Create PFM snapshot
-  GET    /api/v1/pfm/networth-trend            Net-worth over time
-  PUT    /api/v1/pfm/snapshots/{id}            Update snapshot
-
-7.9 Trading
-───────────
-  GET    /api/v1/trading/positions              Trading positions
-  POST   /api/v1/trading/orders                 Create order
-  PUT    /api/v1/trading/orders/{id}            Update order
-  DELETE /api/v1/trading/orders/{id}            Delete order
-
-7.10 Portfolio Tracker
-─────────────────────
-  GET    /api/v1/tracker/snapshots              Portfolio snapshots
-  POST   /api/v1/tracker/snapshots              Save snapshot
-  GET    /api/v1/tracker/daily-pnl              Daily P&L data
-
-7.11 Integrity
-──────────────
-  GET    /api/v1/integrity/check               Run full integrity checks
-  GET    /api/v1/integrity/report              Generate audit report
-
-7.12 Notifications
-──────────────────
-  POST   /api/v1/notifications/push-tokens     Register push token
-  DELETE /api/v1/notifications/push-tokens     Remove push token
-
-7.13 Backup & Restore
-─────────────────────
-  GET    /api/v1/backup/list                   List backups
-  POST   /api/v1/backup/create                 Create backup
-  POST   /api/v1/backup/restore                Restore from backup
-
-7.14 Admin (Admin-Only)
-──────────────────────
-  GET    /api/v1/admin/users                   List all users
-  GET    /api/v1/admin/audit-log               Audit log viewer
-  PUT    /api/v1/admin/settings                System settings
-  GET    /api/v1/admin/health                  System health
-
-7.15 Securities
-───────────────
-  GET    /api/v1/securities/master              Securities list
-  POST   /api/v1/securities/import              Import securities
-
-7.16 Cron
-─────────
-  POST   /api/v1/cron/update-prices            Trigger price update (CRON_SECRET_KEY)
-  GET    /api/v1/cron/status                   Scheduler status
-
-7.17 Health (No Auth)
-────────────────────
-  GET    /health                                Lightweight health check
-  GET    /api/health                            Alternative health endpoint
-
-
-================================================================================
-  8. CORE SERVICES & BUSINESS LOGIC
-================================================================================
-
-8.1 Portfolio Service (~800 LOC)
-────────────────────────────────
-The most critical service — all portfolio calculations route through here.
-
-Key Methods:
-  get_current_holdings(portfolio)    — Holdings aggregation from transactions
-  build_portfolio_table(name)        — Full detailed holdings table (18 columns)
-  get_complete_overview()            — Aggregated data across all portfolios
-  get_account_balances()             — External account summaries
-  calculate_performance(period)      — TWR/MWRR via twr_calculator
-  calculate_sharpe_ratio(rf_rate)    — Risk-adjusted returns
-  calculate_sortino_ratio(mar)       — Downside-only volatility
-  calculate_realized_profit_details()— Per-transaction P&L breakdown
-  recalc_portfolio_cash()            — 5-source cash reconciliation
-  get_total_portfolio_value()        — Unified value (KWD)
-
-WAC (Weighted Average Cost) Engine — CFA/IFRS-compliant:
-  Buy   → cost += purchase_cost + fees; shares += qty
-  Sell  → avg = cost/shares; realized_pnl += (sell_value - fees) - avg*qty
-  Bonus → shares += qty (zero cost, dilutes avg_cost)
-
-Key Calculations:
-  Average Cost:     cost_basis / shares
-  Unrealized P&L:   (market_price - avg_cost) × shares
-  Realized P&L:     Tracked per sell, cumulative per position
-  Portfolio Value:   Stock value (CCY) + USD→KWD conversion via FX
-  Cash Balance:      Deposits − Buys + Sells + Dividends − Fees
-  Allocation %:      position_value / total_portfolio_value
-
-8.2 Extraction Service (~1000+ LOC)
-───────────────────────────────────
-AI-powered financial statement extraction from PDFs.
-
-Pipeline:
-  1. PDF Preprocessing  — Convert to 250 DPI images via PyMuPDF
-  2. Reasoning Pass     — Gemini analyzes with scratchpad arithmetic
-  3. Extraction & Audit — AI outputs JSON with internal validation
-  4. Verification Step  — Code-level cross-checks (totals vs. sum-of-parts)
-  5. Caching            — Content-hash lookup skips reprocessing
-  6. Retry              — Up to 3 retries on mismatch
-
-Extracted Data: statement_type (income/balance/cashflow/equity),
-  periods, line items, audit checks, confidence metrics
-
-8.3 Integrity Service (~400 LOC)
-────────────────────────────────
-Financial data verification:
-  1. Cash Balance Verification  — Expected vs. Stored
-  2. Position Verification      — Aggregate SQL vs. WAC engine
-  3. Snapshot Staleness          — Warn if > 3 days old
-  4. Anomaly Detection           — Zero prices, negative balances, etc.
-  5. Completeness Check          — Orphan symbols, missing deposits
-
-8.4 Price Service (~300 LOC)
-───────────────────────────
-Stock price updates via yfinance.
-  • Kuwait stocks: append .KW suffix
-  • Variation mapping (AGILITY → AGLTY)
-  • Kuwait quotes in fils → divide by 1000
-  • Result tracking: updated/failed/skipped counts
-
-8.5 TWR/MWRR Calculator (~200 LOC)
-──────────────────────────────────
-  TWR:   Modified Dietz chain-linking (sub-period returns)
-  MWRR:  Newton-Raphson root-finding on NPV function
-  Both annualized as percentages; requires min 2 snapshots
-
-8.6 FX Service (~150 LOC)
-────────────────────────
-  In-memory cache with TTL (default 3600s)
-  yfinance USD/KWD rate with exponential backoff
-  Fallback: DEFAULT_USD_TO_KWD = 0.307190
-  Portfolio CCY mapping: KFH/BBYN = KWD, USA = USD
-
-8.7 Cashflow Reconciler (~200 LOC)
-─────────────────────────────────
-5-source verification:
-  Expected = Deposits − Buys + Sells + Dividends − Fees
-
-8.8 Audit Service (~150 LOC)
-───────────────────────────
-Immutable append-only logging:
-  Event types: AUTH_LOGIN, AUTH_LOGIN_FAILED, AUTH_REGISTER,
-    AUTH_PASSWORD_CHANGE, AUTH_TOKEN_REFRESH, AUTH_LOCKOUT,
-    CASH_*, TRANSACTION_*, STOCK_*, PORTFOLIO_*, ADMIN_*
-  Logged data: user_id, action, resource, details (JSON),
-    IP address, user agent, timestamp
-
-
-================================================================================
-  9. CRON JOBS & SCHEDULING
-================================================================================
-
-APScheduler with file lock (single instance in multi-worker Gunicorn).
-
-  Job                         Schedule
-  ──────────────────          ─────────────────────────────────
-  daily_price_and_snapshot    Daily at PRICE_UPDATE_HOUR:MINUTE (Asia/Kuwait)
-  stale_extraction_sweep      Every 5 minutes
-  news_poller                 Adaptive: 15s market hours, 5m off-hours
-
-News Poller Features:
-  • HTTP caching (ETag + If-Modified-Since)
-  • Exponential backoff on failures (max 5 min)
-  • Market hours: Sun–Thu, 08:00–14:00 Asia/Kuwait
-  • Push notifications for users holding related stocks
-  • Data source: Boursa Kuwait API (RT codes 3507/3508)
-
-
-================================================================================
-  10. SECURITY IMPLEMENTATION (Backend)
-================================================================================
-
-10.1 Authentication
-───────────────────
-  JWT Access Token:    Short-lived (default 6 hours), type=access
-  JWT Refresh Token:   Long-lived (default 30 days), unique JTI
-  Token Rotation:      Old refresh blacklisted on new issue (replay protection)
-  Token Blacklist:     Database table tracks revoked JTI + expiry
-
-10.2 Password Security
-──────────────────────
-  Hashing:             Bcrypt (configurable work factor, default 12)
-  Password Policy:     Min 8 chars, 1 uppercase, 1 digit, 1 special
-  Account Lockout:     5 failed attempts → 15 min lockout
-  Legacy Fallback:     LEGACY_PLAINTEXT_LOGIN (dev migration aid, auto-upgrades)
-
-10.3 Field-Level Encryption
-───────────────────────────
-  Mechanism:           Fernet (symmetric, cryptography library)
-  Key:                 FIELD_ENCRYPTION_KEY from config
-  Use Cases:           API keys, secrets stored in database
-
-10.4 Security Headers (All Responses)
-─────────────────────────────────────
-  X-Content-Type-Options:     nosniff
-  X-Frame-Options:            DENY
-  X-XSS-Protection:           1; mode=block
-  Referrer-Policy:             strict-origin-when-cross-origin
-  Content-Security-Policy:     default-src 'self'; frame-ancestors 'none'
-  Permissions-Policy:          interest-cohort=()
-  Strict-Transport-Security:   max-age=63072000; includeSubdomains; preload
-
-10.5 CORS
-─────────
-  Dev:   Whitelist localhost variants (8081, 8082, 19006, 3000, 4200)
-  Prod:  Explicit origins + regex for *.ondigitalocean.app
-
-10.6 Rate Limiting
-──────────────────
-  Global:     120 req/min (slowapi, in-memory)
-  Login:      5/min
-  Register:   3/min
-  Refresh:    10/min
-
-10.7 Request Security
-─────────────────────
-  Max Body:   50 MB (for PDF uploads)
-  Validation: Pydantic schemas + field validators (symbols, portfolios, dates)
-  Soft Deletes: is_deleted + deleted_at (audit trail, recovery)
-
-10.8 Cron Security
-──────────────────
-  CRON_SECRET_KEY via header (X-Cron-Key) or query param
-
-
-================================================================================
-  11. TESTING (Backend)
-================================================================================
-
-  Directory          Files   Purpose
-  ──────────         ─────   ──────────────────────────────
-  tests/unit/           11   WAC, TWR, FX, validators, auth, integrity
-  tests/integration/     5   API endpoint contracts (portfolio, cash, analytics)
-  tests/e2e/             1   Full workflows (login→txn→snapshot→analytics)
-  tests/contract/        —   OpenAPI schema compliance
-  tests/conftest.py    400   pytest fixtures (temp DB, test user, app client)
-  tests/helpers.py     100   Test utilities (auth headers, test data)
-  TOTAL                 23   4,061 lines
-
-  Config: pytest with -v --tb=short, DeprecationWarning suppressed
-
-
-================================================================================
-================================================================================
-                PART C — MOBILE APP (Expo / React Native)
-================================================================================
-================================================================================
-
-
-================================================================================
-  12. CONFIGURATION & DEPENDENCIES
-================================================================================
-
-12.1 Key Dependencies (package.json — 104 packages)
-────────────────────────────────────────────────────
-
-  Category        Package                        Version
-  ──────────      ────────────────────            ──────────
-  Framework       expo                            54
-  Framework       react                           19.1.0
-  Framework       react-native                    0.81.5
-  Navigation      expo-router                     6.0.23
-  Navigation      @react-navigation/native        7.2.2
-  State           zustand                         5.0.12
-  State           @tanstack/react-query           5.99.0
-  Forms           react-hook-form                 7.72.1
-  Forms           zod                             3.25.76
-  UI              react-native-paper              5.15.1
-  UI              @dnd-kit (drag-drop)            —
-  PDF             jspdf                           4.2.1
-  Auth            @react-native-google-signin     16.1.2
-  Auth            expo-auth-session               7.0.10
-  Storage         expo-secure-store               15.0.8
-  Storage         react-native-mmkv              4.3.1
-  i18n            i18next                         26.0.5
-  i18n            react-i18next                   17.0.3
-  HTTP            axios                           1.15.0
-  Analytics       @react-native-firebase          24.0.0
-
-12.2 Build Configuration
-────────────────────────
-  TypeScript:    5.9 strict mode, path aliases (@/*)
-  Metro:         Custom jspdf ES module resolution
-  EAS:           dev (localhost:8002), preview/prod (DigitalOcean)
-  Vercel:        API proxy rewrites, SPA fallback routing
-  Jest:          jest-expo preset, extensive RN module transforms
-
-
-================================================================================
-  13. APP STRUCTURE & SCREENS (37 Files)
-================================================================================
-
-13.1 Root Layout
-────────────────
-  _layout.tsx     (136 lines)  Auth hydration, OAuth hash detection,
-                                i18n/RTL setup, QueryClientProvider
-  index.tsx       (96 lines)   Auth-aware entry: onboarding → login → tabs
-
-13.2 Auth Screens (app/(auth)/)
-───────────────────────────────
-  login.tsx       (260+ lines) Email/password + Google Sign-In, animated
-                                error banner, server connectivity check
-  register.tsx    (330+ lines) Email/password confirmation, password strength
-                                meter, auto-login on success
-  forgot-password.tsx           Password reset flow
-
-13.3 Onboarding (app/(onboarding)/)
-───────────────────────────────────
-  welcome.tsx                   Intro screen
-  select-expertise.tsx          Normal / Intermediate / Advanced picker
-  get-started.tsx               Tutorial walkthrough
-  features.tsx                  Feature overview
-
-13.4 Main Tab Screens (app/(tabs)/) — 23 screens
-─────────────────────────────────────────────────
-
-  Screen                    Lines   Description
-  ──────────────────        ─────   ──────────────────────────────────────
-  index.tsx                  450+   Overview dashboard: hero banner, 5 KPIs,
-                                     profit breakdown, health card, AI panel,
-                                     realized trades, news, setup wizard
-  portfolio-tracker.tsx      300+   Streamlit-matching tracker: 18-col table,
-                                     KPI cards, dual charts, snapshot save
-  holdings.tsx               300+   18-column holdings table, allocation pie,
-                                     cash override, Excel export, stock merge
-  fundamental-analysis.tsx    50    Router → 10 sub-tabs (stocks, statements,
-                                     comparison, metrics, growth, score,
-                                     decision, valuations, buffett, news)
-  portfolio-analysis.tsx      —     Per-portfolio deep-dive analysis
-  trading.tsx                400+   19-column table, 12 summary cards, filters,
-                                     edit-in-place, pagination, Excel export
-  dividends.tsx              150+   5 tabs: all, by-stock, bonus, yield calc,
-                                     projections
-  news.tsx                   100    News feed with portfolio/market filter,
-                                     category tabs, debounced search
-  pfm.tsx                    150    Personal Finance: 4 tabs (snapshots,
-                                     balance sheet, income/expenses, ratios)
-  add-transaction.tsx        400+   Dynamic form (buy/sell/dividend-only),
-                                     advanced toggle, stock picker, bulk import
-  transactions.tsx            —     Transaction history (paginated, filterable)
-  deposits.tsx                —     Deposit history with totals
-  add-deposit.tsx             —     Record cash deposit/withdrawal
-  add-stock.tsx               —     Add new stock to portfolio
-  admin.tsx                  200    Admin: users table, activities, CRUD
-  settings.tsx               150    Profile, password, API keys, language,
-                                     expertise, notifications, price updates
-  market.tsx                  —     Market overview + watchlist
-  planner.tsx                 —     Investment planner tool
-  integrity.tsx               —     Data reconciliation
-  alerts.tsx                  —     Price/portfolio alerts
-  backup.tsx                  —     Data backup/restore
-  two.tsx                     —     Legacy placeholder (unused)
-
-  Web Only:
-  +html.tsx                  —     Server-side HTML wrapper
-  +not-found.tsx             —     404 page
-
-
-================================================================================
-  14. COMPONENTS (66 Files)
-================================================================================
-
-14.1 Primitive / Themed (6 files)
-─────────────────────────────────
-  Themed.tsx                    Theme-aware Text/View wrappers
-  StyledText.tsx                Semantic text (H1, H2, Body, etc.)
-  ExternalLink.tsx              Cross-platform link handler
-  useColorScheme.ts/.web.ts     Theme detection (system/preference)
-  useClientOnlyValue.ts/.web.ts SSR-safe client-only state
-
-14.2 Form Components (6 files)
-──────────────────────────────
-  FormField.tsx                 Wrapper with label + error
-  TextInput.tsx                 Themed text input
-  NumberInput.tsx               Number field with locale formatting
-  DateInput.tsx                 Platform-aware date picker
-  SegmentedControl.tsx          Toggle/radio group
-  index.ts                      Barrel export
-
-14.3 UI Components (15 files)
-─────────────────────────────
-  ErrorBoundary.tsx             Class-based error boundary with reset
-  ErrorScreen.tsx               Full-screen error with retry
-  LoadingScreen.tsx             Spinner + message
-  EmptyState.tsx                No-data placeholder
-  MetricCard.tsx                KPI card (value + label + trend)
-  FilterChip.tsx                Toggleable filter button
-  InfoTip.tsx                   Tooltip/popover
-  Shimmer.tsx                   Loading skeleton animation
-  PageSkeletons.tsx             Pre-built skeleton screens
-  OverviewSkeleton.tsx          Dashboard skeleton loader
-  AnimatedTabBar.tsx            Animated bottom tab bar with indicator
-  ToastProvider.tsx             Toast/snackbar context
-  ResponsiveContainer.tsx       Max-width wrapper
-  ResponsiveGrid.tsx            Responsive grid (2/3/5 columns)
-  ShariaBadge.tsx               Sharia compliance indicator
-
-14.4 Screen Containers (3 files)
-────────────────────────────────
-  FormScreen.tsx     (50 lines) Form wrapper with ScrollView, submit, error
-  DataScreen.tsx     (50 lines) Data table with RefreshControl, loading, error
-  index.ts                      Barrel export
-
-14.5 Charts (4 files)
-─────────────────────
-  PortfolioChart.tsx            Line chart (value over time, custom SVG)
-  SnapshotLineChart.tsx         Dual-axis line (value + net gain) with tooltips
-  AllocationDonut.tsx           Pie/donut chart for allocation
-  DividendYearlyChart.tsx       Bar chart for yearly dividend income
-
-14.6 News (3 files)
-───────────────────
-  NewsFeed.tsx       (200+ lines) Paginated list with filtering, search
-  NewsCard.tsx                    Card with image, title, snippet, date
-  NewsAttribution.tsx             Source attribution footer
-
-14.7 Trading (8 files)
-──────────────────────
-  TradingTable.tsx              19-column transaction table, sortable
-  TradingSummary.tsx            12 summary metric cards
-  TradingFilters.tsx            Filter chips (portfolio, type, date)
-  TradingEditableRow.tsx        In-place row editing with validation
-  TradeSimulatorModal.tsx       "What-if" trade scenario calculator
-  KfhTradeImportButton.tsx      Trigger KFH statement import
-  KfhTradeImportModal.tsx       File preview + status
-  KfhTradeHelpModal.tsx         Help for KFH format
-
-14.8 Portfolio (5 files)
-────────────────────────
-  PortfolioCard.tsx             Portfolio summary card
-  KpiWidgets.tsx                Reusable KPI card
-  HoldingsTablePA.tsx           Holdings for portfolio-analysis tab
-  CashBalancesSection.tsx       Cash accounts with edit/override
-  ReconciliationModal.tsx       Data reconciliation UI
-
-14.9 Overview (8 files)
-───────────────────────
-  AIFinancialIntelligence.tsx   AI chat for portfolio analysis
-  ActionInsightCard.tsx         Actionable insight card
-  HistoricalPerformance.tsx     Performance metrics display
-  PortfolioHealthCard.tsx       Health indicator (60-100 score)
-  RealizedTradesSection.tsx     Realized P&L summary
-  LocalInsightsPanel.tsx        KW-specific insights
-  TrendingStocksPanel.tsx       Social signals + trending
-  StrategySelector.tsx          Investment strategy picker
-
-14.10 Onboarding (2 files)
-──────────────────────────
-  FirstTimeSetup.tsx            Multi-step setup wizard
-  SetupProgress.tsx             Progress tracker
-
-14.11 Settings (1 file)
-───────────────────────
-  BriefingSettings.tsx          WhatsApp briefing configuration
-
-14.12 Navigation (3 files)
-──────────────────────────
-  MobileDrawer.tsx              Hamburger navigation menu
-  WebSidebar.tsx                Persistent sidebar (desktop)
-  HoldingsTable.tsx             Generic holdings table
-
-
-================================================================================
-  15. HOOKS (25 Files)
-================================================================================
-
-15.1 Auth & Session
-───────────────────
-  useAuth.ts             (50 lines)  Wrapper around authStore
-  useSessionGuard.ts    (100 lines)  Periodic heartbeat (5 min), app focus
-                                      re-validation, auto-logout on expiry
-  useGoogleSignIn.ts    (100 lines)  Cross-platform Google OAuth
-
-15.2 Data Queries (hooks/queries/) — 15 modules
-────────────────────────────────────────────────
-  usePortfolioQueries.ts         useHoldings, useOverviewDependentQueries
-  useTrackerQueries.ts           useSnapshots, useSnapshot
-  useTradingQueries.ts           useTradingSummary, useTradeStats
-  useTransactionQueries.ts       useTransactions, useTransaction
-  useDividendQueries.ts          useDividends, useDividendsByStock,
-                                  useBonusShares, useAllDividends
-  useDepositQueries.ts           useDeposits, useDepositTotals
-  useNewsQueries.ts              useNewsFeed, useNewsItem, useNewsHistory
-  useMarketQueries.ts            useMarketData, useWatchlist
-  usePfmQueries.ts               usePfmSnapshots, usePfmSnapshot
-  useStockQueries.ts             useStocks, useStockList, useAllStocksForMerge
-  useAnalysisQueries.ts          useFundamentalAnalysis, useValuations
-  useInsightsQueries.ts          useInsights, useAiAnalysis
-  useSettingsQueries.ts          useMe, useApiKey, useAiStatus
-  useAdminQueries.ts             useAdminUsers, useAdminActivities
-  index.ts                        Barrel export
-
-15.3 Responsive & UI
-────────────────────
-  useResponsive.ts      (100 lines) Breakpoints (768/1024), spacing, fonts,
-                                     sidebar visibility
-  useScreenStyles.ts                 Screen-specific padding/spacing
-
-15.4 Mutations & Side Effects
-─────────────────────────────
-  useTransactionMutations.ts (100 lines) CRUD with cache invalidation
-  usePriceRefresh.ts                      Trigger price update + notification
-  useFeatureVisibility.ts                 Feature flag by expertise level
-  useDebouncedValue.ts                    Debounced search (300ms)
-  useChartAnimation.ts                    Reanimated gesture handling
-
-
-================================================================================
-  16. SERVICES & STATE MANAGEMENT (27 Files)
-================================================================================
-
-16.1 Zustand Stores
-───────────────────
-  authStore.ts     (150 lines) Login/register/googleSignIn, token persistence,
-                                error mapping, logout
-  themeStore.ts     (80 lines) Light/dark mode toggle, persistence
-  userPrefsStore.ts(200 lines) Expertise level, language, feature flags,
-                                notification prefs, persisted to storage
-
-16.2 Token Storage
-──────────────────
-  tokenStorage.ts  (100 lines) Cross-platform:
-                                Web: sessionStorage (cleared on tab close)
-                                Native: expo-secure-store (keychain encryption)
-                                JWT expiry checking, auto-clear on expiry
-
-16.3 API Layer (services/api/)
-──────────────────────────────
-  client.ts        (200+ lines) Axios instance:
-                                • Request interceptor (attach JWT)
-                                • Response interceptor (401 silent refresh)
-                                • Rate limiter (30 req / 10s)
-                                • Network error tracking
-  auth.ts          (100 lines) login(), register(), googleSignIn(),
-                                changePassword(), getMe(), saveApiKey()
-  portfolio.ts     (100+ lines) getOverview(), getHoldings(), getCashBalances(),
-                                createStock(), createDeposit(), exportExcel()
-  transactions.ts               CRUD, bulk import, export
-  extraction.ts                 PDF upload, statement extraction
-  reconciliation.ts             Data reconciliation
-  analytics.ts                  Portfolio analysis endpoints
-  types.ts         (100 lines) Shared interfaces (LoginResponse, Holding, etc.)
-  index.ts                      Barrel export
-
-16.4 Feature Services
-─────────────────────
-  alerts/alertRules.ts          (100 lines) Alert types, evaluation logic
-  alerts/notificationService.ts              Push notification handling
-  news/newsApi.ts               (80 lines)  Cursor pagination, history search
-  news/newsNotifications.ts                  News notification triggers
-  news/types.ts                              NewsItem, NewsCategory types
-  market/marketApi.ts                        Market data endpoints
-  notifications/pushTokenService.ts          Firebase push token registration
-  notifications/priceUpdateNotification.ts   Price update UI
-  socialSignals/trendingStocks.ts            Trending stocks data
-  briefings/whatsappBriefing.ts              WhatsApp summary service
-  localInsights/boursaKuwait.ts              KW-specific market insights
-
-Data Flow:
-  UI Component → useQuery Hook → React Query → Axios → Backend API
-                                   ↓
-                      localStorage / SecureStore (cache)
-
-
-================================================================================
-  17. LIB UTILITIES (30 Files)
-================================================================================
-
-17.1 Core Utilities
-───────────────────
-  currency.ts       (80 lines)  formatCurrency(), formatPercent(), fmt(),
-                                 fmtNum() with locale (KWD 3 decimals)
-  dateUtils.ts      (50 lines)  todayISO(), parseLocalDate(), formatShortDate()
-  formatting.ts     (30 lines)  fmtAxisVal() (compact M/K), pnlColor()
-  analytics.ts      (20 lines)  logEvent(), logScreenView() (Firebase placeholders)
-  errorHandling.ts (150 lines)  extractErrorMessage() (Axios parsing),
-                                 showErrorAlert(), cross-platform Alert
-  validationSchemas.ts (100 lines) Zod schemas (login, register, password)
-  env.ts            (50 lines)  Environment variable validation
-
-17.2 Financial Engines
-──────────────────────
-  insightEngine.ts (150 lines)  Rules-based insight generation (concentration,
-                                 yield, sector exposure)
-  shariaCompliance.ts (150 lines) Musaffa.com compliance database, debt/interest
-                                  ratio evaluation
-  dividendProjector.ts (200 lines) CAGR-based projection, confidence scoring
-  decisionEngine.ts  (200 lines) CFA buy/hold/sell from composite score +
-                                  valuation comparison
-  tradeSimulator.ts  (150 lines) "What-if" scenario: allocation & concentration
-                                  impact analysis
-  aiSummaryGenerator.ts            AI text summarization (Gemini/OpenAI)
-
-17.3 Export Generators
-──────────────────────
-  exportGrowthPdf.ts               Growth chart PDF (jsPDF)
-  exportMetricsPdf.ts              Metrics dashboard PDF
-  exportValuationPdf.ts            Valuation model PDF
-  exportYieldPdf.ts                Dividend yield projection PDF
-  exportAnalysis.ts                Summary analysis document
-
-17.4 Authentication
-───────────────────
-  googleAuth.ts     (200 lines) Cross-platform Google Sign-In:
-                                 Web: OAuth 2.0 implicit flow
-                                 Native: OS-native intent, ID token
-
-17.5 Internationalization
-─────────────────────────
-  i18n/config.ts    (100 lines) i18next + react-i18next, RTL for Arabic,
-                                 device language detection with fallback
-
-17.6 KFH Trade Import (lib/kfh/)
-────────────────────────────────
-  kfhTradeImportService.ts       Orchestration (parse → preview → import)
-  kfhTradeParser.ts              Excel/CSV parsing (KFH statement format)
-  kfhTradeMapper.ts              Row → transaction/deposit payload mapping
-  kfhTradeTypes.ts               KfhNormalizedRow, KfhImportPreview types
-  index.ts                        Barrel export
-
-17.7 Other
-──────────
-  queryClient.ts    (30 lines) React Query config (30s staleTime, 401 no-retry)
-  strategies/templates.ts        Pre-built portfolio allocations
-  news/summarizer.ts             News article summarization
-  reconciliation/utils.ts        Data reconciliation helpers
-
-
-================================================================================
-  18. FEATURE MODULES (Fundamental Analysis — 22 Files)
-================================================================================
-
-18.1 Store
-──────────
-  src/store/userPrefsStore.ts   (200 lines)
-    Zustand store: expertise level (normal/intermediate/advanced),
-    language (en/ar), feature flags, notification preferences.
-    Persisted to localStorage (web) / SecureStore (native).
-
-18.2 Types & Configuration
-──────────────────────────
-  types.ts          (200 lines)  SubTab definitions, STMNT_TYPES, CFA composite
-                                  scoring weights:
-                                  30% fundamental + 25% quality + 25% growth +
-                                  20% valuation + 15% risk penalty
-  styles.ts                      Responsive layouts
-  utils.ts                       Financial calculations
-
-18.3 Hooks
-──────────
-  useValuationCalculations.ts    DCF, Graham Number, DDM models
-  useFinancialStatements.ts      Income/balance/cashflow parsing
-
-18.4 Components (13 sub-components)
-──────────────────────────────────
-  StocksPanel.tsx                Stock picker with search
-  StatementsPanel.tsx            Financial statements (4 statement types)
-  MetricsPanel.tsx               15+ metrics organized by category
-  GrowthPanel.tsx                Revenue/EPS/margin growth rates
-  GrowthChart.tsx                Line chart with multi-year history
-  ValuationsPanel.tsx            4 valuation models (Graham, DCF, DDM, Multiples)
-  ScorePanel.tsx                 CFA composite score breakdown (5 pillars)
-  DecisionPanel.tsx              Buy/hold/sell recommendation + confidence
-  ComparisonPanel.tsx            Peer comparison table
-  BuffettChecklistPanel.tsx      15-point quality checklist
-  shared.tsx                     Shared components (card wrappers)
-
-18.5 Buffett Checklist
-──────────────────────
-  types.ts                       ChecklistItem interface
-  config.ts                      15 questions with tooltips
-  calculator.ts                  Scoring logic
-  persistence.ts                 LocalStorage save/load
-  index.ts                       Barrel export
-
-
-================================================================================
-  19. INTERNATIONALIZATION & THEMING
-================================================================================
-
-19.1 i18n
-─────────
-  Languages:    English (en), Arabic (ar)
-  Framework:    i18next + react-i18next
-  RTL:          I18nManager.forceRTL (native), document.dir (web)
-  Detection:    Device language → fallback English
-
-19.2 Theming
-────────────
-  Dark & Light:  Streamlit-matching palettes
-  15 Properties: backgrounds, text, accents, semantics, chrome
-  Toggle:        Zustand themeStore, persisted
-  System Aware:  useColorScheme detects OS preference
-
-19.3 Responsive Design
-──────────────────────
-  Breakpoints:   mobile (<768), tablet (768–1024), desktop (>1024)
-  Layout:        Sidebar (desktop), hamburger + bottom tabs (mobile)
-  Grid:          2 cols (mobile), 3 (tablet), 5 (desktop)
-  Fonts:         14–28px hero, min 12–14px mobile
-
-
-================================================================================
-  20. SECURITY IMPLEMENTATION (Frontend)
-================================================================================
-
-20.1 Token Storage
-──────────────────
-  Web:     sessionStorage (cleared on tab close)
-  Native:  expo-secure-store (hardware keychain/keystore)
-  Note:    Comment suggests future migration to httpOnly cookies
-
-20.2 Session Management
-──────────────────────
-  Heartbeat:     5 min periodic check to /api/v1/auth/me
-  Focus Check:   Re-validate on app foreground / browser tab focus
-  Client Expiry: Local JWT expiry check (no network needed)
-  Auto-Logout:   On token expiry or refresh failure
-
-20.3 Google OAuth
-─────────────────
-  Web:     OAuth 2.0 implicit flow (redirect to Google, hash token)
-  Native:  @react-native-google-signin (OS intent, ID token)
-  Exchange: Token exchanged with backend for JWT session
-
-20.4 API Security
-─────────────────
-  HTTPS:        Production (DigitalOcean backend)
-  Rate Limit:   30 req / 10s client-side throttle
-  Error Handling: 401→refresh/logout, 500→retry, 429→backoff
-  No Secrets:   All secrets in env vars / backend
-
-
-================================================================================
-  21. TESTING (Frontend)
-================================================================================
-
-  Category                    Files   Lines   Coverage
-  ──────────────────          ─────   ─────   ──────────────────────
-  Unit (lib/)                    6     800    Currency, validation, errors, KFH
-  Integration (services/)        2     350    Axios interceptors, token expiry
-  Component (hooks/)             3     400    Responsive, auth, statements
-  Feature (fundamental)          3     500    Buffett checklist, calcs, utils
-  Screen (app/)                  5     700    Auth flow, layout, overview,
-                                               holdings, transactions
-  E2E (Detox)                    3     100    Login flow, full journey
-  Test Helpers                   2     180    MockQueryClient, providers
-  Config (jest.setup.js)         1      80    Global mocks (SecureStore, etc.)
+  File                  Model Classes                       Lines
   ──────────────────────────────────────────────────────────────────
-  TOTAL                         21   4,400
+  user.py               User                                  26
+  portfolio.py          Portfolio, Stock,                     140
+                        PortfolioTransaction,
+                        PortfolioTransaction2, Transaction
+  audit.py              AuditLog, TokenBlacklist               37
+  cash.py               CashDeposit                            44
+  pfm.py                PfmSnapshot, PfmAsset,                 79
+                        PfmLiability, PfmIncomeExpense
+  news.py               NewsArticle                            23
+  push_token.py         PushToken                              14
+  security.py           (security tables)                      37
+  snapshot.py           PortfolioSnapshot,                     71
+                        PositionSnapshot
+  __init__.py           (barrel exports)                       46
+  ──────────────────────────────────────────────────────────────────
+  Total:                                                      517
+
+
+================================================================================
+  9. PYDANTIC SCHEMAS
+================================================================================
+
+  File                  Schema Classes                      Lines
+  ──────────────────────────────────────────────────────────────────
+  user.py               LoginRequest, RegisterRequest,        63
+                        ChangePasswordRequest, UserInfo,
+                        TokenResponse, RefreshRequest,
+                        RefreshResponse
+  portfolio.py          TransactionCreate/Update,             137
+                        Holdings response models
+  cash.py               CashDepositCreate/Update               51
+  common.py             Standardized JSON wrappers             29
+  analytics.py          Analytics query params                 49
+  integrity.py          Check result models                    88
+  __init__.py           (barrel exports)                       51
+  ──────────────────────────────────────────────────────────────────
+  Total:                                                      468
+
+
+================================================================================
+  10. CORE SERVICES & BUSINESS LOGIC
+================================================================================
+
+  File                      Lines   Purpose
+  ──────────────────────────────────────────────────────────────────────────────
+  extraction_service.py     3,553   AI financial statement extraction (Gemini)
+                                    PDF parsing, staging, acceptance workflow
+  portfolio_service.py      1,610   CFA/IFRS portfolio calculations
+                                    Holdings, WAC, performance, Sharpe, Sortino,
+                                    realized P&L, total value, complete overview
+  cashflow_reconciler.py      918   Cashflow staging & review pipeline
+                                    Stage rows → manual review → acceptance
+  integrity_service.py        540   Data consistency checks
+                                    Cash, positions, snapshots, anomalies
+  market_service.py           402   Boursa Kuwait market scraping
+                                    Indices, sectors, gainers/losers
+  backup_service.py           378   Excel backup/restore (Pandas-based XLSX I/O)
+  price_service.py            238   Stock price refresh via yfinance
+                                    Yahoo symbol resolution, retry logic
+  twr_calculator.py           155   Time-weighted return engine
+                                    GIPS-compliant algorithm
+  ai_service.py               121   Gemini-powered portfolio analysis
+  push_service.py             119   Expo push notification protocol
+  email_service.py            112   SMTP integration (OTP, password reset)
+  fx_service.py                99   USD↔KWD conversion (1h cache)
+  user_onboarding.py           95   New user initialization
+  audit_service.py             84   Structured audit event logging
+  auth_service.py              40   Login verification (bcrypt + fallback)
+  ──────────────────────────────────────────────────────────────────────────────
+  Total:                    8,464
+
+
+================================================================================
+  11. CORE INFRASTRUCTURE
+================================================================================
+
+  File                      Lines   Purpose
+  ──────────────────────────────────────────────────────────────────────────────
+  schema.py                   702   ensure_all_tables() — idempotent table creation
+  database.py                 375   SQLAlchemy + raw SQL layer (dual SQLite/PG)
+                                    WAL mode, FK enforcement, query helpers
+  security.py                 186   Crypto: bcrypt (12 rounds), JWT HS256,
+                                    access/refresh tokens, JTI blacklist
+  exceptions.py               139   APIError hierarchy (401, 400, 404, 409, 503)
+  config.py                    89   Settings via pydantic-settings (.env)
+  middleware.py                85   SecurityHeaders, RequestSizeLimit,
+                                    PrivateNetworkAccess
+  encryption.py                56   Fernet field-level encryption (API keys)
+  json_response.py             31   SafeJSONResponse (Decimal, datetime)
+  limiter.py                   11   slowapi rate limiter instance
+  ──────────────────────────────────────────────────────────────────────────────
+  Total:                    1,674
+
+
+================================================================================
+  12. CRON JOBS & SCHEDULING
+================================================================================
+
+  File                      Lines   Purpose                    Schedule
+  ──────────────────────────────────────────────────────────────────────────────
+  scheduler.py                183   APScheduler configuration   Daily @ configured time
+                                    (Asia/Kuwait timezone)
+  news_poller.py              293   Boursa announcement fetch   Every 15 min
+  snapshot_saver.py           134   Portfolio value snapshot     After price update
+  price_updater.py             41   yfinance price refresh      Daily (via scheduler)
+  ──────────────────────────────────────────────────────────────────────────────
+  Total:                      651
+
+  Cross-Worker Lock: File-based lock (portfolio_scheduler.lock) ensures
+  only ONE gunicorn worker runs the scheduler.
+
+
+================================================================================
+  13. UTILITIES & REFERENCE DATA
+================================================================================
+
+  Utils:
+    currency.py     61 lines   Currency conversion helpers
+    date_parser.py  77 lines   ISO date handling
+    validators.py   34 lines   Input validation (symbol, amount, date)
+
+  Data:
+    stock_lists.py  202 lines  KUWAIT_STOCKS (150+), US_STOCKS (50+)
+                               with yf_ticker mapping
+
+
+================================================================================
+  14. MIGRATIONS & SCRIPTS
+================================================================================
+
+  Migrations:
+    add_is_admin.py           11 lines   Add is_admin column to users
+    add_security_tables.py    83 lines   Create token_blacklist table
+
+  Scripts:
+    check_conflicts.py        45 lines   Detect duplicate transactions
+    migrate_data.py          496 lines   Bulk data migration utility
+    normalize_codes.py       217 lines   Standardize stock symbols
+
+  Note: Alembic versions/ directory is empty (.gitkeep only).
+  Schema managed via app.core.schema.ensure_all_tables() (idempotent).
+
+
+================================================================================
+  15. TESTING (BACKEND)
+================================================================================
+
+  Test Structure:
+    tests/
+    ├── conftest.py                              304 lines  Pytest fixtures
+    ├── helpers.py                               332 lines  Shared test utilities
+    ├── unit/
+    │   ├── test_auth.py                         192 lines
+    │   ├── test_cashflow_reconciler.py          341 lines
+    │   ├── test_exceptions.py                   115 lines
+    │   ├── test_fx_service.py                   120 lines
+    │   ├── test_integrity.py                    213 lines
+    │   ├── test_portfolio_service.py            106 lines
+    │   ├── test_twr_calculator.py               230 lines
+    │   ├── test_utils.py                         34 lines
+    │   └── test_wac_engine.py                   251 lines
+    ├── integration/
+    │   ├── test_analytics_api.py                144 lines
+    │   ├── test_api.py                           62 lines
+    │   ├── test_cash_api.py                     211 lines
+    │   ├── test_extraction_pipeline.py          390 lines
+    │   └── test_portfolio_api.py                408 lines
+    ├── contract/
+    │   └── test_response_schemas.py             228 lines
+    └── e2e/
+        └── test_full_flows.py                   377 lines
+
+  Test Execution:
+    pytest tests/ -v --tb=short              # Run all
+    pytest tests/unit/ -v                    # Unit only
+    pytest tests/integration/test_auth.py -v # Specific file
+
+  Total: 21 test files, 3,962 lines
+
+
+================================================================================
+  16. DEPLOYMENT CONFIGURATION
+================================================================================
+
+  Dockerfile (Python 3.12-slim):
+    • Installs gcc, libffi-dev
+    • Healthcheck: curl /health (30s interval, 3 retries)
+    • Cmd: gunicorn 2 workers + uvicorn adapter, 300s timeout
+
+  docker-compose.yml:
+    • Service: portfolio-api on port 8004
+    • Volume: /data for SQLite persistence
+    • Docker-native healthcheck
+
+  Procfile:
+    web: gunicorn app.main:app --workers 2
+         --worker-class uvicorn.workers.UvicornWorker
+         --bind 0.0.0.0:${PORT:-8004} --timeout 300
+
+  render.yaml:
+    • Runtime: Docker, Region: frankfurt (EU)
+    • Plan: free / starter ($7/mo)
+    • Disk: 1 GB /data mount for SQLite
+    • Auto-redeploy: On push to GitHub
+    • Env Vars: ENVIRONMENT, SECRET_KEY, CRON_SECRET_KEY,
+      CORS_ORIGINS, PRICE_UPDATE_HOUR/MINUTE, GEMINI_API_KEY
 
 
 ================================================================================
 ================================================================================
-                   PART D — DEVOPS & TOOLING
+                    PART C — MOBILE APP (Expo / React Native)
 ================================================================================
 ================================================================================
 
 
 ================================================================================
-  22. ROOT-LEVEL SCRIPTS (22 Files, 1,201 Lines)
+  17. CONFIGURATION & DEPENDENCIES
 ================================================================================
 
-  Category            File                       Lines   Purpose
-  ──────────          ────────────────────        ─────   ──────────────────────
-  Data Validation     _check_2022_2023.py           47   Query financial stmts
-                      _check_data.py                44   List tables & schemas
-                      _check_earnings.py            32   Earnings article check
-                      _check_pfm.py                  5   PFM table row counts
-                      _check_schema.py              27   DB schema display
-                      _check_updated_prices.py      17   Verify price updates
-                      _check_users.py               15   List user records
+  App Version: 1.0.0
+  Platform:    Expo 54.0.33 | React 19.1 | React Native 0.81.5
 
-  Debugging           _debug_auth.py                15   Auth/JWT debugging
-                      _debug_growth.py              86   Growth calc inspection
-                      _debug_growth2.py            144   Income statement analysis
-                      _debug_growth3.py            131   Multi-stock diagnostics
+  Core Dependencies:
+    expo ~54.0.33                     Expo framework
+    expo-router ~6.0.23              File-based routing
+    @tanstack/react-query ^5.99.0    Server state (offline persistence)
+    zustand ^5.0.12                  Client state (auth, theme, prefs)
+    react-hook-form ^7.72.1          Form management
+    @hookform/resolvers ^5.2.2       Zod resolver
+    zod ^3.25.76                     Schema validation
+    react-native-paper ^5.15.1       Material Design 3 UI
+    @react-native-google-signin      Google OAuth
+    react-native-mmkv ^4.3.1         Encrypted local storage
+    react-native-reanimated ~4.1.1   Native animations
+    react-native-screens ~4.16.0     Native screen management
+    @dnd-kit/*                       Drag-and-drop sortable lists
+    jspdf                            PDF generation
+    xlsx                             Excel export
+    i18next + react-i18next          Internationalization
+    axios ^1.15.0                    HTTP client
+    axios-retry ^4.5.0               Retry logic
+    date-fns ^4.1.0                  Date utilities
+    react-native-safe-area-context   Safe area insets
+    react-native-svg                 SVG rendering
 
-  Verification        _verify_growth.py             56   Growth calc verification
-                      _verify_pnl.py                73   P&L formula verification
+  DevDependencies:
+    typescript ~5.9.2                Type checking
+    eslint ^10.2.0                   Linting
+    @typescript-eslint/*             TS lint rules
+    jest ^29.7.0                     Unit testing
+    jest-expo ~54.0.0                Expo test preset
+    @testing-library/react-native    Component testing
+    husky ^9.1.7                     Git hooks
+    lint-staged ^15.5.2              Pre-commit linting
 
-  Data Repair         _fix_user_ids.py              33   Bulk user_id reassignment
-                      _fix_user_ids_v2.py           53   Per-table reassignment
-                      _fix_user_ids_v3.py           93   Constraint-aware repair
-
-  Integration Test    _e2e_test.py                  89   Full API flow test
-                      _integration_test.py          39   DB structure verification
-                      _test_extraction.py          161   Gemini PDF extraction test
-
-  Diagnostic          _compare_api_vs_db.py        286   API vs. direct DB comparison
-                      _deep_diagnostic.py           52   Full data dump for user_id=1
-                      _find_stocks.py                9   Stocks with 3+ fiscal years
-
-
-================================================================================
-  23. DEPLOYMENT CONFIGURATION
-================================================================================
-
-23.1 Backend (FastAPI)
-──────────────────────
-  Docker:        python:3.12-slim, 2 Gunicorn workers, 300s timeout
-  Render.com:    Frankfurt, 1GB persistent disk, auto-deploy on push
-  Health Check:  GET /health every 30s
-  Production DB: PostgreSQL recommended (SQLite for dev)
-
-23.2 Frontend (Expo)
-────────────────────
-  Web:           Vercel static export with API proxy rewrites
-  iOS:           EAS Build → App Store ($99/yr Apple Developer)
-  Android:       EAS Build → Google Play ($25 one-time)
-  Dev Server:    Metro bundler on port 8081
-
-23.3 Cost Summary
-─────────────────
-  Backend (Render Free):     $0/month (auto-pauses)
-  Backend (Render Starter):  $7/month (always-on)
-  Frontend (Vercel Free):    $0/month
-  Android (Google Play):     $25 one-time
-  iOS (Apple Developer):     $99/year
+  Scripts:
+    start, android, ios, web         Dev servers
+    build:ios, build:android         EAS builds
+    build:web                        Static export
+    lint, typecheck                  Code quality
+    test, test:ci, test:coverage     Jest testing
 
 
 ================================================================================
-  24. ENVIRONMENT VARIABLES
+  18. BUILD & PLATFORM CONFIGURATION
 ================================================================================
 
-  Variable                      Required   Default        Notes
-  ────────────────────          ────────   ───────        ──────────────────
-  ENVIRONMENT                   Yes        development    production|development
-  SECRET_KEY                    Yes        (random)       JWT signing key
-  JWT_ALGORITHM                 No         HS256          Token algorithm
-  JWT_EXPIRE_MINUTES            No         360            Access token TTL
-  DATABASE_PATH                 Dev        dev_portfolio.db  SQLite path
-  DATABASE_URL                  Prod       —              PostgreSQL URL
-  CORS_ORIGINS                  Prod       localhost      Comma-separated origins
-  FX_CACHE_TTL                  No         3600           FX cache seconds
-  CRON_SECRET_KEY               Yes        (random)       Cron endpoint auth
-  PRICE_UPDATE_ENABLED          No         true           Daily price updates
-  PRICE_UPDATE_HOUR             No         14             Cron hour (Asia/Kuwait)
-  PRICE_UPDATE_MINUTE           No         0              Cron minute
-  GEMINI_API_KEY                No         —              AI extraction
-  SMTP_HOST                     No         —              Password reset email
-  SMTP_PORT                     No         587            —
-  SMTP_USER                     No         —              —
-  SMTP_PASSWORD                 No         —              —
-  FIELD_ENCRYPTION_KEY          No         —              Fernet key for DB fields
-  EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID  Yes    —              Google OAuth (frontend)
+  app.json:
+    Name: Portfolio Tracker (slug: portfolio-tracker)
+    Orientation: portrait
+    Android: com.portfoliotracker.app (edgeToEdge, adaptive icon)
+    iOS: com.portfoliotracker.app (supportsTablet: true)
+    Web: metro bundler (output: static)
+    Plugins: expo-router, expo-secure-store, expo-localization
+    New Architecture: enabled
+    Typed Routes: enabled
 
+  eas.json — Build Profiles:
+    development:  developmentClient, internal, API=localhost:8002
+    preview:      internal APK, API=production URL (DigitalOcean)
+    production:   autoIncrement, production API URL
 
-================================================================================
-================================================================================
-                         PART E — ANALYSIS
-================================================================================
-================================================================================
+  tsconfig.json:
+    Extends expo/tsconfig.base
+    Strict mode: enabled (strict, noImplicitAny, strictNullChecks)
+    Path aliases: @/* → ./
 
+  metro.config.js (43 lines):
+    Custom jspdf resolver (forces ES build)
+    Package exports enabled
+    Terser minifier (drop_console on prod)
 
-================================================================================
-  25. FEATURE CAPABILITY MATRIX
-================================================================================
+  babel.config.js (6 lines):
+    Preset: babel-preset-expo
 
-  Feature                          Backend   Frontend   Status
-  ──────────────────────────       ───────   ────────   ──────────
-  Auth (Email + Google OAuth)        ✅        ✅       Complete
-  JWT Token Rotation                 ✅        ✅       Complete
-  Account Lockout                    ✅        ✅       Complete
-  Portfolio Overview                 ✅        ✅       Complete
-  Holdings (18-col table)            ✅        ✅       Complete
-  Portfolio Analysis (TWR/MWRR)      ✅        ✅       Complete
-  Transaction CRUD                   ✅        ✅       Complete
-  KFH Trade Import                   ✅        ✅       Complete
-  Cash Deposits                      ✅        ✅       Complete
-  Dividends & Bonus Shares           ✅        ✅       Complete
-  Dividend Projections               —         ✅       Frontend-only
-  Fundamental Analysis (10 tabs)     ✅        ✅       Complete
-  CFA Composite Scoring              —         ✅       Frontend-only
-  Buffett Checklist                  —         ✅       Frontend-only
-  Valuation Models (Graham/DCF/DDM)  —         ✅       Frontend-only
-  AI PDF Extraction                  ✅        ✅       Complete
-  AI Financial Intelligence          ✅        ✅       Partial
-  Portfolio Tracker                  ✅        ✅       Complete
-  Trading Overview (19-col)          ✅        ✅       Complete
-  Trade Simulator                    —         ✅       Frontend-only
-  Personal Finance (PFM)             ✅        ✅       Complete
-  News Feed (Boursa Kuwait)          ✅        ✅       Complete
-  Market Data                        ✅        ✅       Complete
-  Price Alerts                       ✅        ✅       Partial
-  Data Integrity Checks              ✅        ✅       Complete
-  Backup & Restore                   ✅        ✅       Complete
-  Admin Dashboard                    ✅        ✅       Complete
-  Securities Master                  ✅        ✅       Complete
-  PDF Export (4 reports)             —         ✅       Frontend-only
-  Excel Export                       ✅        ✅       Complete
-  Sharia Compliance                  —         ✅       Frontend-only
-  Decision Engine (Buy/Hold/Sell)    —         ✅       Frontend-only
-  Investment Strategies              —         ✅       Frontend-only
-  Portfolio Health Card              —         ✅       Frontend-only
-  Dark/Light Theme                   —         ✅       Frontend-only
-  i18n (English + Arabic RTL)        —         ✅       Frontend-only
-  Responsive (Mobile/Tablet/Desktop) —         ✅       Frontend-only
-  Onboarding Flow                    —         ✅       Frontend-only
-  Push Notifications                 ✅        ✅       Partial
-  WhatsApp Briefing                  —         ✅       Partial
-  Trending Stocks                    —         ✅       Partial
+  vercel.json (12 lines):
+    Build: npx expo export --platform web
+    Output: dist/
+    Rewrites: /api/* → backend, /(*) → /index.html (SPA)
 
 
 ================================================================================
-  26. ARCHITECTURE PATTERNS & DESIGN DECISIONS
+  19. APP SCREENS & ROUTING (30+ Screens)
 ================================================================================
 
-26.1 Backend Patterns
-─────────────────────
-  • Service Layer Separation: Routes (thin) → Services (logic) → Models (ORM)
-  • Dependency Injection: FastAPI Depends() for auth, DB, admin
-  • Custom Error Hierarchy: APIError → NotFoundError, AuthError, etc.
-  • Soft Deletes: is_deleted + deleted_at (audit trail + recovery)
-  • Dual DB Support: SQLAlchemy + raw SQL helpers (SQLite/PostgreSQL)
-  • Caching: In-memory with TTL (FX rates 1hr, P/E ratios 24hr)
-  • Async Routes: All handlers async def with await dependencies
-  • APScheduler: File lock for single instance in multi-worker setup
+Expo Router file-based routing. Groups: (auth), (onboarding), (tabs).
 
-26.2 Frontend Patterns
-──────────────────────
-  • File-based Routing: Expo Router with route groups (auth/tabs/onboarding)
-  • Server State: React Query (TanStack) — 30s staleTime, 401 no-retry
-  • Client State: Zustand stores (auth, theme, preferences)
-  • Form State: React Hook Form + Zod validation schemas
-  • Error Boundaries: Class-based with reset + retry
-  • Responsive Hook: useResponsive() for breakpoint-aware UI
-  • Feature Gating: Expertise level controls visible tabs/features
-  • Token Management: Proactive refresh + 401 silent refresh interceptor
-  • Rate Limiting: Client-side 30 req / 10s throttle
+───────────────────────────────────────────────────────────────────────────────
+  Root-Level
+───────────────────────────────────────────────────────────────────────────────
 
-26.3 Cross-Cutting
-──────────────────
-  • REST API contract between frontend and backend
-  • JWT token flow: login → access + refresh → auto-refresh → logout
-  • Consistent error envelope: { status, error_code, detail }
-  • User-scoped data: All queries filtered by authenticated user_id
-  • Admin guard: Backend enforce is_admin, frontend hides admin tab
+  _layout.tsx           229 lines  Root layout: fonts, theme, providers, error
+                                   boundary, network banner, session guards
+  index.tsx              87 lines  Entry: auth-aware redirect (login/tabs/onboarding)
+  modal.tsx              31 lines  Modal presentation wrapper
+  +html.tsx              46 lines  Web HTML template
+  +not-found.tsx         53 lines  404 handler
+
+───────────────────────────────────────────────────────────────────────────────
+  (auth)/ — Authentication Screens
+───────────────────────────────────────────────────────────────────────────────
+
+  _layout.tsx            13 lines  Stack layout (no header)
+  login.tsx             481 lines  Login form (email/password + Google Sign-In)
+  register.tsx          563 lines  Registration + password strength + Google
+  forgot-password.tsx   635 lines  Password recovery flow
+
+───────────────────────────────────────────────────────────────────────────────
+  (onboarding)/ — First-Time User Screens
+───────────────────────────────────────────────────────────────────────────────
+
+  _layout.tsx            11 lines  Stack layout (no header)
+  welcome.tsx           103 lines  Welcome screen
+  features.tsx          143 lines  Feature showcase with animations
+  get-started.tsx       116 lines  Get started button
+  select-expertise.tsx  365 lines  User expertise selection
+
+───────────────────────────────────────────────────────────────────────────────
+  (tabs)/ — Main App Tabs (23 screens)
+───────────────────────────────────────────────────────────────────────────────
+
+  _layout.tsx           342 lines  Bottom tab navigator (7-9 tabs)
+  index.tsx             964 lines  Dashboard/Overview (summary, AI, market)
+  holdings.tsx          376 lines  Holdings table (sortable, filterable, export)
+  fundamental-
+    analysis.tsx        164 lines  AI extraction, DCF, Buffett checklist
+  transactions.tsx      724 lines  Transaction history & filtering
+  add-transaction.tsx   282 lines  3-step wizard (portfolio → details → review)
+  add-stock.tsx         664 lines  Quick add single stock
+  add-deposit.tsx       269 lines  Add cash deposit
+  deposits.tsx          779 lines  Deposit history by portfolio
+  dividends.tsx         980 lines  Dividend tracking & projections
+  portfolio-tracker.tsx 555 lines  Historic portfolio overview
+  portfolio-
+    analysis.tsx        291 lines  KPI widgets, performance charts, cash
+  news.tsx              175 lines  News feed from API
+  market.tsx            938 lines  Market data (trending, indices)
+  trading.tsx         1,070 lines  Trade simulator, KFH import, filters
+  alerts.tsx            752 lines  Price & portfolio alerts
+  backup.tsx             10 lines  Data backup/restore (lazy-loads screen)
+  pfm.tsx               339 lines  Personal finance management
+  planner.tsx            10 lines  Portfolio planning tools (lazy-loads)
+  integrity.tsx          10 lines  Data integrity checks (lazy-loads)
+  settings.tsx           10 lines  Settings (lazy-loads SettingsScreen)
+  admin.tsx              25 lines  Admin gate → AdminDashboardScreen
+  two.tsx               449 lines  Secondary tab content
+
+  Feature Screens (lazy-loaded via src/screens/):
+    AdminDashboardScreen.tsx    1,216 lines
+    BackupRestoreScreen.tsx       427 lines
+    IntegrityScreen.tsx           583 lines
+    PlannerScreen.tsx             713 lines
+    SettingsScreen.tsx            904 lines
 
 
 ================================================================================
-  27. SECURITY AUDIT SUMMARY
+  20. COMPONENTS (88+ Files)
 ================================================================================
 
-  Area                    Status    Notes
-  ──────────────────      ──────    ──────────────────────────────────────
-  Authentication          ✅        JWT + refresh + rotation + blacklist
-  Password Hashing        ✅        Bcrypt (configurable rounds)
-  Password Policy         ✅        8+ chars, uppercase, digit, special
-  Account Lockout         ✅        5 attempts → 15 min lock
-  CORS                    ✅        Explicit origins (no wildcard in prod)
-  Security Headers        ✅        OWASP-compliant (CSP, HSTS, X-Frame)
-  Rate Limiting           ✅        Global + per-endpoint limits
-  Input Validation        ✅        Pydantic (backend) + Zod (frontend)
-  SQL Injection           ✅        Parameterized queries, ORM
-  XSS                     ✅        React auto-escaping, CSP headers
-  CSRF                    ⚠️        Stateless JWT (no CSRF tokens needed
-                                     for API-only, but consider for cookies)
-  Token Storage (Web)     ⚠️        sessionStorage (XSS risk); consider
-                                     httpOnly cookies via backend proxy
-  Encryption at Rest      ✅        Fernet for sensitive DB fields
-  Encryption in Transit   ✅        HTTPS in production (HSTS enforced)
-  Audit Logging           ✅        Immutable append-only, all events
-  Soft Deletes            ✅        Audit trail + data recovery
-  Admin Authorization     ✅        Backend-enforced is_admin check
-  Secrets Management      ✅        Env vars, no hardcoded credentials
-  Legacy Plaintext Login  ⚠️        Dev-only migration aid; must be
-                                     disabled in production
+───────────────────────────────────────────────────────────────────────────────
+  components/charts/ — Chart Components (4 files, 1,936 lines)
+───────────────────────────────────────────────────────────────────────────────
+
+  AllocationDonut.tsx        397   Allocation pie chart, interactive legend
+  PortfolioChart.tsx         574   Portfolio value trend line chart
+  SnapshotLineChart.tsx      578   Generic line chart for any metric
+  DividendYearlyChart.tsx    387   Yearly dividend bar chart
+
+───────────────────────────────────────────────────────────────────────────────
+  components/form/ — Form Controls (6 files, 654 lines)
+───────────────────────────────────────────────────────────────────────────────
+
+  DateInput.tsx              277   Date picker (modal + calendar)
+  StepWizard.tsx             116   Multi-step navigator with progress bar
+  NumberInput.tsx             85   Number-only with currency formatting
+  SegmentedControl.tsx        84   Segmented button group
+  FormField.tsx               44   Label + error wrapper
+  TextInput.tsx               40   Themed text input with icon support
+
+───────────────────────────────────────────────────────────────────────────────
+  components/ui/ — UI Primitives (19 files, 2,541 lines)
+───────────────────────────────────────────────────────────────────────────────
+
+  PageSkeletons.tsx          478   Reusable skeleton loaders
+  Shimmer.tsx                242   Shimmer loading animation
+  AnimatedTabBar.tsx         220   Bottom tab bar with reanimated indicators
+  ToastProvider.tsx          195   Toast notification context + hook
+  ShariaBadge.tsx            166   Sharia compliance indicator
+  MetricCard.tsx             164   KPI display card
+  ErrorBoundary.tsx          120   Error boundary with fallback + Sentry
+  LoadingScreen.tsx          120   Full-screen loading spinner
+  OverviewSkeleton.tsx       103   Loading skeleton for overview
+  AccessibleDragList.tsx      99   Drag-reorderable list (dnd-kit)
+  InfoTip.tsx                 96   Tooltip component
+  ResponsiveDataTable.tsx     94   Auto card/table layout, sortable
+  ResponsiveContainer.tsx     88   Responsive grid container
+  EmptyState.tsx              93   Empty data placeholder
+  PressableCard.tsx           63   Touchable card component
+  ErrorScreen.tsx             55   Full-screen error display
+  ResponsiveGrid.tsx          52   Auto-layout grid
+  FilterChip.tsx              39   Toggle chip for filtering
+  NetworkBanner.tsx           29   Offline/online status banner
+
+───────────────────────────────────────────────────────────────────────────────
+  components/overview/ — Dashboard Panels (8 files, 2,169 lines)
+───────────────────────────────────────────────────────────────────────────────
+
+  HistoricalPerformance.tsx  396   Performance metrics & charts
+  AIFinancialIntelligence.tsx 380  AI summary panel with streaming
+  StrategySelector.tsx       302   Investment strategy selector
+  PortfolioHealthCard.tsx    268   Health metrics summary
+  LocalInsightsPanel.tsx     253   Boursa Kuwait market insights
+  RealizedTradesSection.tsx  238   Recent realized P&L
+  TrendingStocksPanel.tsx    216   Trending stocks list
+  ActionInsightCard.tsx      116   AI-generated insight/action card
+
+───────────────────────────────────────────────────────────────────────────────
+  components/trading/ — Trading Components (8 files, 2,569 lines)
+───────────────────────────────────────────────────────────────────────────────
+
+  TradeSimulatorModal.tsx    729   Paper trading simulator
+  TradingEditableRow.tsx     530   Inline-editable trade row
+  KfhTradeImportModal.tsx    384   KFH CSV import modal + parser
+  TradingTable.tsx           375   Editable trade history table
+  KfhTradeHelpModal.tsx      254   Help text for KFH import
+  KfhTradeImportButton.tsx   169   Import KFH trades button
+  TradingSummary.tsx         122   Trading stats summary
+  TradingFilters.tsx           6   Filter UI for trades
+
+───────────────────────────────────────────────────────────────────────────────
+  components/portfolio/ — Portfolio Widgets (5 files, 1,354 lines)
+───────────────────────────────────────────────────────────────────────────────
+
+  ReconciliationModal.tsx    660   Modal for reconciling discrepancies
+  HoldingsTablePA.tsx        304   Holdings table for portfolio analysis
+  CashBalancesSection.tsx    217   Cash balance by portfolio
+  PortfolioCard.tsx          131   Portfolio summary card
+  KpiWidgets.tsx              42   Reusable KPI card
+
+───────────────────────────────────────────────────────────────────────────────
+  components/news/ — News Components (3 files, 638 lines)
+───────────────────────────────────────────────────────────────────────────────
+
+  NewsFeed.tsx               382   Scrollable list with pull-to-refresh
+  NewsCard.tsx               199   Individual article card
+  NewsAttribution.tsx         57   Source attribution
+
+───────────────────────────────────────────────────────────────────────────────
+  components/screens/ — Screen Wrappers (3 files, 373 lines)
+───────────────────────────────────────────────────────────────────────────────
+
+  FormScreen.tsx             252   Wrapper for form screens
+  DataScreen.tsx             117   Wrapper (loading/error/retry states)
+  index.ts                     4   Barrel export
+
+───────────────────────────────────────────────────────────────────────────────
+  components/onboarding/ — Onboarding (2 files, 327 lines)
+───────────────────────────────────────────────────────────────────────────────
+
+  FirstTimeSetup.tsx         226   Onboarding wizard for new users
+  SetupProgress.tsx          101   Progress indicator
+
+───────────────────────────────────────────────────────────────────────────────
+  components/settings/ (1 file, 367 lines)
+───────────────────────────────────────────────────────────────────────────────
+
+  BriefingSettings.tsx       367   WhatsApp briefing configuration
+
+───────────────────────────────────────────────────────────────────────────────
+  components/ (top-level legacy, 8 files, 1,539 lines)
+───────────────────────────────────────────────────────────────────────────────
+
+  HoldingsTable.tsx          743   Legacy holdings display
+  MobileDrawer.tsx           343   Navigation drawer for mobile
+  WebSidebar.tsx             301   Navigation sidebar for web
+  EditScreenInfo.tsx          70   Dev helper component
+  Themed.tsx                  35   Theme-aware View wrapper
+  ExternalLink.tsx            24   Opens URLs in browser
+  useClientOnlyValue.*        14   Platform-specific hooks
+  useColorScheme.*             9   Theme color detection
+  StyledText.tsx               4   Custom Text component
 
 
 ================================================================================
-  28. STRENGTHS & RECOMMENDATIONS
+  21. CUSTOM HOOKS (35+ Hooks)
 ================================================================================
 
-28.1 Strengths
-──────────────
-  1. Clean architecture with clear separation of concerns
-  2. CFA/IFRS-compliant financial calculations (WAC, TWR, MWRR)
-  3. Comprehensive security (JWT rotation, bcrypt, lockout, audit, OWASP)
-  4. Full-stack TypeScript + Python type safety
-  5. Self-healing AI extraction with scratchpad reasoning + retry
-  6. Adaptive scheduling (market-hours-aware polling)
-  7. Cross-platform (Web + iOS + Android) from single codebase
-  8. Financial integrity verification (5-source cash reconciliation)
-  9. Extensive test coverage for critical paths (44 test files, 8.4K lines)
-  10. Production-ready deployment configs (Docker, Render, Vercel, EAS)
+───────────────────────────────────────────────────────────────────────────────
+  hooks/queries/ — React Query Hooks (14 files, 855 lines)
+───────────────────────────────────────────────────────────────────────────────
 
-28.2 Recommendations
-────────────────────
-  1. Migrate token storage from sessionStorage to httpOnly cookies
-  2. Switch rate limiting to Redis for multi-worker production
-  3. Add certificate pinning for iOS/Android
-  4. Disable LEGACY_PLAINTEXT_LOGIN in production configs
-  5. Add periodic token blacklist cleanup job
-  6. Implement code splitting for fundamental-analysis module
-  7. Add WebSocket support for live price/news updates
-  8. Expand E2E test coverage beyond login flow
-  9. Add load testing for PDF extraction + heavy computation
-  10. Consider PostgreSQL migration for production multi-user support
+  usePortfolioQueries.ts     133   Portfolio overview, holdings, cash
+  useNewsQueries.ts          125   News feed, history queries
+  useAnalysisQueries.ts      100   Fundamental analysis queries
+  useTransactionMutations.ts  88   Create/update/delete mutations
+  useAdminQueries.ts          87   Admin user/activity queries
+  useStockQueries.ts          87   Stock list, search queries
+  useTransactionQueries.ts    66   Transaction list queries
+  useDividendQueries.ts       49   Dividend data queries
+  useTradingQueries.ts        44   Trading summary/transactions
+  useSettingsQueries.ts       42   Settings queries
+  usePfmQueries.ts            30   PFM snapshot queries
+  useInsightsQueries.ts       30   AI insights queries
+  useDepositQueries.ts        28   Deposit queries
+  useMarketQueries.ts         27   Market data queries
+  useTrackerQueries.ts        17   Tracker snapshot queries
+  index.ts                    20   Barrel re-exports
 
-28.3 Production Checklist
-─────────────────────────
-  [ ] SECRET_KEY is cryptographically random (not default)
-  [ ] CRON_SECRET_KEY configured
-  [ ] CORS_ORIGINS excludes wildcard + localhost
-  [ ] DATABASE_URL points to PostgreSQL
-  [ ] LEGACY_PLAINTEXT_LOGIN = false
-  [ ] SMTP configured for password reset (optional)
-  [ ] GEMINI_API_KEY set for AI features
-  [ ] PRICE_UPDATE_ENABLED = true
-  [ ] Monitoring on /health endpoint
-  [ ] Database backup strategy verified
-  [ ] Audit logs reviewed periodically
+───────────────────────────────────────────────────────────────────────────────
+  hooks/ — Core Hooks (18 files, 1,021 lines)
+───────────────────────────────────────────────────────────────────────────────
+
+  useTransactionMutations.ts 191   Transaction CRUD + cache invalidation
+  useSessionGuard.ts         146   Session timeout, re-auth on expiry
+  useResponsive.ts           107   Responsive breakpoints (phone/tablet/desktop)
+  useScreenStyles.ts          97   Shared screen styling logic
+  useGoogleSignIn.ts          83   Google Sign-In (web popup + native)
+  usePriceRefresh.ts          64   Auto-refresh stock prices (polling)
+  useAdminGate.ts             34   Admin privilege check + redirect
+  useChartAnimation.ts        34   Reanimated chart entrance animations
+  useOfflineSync.ts           32   Offline queue + sync on reconnect
+  useAuth.ts                  30   Auth state + hydration hook
+  useAuthCacheSync.ts         26   Cross-tab sync (web)
+  useA11yChart.ts             22   Accessibility for charts
+  useWebMeta.ts               21   Web page title/meta (HTML head)
+  usePageViewTracking.ts      17   GA4 page views
+  useDebouncedValue.ts        13   Debounced state value
+  useFeatureVisibility.ts     12   Feature flags (A/B testing)
+
+
+================================================================================
+  22. SERVICES & STATE MANAGEMENT (40+ Files)
+================================================================================
+
+───────────────────────────────────────────────────────────────────────────────
+  Core Stores
+───────────────────────────────────────────────────────────────────────────────
+
+  authStore.ts               339   Zustand auth store (JWT management,
+                                   login/register/logout, Google Sign-In,
+                                   hydration with token refresh)
+  authErrors.ts              210   Auth error mapping & logging
+  tokenStorage.ts            182   Secure token storage (web=localStorage,
+                                   native=expo-secure-store)
+  themeStore.ts               65   Theme (light/dark) persistence
+  userPrefsStore.ts          209   User preferences Zustand store (src/store/)
+
+───────────────────────────────────────────────────────────────────────────────
+  services/api/ — API Client & Endpoints (10 files, 2,362 lines)
+───────────────────────────────────────────────────────────────────────────────
+
+  types.ts                   854   TypeScript interfaces (Holding, Transaction,
+                                   Portfolio, Stock, etc.)
+  portfolio.ts               328   Portfolio aggregation endpoints
+  client.ts                  168   Axios instance + interceptors (JWT, refresh,
+                                   retry, offline queue)
+  auth.ts                    140   Login, register, Google Sign-In endpoints
+  transactions.ts             96   CRUD transactions, import/export
+  reconciliation.ts           84   Reconciliation endpoints
+  admin.ts                    52   Admin endpoints
+  extraction.ts               31   AI statement extraction endpoints
+  index.ts                    15   Barrel export
+
+  services/api/analytics/ (9 files, 1,042 lines):
+    fundamental.ts           241   Fundamental analysis API
+    metrics.ts               204   Financial metrics API
+    extraction.ts            198   Extraction API
+    tracker.ts               110   Tracker API
+    performance.ts           106   Performance analytics API
+    index.ts                  60   Barrel export
+    pfm.ts                    48   PFM API
+    dividends.ts              43   Dividend API
+    securities.ts             32   Securities API
+
+───────────────────────────────────────────────────────────────────────────────
+  services/notifications/ (2 files, 132 lines)
+───────────────────────────────────────────────────────────────────────────────
+
+  pushTokenService.ts         86   Register device push token with backend
+  priceUpdateNotification.ts  46   Handle price change notifications
+
+───────────────────────────────────────────────────────────────────────────────
+  services/alerts/ (2 files, 315 lines)
+───────────────────────────────────────────────────────────────────────────────
+
+  alertRules.ts              212   Alert rule definitions & checker
+  notificationService.ts     103   Send notifications to user
+
+───────────────────────────────────────────────────────────────────────────────
+  services/briefings/ (2 files, 135 lines)
+───────────────────────────────────────────────────────────────────────────────
+
+  whatsappBriefing.ts        134   WhatsApp briefing generator
+  index.ts                     1   Barrel export
+
+───────────────────────────────────────────────────────────────────────────────
+  services/news/ (3 files, 195 lines)
+───────────────────────────────────────────────────────────────────────────────
+
+  newsApi.ts                  80   Fetch news from external API
+  newsNotifications.ts        69   News notification handler
+  types.ts                    46   News data types
+
+───────────────────────────────────────────────────────────────────────────────
+  services/market/ (1 file, 77 lines)
+───────────────────────────────────────────────────────────────────────────────
+
+  marketApi.ts                77   Market data (indices, forex, trending)
+
+───────────────────────────────────────────────────────────────────────────────
+  services/localInsights/ (1 file, 88 lines)
+───────────────────────────────────────────────────────────────────────────────
+
+  boursaKuwait.ts             88   Boursa Kuwait market insights
+
+───────────────────────────────────────────────────────────────────────────────
+  services/socialSignals/ (2 files, 153 lines)
+───────────────────────────────────────────────────────────────────────────────
+
+  trendingStocks.ts          152   Fetch trending stocks from social data
+  index.ts                     1   Barrel export
+
+
+================================================================================
+  23. LIB UTILITIES (37 Files, 5,502 lines)
+================================================================================
+
+───────────────────────────────────────────────────────────────────────────────
+  Core Utilities
+───────────────────────────────────────────────────────────────────────────────
+
+  errorHandling.ts           126   Error alert UI + Sentry integration
+  currency.ts                 80   KWD/USD/EUR formatting
+  queryClient.ts              75   React Query config with persistence
+  analytics.ts                73   Event tracking + performance metrics
+  env.ts                      57   Environment validation + API URL
+  dateUtils.ts                38   Date parsing, formatting, ISO helpers
+  gtag.ts                     39   Google Analytics 4 integration
+  formatting.ts               24   Number/percent formatting helpers
+
+───────────────────────────────────────────────────────────────────────────────
+  Financial Calculations
+───────────────────────────────────────────────────────────────────────────────
+
+  tradeSimulator.ts          305   Simulate trades, calculate P&L
+  dividendProjector.ts       283   Project future dividend income
+  insightEngine.ts           195   Generate portfolio insights & alerts
+  googleAuth.ts              180   Google OAuth helper functions
+  decisionEngine.ts          155   AI-powered buy/sell/hold recommendations
+  shariaCompliance.ts        140   Stock Sharia compliance checking
+  validationSchemas.ts        75   Zod schemas (login, register, etc.)
+
+───────────────────────────────────────────────────────────────────────────────
+  Export Functions
+───────────────────────────────────────────────────────────────────────────────
+
+  exportValuationPdf.ts      941   Valuation report PDF generation
+  exportMetricsPdf.ts        443   Metrics report PDF
+  exportYieldPdf.ts          415   Dividend yield PDF
+  exportGrowthPdf.ts         357   Growth chart PDF
+  exportAnalysis.ts          278   Export analysis as Excel/PDF
+  exportSafe.ts               59   Safe export wrapper (error handling)
+  sanitizePdf.ts              26   PDF sanitization for safety
+
+───────────────────────────────────────────────────────────────────────────────
+  KFH Bank Integration (lib/kfh/, 5 files, 807 lines)
+───────────────────────────────────────────────────────────────────────────────
+
+  kfhTradeParser.ts          477   Parse KFH CSV export format
+  kfhTradeImportService.ts   146   Handle KFH trade import flow
+  kfhTradeMapper.ts          109   Map KFH trades to internal format
+  kfhTradeTypes.ts            71   TypeScript types for KFH data
+  index.ts                     4   Barrel export
+
+───────────────────────────────────────────────────────────────────────────────
+  Other Libraries
+───────────────────────────────────────────────────────────────────────────────
+
+  strategies/templates.ts    233   Pre-built portfolio strategies
+  reconciliation/utils.ts    228   Data reconciliation helpers
+  aiSummaryGenerator.ts      124   AI portfolio summary generator
+  news/summarizer.ts         109   News article summarization
+  i18n/config.ts              66   i18next configuration (en, ar)
+
+
+================================================================================
+  24. FEATURE MODULES (src/features/)
+================================================================================
+
+───────────────────────────────────────────────────────────────────────────────
+  Fundamental Analysis (27 files, 10,260 lines)
+───────────────────────────────────────────────────────────────────────────────
+
+  Components (16 files):
+    ValuationsPanel.tsx    1,361   DCF & Graham valuations
+    BuffettChecklistPanel.tsx 804  Buffett investment checklist UI
+    GrowthPanel.tsx          577   Growth metrics + projections
+    ScorePanel.tsx           494   Investment score (0-100)
+    GrowthChart.tsx          454   Revenue/EPS growth visualization
+    StocksPanel.tsx          403   Stock selector + info
+    ComparisonPanel.tsx      373   Company side-by-side comparison
+    shared.tsx               371   Shared components/helpers
+    DecisionPanel.tsx        357   Buy/Sell/Hold recommendation
+    AiExtractionFlow.tsx     286   Upload → AI parsing flow
+    MetricsPanel.tsx         266   Key financial metrics (P/E, ROE)
+    StatementsToolbar.tsx    261   Filter/controls for statements
+    StatementsPanel.tsx      201   Financial statements display
+    StatementTableRows.tsx   199   Individual row rendering
+    ExtractionResultCard.tsx 191   AI extracted metrics display
+    StatementsTable.tsx      150   Multi-year comparison table
+
+  Hooks (4 files):
+    useStatementsTableState.ts    353   Table sorting/filtering state
+    useFinancialStatements.ts     301   Fetch & manage statements
+    useValuationCalculations.ts   282   DCF/Graham calc engine
+    useStatementManager.ts        279   Edit/add statements
+
+  Buffett Checklist (5 files):
+    calculator.ts                 735   Score calculation logic
+    config.ts                     386   Questions & scoring rules
+    types.ts                      164   TypeScript types
+    persistence.ts                 91   Save/load state
+    index.ts                       35   Barrel export
+
+  Utils & Types:
+    utils.ts                      253   Financial calculation helpers
+    types.ts                      119   Financial statement types
+    styles.ts                     101   Component styling
+
+───────────────────────────────────────────────────────────────────────────────
+  Holdings (3 files, 781 lines)
+───────────────────────────────────────────────────────────────────────────────
+
+  HoldingsDataGrid.tsx       253   Desktop table, mobile cards
+  StockMergeModal.tsx        287   Merge duplicate stocks
+  useHoldingsView.ts         241   Sorting, filtering, allocation
+
+───────────────────────────────────────────────────────────────────────────────
+  Transactions (6 files, 834 lines)
+───────────────────────────────────────────────────────────────────────────────
+
+  TransactionImport.tsx      268   Excel import, merge/replace, delete all
+  Step2Details.tsx           202   Stock, date, qty, price, dividends
+  StockPicker.tsx            128   Searchable stock dropdown
+  transactionSchema.ts      115   Zod schema for form validation
+  Step3Review.tsx             90   Review summary before submit
+  Step1Type.tsx               31   Select portfolio + txn type
+
+
+================================================================================
+  25. CONSTANTS & THEMING
+================================================================================
+
+  theme.ts                   108   Theme palette (light/dark, MD3 colors)
+  Config.ts                   67   API URLs, feature flags, app settings
+  uiTokens.ts                 21   Design tokens (spacing, sizing, radius)
+  layout.ts                   21   Layout constants (padding, margins)
+  Colors.ts                   18   Color palette
+
+  Responsive Breakpoints:
+    Phone:   < 768px
+    Tablet:  768–1024px
+    Desktop: > 1024px
+
+
+================================================================================
+  26. TESTING (FRONTEND)
+================================================================================
+
+  Test Framework: Jest ^29.7 + jest-expo + @testing-library/react-native
+  Coverage Threshold: 80% (branches, functions, lines, statements)
+
+  Test Files (26 files, 5,278 lines):
+
+  App Tests (2):
+    layout.test.tsx                     117   Layout rendering
+    auth-flow.test.tsx                   93   Auth redirect logic
+
+  Screen Tests (4):
+    OverviewScreen.test.tsx             305   Dashboard rendering
+    AddTransaction.test.tsx             247   Multi-step form validation
+    TransactionsScreen.test.tsx         200   Transaction list
+    HoldingsScreen.test.tsx             116   Holdings table
+
+  Hook Tests (5):
+    useFinancialStatements.test.ts      414   Statement fetching
+    useResponsive.test.ts              101   Responsive breakpoints
+    useAuth.test.ts                    100   Auth store hydration
+    useAdminGate.test.ts                97   Admin check logic
+    useAuthCacheSync.test.ts            79   Cross-tab sync
+
+  Service Tests (4):
+    api.test.ts                        330   API client methods
+    client.interceptor.test.ts         122   JWT interceptor logic
+    apiClient.test.ts                   82   Axios client config
+    tokenExpiration.test.ts             62   Token expiry detection
+
+  Lib Tests (4):
+    kfhTrade.test.ts                   369   KFH CSV parsing
+    errorHandling.test.ts              202   Error mapping
+    validationSchemas.test.ts          161   Zod validation rules
+    currency.test.ts                   135   Currency formatting
+
+  Feature Tests (3):
+    buffettChecklist.test.ts           753   Checklist scoring
+    financialCalculations.test.ts      312   DCF/Graham calcs
+    utils.test.ts                      109   Financial helpers
+
+  Constants Tests (2):
+    theme.test.ts                      123   Theme validation
+    Config.test.ts                      69   Config validation
+
+  Test Helpers:
+    helpers.tsx                        256   Shared test utilities
+
+  E2E Tests (e2e/):
+    full-journey.yaml                  Full user flow (login → analysis → export)
+    login-flow.yaml                    Login, register, forgot password
+    transaction-flow.yaml              Add, import, delete transactions
+
+
+================================================================================
+  27. ASSETS & PUBLIC FILES
+================================================================================
+
+  Assets:
+    images/icon.png                    App icon (512×512)
+    images/splash-icon.png             Splash screen
+    images/adaptive-icon.png           Android adaptive icon
+    images/favicon.png                 Web favicon
+    fonts/SpaceMono-Regular.ttf        Monospace font
+
+  Public (Web):
+    robots.txt                         SEO robots directive
+    sitemap.xml                        XML sitemap
+    google8b7415f05aa31ab5.html        Google verification
+
+  Mocks (__mocks__/):
+    @react-native-async-storage/
+      async-storage.js                 Mock AsyncStorage for tests
+
+
+================================================================================
+================================================================================
+                        PART D — DEVOPS & TOOLING
+================================================================================
+================================================================================
+
+
+================================================================================
+  28. ROOT-LEVEL DIAGNOSTIC SCRIPTS
+================================================================================
+
+  22 Python scripts at repository root (1,201 lines total):
+
+  Data Verification:
+    _check_data.py             36   General data checks
+    _check_schema.py           31   Schema validation
+    _check_2022_2023.py        29   2022-2023 data verification
+    _check_earnings.py         34   Earnings data checks
+    _check_pfm.py               8   PFM data checks
+    _check_updated_prices.py   14   Price update verification
+    _check_users.py             9   User data checks
+
+  Debugging:
+    _debug_auth.py             16   Auth flow debugging
+    _debug_growth.py           71   Growth calculation debugging
+    _debug_growth2.py          95   Growth debugging (variant 2)
+    _debug_growth3.py          51   Growth debugging (variant 3)
+    _deep_diagnostic.py        49   Deep diagnostic queries
+    _compare_api_vs_db.py     186   API vs DB comparison
+
+  Testing:
+    _e2e_test.py               85   End-to-end test runner
+    _integration_test.py       32   Integration test runner
+    _test_extraction.py       159   Extraction testing
+
+  Verification:
+    _verify_growth.py          60   Growth verification
+    _verify_pnl.py             44   P&L verification
+    _find_stocks.py            15   Stock lookup utility
+
+  Fixes:
+    _fix_user_ids.py           42   User ID correction
+    _fix_user_ids_v2.py        64   User ID fix (v2)
+    _fix_user_ids_v3.py        71   User ID fix (v3)
+
+
+================================================================================
+  29. ENVIRONMENT VARIABLES
+================================================================================
+
+  Backend (.env):
+    ENVIRONMENT              dev / production
+    SECRET_KEY               JWT signing key
+    CRON_SECRET_KEY          Scheduled task auth
+    CORS_ORIGINS             Allowed origins (comma-separated)
+    DATABASE_URL             PostgreSQL connection string (prod)
+    PRICE_UPDATE_HOUR        Daily price update hour (Asia/Kuwait)
+    PRICE_UPDATE_MINUTE      Daily price update minute
+    GEMINI_API_KEY           Google AI API key (server-wide)
+    SMTP_*                   Email service config (optional)
+
+  Frontend (.env):
+    EXPO_PUBLIC_API_URL      Backend API base URL
+    EXPO_PUBLIC_GOOGLE_CLIENT_ID   Google OAuth client ID
+
+
+================================================================================
+================================================================================
+                          PART E — ANALYSIS
+================================================================================
+================================================================================
+
+
+================================================================================
+  30. FEATURE CAPABILITY MATRIX
+================================================================================
+
+  ┌──────────────────────────────────┬───────┬───────┬───────┬─────────────────┐
+  │ Feature                          │ API   │ Web   │ iOS   │ Notes           │
+  ├──────────────────────────────────┼───────┼───────┼───────┼─────────────────┤
+  │ Email/Password Auth              │  ✓    │  ✓    │  ✓    │ bcrypt + JWT    │
+  │ Google OAuth                     │  ✓    │  ✓    │  ✓    │ ID/access token │
+  │ Account Lockout                  │  ✓    │  ✓    │  ✓    │ 5 tries, 15min  │
+  │ Token Refresh + Rotation         │  ✓    │  ✓    │  ✓    │ JTI blacklist   │
+  │ Onboarding Flow                  │  —    │  ✓    │  ✓    │ 4-step wizard   │
+  │ Portfolio Overview               │  ✓    │  ✓    │  ✓    │ KWD-converted   │
+  │ Holdings Table (sortable)        │  ✓    │  ✓    │  ✓    │ 18-col sortable │
+  │ Transaction CRUD                 │  ✓    │  ✓    │  ✓    │ 3-step wizard   │
+  │ Bulk Import (KFH/Excel)          │  ✓    │  ✓    │  ✓    │ Merge/replace   │
+  │ Cash Deposits                    │  ✓    │  ✓    │  ✓    │ Multi-currency  │
+  │ Dividends (cash/bonus/reinvest)  │  ✓    │  ✓    │  ✓    │ Yield-on-cost   │
+  │ Performance Metrics (TWR/MWRR)   │  ✓    │  ✓    │  ✓    │ GIPS-compliant  │
+  │ Risk Metrics (Sharpe/Sortino)    │  ✓    │  ✓    │  ✓    │ Configurable RF │
+  │ Realized P&L (dual-path WAC)    │  ✓    │  ✓    │  ✓    │ CFA/IFRS        │
+  │ Portfolio Snapshots              │  ✓    │  ✓    │  ✓    │ Daily tracking  │
+  │ Portfolio Tracker                │  ✓    │  ✓    │  ✓    │ Time-series     │
+  │ Trading Overview                 │  ✓    │  ✓    │  ✓    │ 12 metrics      │
+  │ Trade Simulator                  │  —    │  ✓    │  ✓    │ Paper trading   │
+  │ Fundamental Analysis (AI)        │  ✓    │  ✓    │  ✓    │ Gemini-powered  │
+  │ PDF Upload & Extraction          │  ✓    │  ✓    │  ✓    │ Financial stmts │
+  │ DCF/Graham Valuations            │  ✓    │  ✓    │  ✓    │ Intrinsic value │
+  │ Buffett Checklist                │  —    │  ✓    │  ✓    │ Scoring engine  │
+  │ Stock Scoring                    │  ✓    │  ✓    │  ✓    │ 0-100 composite │
+  │ Company Comparison               │  —    │  ✓    │  ✓    │ Side-by-side    │
+  │ Growth Analysis                  │  ✓    │  ✓    │  ✓    │ Revenue/EPS     │
+  │ Personal Finance Manager         │  ✓    │  ✓    │  ✓    │ Net worth track │
+  │ AI Portfolio Analysis            │  ✓    │  ✓    │  ✓    │ Gemini (en/ar)  │
+  │ News Feed (Boursa Kuwait)        │  ✓    │  ✓    │  ✓    │ Auto-fetch 15m  │
+  │ Market Data                      │  ✓    │  ✓    │  ✓    │ Boursa scraping │
+  │ Price Alerts                     │  —    │  ✓    │  ✓    │ Custom rules    │
+  │ Securities Master                │  ✓    │  ✓    │  ✓    │ Aliases support │
+  │ Data Integrity Checks            │  ✓    │  ✓    │  ✓    │ 5 check types   │
+  │ Backup & Restore (Excel)         │  ✓    │  ✓    │  ✓    │ Full data XLSX  │
+  │ Admin Dashboard                  │  ✓    │  ✓    │  ✓    │ Users/activity  │
+  │ Push Notifications               │  ✓    │  ✓    │  ✓    │ Expo push       │
+  │ PDF Export (4 report types)      │  —    │  ✓    │  ✓    │ jsPDF           │
+  │ CSV/Excel Export                 │  ✓    │  ✓    │  ✓    │ XLSX            │
+  │ Sharia Compliance Badge          │  —    │  ✓    │  ✓    │ Client-side     │
+  │ Internationalization (en/ar)     │  ✓    │  ✓    │  ✓    │ i18next         │
+  │ Dark/Light Theme                 │  —    │  ✓    │  ✓    │ MD3 colors      │
+  │ Responsive Layout                │  —    │  ✓    │  ✓    │ 3 breakpoints   │
+  │ Offline Support                  │  —    │  ✓    │  ✓    │ MMKV + queue    │
+  │ WhatsApp Briefings               │  —    │  ✓    │  ✓    │ Scheduled       │
+  │ TVM Planner                      │  —    │  ✓    │  ✓    │ CFA-level       │
+  └──────────────────────────────────┴───────┴───────┴───────┴─────────────────┘
+
+
+================================================================================
+  31. ARCHITECTURE PATTERNS & DESIGN DECISIONS
+================================================================================
+
+  Backend:
+    • Layered Architecture: Routes → Services → ORM/Raw SQL → Database
+    • Dual DB Support: SQLite (dev WAL mode) / PostgreSQL (prod)
+    • Schema-First: ensure_all_tables() creates schema idempotently
+    • Soft-Delete Pattern: is_deleted flag on transactions & deposits
+    • Audit Trail: All security-relevant actions logged to audit_log
+    • Rate Limiting: slowapi per-IP, per-endpoint limits
+    • Worker Safety: File-based lock for single scheduler instance
+    • CFA/IFRS Compliance: WAC engine, TWR, MWRR, Modified Dietz
+    • Dual API Versions: Legacy (/auth, /portfolio) + v1 (/api/v1/*)
+
+  Frontend:
+    • State Management: Zustand (auth, theme, prefs) + React Query (server)
+    • Code Organization: Expo Router file-based + domain features (src/)
+    • Form Pattern: react-hook-form + Zod schemas + step wizards
+    • Responsive: 3-tier breakpoint system (phone/tablet/desktop)
+    • Offline First: react-native-mmkv + offline queue in API client
+    • Error Handling: ErrorBoundary + Sentry + toast notifications
+    • Lazy Loading: Heavy screens lazy-loaded via src/screens/
+    • New Architecture: React Native new arch enabled (Fabric + TurboModules)
+    • Typed Routes: Expo Router typed routes for compile-time safety
+
+
+================================================================================
+  32. SECURITY AUDIT SUMMARY
+================================================================================
+
+  Authentication:
+    ✓ bcrypt password hashing (12 rounds)
+    ✓ JWT HS256 with separate access/refresh tokens
+    ✓ Token rotation (old refresh invalidated on use)
+    ✓ JTI-based token blacklist
+    ✓ Account lockout after 5 failed attempts (15 min)
+    ✓ Google OAuth support (ID token + access token)
+    ✓ Audit logging for all auth events
+
+  API Security:
+    ✓ Rate limiting (login: 5/min, register: 3/min, refresh: 10/min)
+    ✓ Request size limit (50 MB)
+    ✓ CORS configuration (dev origins vs prod regex)
+    ✓ Security headers (X-Frame-Options, X-Content-Type-Options, etc.)
+    ✓ Cron endpoint protection (X-Cron-Key header)
+    ✓ Admin-only endpoint guards (is_admin=1)
+    ✓ Production security audit on startup
+
+  Data Security:
+    ✓ Fernet encryption for API keys at rest
+    ✓ Soft-delete (data preserved, not hard-deleted)
+    ✓ User-scoped data access (user_id FK on all tables)
+    ✓ Input validation (Pydantic + Zod)
+    ✓ PDF sanitization before processing
+
+  Frontend Security:
+    ✓ Secure token storage (expo-secure-store on native, localStorage on web)
+    ✓ Session timeout with auto-redirect
+    ✓ Token refresh with rotation
+    ✓ Network status monitoring
+    ✓ Error boundary prevents crash data leaks
+
+  Areas for Enhancement:
+    △ Consider HTTPS-only cookies for web token storage
+    △ Add CSRF protection for form submissions
+    △ Implement content security policy (CSP) headers
+    △ Add database connection pooling configuration for production
+    △ Consider migrating from SQLite to PostgreSQL for production
+
+
+================================================================================
+  33. STRENGTHS & RECOMMENDATIONS
+================================================================================
+
+  Strengths:
+    • Comprehensive financial feature set (CFA-level calculations)
+    • Cross-platform (Web + iOS + Android) from single codebase
+    • Strong testing foundation (48 test files, 9,240 lines)
+    • AI-powered features (Gemini extraction, analysis, summaries)
+    • Production-grade auth (lockout, rotation, blacklist, audit)
+    • Offline-first architecture with MMKV + queue
+    • Responsive design with 3-tier breakpoints
+    • KFH bank integration for Kuwait market
+    • Data integrity checking built-in
+    • Full backup/restore capability
+
+  Recommendations:
+    1. Activate Alembic migrations for schema version control
+    2. Split fundamental.py (6,122 lines) into sub-modules
+    3. Add API versioning deprecation timeline for legacy routes
+    4. Implement database connection pooling for production
+    5. Add structured logging (JSON) for production monitoring
+    6. Consider WebSocket for real-time price updates
+    7. Add E2E automation framework (Detox/Maestro for mobile)
+    8. Implement database backup scheduling (automated)
+    9. Add performance monitoring (APM) for API response times
+    10. Consider feature flags service for controlled rollouts
 
 
 ################################################################################
 ##                                                                            ##
-##                          END OF AUDIT                                      ##
+##                           END OF AUDIT                                     ##
 ##                                                                            ##
-##  Total Files Audited:  384                                                 ##
-##  Total Lines:          95,413 (86,952 production + 8,461 test)             ##
-##  Generated:            2026-04-15                                          ##
+##          Generated: 2026-04-18                                             ##
+##          Backend:  30,435 lines Python (100+ files)                        ##
+##          Frontend: 61,159 lines TypeScript/JS (250+ files)                 ##
+##          Root Scripts: 1,201 lines (22 files)                              ##
+##          Total: 92,795 lines across 372+ files                             ##
 ##                                                                            ##
 ################################################################################

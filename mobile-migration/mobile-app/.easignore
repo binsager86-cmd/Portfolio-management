@@ -56,3 +56,7 @@ e2e/
 jest.config.js
 jest.setup.js
 test-results.json
+
+# Nested git / deploy configs (causes EAS tar permission issues)
+.git
+.do

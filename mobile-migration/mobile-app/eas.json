@@ -17,13 +17,15 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://backend-api-app-hfc2n.ondigitalocean.app"
+        "EXPO_PUBLIC_API_URL": "https://backend-api-app-hfc2n.ondigitalocean.app",
+        "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "549902495569-6kbcenrhcir2iqskj377fm561e8e6l50.apps.googleusercontent.com"
       }
     },
     "production": {
       "autoIncrement": true,
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://backend-api-app-hfc2n.ondigitalocean.app"
+        "EXPO_PUBLIC_API_URL": "https://backend-api-app-hfc2n.ondigitalocean.app",
+        "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "549902495569-6kbcenrhcir2iqskj377fm561e8e6l50.apps.googleusercontent.com"
       }
     }
   },

@@ -36,14 +36,23 @@ function createStorage() {
   }
 
   // Native: use MMKV for fast synchronous storage
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { MMKV } = require("react-native-mmkv");
-  const mmkv = new MMKV({ id: "react-query" });
-  return {
-    getItem: (key: string) => mmkv.getString(key) ?? undefined,
-    setItem: (key: string, value: string) => mmkv.set(key, value),
-    removeItem: (key: string) => mmkv.delete(key),
-  };
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { MMKV } = require("react-native-mmkv");
+    const mmkv = new MMKV({ id: "react-query" });
+    return {
+      getItem: (key: string) => mmkv.getString(key) ?? undefined,
+      setItem: (key: string, value: string) => mmkv.set(key, value),
+      removeItem: (key: string) => mmkv.delete(key),
+    };
+  } catch {
+    // Fallback no-op storage if MMKV fails to initialize
+    return {
+      getItem: () => undefined,
+      setItem: () => {},
+      removeItem: () => {},
+    };
+  }
 }
 
 // ── Query client ────────────────────────────────────────────────────
