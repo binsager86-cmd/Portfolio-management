@@ -84,7 +84,7 @@ function OverviewScreen() {
   const { colors, toggle, mode } = useThemeStore();
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
-  const { metricCols, isDesktop, isPhone, spacing, fonts, maxContentWidth } = useResponsive();
+  const { metricCols, isDesktop, isPhone, spacing, fonts, maxContentWidth, showSidebar } = useResponsive();
   const { refresh: refreshPrices } = usePriceRefresh();
   const queryClient = useQueryClient();
   const [refreshing, setRefreshing] = useState(false);
@@ -370,7 +370,7 @@ function OverviewScreen() {
       contentContainerStyle={[
         styles.content,
         {
-          paddingTop: insets.top + 8,
+          paddingTop: showSidebar ? insets.top + 8 : 8,
           paddingHorizontal: spacing.pagePx,
           maxWidth: maxContentWidth,
           alignSelf: isDesktop ? "center" as const : undefined,
@@ -385,25 +385,28 @@ function OverviewScreen() {
         />
       }
     >
-      {/* ── Inline scrollable header ── */}
-      <View style={styles.inlineHeader}>
-        <View style={{ flex: 1 }}>
-          <Text style={[styles.inlineHeaderTitle, { color: colors.textPrimary }]}>
-            {t('nav.overview')}
-          </Text>
-          <LastUpdated timestamp={dataUpdatedAt} isFetching={isFetching} />
+      {/* ── Inline scrollable header (only on web/desktop where tab header is hidden) ── */}
+      {showSidebar && (
+        <View style={styles.inlineHeader}>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.inlineHeaderTitle, { color: colors.textPrimary }]}>
+              {t('nav.overview')}
+            </Text>
+            <LastUpdated timestamp={dataUpdatedAt} isFetching={isFetching} />
+          </View>
+          <Pressable onPress={toggle} style={styles.inlineHeaderBtn}>
+            {({ pressed }) => (
+              <FontAwesome
+                name={mode === "dark" ? "lightbulb-o" : "moon-o"}
+                size={20}
+                color={colors.textSecondary}
+                style={{ opacity: pressed ? 0.5 : 1 }}
+              />
+            )}
+          </Pressable>
         </View>
-        <Pressable onPress={toggle} style={styles.inlineHeaderBtn}>
-          {({ pressed }) => (
-            <FontAwesome
-              name={mode === "dark" ? "lightbulb-o" : "moon-o"}
-              size={20}
-              color={colors.textSecondary}
-              style={{ opacity: pressed ? 0.5 : 1 }}
-            />
-          )}
-        </Pressable>
-      </View>
+      )}
+      {!showSidebar && <LastUpdated timestamp={dataUpdatedAt} isFetching={isFetching} />}
 
       {/* ── Hero Banner ── */}
       <View
