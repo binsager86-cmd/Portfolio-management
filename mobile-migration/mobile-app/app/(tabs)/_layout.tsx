@@ -210,7 +210,6 @@ export default function TabLayout() {
             name="index"
             options={{
               title: t("nav.overview"),
-              headerShown: false,
               href: isAdmin ? null : undefined,
               tabBarIcon: ({ color }) => (
                 <TabBarIcon name="line-chart" color={color} />
@@ -299,7 +298,6 @@ export default function TabLayout() {
             name="dividends"
             options={{
               title: t("nav.dividends"),
-              headerShown: false,
               href: isAdmin || !showSidebar ? null : undefined,
               tabBarIcon: ({ color }) => (
                 <TabBarIcon name="money" color={color} />
