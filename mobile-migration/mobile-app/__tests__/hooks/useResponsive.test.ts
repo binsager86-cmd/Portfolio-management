@@ -14,6 +14,7 @@ import { useWindowDimensions } from "react-native";
 
 // We need to mock useWindowDimensions to control viewport size
 let mockDimensions = { width: 375, height: 812 };
+let mockPlatformOS = "ios";
 
 jest.mock("react-native", () => {
   const actual = jest.requireActual("react-native");
@@ -22,6 +23,12 @@ jest.mock("react-native", () => {
     get(target, prop) {
       if (prop === "useWindowDimensions") {
         return () => mockDimensions;
+      }
+      if (prop === "Platform") {
+        return {
+          ...target.Platform,
+          OS: mockPlatformOS,
+        };
       }
       return target[prop];
     },
@@ -33,6 +40,7 @@ import { useResponsive, Breakpoint } from "@/hooks/useResponsive";
 describe("useResponsive", () => {
   afterEach(() => {
     mockDimensions = { width: 375, height: 812 };
+    mockPlatformOS = "ios";
   });
 
   // ── Phone breakpoint ──
@@ -77,6 +85,15 @@ describe("useResponsive", () => {
     expect(result.current.isDesktop).toBe(false);
   });
 
+  it("shows the sidebar on native tablet layouts", () => {
+    mockPlatformOS = "android";
+    mockDimensions = { width: 800, height: 1280 };
+    const { result } = renderHook(() => useResponsive());
+
+    expect(result.current.showSidebar).toBe(true);
+    expect(result.current.showHamburger).toBe(false);
+  });
+
   it("returns 3 metric columns for tablet", () => {
     mockDimensions = { width: 768, height: 1024 };
     const { result } = renderHook(() => useResponsive());
@@ -101,6 +118,15 @@ describe("useResponsive", () => {
     expect(result.current.isDesktop).toBe(true);
   });
 
+  it("shows the sidebar on web desktop layouts", () => {
+    mockPlatformOS = "web";
+    mockDimensions = { width: 1280, height: 800 };
+    const { result } = renderHook(() => useResponsive());
+
+    expect(result.current.showSidebar).toBe(true);
+    expect(result.current.showHamburger).toBe(false);
+  });
+
   it("returns 5 metric columns for desktop", () => {
     mockDimensions = { width: 1440, height: 900 };
     const { result } = renderHook(() => useResponsive());
@@ -121,5 +147,14 @@ describe("useResponsive", () => {
 
     expect(result.current.width).toBe(414);
     expect(result.current.height).toBe(896);
+  });
+
+  it("keeps the hamburger on phone layouts", () => {
+    mockPlatformOS = "android";
+    mockDimensions = { width: 390, height: 844 };
+    const { result } = renderHook(() => useResponsive());
+
+    expect(result.current.showSidebar).toBe(false);
+    expect(result.current.showHamburger).toBe(true);
   });
 });

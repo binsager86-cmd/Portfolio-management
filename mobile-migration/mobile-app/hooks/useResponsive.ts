@@ -74,7 +74,7 @@ export interface ResponsiveInfo {
   /** Max content width (for centered layouts on desktop) */
   maxContentWidth: number;
 
-  /** Whether to show the persistent sidebar (web desktop/tablet) */
+  /** Whether to show the persistent sidebar (tablet/desktop on all platforms) */
   showSidebar: boolean;
 
   /** Whether to show a hamburger button (mobile + tablet web) */
@@ -105,8 +105,8 @@ export function useResponsive(): ResponsiveInfo {
   const isTablet = bp === "tablet";
   const isDesktop = bp === "desktop";
 
-  // Sidebar: only on web when ≥ tablet
-  const showSidebar = Platform.OS === "web" && (isDesktop || isTablet);
+  // Sidebar: tablet/desktop on all platforms
+  const showSidebar = isDesktop || isTablet;
 
   // Hamburger: shown whenever there's no sidebar (native phone/tablet, or narrow web)
   const showHamburger = !showSidebar;

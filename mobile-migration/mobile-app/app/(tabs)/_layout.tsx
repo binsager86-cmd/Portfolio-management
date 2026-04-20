@@ -271,7 +271,7 @@ export default function TabLayout() {
             name="trading"
             options={{
               title: t("nav.trading"),
-              href: isAdmin || !showSidebar ? null : (tabVisible("intermediate") ? undefined : null),
+              href: isAdmin || !showSidebar ? null : undefined,
               tabBarIcon: ({ color }) => <TabBarIcon name="bar-chart-o" color={color} />,
             }}
           />
@@ -279,7 +279,7 @@ export default function TabLayout() {
             name="fundamental-analysis"
             options={{
               title: t("tabs.analysis"),
-              href: isAdmin || !showSidebar ? null : (tabVisible("intermediate") ? undefined : null),
+              href: isAdmin || !showSidebar ? null : undefined,
               tabBarIcon: ({ color }) => (
                 <TabBarIcon name="flask" color={color} />
               ),
@@ -308,7 +308,7 @@ export default function TabLayout() {
             name="alerts"
             options={{
               title: t("nav.alerts"),
-              href: isAdmin || !showSidebar ? null : (tabVisible("intermediate") ? undefined : null),
+              href: isAdmin || !showSidebar ? null : undefined,
               tabBarIcon: ({ color }) => (
                 <TabBarIcon name="bell" color={color} />
               ),
