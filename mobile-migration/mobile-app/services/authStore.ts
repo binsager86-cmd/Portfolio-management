@@ -9,11 +9,7 @@
  */
 
 import { API_BASE_URL } from "@/constants/Config";
-import {
-    login as apiLogin,
-    register as apiRegister,
-    LoginResponse,
-} from "@/services/api";
+import type { LoginResponse } from "@/services/api/types";
 import {
     logAuthError,
     mapAuthError,
@@ -104,6 +100,29 @@ async function persistAndSetSession(
     error: null,
     lastAuthError: null,
   });
+}
+
+async function authRequest(
+  path: "/api/v1/auth/login" | "/api/v1/auth/register",
+  payload: Record<string, unknown>,
+): Promise<LoginResponse> {
+  const resp = await fetch(`${API_BASE_URL}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  const json = await resp.json().catch(() => ({} as Record<string, unknown>));
+  if (!resp.ok) {
+    const message =
+      (typeof json?.detail === "string" && json.detail) ||
+      (typeof json?.message === "string" && json.message) ||
+      `Auth request failed (${resp.status})`;
+    throw new Error(message);
+  }
+
+  const data = (json as any)?.data ?? json;
+  return data as LoginResponse;
 }
 
 // ── Store ───────────────────────────────────────────────────────────
@@ -285,7 +304,10 @@ export const useAuthStore = create<AuthState>((set) => ({
   login: async (username: string, password: string) => {
     set({ isLoading: true, error: null, lastAuthError: null });
     try {
-      const res: LoginResponse = await apiLogin(username, password);
+      const res: LoginResponse = await authRequest("/api/v1/auth/login", {
+        username,
+        password,
+      });
       await persistAndSetSession(res, set);
       return true;
     } catch (err: unknown) {
@@ -301,7 +323,11 @@ export const useAuthStore = create<AuthState>((set) => ({
   register: async (username: string, password: string, name?: string) => {
     set({ isLoading: true, error: null, lastAuthError: null });
     try {
-      const res: LoginResponse = await apiRegister(username, password, name);
+      const res: LoginResponse = await authRequest("/api/v1/auth/register", {
+        username,
+        password,
+        name,
+      });
 
       // DATA INTEGRITY: backend /register already returns a TokenResponse
       // identical to /login, so we can auto-login immediately.
@@ -327,14 +353,23 @@ export const useAuthStore = create<AuthState>((set) => ({
     if (__DEV__) console.log("[AuthStore] 🔵 googleSignIn called");
     set({ isLoading: true, error: null, lastAuthError: null });
     try {
-      // Dynamic import to avoid bundling Google auth code when unused
-      const { googleSignIn: apiGoogleSignIn } = await import(
-        "@/services/api"
-      );
       if (__DEV__) console.log("[AuthStore] 🔵 Calling POST /api/v1/auth/google…");
-      const res: LoginResponse = await apiGoogleSignIn(idToken);
+      const googleResp = await fetch(`${API_BASE_URL}/api/v1/auth/google`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id_token: idToken }),
+      });
+      const googleJson = await googleResp.json().catch(() => ({} as Record<string, unknown>));
+      if (!googleResp.ok) {
+        const message =
+          (typeof googleJson?.detail === "string" && googleJson.detail) ||
+          (typeof googleJson?.message === "string" && googleJson.message) ||
+          `Google sign-in failed (${googleResp.status})`;
+        throw new Error(message);
+      }
+      const normalized = ((googleJson as any)?.data ?? googleJson) as LoginResponse;
       if (__DEV__) console.log("[AuthStore] ✅ Backend returned tokens");
-      await persistAndSetSession(res, set);
+      await persistAndSetSession(normalized, set);
       if (__DEV__) console.log("[AuthStore] ✅ Session persisted, user is now authenticated");
       return true;
     } catch (err: unknown) {
