@@ -227,6 +227,32 @@ function RootLayoutNav() {
     });
   }, [token]);
 
+  // Foreground push handler: when a news push arrives while the app is open,
+  // invalidate the news feed query so the new article appears immediately
+  // instead of waiting for the next stale refetch.
+  useEffect(() => {
+    if (Platform.OS === "web") return;
+    let sub: { remove: () => void } | undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        const Notifications = await import("expo-notifications");
+        if (cancelled) return;
+        sub = Notifications.addNotificationReceivedListener(() => {
+          // Any incoming notification likely means new news; invalidate cheaply.
+          // Backend's ETag/Last-Modified short-circuits if it really hasn't changed.
+          queryClient.invalidateQueries({ queryKey: ["news"] });
+        });
+      } catch {
+        // expo-notifications not available (e.g. Expo Go limitation) — ignore.
+      }
+    })();
+    return () => {
+      cancelled = true;
+      sub?.remove();
+    };
+  }, [queryClient]);
+
   // Paper theme
   const paperTheme =
     themeMode === "dark"

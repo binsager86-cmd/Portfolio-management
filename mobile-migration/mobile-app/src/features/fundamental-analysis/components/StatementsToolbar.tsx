@@ -52,6 +52,9 @@ export function StatementsToolbar({ state, colors, stockSymbol }: StatementsTool
               {/* Statement type picker */}
               <View style={{ position: "relative" as const, zIndex: stmtPickerOpen ? 1001 : 1 }}>
                 <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Select statement type"
+                  accessibilityState={{ expanded: stmtPickerOpen }}
                   onPress={() => { setStmtPickerOpen((v) => !v); setPdfPickerOpen(false); }}
                   style={{ flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, backgroundColor: colors.bgInput, borderWidth: 1, borderColor: reconcileType !== "all" ? colors.accentPrimary : colors.borderColor }}
                 >
@@ -66,6 +69,9 @@ export function StatementsToolbar({ state, colors, stockSymbol }: StatementsTool
                     {RECONCILE_OPTS.map((opt) => (
                       <Pressable
                         key={opt.key}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Filter by ${opt.label}`}
+                        accessibilityState={{ selected: opt.key === reconcileType }}
                         onPress={() => { setReconcileType(opt.key); setStmtPickerOpen(false); }}
                         style={({ pressed }) => [{ flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 10, paddingVertical: 8, backgroundColor: opt.key === reconcileType ? colors.accentPrimary + "15" : pressed ? colors.bgInput : "transparent" }]}
                       >
@@ -82,6 +88,9 @@ export function StatementsToolbar({ state, colors, stockSymbol }: StatementsTool
               <Text style={{ fontSize: 11, color: colors.textMuted }}>PDF:</Text>
               <View style={{ position: "relative" as const, zIndex: pdfPickerOpen ? 1001 : 1 }}>
                 <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Select PDF source"
+                  accessibilityState={{ expanded: pdfPickerOpen }}
                   onPress={() => { setPdfPickerOpen((v) => !v); setStmtPickerOpen(false); }}
                   style={{ flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, backgroundColor: selectedPdfId ? colors.accentPrimary + "20" : colors.bgInput, borderWidth: 1, borderColor: selectedPdfId ? colors.accentPrimary : colors.borderColor }}
                 >
@@ -95,6 +104,9 @@ export function StatementsToolbar({ state, colors, stockSymbol }: StatementsTool
                     {tablePdfs.map((pdf) => (
                       <Pressable
                         key={pdf.id}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Select PDF ${pdf.original_name}`}
+                        accessibilityState={{ selected: pdf.id === selectedPdfId }}
                         onPress={() => { setSelectedPdfId(pdf.id); setPdfPickerOpen(false); }}
                         style={({ pressed }) => [{ flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 10, paddingVertical: 8, backgroundColor: pdf.id === selectedPdfId ? colors.accentPrimary + "15" : pressed ? colors.bgInput : "transparent" }]}
                       >
@@ -111,6 +123,9 @@ export function StatementsToolbar({ state, colors, stockSymbol }: StatementsTool
             </View>
           )}
           <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={rearranging ? "Auditing statements" : "AI reconcile statements"}
+            accessibilityState={{ disabled: rearranging || !selectedPdfId, busy: rearranging }}
             onPress={handleRearrange}
             disabled={rearranging || !selectedPdfId}
             style={({ pressed }) => [{
@@ -135,6 +150,9 @@ export function StatementsToolbar({ state, colors, stockSymbol }: StatementsTool
         {/* Merge mode */}
         {mergeMode && mergeSelection.length === 2 && (
           <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Merge ${mergeSelection.length} selected rows`}
+            accessibilityState={{ disabled: mergeMutPending, busy: mergeMutPending }}
             onPress={handleMerge}
             disabled={mergeMutPending}
             style={({ pressed }) => [{
@@ -152,6 +170,9 @@ export function StatementsToolbar({ state, colors, stockSymbol }: StatementsTool
           </Pressable>
         )}
         <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={mergeMode ? "Cancel merge mode" : "Enter merge rows mode"}
+          accessibilityState={{ selected: mergeMode }}
           onPress={() => { setMergeMode((v) => !v); setMergeSelection([]); }}
           style={({ pressed }) => [{
             flexDirection: "row", alignItems: "center", gap: 5,
@@ -170,6 +191,9 @@ export function StatementsToolbar({ state, colors, stockSymbol }: StatementsTool
         {/* Delete mode */}
         {deleteMode && selectedPeriods.size > 0 && (
           <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Delete ${selectedPeriods.size} selected periods`}
+            accessibilityState={{ disabled: deleteMutPending, busy: deleteMutPending }}
             onPress={handleDelete}
             disabled={deleteMutPending}
             style={({ pressed }) => [{
@@ -188,6 +212,9 @@ export function StatementsToolbar({ state, colors, stockSymbol }: StatementsTool
         )}
         {deleteMode && (
           <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Delete all periods"
+            accessibilityState={{ disabled: deleteAllMutPending, busy: deleteAllMutPending }}
             onPress={handleDeleteAll}
             disabled={deleteAllMutPending}
             style={({ pressed }) => [{
@@ -206,6 +233,9 @@ export function StatementsToolbar({ state, colors, stockSymbol }: StatementsTool
           </Pressable>
         )}
         <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={deleteMode ? "Cancel year selection" : "Select years to delete"}
+          accessibilityState={{ selected: deleteMode }}
           onPress={() => { setDeleteMode((v) => !v); setSelectedPeriods(new Set()); }}
           style={({ pressed }) => [{
             flexDirection: "row", alignItems: "center", gap: 5,
@@ -267,7 +297,7 @@ function ResultBanner({ text, colors, onDismiss }: { text: string; colors: Theme
       <Text style={{ flex: 1, fontSize: 11, color: isError ? colors.danger : colors.success }}>
         {text}
       </Text>
-      <Pressable onPress={onDismiss} hitSlop={8}>
+      <Pressable accessibilityRole="button" accessibilityLabel="Dismiss notification" onPress={onDismiss} hitSlop={8}>
         <FontAwesome name="times" size={12} color={colors.textMuted} />
       </Pressable>
     </View>

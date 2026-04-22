@@ -13,11 +13,42 @@ async function authHeaders(): Promise<Record<string, string>> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+// In-memory conditional-GET cache so the client can short-circuit unchanged
+// /feed responses with HTTP 304. Keyed by request URL. Survives for the
+// lifetime of the JS bundle (cleared on app reload), which is exactly the
+// horizon React Query already trusts for `staleTime`.
+type CachedResponse = { etag?: string; lastModified?: string; body: unknown };
+const _conditionalCache = new Map<string, CachedResponse>();
+
 async function fetchJson<T>(url: string): Promise<T> {
   const headers = await authHeaders();
   const res = await fetch(url, { headers });
   if (!res.ok) throw new Error(`News API error: ${res.status}`);
   return res.json();
+}
+
+/**
+ * fetchJson variant that participates in conditional-GET (ETag /
+ * Last-Modified). On a 304 response we return the previously cached body.
+ */
+async function fetchJsonConditional<T>(url: string): Promise<T> {
+  const headers: Record<string, string> = await authHeaders();
+  const cached = _conditionalCache.get(url);
+  if (cached?.etag) headers["If-None-Match"] = cached.etag;
+  if (cached?.lastModified) headers["If-Modified-Since"] = cached.lastModified;
+
+  const res = await fetch(url, { headers });
+  if (res.status === 304 && cached) {
+    return cached.body as T;
+  }
+  if (!res.ok) throw new Error(`News API error: ${res.status}`);
+  const body = (await res.json()) as T;
+  const etag = res.headers.get("etag") ?? undefined;
+  const lastModified = res.headers.get("last-modified") ?? undefined;
+  if (etag || lastModified) {
+    _conditionalCache.set(url, { etag, lastModified, body });
+  }
+  return body;
 }
 
 export interface NewsFeedParams {
@@ -46,7 +77,7 @@ export const newsApi = {
     if (params.categories?.length) qs.append("categories", params.categories.join(","));
     if (params.cursor) qs.append("cursor", params.cursor);
     if (params.lang) qs.append("lang", params.lang);
-    return fetchJson(`${NEWS_API}/feed?${qs}`);
+    return fetchJsonConditional(`${NEWS_API}/feed?${qs}`);
   },
 
   /** Get single news item with full content + attachments */

@@ -71,7 +71,9 @@ interface AIFinancialIntelligenceProps {
   aiPrompt: string;
   setAiPrompt: (v: string) => void;
   aiResult: string | null;
-  aiMutation: UseMutationResult<{ analysis: string } | undefined, Error, string>;
+  // Component only reads `isPending` — keep the type narrow so callers don't
+  // have to perfectly match the mutation's success/error generics.
+  aiMutation: Pick<UseMutationResult<unknown, unknown, string>, "isPending">;
   handleAiAnalyze: (prompt: string) => void;
   aiStatusData?: { configured: boolean } | undefined;
   /** Optional stock context — when provided, generates an expertise-level summary card */
@@ -135,6 +137,9 @@ export function AIFinancialIntelligence({
         {AI_PROMPT_CATEGORIES.map((cat, idx) => (
           <Pressable
             key={cat.label}
+            accessibilityRole="button"
+            accessibilityLabel={t('ai.' + cat.label)}
+            accessibilityState={{ selected: aiCategory === idx }}
             onPress={() => setAiCategory(aiCategory === idx ? null : idx)}
             style={[
               s.aiCatBtn,
@@ -158,6 +163,8 @@ export function AIFinancialIntelligence({
           {AI_PROMPT_CATEGORIES[aiCategory].promptKeys.map((key) => (
             <Pressable
               key={key}
+              accessibilityRole="button"
+              accessibilityLabel={t(key)}
               onPress={() => setAiPrompt(t(key))}
               style={[s.aiPromptSuggestion, { backgroundColor: colors.bgCard, borderColor: colors.borderColor }]}
             >
@@ -179,6 +186,9 @@ export function AIFinancialIntelligence({
           multiline
         />
         <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t('ai.send', 'Send AI prompt')}
+          accessibilityState={{ disabled: aiMutation.isPending || !aiPrompt.trim(), busy: aiMutation.isPending }}
           onPress={() => aiPrompt.trim() && handleAiAnalyze(aiPrompt.trim())}
           disabled={aiMutation.isPending || !aiPrompt.trim()}
           style={[
@@ -231,7 +241,7 @@ export function AIFinancialIntelligence({
           )}
 
           {preferences.expertiseLevel !== "normal" && preferences.showAdvancedMetrics && onViewDetails && (
-            <Pressable onPress={onViewDetails} style={[s.viewDetailsBtn, { borderColor: colors.accentPrimary + "40" }]}>
+            <Pressable accessibilityRole="button" accessibilityLabel={t('ai.viewTechnical')} onPress={onViewDetails} style={[s.viewDetailsBtn, { borderColor: colors.accentPrimary + "40" }]}>
               <Text style={{ color: colors.accentPrimary, fontSize: 13, fontWeight: "600" }}>
                 {t('ai.viewTechnical')}
               </Text>
@@ -268,7 +278,7 @@ export function AIFinancialIntelligence({
           )}
           {/* Collapsible full analysis for beginners */}
           {isBeginner && !showFullAnalysis ? (
-            <Pressable onPress={() => setShowFullAnalysis(true)} style={{ paddingVertical: 8 }}>
+            <Pressable accessibilityRole="button" accessibilityLabel={t('ai.showFull')} onPress={() => setShowFullAnalysis(true)} style={{ paddingVertical: 8 }}>
               <Text style={{ color: colors.accentPrimary, fontSize: 13, fontWeight: "600" }}>
                 {t('ai.showFull')}
               </Text>
@@ -276,7 +286,7 @@ export function AIFinancialIntelligence({
           ) : (
             <>
               {isBeginner && (
-                <Pressable onPress={() => setShowFullAnalysis(false)} style={{ paddingVertical: 4, marginBottom: 4 }}>
+                <Pressable accessibilityRole="button" accessibilityLabel={t('ai.hideFull')} onPress={() => setShowFullAnalysis(false)} style={{ paddingVertical: 4, marginBottom: 4 }}>
                   <Text style={{ color: colors.accentPrimary, fontSize: 13, fontWeight: "600" }}>
                     {t('ai.hideFull')}
                   </Text>

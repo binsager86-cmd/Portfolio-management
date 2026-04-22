@@ -39,8 +39,13 @@ export function useNewsFeed(options: {
       }),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (lastPage) => lastPage.nextPageCursor,
-    staleTime: 5 * 60_000,
+    // Short staleTime + focus/reconnect refetch keeps the feed near-live.
+    // The backend supports If-None-Match / If-Modified-Since on /feed, so
+    // unchanged refetches return 304 and cost almost nothing.
+    staleTime: 30_000,
     gcTime: 30 * 60_000,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
     retry: 2,
     enabled: options.enabled !== false,
   });
