@@ -30,12 +30,6 @@ jest.mock("expo-document-picker", () => ({
   getDocumentAsync: (...args: unknown[]) => mockGetDocument(...args),
 }));
 
-// Mock expo-crypto
-jest.mock("expo-crypto", () => ({
-  digestStringAsync: jest.fn().mockResolvedValue("mock-sha256-hash"),
-  CryptoDigestAlgorithm: { SHA256: "SHA-256" },
-}));
-
 // Mock constants
 jest.mock("@/constants/layout", () => ({
   MAX_UPLOAD_BYTES: 50 * 1024 * 1024,

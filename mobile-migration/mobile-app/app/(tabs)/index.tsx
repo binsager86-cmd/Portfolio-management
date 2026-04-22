@@ -54,6 +54,7 @@ import {
 import { useAuthStore } from "@/services/authStore";
 import { useThemeStore } from "@/services/themeStore";
 import { useUserPrefsStore } from "@/src/store/userPrefsStore";
+import { getApiErrorMessage } from "@/src/features/fundamental-analysis/types";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { isAxiosError } from "axios";
@@ -122,7 +123,18 @@ function OverviewScreen() {
     mutationFn: (prompt: string) =>
       analyzePortfolio({ prompt, include_holdings: true, include_performance: true }),
     onSuccess: (data) => {
-      setAiResult(data?.analysis ?? "");
+      const text = data?.analysis ?? "";
+      if (!text) {
+        setAiResult(t("ai.emptyResponse", "The AI returned an empty response. Please try again."));
+        return;
+      }
+      setAiResult(text);
+    },
+    onError: (err: unknown) => {
+      // Surface backend errors (missing Gemini key, network, 503, etc.) so the user
+      // sees feedback instead of the prompt silently doing nothing.
+      const msg = getApiErrorMessage(err, t("ai.requestFailed", "AI request failed. Please try again."));
+      setAiResult(msg);
     },
   });
 

@@ -113,11 +113,17 @@ export function enrichMetricsWithFallbacks(
 ): StockMetric[] {
   // Normalize backend metric names: server stores "Debt-to-Equity" but the
   // UI/Capital Structure section should display it as "Debt/Equity Ratio".
-  const normalized: StockMetric[] = allMetrics.map((m) =>
-    m.metric_type === "leverage" && m.metric_name === "Debt-to-Equity"
-      ? { ...m, metric_name: "Debt/Equity Ratio" }
-      : m,
+  // Skip the map() allocation when nothing needs renaming (most common case).
+  const needsRename = allMetrics.some(
+    (m) => m.metric_type === "leverage" && m.metric_name === "Debt-to-Equity",
   );
+  const normalized: StockMetric[] = needsRename
+    ? allMetrics.map((m) =>
+        m.metric_type === "leverage" && m.metric_name === "Debt-to-Equity"
+          ? { ...m, metric_name: "Debt/Equity Ratio" }
+          : m,
+      )
+    : allMetrics;
 
   // Index existing valuation metrics by fiscal_year → metric_name
   const existing = new Map<string, number>();

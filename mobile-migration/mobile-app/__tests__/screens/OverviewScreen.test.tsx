@@ -39,6 +39,7 @@ jest.mock("@/hooks/queries", () => ({
   useRiskMetrics: () => ({ data: null }),
   useRfRateSetting: () => ({ data: null }),
   useAiStatus: () => ({ data: null }),
+  useMarketSummary: () => ({ data: null }),
   portfolioKeys: { all: ["portfolio"] },
 }));
 

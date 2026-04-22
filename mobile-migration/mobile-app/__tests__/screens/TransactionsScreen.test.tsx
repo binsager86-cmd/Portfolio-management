@@ -251,7 +251,7 @@ describe("TransactionsScreen", () => {
     await waitFor(() => {
       expect(mockGetTransactions).toHaveBeenCalledWith({
         page: 1,
-        page_size: 50,
+        per_page: 50,
         portfolio: undefined,
         symbol: undefined,
       });

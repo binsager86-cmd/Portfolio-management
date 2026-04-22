@@ -85,13 +85,14 @@ describe("useResponsive", () => {
     expect(result.current.isDesktop).toBe(false);
   });
 
-  it("shows the sidebar on native tablet layouts", () => {
+  it("keeps the sidebar hidden on native tablets (web-only feature)", () => {
     mockPlatformOS = "android";
     mockDimensions = { width: 800, height: 1280 };
     const { result } = renderHook(() => useResponsive());
 
-    expect(result.current.showSidebar).toBe(true);
-    expect(result.current.showHamburger).toBe(false);
+    // Sidebar is a web-only layout pattern; native tablets use the drawer/hamburger.
+    expect(result.current.showSidebar).toBe(false);
+    expect(result.current.showHamburger).toBe(true);
   });
 
   it("returns 3 metric columns for tablet", () => {
