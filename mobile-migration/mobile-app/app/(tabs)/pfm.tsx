@@ -69,24 +69,24 @@ export default function PfmScreen() {
     }
   }, [deleteMutation, t]);
 
-  if (isLoading) return <PfmSkeleton />;
-  if (isError) return <ErrorScreen message={error?.message ?? "Failed to load PFM data"} onRetry={refetch} />;
-
-  const snapshots = listData?.snapshots ?? [];
-  const detail = detailData;
-
   const ratios = useMemo(() => {
-    if (!detail) return null;
+    if (!detailData) return null;
     let totalIncome = 0, totalExpenses = 0, financeCosts = 0;
-    for (const ie of detail.income_expenses) {
+    for (const ie of detailData.income_expenses) {
       if (ie.kind === "income") totalIncome += ie.monthly_amount;
       else if (ie.kind === "expense") totalExpenses += ie.monthly_amount;
       if (ie.is_finance_cost) financeCosts += ie.monthly_amount;
     }
     const savingsRate = totalIncome > 0 ? ((totalIncome - totalExpenses) / totalIncome * 100) : 0;
-    const debtToAsset = detail.total_assets > 0 ? (detail.total_liabilities / detail.total_assets * 100) : 0;
+    const debtToAsset = detailData.total_assets > 0 ? (detailData.total_liabilities / detailData.total_assets * 100) : 0;
     return { totalIncome, totalExpenses, financeCosts, savingsRate, debtToAsset };
-  }, [detail]);
+  }, [detailData]);
+
+  if (isLoading) return <PfmSkeleton />;
+  if (isError) return <ErrorScreen message={error?.message ?? "Failed to load PFM data"} onRetry={refetch} />;
+
+  const snapshots = listData?.snapshots ?? [];
+  const detail = detailData;
 
   return (
     <View style={ss.container}>

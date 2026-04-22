@@ -262,7 +262,13 @@ export default function AddTransactionScreen() {
 
         {/* ── Back button (steps 2+) ── */}
         {step > 1 && (
-          <Pressable onPress={handleBack} style={styles.backBtn}>
+          <Pressable
+            onPress={handleBack}
+            accessibilityRole="button"
+            accessibilityLabel={t("addTransaction.back")}
+            hitSlop={8}
+            style={styles.backBtn}
+          >
             <FontAwesome name="arrow-left" size={14} color={colors.accentPrimary} />
             <Text style={[styles.backText, { color: colors.accentPrimary }]}>{t("addTransaction.back")}</Text>
           </Pressable>

@@ -386,12 +386,6 @@ function TradingScreen() {
     }
   }, [selectedIds, queryClient, exitEditMode]);
 
-  if (isLoading && !data) return <TradingSkeleton />;
-  if (isError && !data)
-    return <ErrorScreen message={error?.message ?? t('app.failedToLoad')} onRetry={refetch} />;
-
-  const summary = data?.summary;
-
   const tradingTxnKeyExtractor = useCallback((item: TradingTransaction) => String(item.id), []);
   const renderTradingRow = useCallback(
     ({ item, index }: { item: TradingTransaction; index: number }) => (
@@ -416,6 +410,12 @@ function TradingScreen() {
     },
     [colors, editRows, handleToggleSelect, handleUpdateField, selectedIds],
   );
+
+  if (isLoading && !data) return <TradingSkeleton />;
+  if (isError && !data)
+    return <ErrorScreen message={error?.message ?? t('app.failedToLoad')} onRetry={refetch} />;
+
+  const summary = data?.summary;
 
   // ── Render helpers ──────────────────────────────────────────────
 

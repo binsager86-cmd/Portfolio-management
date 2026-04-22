@@ -258,6 +258,8 @@ export const HeaderCell = React.memo(function HeaderCell({ col, colors, sortCol,
   return (
     <Pressable
       onPress={() => onSort(col.key)}
+      accessibilityRole="button"
+      accessibilityLabel={`Sort by ${t(col.label)}${isActive ? sortDir === "asc" ? ", ascending" : ", descending" : ""}`}
       style={[htStyles.headerCell, { width: col.width, backgroundColor: isActive ? colors.bgCardHover : "transparent" }]}
     >
       <Text

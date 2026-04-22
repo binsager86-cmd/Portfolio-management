@@ -61,6 +61,8 @@ export function NewsCard({ item, colors, expertiseLevel, onPress, compact }: New
   return (
     <Pressable
       onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={item.title || item.summary || "News article"}
       style={({ pressed }) => [
         s.card,
         {

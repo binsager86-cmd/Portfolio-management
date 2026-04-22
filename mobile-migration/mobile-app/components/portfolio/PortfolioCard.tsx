@@ -91,6 +91,8 @@ export const PortfolioCard = React.memo(function PortfolioCard({ name, data, onP
     return (
       <Pressable
         onPress={onPress}
+        accessibilityRole="button"
+        accessibilityLabel={`${name} portfolio, ${formatCurrency(data.market_value_kwd, "KWD")}`}
         style={({ pressed }) => ({ opacity: pressed ? 0.8 : 1 })}
       >
         {content}

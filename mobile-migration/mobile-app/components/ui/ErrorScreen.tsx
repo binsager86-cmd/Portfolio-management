@@ -23,6 +23,8 @@ export function ErrorScreen({ message, onRetry }: ErrorScreenProps) {
       {onRetry && (
         <Pressable
           onPress={onRetry}
+          accessibilityRole="button"
+          accessibilityLabel="Retry"
           style={[styles.button, { backgroundColor: colors.accentPrimary }]}
         >
           <Text style={styles.buttonText}>Retry</Text>

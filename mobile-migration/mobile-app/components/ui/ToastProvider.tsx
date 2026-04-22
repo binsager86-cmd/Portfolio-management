@@ -128,6 +128,8 @@ function ToastItem({
       <Pressable
         onPress={() => onDismiss(toast.id)}
         hitSlop={8}
+        accessibilityRole="button"
+        accessibilityLabel="Dismiss notification"
         style={styles.closeBtn}
       >
         <Text style={[styles.closeText, { color: textColor }]}>✕</Text>

@@ -199,6 +199,9 @@ export default function HoldingsScreen() {
               <Pressable
                 key={mode}
                 onPress={() => setViewMode(mode)}
+                accessibilityRole="button"
+                accessibilityLabel={mode === "summary" ? t("holdings.summary", "Summary") : t("holdings.detailed", "Detailed")}
+                accessibilityState={{ selected: viewMode === mode }}
                 style={[
                   s.viewToggleBtn,
                   {
@@ -283,6 +286,8 @@ export default function HoldingsScreen() {
                           </Text>
                           <Pressable
                             onPress={() => router.push("/(tabs)/add-stock")}
+                            accessibilityRole="button"
+                            accessibilityLabel={t("holdingsScreen.addFirstStock")}
                             style={{ backgroundColor: colors.accentPrimary, paddingHorizontal: 18, paddingVertical: 8, borderRadius: 8 }}
                           >
                             <Text style={{ color: "#fff", fontWeight: "600", fontSize: 13 }}>{t("holdingsScreen.addFirstStock")}</Text>

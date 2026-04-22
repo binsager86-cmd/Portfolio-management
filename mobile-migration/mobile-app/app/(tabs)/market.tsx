@@ -542,6 +542,9 @@ export default withErrorBoundary(function MarketScreen() {
         </View>
         <Pressable
           onPress={onRefresh}
+          accessibilityRole="button"
+          accessibilityLabel={t("market.refresh", "Refresh market data")}
+          accessibilityState={{ disabled: isFetching }}
           style={[s.refreshBtn, { backgroundColor: colors.accentPrimary + "15" }]}
           disabled={isFetching}
         >

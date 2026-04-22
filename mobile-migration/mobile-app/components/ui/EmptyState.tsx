@@ -59,6 +59,8 @@ export function EmptyState({ type, onPrimaryAction }: EmptyStateProps) {
       <View style={styles.actions}>
         <Pressable
           onPress={onPrimaryAction || (() => router.push("/(tabs)/add-transaction"))}
+          accessibilityRole="button"
+          accessibilityLabel={primaryAction}
           style={[styles.primaryButton, { backgroundColor: colors.accentPrimary }]}
         >
           <FontAwesome name="plus" size={16} color="#fff" style={{ marginRight: 8 }} />
@@ -68,6 +70,8 @@ export function EmptyState({ type, onPrimaryAction }: EmptyStateProps) {
         {secondaryAction && (
           <Pressable
             onPress={() => router.push("/(tabs)/transactions")}
+            accessibilityRole="button"
+            accessibilityLabel={secondaryAction}
             style={[styles.secondaryButton, { borderColor: colors.success }]}
           >
             <FontAwesome name="upload" size={16} color={colors.success} style={{ marginRight: 8 }} />

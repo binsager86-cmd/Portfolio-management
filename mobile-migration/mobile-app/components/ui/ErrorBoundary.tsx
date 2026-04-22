@@ -55,7 +55,12 @@ export class AppErrorBoundary extends Component<Props, State> {
               {this.state.error.stack}
             </Text>
           ) : null}
-          <Pressable onPress={this.handleReset} style={styles.button}>
+          <Pressable
+            onPress={this.handleReset}
+            accessibilityRole="button"
+            accessibilityLabel="Try Again"
+            style={styles.button}
+          >
             <Text style={styles.buttonText}>Try Again</Text>
           </Pressable>
         </View>

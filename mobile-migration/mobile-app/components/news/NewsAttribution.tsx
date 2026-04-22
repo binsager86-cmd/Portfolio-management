@@ -30,7 +30,12 @@ export function NewsAttribution({ source, url, isVerified, colors }: NewsAttribu
         </Text>
       </View>
       {url && (
-        <Pressable onPress={() => Linking.openURL(url)} hitSlop={8}>
+        <Pressable
+          onPress={() => Linking.openURL(url)}
+          hitSlop={8}
+          accessibilityRole="link"
+          accessibilityLabel={i18n.t('news.viewOriginal')}
+        >
           <Text style={[s.link, { color: colors.accentPrimary }]}>
             <FontAwesome name="external-link" size={10} color={colors.accentPrimary} />{" "}
             {i18n.t('news.viewOriginal')}
