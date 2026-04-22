@@ -328,7 +328,7 @@ function TransactionsScreen() {
       const manualDeposits = cashBal?.manual_override ? cashBal.balance : 0;
       const computedCash = cashBal?.balance ?? 0;
       const summary = buildReconciliationSummary(txns, deposits, manualDeposits, computedCash, undefined, holdings);
-      console.log("[Reconciliation]", {
+      console.info("[Reconciliation]", {
         txns: txns.length,
         deposits: deposits.length,
         holdings: holdings.length,

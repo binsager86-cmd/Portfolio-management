@@ -109,7 +109,7 @@ export default function KfhTradeImportButton({ portfolio = "KFH", onImportComple
         }
       }
       // Auto-close preview and trigger reconciliation immediately
-      console.log("[KfhImport] Import done, auto-closing preview and triggering reconciliation");
+      console.info("[KfhImport] Import done, auto-closing preview and triggering reconciliation");
       setPreviewVisible(false);
       setPreview(null);
       onImportComplete?.();

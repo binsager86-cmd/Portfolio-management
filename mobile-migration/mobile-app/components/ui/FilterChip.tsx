@@ -21,6 +21,10 @@ export const FilterChip = React.memo(function FilterChip({
   return (
     <Pressable
       onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ selected: active }}
+      hitSlop={UITokens.hitSlop.sm}
       style={[styles.chip, { backgroundColor: bg, borderColor: colors.borderColor }, Platform.OS === "web" ? ({ cursor: "pointer" } as unknown as ViewStyle) : undefined]}
     >
       <Text style={[styles.chipText, { color: active ? "#fff" : colors.textSecondary }]}>

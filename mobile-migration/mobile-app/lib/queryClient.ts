@@ -75,10 +75,13 @@ export const queryClient = new QueryClient({
         if (status === 401 || status === 403) return false;
         return failureCount < 2;
       },
-      // Refetch stale queries when the user returns to the app/tab.
-      // Combined with the native AppState focusManager (below),
-      // this ensures data freshness without manual pull-to-refresh.
-      refetchOnWindowFocus: "always",
+      // Refetch only stale queries when the user returns to the app/tab.
+      // "always" was previously used but caused a network thundering-herd
+      // every tab switch on web. "true" defers to per-query staleTime so
+      // fresh queries are not re-fetched needlessly. Per-query overrides
+      // can opt back into "always" where freshness is critical (e.g., live
+      // prices).
+      refetchOnWindowFocus: true,
     },
   },
 });

@@ -34,7 +34,7 @@ function resolveProjectId(): string | undefined {
 export async function registerPushToken(): Promise<string | null> {
   // Web uses a different notification flow
   if (Platform.OS === "web") {
-    if (__DEV__) console.log("[Push] Web platform — skipping Expo push token");
+    if (__DEV__) console.info("[Push] Web platform — skipping Expo push token");
     return null;
   }
 
@@ -48,7 +48,7 @@ export async function registerPushToken(): Promise<string | null> {
   }
 
   if (finalStatus !== "granted") {
-    if (__DEV__) console.log("[Push] Permission not granted");
+    if (__DEV__) console.info("[Push] Permission not granted");
     return null;
   }
 
@@ -77,12 +77,12 @@ export async function registerPushToken(): Promise<string | null> {
     const tokenData = await Notifications.getExpoPushTokenAsync({ projectId });
     const pushToken = tokenData.data;
 
-    if (__DEV__) console.log("[Push] Token:", pushToken);
+    if (__DEV__) console.info("[Push] Token:", pushToken);
 
     // Send to backend
     const jwt = await getToken();
     if (!jwt) {
-      if (__DEV__) console.log("[Push] No auth token — skipping registration");
+      if (__DEV__) console.info("[Push] No auth token — skipping registration");
       return pushToken;
     }
 
@@ -99,7 +99,7 @@ export async function registerPushToken(): Promise<string | null> {
     });
 
     if (resp.ok) {
-      if (__DEV__) console.log("[Push] Token registered with backend");
+      if (__DEV__) console.info("[Push] Token registered with backend");
     } else {
       const err = await resp.text();
       console.warn("[Push] Backend registration failed:", resp.status, err);

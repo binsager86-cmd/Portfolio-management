@@ -291,7 +291,6 @@ export default function TabLayout() {
               ),
             }}
           />
-          <Tabs.Screen name="two" options={{ href: null, title: "Holdings (Legacy)" }} />
           <Tabs.Screen
             name="portfolio-tracker"
             options={{

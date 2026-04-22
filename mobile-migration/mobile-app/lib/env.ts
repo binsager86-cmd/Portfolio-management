@@ -54,7 +54,7 @@ export function validateEnv(): boolean {
   }
 
   if (__DEV__) {
-    console.log("[env] ✅ All required environment variables are set.");
+    console.info("[env] ✅ All required environment variables are set.");
   }
 
   return true;

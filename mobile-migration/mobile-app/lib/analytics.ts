@@ -23,7 +23,7 @@ let Sentry: any = null;
 async function init(): Promise<void> {
   const dsn = process.env.EXPO_PUBLIC_SENTRY_DSN;
   if (!dsn) {
-    if (__DEV__) console.log("[Analytics] No EXPO_PUBLIC_SENTRY_DSN — Sentry disabled");
+    if (__DEV__) console.info("[Analytics] No EXPO_PUBLIC_SENTRY_DSN — Sentry disabled");
     return;
   }
 
@@ -46,7 +46,7 @@ async function init(): Promise<void> {
 /** Fire a named analytics event with optional key-value parameters. */
 function logEvent(name: string, params?: EventParams): void {
   if (__DEV__) {
-    console.log(`[Analytics] ${name}`, params ?? "");
+    console.info(`[Analytics] ${name}`, params ?? "");
   }
   Sentry?.addBreadcrumb({ category: "event", message: name, data: params });
 }

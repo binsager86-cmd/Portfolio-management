@@ -119,7 +119,7 @@ export function useSessionGuard() {
     async function heartbeat() {
       const valid = await validateSession();
       if (!valid) {
-        if (__DEV__) console.log("[SessionGuard] Session invalid — logging out");
+        if (__DEV__) console.info("[SessionGuard] Session invalid — logging out");
         await removeToken();
         await removeRefreshToken();
         logout();

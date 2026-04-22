@@ -52,6 +52,14 @@ type QueueItem = {
 };
 let failedQueue: QueueItem[] = [];
 
+// Module-level atomic lock guarding refresh-state initialization. The
+// Zustand `isRefreshing` flag is the queue gate, but it is set inside
+// an async block; under high concurrency two 401s can both pass the
+// `if (isRefreshing)` check before either calls `setRefreshState(true)`.
+// This boolean is set synchronously before any async work, closing
+// that race window.
+let refreshInFlight = false;
+
 function processQueue(error: Error | null, token: string | null = null): void {
   failedQueue.forEach((prom) =>
     error ? prom.reject(error) : prom.resolve(token!),
@@ -132,7 +140,7 @@ client.interceptors.response.use(
     }
 
     // ── Queue behind in-flight refresh ──
-    if (isRefreshing) {
+    if (isRefreshing || refreshInFlight) {
       return new Promise((resolve, reject) => {
         failedQueue.push({
           resolve: (token) => {
@@ -147,6 +155,7 @@ client.interceptors.response.use(
     }
 
     // ── Perform refresh ──
+    refreshInFlight = true;
     setRefreshState(true, refreshAttempts + 1);
 
     try {
@@ -177,11 +186,13 @@ client.interceptors.response.use(
         original.headers.Authorization = `Bearer ${data.access_token}`;
       }
       setRefreshState(false, 0);
+      refreshInFlight = false;
       return client(original);
     } catch (refreshError) {
       processQueue(refreshError as Error, null);
       await clearTokens();
       setRefreshState(false, 0);
+      refreshInFlight = false;
       await useAuthStore.getState().logout();
       return Promise.reject(refreshError);
     }

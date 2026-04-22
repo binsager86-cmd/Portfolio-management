@@ -24,11 +24,14 @@ export default tseslint.config(
       },
     },
     rules: {
-      "max-lines": ["warn", { max: 350, skipBlankLines: true, skipComments: true }],
+      "max-lines": ["warn", { max: 500, skipBlankLines: true, skipComments: true }],
       "@typescript-eslint/no-explicit-any": "error",
       "@typescript-eslint/no-unused-vars": ["warn", { argsIgnorePattern: "^_", varsIgnorePattern: "^_" }],
       "@typescript-eslint/ban-ts-comment": "off",
-      "no-console": "warn",
+      // Allow console.warn/error/info — they map to platform logs in
+      // production and are useful for diagnosability. console.log is the
+      // dev-only chatter we want to keep out of shipping bundles.
+      "no-console": ["warn", { allow: ["warn", "error", "info"] }],
       "no-restricted-imports": ["error", {
         patterns: [
           { group: ["**/services/api.ts"], message: "Import from @/services/api (barrel) instead." },

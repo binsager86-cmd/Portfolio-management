@@ -259,7 +259,7 @@ export default function BackupRestoreScreen() {
             <Text style={[s.resultTitle, { color: colors.danger }]}>{t('backup.importFailed')}</Text>
           </View>
           <Text style={{ color: colors.textSecondary, fontSize: 14, lineHeight: 20 }}>{importError}</Text>
-          <Pressable onPress={() => setImportError(null)} style={{ marginTop: 12 }}>
+          <Pressable onPress={() => setImportError(null)} hitSlop={8} accessibilityRole="button" accessibilityLabel={t('backup.dismiss')} style={{ marginTop: 12 }}>
             <Text style={{ color: colors.accentPrimary, fontSize: 13, fontWeight: "600" }}>{t('backup.dismiss')}</Text>
           </Pressable>
         </View>

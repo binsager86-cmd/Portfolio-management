@@ -271,7 +271,7 @@ export const HeaderCell = React.memo(function HeaderCell({ col, colors, sortCol,
   );
 });
 
-function DataCell({ col, holding, colors }: { col: ColDef; holding: Holding; colors: ThemePalette }) {
+const DataCell = React.memo(function DataCell({ col, holding, colors }: { col: ColDef; holding: Holding; colors: ThemePalette }) {
   const val = getCellValue(holding, col.key);
   const { text, color, bold } = fmtCell(val, col.fmt, colors);
   const usdText = getUsdBracketText(holding, col.key);
@@ -287,7 +287,7 @@ function DataCell({ col, holding, colors }: { col: ColDef; holding: Holding; col
       ) : null}
     </View>
   );
-}
+});
 
 /** Footer total cell — renders aggregate value for summable columns. */
 export const TotalCell = React.memo(function TotalCell({ col, totals, colors }: { col: ColDef; totals: Record<string, number>; colors: ThemePalette }) {

@@ -284,12 +284,12 @@ export default function SettingsScreen() {
                   <FontAwesome name="check" size={16} color={colors.accentPrimary} />
                 )}
               </Pressable>
-              <Pressable onPress={() => setIsEditingName(false)}>
+              <Pressable onPress={() => setIsEditingName(false)} hitSlop={12} accessibilityRole="button" accessibilityLabel="Cancel editing name">
                 <FontAwesome name="times" size={16} color={colors.textSecondary} />
               </Pressable>
             </View>
           ) : (
-            <Pressable onPress={handleEditName} style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+            <Pressable onPress={handleEditName} hitSlop={8} accessibilityRole="button" accessibilityLabel="Edit display name" style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
               <Text style={[s.infoValue, { color: colors.textPrimary }]}>{user?.name || authName || "—"}</Text>
               <FontAwesome name="pencil" size={13} color={colors.textSecondary} />
             </Pressable>

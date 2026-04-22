@@ -42,7 +42,7 @@ export async function performGoogleSignIn(): Promise<GoogleAuthResult> {
     };
   }
 
-  if (__DEV__) console.log("[GoogleAuth] Starting sign-in on platform:", Platform.OS);
+  if (__DEV__) console.info("[GoogleAuth] Starting sign-in on platform:", Platform.OS);
 
   if (Platform.OS === "web") {
     return performWebGoogleSignIn();
@@ -70,7 +70,7 @@ async function performWebGoogleSignIn(): Promise<GoogleAuthResult> {
     });
 
     if (__DEV__) {
-      console.log("[GoogleAuth] Redirect URI:", redirectUri);
+      console.info("[GoogleAuth] Redirect URI:", redirectUri);
     }
 
     const request = new AuthSession.AuthRequest({
@@ -81,14 +81,22 @@ async function performWebGoogleSignIn(): Promise<GoogleAuthResult> {
       usePKCE: false, // implicit flow doesn't use PKCE
     });
 
+    // CSRF protection for the URL-hash redirect fallback path: stash the
+    // randomly-generated `state` so `app/_layout.tsx` can verify any
+    // returned `#access_token=...&state=...` was issued by *this* request
+    // and not injected by an attacker via a crafted link.
+    if (typeof window !== "undefined" && request.state) {
+      try { window.sessionStorage.setItem("google_oauth_state", request.state); } catch { /* storage may be disabled */ }
+    }
+
     // Open the Google consent screen in a popup
-    if (__DEV__) console.log("[GoogleAuth] Opening Google consent screen…");
+    if (__DEV__) console.info("[GoogleAuth] Opening Google consent screen…");
     const result = await request.promptAsync(discovery);
 
-    if (__DEV__) console.log("[GoogleAuth] Auth result type:", result.type);
+    if (__DEV__) console.info("[GoogleAuth] Auth result type:", result.type);
 
     if (result.type === "cancel" || result.type === "dismiss") {
-      if (__DEV__) console.log("[GoogleAuth] User cancelled/dismissed the consent screen");
+      if (__DEV__) console.info("[GoogleAuth] User cancelled/dismissed the consent screen");
       return { success: false, cancelled: true };
     }
 
@@ -102,7 +110,7 @@ async function performWebGoogleSignIn(): Promise<GoogleAuthResult> {
           error: "Google did not return an access token.",
         };
       }
-      if (__DEV__) console.log("[GoogleAuth] ✅ Got access_token");
+      if (__DEV__) console.info("[GoogleAuth] ✅ Got access_token");
       // We return it as `idToken` for backward compatibility with the
       // auth store which calls `apiGoogleSignIn(idToken)`. The backend
       // accepts both real ID tokens and access tokens.
@@ -155,7 +163,7 @@ export async function performNativeGoogleSignIn(): Promise<GoogleAuthResult> {
       scheme: "portfolio-tracker",
     });
 
-    if (__DEV__) console.log("[GoogleAuth Native] Redirect URI:", redirectUri);
+    if (__DEV__) console.info("[GoogleAuth Native] Redirect URI:", redirectUri);
 
     const request = new AuthSession.AuthRequest({
       clientId: GOOGLE_WEB_CLIENT_ID,
@@ -167,7 +175,7 @@ export async function performNativeGoogleSignIn(): Promise<GoogleAuthResult> {
 
     const result = await request.promptAsync(discovery);
 
-    if (__DEV__) console.log("[GoogleAuth Native] Result type:", result.type);
+    if (__DEV__) console.info("[GoogleAuth Native] Result type:", result.type);
 
     if (result.type === "cancel" || result.type === "dismiss") {
       return { success: false, cancelled: true };
@@ -182,7 +190,7 @@ export async function performNativeGoogleSignIn(): Promise<GoogleAuthResult> {
           error: "Google did not return an access token.",
         };
       }
-      if (__DEV__) console.log("[GoogleAuth Native] ✅ Got access_token");
+      if (__DEV__) console.info("[GoogleAuth Native] ✅ Got access_token");
       return { success: true, idToken: accessToken };
     }
 

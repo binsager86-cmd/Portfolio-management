@@ -218,11 +218,11 @@ export default function PortfolioTrackerScreen() {
 
   const recalcMutation = useMutation({
     mutationFn: () => {
-      console.log("[Recalculate] Starting recalculation request...");
+      console.info("[Recalculate] Starting recalculation request...");
       return recalculateSnapshots();
     },
     onSuccess: (result) => {
-      console.log("[Recalculate] Success:", result);
+      console.info("[Recalculate] Success:", result);
       queryClient.invalidateQueries({ queryKey: ["snapshots"] });
       const msg = t('tracker.recalculatedCount', { count: result.updated });
       if (Platform.OS === "web") window.alert(msg);

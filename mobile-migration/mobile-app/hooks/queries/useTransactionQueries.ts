@@ -51,7 +51,8 @@ export function useAllTransactions() {
   });
 }
 
-/** Lightweight transaction count — stable cache for UI visibility decisions. */
+/** Lightweight transaction count — cached briefly so UI visibility decisions stay
+ *  in sync when transactions are added/removed elsewhere (other tab, mutation). */
 export function useTransactionCount() {
   return useQuery({
     queryKey: ["transactions", "count"],
@@ -59,17 +60,18 @@ export function useTransactionCount() {
       const data = await getTransactions({ page: 1, per_page: 1 });
       return data.count;
     },
-    staleTime: Infinity,
-    refetchOnWindowFocus: false,
+    staleTime: 60_000,
   });
 }
 
-/** Single transaction for edit mode. */
+/** Single transaction for edit mode — cache for the duration of an edit
+ *  session to avoid refetching on every modal open/remount. */
 export function useTransaction(editId?: string) {
   return useQuery<TransactionRecord>({
     queryKey: transactionKeys.detail(editId),
     queryFn: () => getTransaction(Number(editId)),
     enabled: !!editId,
-    staleTime: 0,
+    staleTime: 30_000,
+    refetchOnMount: false,
   });
 }

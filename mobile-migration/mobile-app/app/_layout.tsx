@@ -127,16 +127,32 @@ function RootLayoutNav() {
         if (hash && hash.includes("access_token=")) {
           const params = new URLSearchParams(hash.substring(1));
           const accessToken = params.get("access_token");
-          if (accessToken) {
-            // Clean the URL so the token isn't visible
-            window.history.replaceState(
-              null,
-              "",
-              window.location.pathname + window.location.search,
-            );
+          const returnedState = params.get("state");
+          // CSRF defence: only accept the token if we initiated an OAuth
+          // request in this session AND the returned state matches the
+          // value we stashed in lib/googleAuth.ts. Drop everything
+          // otherwise — protects against attacker-crafted hash injection.
+          let expectedState: string | null = null;
+          try { expectedState = window.sessionStorage.getItem("google_oauth_state"); } catch { /* storage may be disabled */ }
+          // Always clean the URL so the token isn't visible / replayable.
+          window.history.replaceState(
+            null,
+            "",
+            window.location.pathname + window.location.search,
+          );
+          try { window.sessionStorage.removeItem("google_oauth_state"); } catch { /* noop */ }
+          if (
+            accessToken &&
+            expectedState &&
+            returnedState &&
+            expectedState === returnedState
+          ) {
             // Await the full sign-in flow — this sets token + loading:false
             await googleSignIn(accessToken);
             return; // skip hydration — googleSignIn already set session
+          }
+          if (__DEV__ && accessToken) {
+            console.warn("[OAuth] Discarded callback: state mismatch or no pending request.");
           }
         }
       }

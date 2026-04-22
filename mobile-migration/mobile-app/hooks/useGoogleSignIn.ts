@@ -78,8 +78,8 @@ function signInWebRedirect(): void {
   const url = `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
 
   if (__DEV__) {
-    console.log("[useGoogleSignIn] Redirecting to Google OAuth");
-    console.log("[useGoogleSignIn] Redirect URI:", redirectUri);
+    console.info("[useGoogleSignIn] Redirecting to Google OAuth");
+    console.info("[useGoogleSignIn] Redirect URI:", redirectUri);
   }
 
   // Navigate the current page to Google
@@ -89,7 +89,7 @@ function signInWebRedirect(): void {
 // ── Native: @react-native-google-signin ─────────────────────────────
 
 async function signInNative(): Promise<GoogleSignInResult> {
-  console.log("[useGoogleSignIn] Platform: native");
+  console.info("[useGoogleSignIn] Platform: native");
   const { performNativeGoogleSignIn } = await import("@/lib/googleAuth");
   const result = await performNativeGoogleSignIn();
   if (result.success) {

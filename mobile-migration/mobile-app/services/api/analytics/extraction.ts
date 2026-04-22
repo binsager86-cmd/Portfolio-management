@@ -3,8 +3,63 @@
  * attribution & rearrange endpoints.
  */
 
+import { z } from "zod";
 import api from "../client";
 import type { AIUploadResult, AIValidationResult } from "../types";
+
+// ── Runtime response validators ─────────────────────────────────────
+// These guard the boundary against malformed responses from the AI
+// pipeline (the LLM occasionally returns shapes that drift from the
+// schema). Validation is non-strict (`.passthrough()`) so unknown new
+// fields do not break the client; only the *required* shape is
+// enforced. Failures fall back to throwing so React Query surfaces
+// the error rather than silently corrupting downstream state.
+
+const StatementShape = z
+  .object({
+    statement_id: z.number(),
+    statement_type: z.string(),
+    period_end_date: z.string(),
+    fiscal_year: z.number(),
+    line_items_count: z.number(),
+    currency: z.string(),
+  })
+  .passthrough();
+
+const AIUploadResultSchema = z
+  .object({
+    message: z.string(),
+    statements: z.array(StatementShape),
+    source_file: z.string(),
+    pages_processed: z.number(),
+    model: z.string(),
+    confidence: z.number(),
+    cached: z.boolean(),
+  })
+  .passthrough();
+
+const UploadJobResponseSchema = z
+  .object({
+    job_id: z.number(),
+    upload_id: z.string(),
+    status: z.string(),
+    message: z.string(),
+    source_file: z.string(),
+  })
+  .passthrough();
+
+const ExtractionStatusResponseSchema = z
+  .object({
+    job_id: z.number(),
+    upload_id: z.string(),
+    status: z.enum(["queued", "running", "done", "failed"]),
+    stage: z.enum(["uploading", "extracting", "saving", "done"]),
+    pages_processed: z.number(),
+    total_pages: z.number(),
+    progress_percent: z.number(),
+    result: AIUploadResultSchema.optional(),
+  })
+  .passthrough();
 
 // ── Interfaces ──────────────────────────────────────────────────────
 
@@ -80,7 +135,7 @@ export async function uploadFinancialStatement(
       signal: options?.signal,
     },
   );
-  return data.data;
+  return UploadJobResponseSchema.parse(data.data) as UploadJobResponse;
 }
 
 /**
@@ -92,7 +147,7 @@ export async function getExtractionStatus(
   const { data } = await api.get<{ status: string; data: ExtractionStatusResponse }>(
     `/api/v1/fundamental/extraction-status/${encodeURIComponent(String(jobId))}`,
   );
-  return data.data;
+  return ExtractionStatusResponseSchema.parse(data.data) as ExtractionStatusResponse;
 }
 
 /**
@@ -122,6 +177,7 @@ export async function validateFinancialStatement(
   file: File | Blob | string,
   fileName: string,
   mimeType: string = "application/pdf",
+  options?: { signal?: AbortSignal },
 ): Promise<AIValidationResult> {
   const formData = new FormData();
 
@@ -141,6 +197,7 @@ export async function validateFinancialStatement(
     {
       headers: { "Content-Type": "multipart/form-data" },
       timeout: 120_000,
+      signal: options?.signal,
     },
   );
   return data.data;
@@ -154,6 +211,7 @@ export async function verifyStatementPlacement(
   file: File | Blob | string,
   fileName: string,
   mimeType: string = "application/pdf",
+  options?: { signal?: AbortSignal },
 ): Promise<AIValidationResult> {
   const formData = new FormData();
 
@@ -173,6 +231,7 @@ export async function verifyStatementPlacement(
     {
       headers: { "Content-Type": "multipart/form-data" },
       timeout: 120_000,
+      signal: options?.signal,
     },
   );
   return data.data;
@@ -183,11 +242,12 @@ export async function verifyStatementPlacement(
  */
 export async function aiAttributeExtraction(
   stockId: number,
+  options?: { signal?: AbortSignal },
 ): Promise<AIValidationResult> {
   const { data } = await api.post<{ status: string; data: AIValidationResult }>(
     `/api/v1/fundamental/stocks/${stockId}/ai-attribute`,
     null,
-    { timeout: 180_000 },
+    { timeout: 180_000, signal: options?.signal },
   );
   return data.data;
 }
@@ -200,6 +260,7 @@ export async function aiRearrangeStatement(
   statementType: string,
   periods?: string[],
   pdfId?: number,
+  options?: { signal?: AbortSignal },
 ): Promise<AIValidationResult> {
   const { data } = await api.post<{ status: string; data: AIValidationResult }>(
     `/api/v1/fundamental/stocks/${stockId}/ai-rearrange`,
@@ -208,7 +269,7 @@ export async function aiRearrangeStatement(
       periods: periods ?? null,
       pdf_id: pdfId ?? null,
     },
-    { timeout: 300_000 },
+    { timeout: 300_000, signal: options?.signal },
   );
   return data.data;
 }
