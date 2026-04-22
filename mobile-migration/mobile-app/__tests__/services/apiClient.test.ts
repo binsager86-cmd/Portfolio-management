@@ -69,11 +69,11 @@ describe("API client — circular dependency fix", () => {
   });
 
   it("has request interceptor for auth token", () => {
-    expect(api.interceptors.request.handlers.length).toBeGreaterThan(0);
+    expect(api.interceptors.request.handlers?.length ?? 0).toBeGreaterThan(0);
   });
 
   it("has response interceptor for 401 refresh", () => {
-    expect(api.interceptors.response.handlers.length).toBeGreaterThan(0);
+    expect(api.interceptors.response.handlers?.length ?? 0).toBeGreaterThan(0);
   });
 
   it("authStore is imported and used for 401 handling", () => {

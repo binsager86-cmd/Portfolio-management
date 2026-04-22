@@ -47,6 +47,7 @@ import {
     TextInput,
     View,
 } from "react-native";
+import type { TextStyle } from "react-native";
 
 // Extracted components
 import {
@@ -96,6 +97,14 @@ function TradingScreen() {
 
   const { data: riskData } = useRiskMetrics();
   const { data: realizedData } = useRealizedProfit();
+  const [expandedRealized, setExpandedRealized] = useState<Set<number>>(new Set());
+  const toggleRealized = useCallback((id: number) => {
+    setExpandedRealized((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }, []);
 
   const clearAllFilters = useCallback(() => {
     setPortfolios([]);
@@ -138,8 +147,8 @@ function TradingScreen() {
       queryClient.invalidateQueries({ queryKey: ["trading-summary"] });
       Alert.alert(t('trading.updated'), `"${result.symbol}" ${t('trading.renamedTo')} "${result.name}"`);
     },
-    onError: (err: any) => {
-      Alert.alert(t('trading.renameFailed'), err?.message ?? "Could not rename stock");
+    onError: (err: unknown) => {
+      Alert.alert(t('trading.renameFailed'), (err instanceof Error ? err.message : null) ?? "Could not rename stock");
     },
   });
 
@@ -306,7 +315,7 @@ function TradingScreen() {
             txn_date: editRow.date,
             stock_symbol: editRow.symbol,
             portfolio: editRow.portfolio,
-            txn_type: txnType as any,
+            txn_type: txnType as "Buy" | "Sell" | "DIVIDEND_ONLY",
             shares: qty,
             fees,
             notes: editRow.notes || null,
@@ -463,17 +472,58 @@ function TradingScreen() {
           {realizedData.details.length > 0 && (
             <View style={[s.detailTable, { borderColor: colors.borderColor, marginTop: 8 }]}>
               <View style={[s.detailRow, { backgroundColor: colors.bgSecondary, borderBottomColor: colors.borderColor }]}>
+                <View style={{ width: 22 }} />
                 <Text style={[s.detailCell, { color: colors.textSecondary, fontWeight: "700", flex: 2 }]}>{t('portfolioAnalysis.symbol')}</Text>
                 <Text style={[s.detailCell, { color: colors.textSecondary, fontWeight: "700" }]}>{t('portfolioAnalysis.date')}</Text>
                 <Text style={[s.detailCell, { color: colors.textSecondary, fontWeight: "700" }]}>{t('portfolioAnalysis.plKWD')}</Text>
               </View>
-              {realizedData.details.slice(0, 30).map((d) => (
-                <View key={d.id} style={[s.detailRow, { borderBottomColor: colors.borderColor }]}>
-                  <Text style={[s.detailCell, { color: colors.textPrimary, flex: 2 }]}>{d.symbol}</Text>
-                  <Text style={[s.detailCell, { color: colors.textSecondary }]}>{d.txn_date}</Text>
-                  <Text style={[s.detailCell, { color: d.realized_pnl_kwd >= 0 ? colors.success : colors.danger }]}>{formatCurrency(d.realized_pnl_kwd, "KWD")}</Text>
-                </View>
-              ))}
+              {realizedData.details.slice(0, 30).map((d) => {
+                const isOpen = expandedRealized.has(d.id);
+                return (
+                  <View key={d.id}>
+                    <Pressable
+                      onPress={() => toggleRealized(d.id)}
+                      accessibilityRole="button"
+                      accessibilityState={{ expanded: isOpen }}
+                      accessibilityLabel={`${d.symbol} ${isOpen ? 'collapse' : 'expand'} details`}
+                      style={({ pressed }) => [s.detailRow, { borderBottomColor: colors.borderColor, alignItems: "center", backgroundColor: pressed ? colors.bgSecondary + "40" : "transparent" }]}
+                    >
+                      <FontAwesome name={isOpen ? "chevron-down" : "chevron-right"} size={11} color={colors.textMuted} style={{ width: 22 }} />
+                      <Text style={[s.detailCell, { color: colors.textPrimary, flex: 2 }]}>{d.symbol}</Text>
+                      <Text style={[s.detailCell, { color: colors.textSecondary }]}>{d.txn_date}</Text>
+                      <Text style={[s.detailCell, { color: d.realized_pnl_kwd >= 0 ? colors.success : colors.danger }]}>{formatCurrency(d.realized_pnl_kwd, "KWD")}</Text>
+                    </Pressable>
+                    {isOpen && (
+                      <View style={{ paddingHorizontal: 16, paddingVertical: 10, backgroundColor: colors.bgSecondary + "30", borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.borderColor }}>
+                        <View style={s.detailKvRow}>
+                          <Text style={[s.detailKvLabel, { color: colors.textMuted }]}>{t('portfolioAnalysis.portfolio') ?? 'Portfolio'}</Text>
+                          <Text style={[s.detailKvValue, { color: colors.textPrimary }]}>{d.portfolio || '—'}</Text>
+                        </View>
+                        <View style={s.detailKvRow}>
+                          <Text style={[s.detailKvLabel, { color: colors.textMuted }]}>{t('portfolioAnalysis.shares') ?? 'Shares'}</Text>
+                          <Text style={[s.detailKvValue, { color: colors.textPrimary }]}>{fmtNum(d.shares)}</Text>
+                        </View>
+                        <View style={s.detailKvRow}>
+                          <Text style={[s.detailKvLabel, { color: colors.textMuted }]}>{t('portfolioAnalysis.sellValue') ?? 'Sell Value'}</Text>
+                          <Text style={[s.detailKvValue, { color: colors.textPrimary }]}>{formatCurrency(d.sell_value, d.currency)}</Text>
+                        </View>
+                        <View style={s.detailKvRow}>
+                          <Text style={[s.detailKvLabel, { color: colors.textMuted }]}>{t('portfolioAnalysis.avgCost') ?? 'Avg Cost'}</Text>
+                          <Text style={[s.detailKvValue, { color: colors.textPrimary }]}>{formatCurrency(d.avg_cost_at_txn, d.currency)}</Text>
+                        </View>
+                        <View style={s.detailKvRow}>
+                          <Text style={[s.detailKvLabel, { color: colors.textMuted }]}>{`${t('portfolioAnalysis.realizedPnl') ?? 'Realized P&L'} (${d.currency})`}</Text>
+                          <Text style={[s.detailKvValue, { color: d.realized_pnl >= 0 ? colors.success : colors.danger }]}>{formatCurrency(d.realized_pnl, d.currency)}</Text>
+                        </View>
+                        <View style={s.detailKvRow}>
+                          <Text style={[s.detailKvLabel, { color: colors.textMuted }]}>{t('portfolioAnalysis.source') ?? 'Source'}</Text>
+                          <Text style={[s.detailKvValue, { color: colors.textPrimary }]}>{d.source || '—'}</Text>
+                        </View>
+                      </View>
+                    )}
+                  </View>
+                );
+              })}
             </View>
           )}
         </View>
@@ -531,62 +581,30 @@ function TradingScreen() {
       <View style={s.dateRow}>
         <View style={[s.dateInputWrap, { backgroundColor: colors.bgInput, borderColor: colors.borderColor }]}>
           <FontAwesome name="calendar" size={12} color={colors.textMuted} />
-          {Platform.OS === "web" ? (
-            <input
-              type="date"
-              value={dateFrom}
-              onChange={(e: any) => { setDateFrom(e.target.value); setPage(1); }}
-              style={{
-                flex: 1,
-                fontSize: 13,
-                color: colors.textPrimary,
-                background: "transparent",
-                border: "none",
-                outline: "none",
-                fontFamily: "inherit",
-              } as any}
-            />
-          ) : (
-            <TextInput
-              value={dateFrom}
-              onChangeText={(tx) => { setDateFrom(tx); setPage(1); }}
-              placeholder={t('trading.fromDate')}
-              placeholderTextColor={colors.textMuted}
-              style={[s.dateInput, { color: colors.textPrimary }]}
-              maxLength={10}
-              returnKeyType="done"
-            />
-          )}
+          <TextInput
+            value={dateFrom}
+            onChangeText={(tx) => { setDateFrom(tx); setPage(1); }}
+            placeholder={t('trading.fromDate')}
+            placeholderTextColor={colors.textMuted}
+            style={[s.dateInput, { color: colors.textPrimary }]}
+            maxLength={10}
+            returnKeyType="done"
+            accessibilityLabel={t('trading.fromDate')}
+          />
         </View>
-        <Text style={{ color: colors.textMuted, fontSize: 13 }}>â†’</Text>
+        <Text style={{ color: colors.textMuted, fontSize: 13 }}>→</Text>
         <View style={[s.dateInputWrap, { backgroundColor: colors.bgInput, borderColor: colors.borderColor }]}>
           <FontAwesome name="calendar" size={12} color={colors.textMuted} />
-          {Platform.OS === "web" ? (
-            <input
-              type="date"
-              value={dateTo}
-              onChange={(e: any) => { setDateTo(e.target.value); setPage(1); }}
-              style={{
-                flex: 1,
-                fontSize: 13,
-                color: colors.textPrimary,
-                background: "transparent",
-                border: "none",
-                outline: "none",
-                fontFamily: "inherit",
-              } as any}
-            />
-          ) : (
-            <TextInput
-              value={dateTo}
-              onChangeText={(tx) => { setDateTo(tx); setPage(1); }}
-              placeholder={t('trading.toDate')}
-              placeholderTextColor={colors.textMuted}
-              style={[s.dateInput, { color: colors.textPrimary }]}
-              maxLength={10}
-              returnKeyType="done"
-            />
-          )}
+          <TextInput
+            value={dateTo}
+            onChangeText={(tx) => { setDateTo(tx); setPage(1); }}
+            placeholder={t('trading.toDate')}
+            placeholderTextColor={colors.textMuted}
+            style={[s.dateInput, { color: colors.textPrimary }]}
+            maxLength={10}
+            returnKeyType="done"
+            accessibilityLabel={t('trading.toDate')}
+          />
         </View>
       </View>
 
@@ -1064,7 +1082,7 @@ const s = StyleSheet.create({
   searchInput: {
     flex: 1,
     fontSize: 14,
-    ...(Platform.OS === "web" ? { outlineStyle: "none" as any } : {}),
+    ...(Platform.OS === "web" ? ({ outlineStyle: "none" } as unknown as TextStyle) : {}),
   },
 
   // Results count
@@ -1091,7 +1109,7 @@ const s = StyleSheet.create({
   dateInput: {
     flex: 1,
     fontSize: 13,
-    ...(Platform.OS === "web" ? { outlineStyle: "none" as any } : {}),
+    ...(Platform.OS === "web" ? ({ outlineStyle: "none" } as unknown as TextStyle) : {}),
   },
 
   // Clear filters
@@ -1169,6 +1187,9 @@ const s = StyleSheet.create({
   detailTable: { borderWidth: 1, borderRadius: 8, overflow: "hidden" as const },
   detailRow: { flexDirection: "row", paddingVertical: 10, paddingHorizontal: 12, borderBottomWidth: StyleSheet.hairlineWidth },
   detailCell: { flex: 1, fontSize: 13 },
+  detailKvRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 4 },
+  detailKvLabel: { fontSize: 12, fontWeight: "600" },
+  detailKvValue: { fontSize: 13, fontWeight: "600" },
 });
 
 export default withErrorBoundary(TradingScreen, "Unable to load Trading. Please try again.");

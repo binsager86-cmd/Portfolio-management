@@ -14,7 +14,7 @@ import type { ThemePalette } from "@/constants/theme";
 
 import type { PortfolioValueEntry } from "@/services/api";
 
-export interface PortfolioCardData extends PortfolioValueEntry {}
+export type PortfolioCardData = PortfolioValueEntry;
 
 interface PortfolioCardProps {
   /** Portfolio name (e.g. "KFH", "BBYN", "USA") */

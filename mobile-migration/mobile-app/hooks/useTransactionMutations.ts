@@ -17,6 +17,7 @@ import {
     deleteTransaction,
     restoreTransaction,
     TransactionCreate,
+  TransactionListResponse,
     TransactionMutationResponse,
     updateTransaction,
 } from "@/services/api";
@@ -138,18 +139,21 @@ export function useDeleteTransaction(onSuccessCallback?: () => void) {
   const queryClient = useQueryClient();
   const toast = useToast();
 
-  return useMutation<TransactionMutationResponse, Error, number>({
+  return useMutation<
+    TransactionMutationResponse,
+    Error,
+    number,
+    { previousCaches: Array<[readonly unknown[], TransactionListResponse | undefined]> }
+  >({
     mutationFn: deleteTransaction,
     onMutate: async (txnId) => {
       // Cancel in-flight fetches so they don't overwrite our optimistic update
       await queryClient.cancelQueries({ queryKey: ["transactions"] });
 
       // Snapshot all transaction list caches (paginated, so multiple entries)
-      const previousCaches = queryClient.getQueriesData<{
-        transactions: { id: number }[];
-        count: number;
-        pagination: { total_items: number };
-      }>({ queryKey: ["transactions"] });
+      const previousCaches = queryClient.getQueriesData<TransactionListResponse>({
+        queryKey: ["transactions"],
+      });
 
       // Optimistically remove the transaction from every cached page
       for (const [key, data] of previousCaches) {

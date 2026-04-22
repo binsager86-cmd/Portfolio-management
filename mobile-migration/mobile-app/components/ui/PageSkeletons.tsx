@@ -247,6 +247,39 @@ export function TransactionsSkeleton() {
   );
 }
 
+export function MarketSkeleton() {
+  const { colors } = useThemeStore();
+  const { isPhone, spacing } = useResponsive();
+
+  return (
+    <View style={{ flex: 1, backgroundColor: colors.bgPrimary }}>
+      <ScrollView
+        contentContainerStyle={{ paddingHorizontal: spacing.pagePx, paddingTop: 12, paddingBottom: 32 }}
+        scrollEnabled={false}
+      >
+        <SectionHeader width={140} />
+        <Grid style={{ marginBottom: spacing.sectionGap }}>
+          {Array.from({ length: 4 }, (_, i) => (
+            <CardSkeleton key={i} width={isPhone ? "48%" : "24%"} />
+          ))}
+        </Grid>
+        <SectionHeader width={120} />
+        <View style={[s.section, { backgroundColor: colors.bgCard, borderColor: colors.borderColor, marginBottom: spacing.sectionGap }]}>
+          {Array.from({ length: 5 }, (_, i) => (
+            <TableRowSkeleton key={i} cols={isPhone ? 3 : 6} />
+          ))}
+        </View>
+        <SectionHeader width={110} />
+        <View style={[s.section, { backgroundColor: colors.bgCard, borderColor: colors.borderColor }]}>
+          {Array.from({ length: 6 }, (_, i) => (
+            <ListItemSkeleton key={i} />
+          ))}
+        </View>
+      </ScrollView>
+    </View>
+  );
+}
+
 /* ═══════════════════════════════════════════════════════════════════════
    6. Dividends
    Layout: Header → 4 totals cards → yearly chart → tabs → list

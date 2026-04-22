@@ -231,7 +231,7 @@ export function normalizeDate(val: unknown): string | null {
   }
 
   // dd-mm-yyyy or dd/mm/yyyy (optionally with time)
-  const dmyMatch = s.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})/);
+  const dmyMatch = s.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})/);
   if (dmyMatch) {
     const [, d, m, y] = dmyMatch;
     return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
@@ -478,7 +478,7 @@ export async function parseKfhStatement(
       rawDate,
       rawType: typeStr || null,
       rawDescription: descStr || null,
-      rawAmount,
+      rawAmount: typeof rawAmount === "string" || typeof rawAmount === "number" ? rawAmount : null,
       normalizedDate,
       normalizedType,
       cashAmount,

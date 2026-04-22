@@ -44,7 +44,7 @@ export function usePriceRefresh() {
    */
   const refresh = useCallback(async () => {
     setIsRefreshing(true);
-    let result: any;
+    let result: Awaited<ReturnType<typeof updatePrices>> | undefined;
     try {
       result = await updatePrices();
     } catch (e) {
@@ -52,12 +52,17 @@ export function usePriceRefresh() {
       console.warn("Price update failed:", e);
     }
 
-    // Invalidate (not refetch) so frozen/inactive tabs also go stale
-    await Promise.all(
-      PRICE_DEPENDENT_QUERY_KEYS.map((key) =>
-        queryClient.invalidateQueries({ queryKey: [key] })
-      )
-    );
+    // Single predicate-based invalidation — React Query walks the cache once
+    // and matches every query whose first key segment is in our list. This
+    // replaces N parallel invalidations (one per key) which previously
+    // triggered N parallel background refetches.
+    const priceKeySet = new Set<string>(PRICE_DEPENDENT_QUERY_KEYS);
+    await queryClient.invalidateQueries({
+      predicate: (q) => {
+        const head = q.queryKey[0];
+        return typeof head === "string" && priceKeySet.has(head);
+      },
+    });
 
     // Fire push notification for the daily price update
     if (result) {

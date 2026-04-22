@@ -23,6 +23,7 @@ import { useThemeStore } from "@/services/themeStore";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
+import type { Href } from "expo-router";
 import React, { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -38,6 +39,7 @@ import {
     Text,
     View,
 } from "react-native";
+import type { TextStyle } from "react-native";
 
 // ── Constants ───────────────────────────────────────────────────────
 
@@ -158,7 +160,7 @@ export default function AddStockScreen() {
           router.replace({
             pathname: "/(tabs)/add-transaction",
             params: { symbol: data.symbol, portfolio },
-          } as any);
+          } as Href);
         } else {
           router.back();
         }
@@ -171,7 +173,7 @@ export default function AddStockScreen() {
               router.replace({
                 pathname: "/(tabs)/add-transaction",
                 params: { symbol: data.symbol, portfolio },
-              } as any),
+              } as Href),
           },
         ]);
       }
@@ -578,7 +580,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 15,
     height: 44,
-    ...(Platform.OS === "web" ? { outlineStyle: "none" as any } : {}),
+    ...(Platform.OS === "web" ? ({ outlineStyle: "none" } as unknown as TextStyle) : {}),
   },
   dropdown: {
     position: "absolute",

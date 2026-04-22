@@ -163,7 +163,7 @@ export function useFinancialStatements(stockId: number, selectedModel: GeminiMod
           if (s.result) {
             setUploadResult(s.result);
             const totalItems = (s.result.statements ?? []).reduce(
-              (sum, st) => sum + (st.line_items_count ?? st.line_items?.length ?? 0), 0,
+              (sum, st) => sum + (st.line_items_count ?? 0), 0,
             );
             updateStep("extraction", {
               status: "done",
@@ -289,7 +289,7 @@ export function useFinancialStatements(stockId: number, selectedModel: GeminiMod
         // Classify upload-specific errors
         const msg = err instanceof Error ? err.message.toLowerCase() : "";
         if (msg.includes("timeout") || msg.includes("timed out")) {
-          throw new Error("Upload timeout — the file could not be sent to the server. Check your connection and try again.");
+          throw new Error("Upload timeout — the file could not be sent to the server. Check your connection and try again.", { cause: err });
         }
         throw err;
       }

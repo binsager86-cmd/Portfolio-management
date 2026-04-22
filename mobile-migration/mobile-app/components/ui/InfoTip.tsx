@@ -7,6 +7,7 @@ import { useThemeStore } from "@/services/themeStore";
 import { FontAwesome } from "@expo/vector-icons";
 import React, { useState } from "react";
 import { Modal, Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import type { ViewStyle } from "react-native";
 
 interface InfoTipProps {
   term: string;
@@ -25,7 +26,7 @@ export function InfoTip({ term, definition, size = 13 }: InfoTipProps) {
         hitSlop={8}
         accessibilityRole="button"
         accessibilityLabel={`Info about ${term}`}
-        style={Platform.OS === "web" ? ({ cursor: "pointer" } as any) : undefined}
+        style={Platform.OS === "web" ? ({ cursor: "pointer" } as unknown as ViewStyle) : undefined}
       >
         <FontAwesome name="question-circle-o" size={size} color={colors.textMuted} />
       </Pressable>

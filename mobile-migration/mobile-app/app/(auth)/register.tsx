@@ -71,8 +71,11 @@ export default function RegisterScreen() {
   const { signIn: googlePrompt, isLoading: googleLoading } = useGoogleSignIn();
 
   // Field refs for keyboard navigation
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Paper TextInput ref intersects internal handles type
   const displayNameRef = useRef<any>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Paper TextInput ref intersects internal handles type
   const passwordRef = useRef<any>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Paper TextInput ref intersects internal handles type
   const confirmPasswordRef = useRef<any>(null);
 
   // react-hook-form + Zod
@@ -111,7 +114,7 @@ export default function RegisterScreen() {
   useEffect(() => {
     if (__DEV__) {
       validateEnv();
-      console.log("[Register] Google Config:", {
+      console.info("[Register] Google Config:", {
         webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID
           ? "✅ Set"
           : "❌ Missing",
@@ -169,14 +172,14 @@ export default function RegisterScreen() {
   const handleGoogleSignIn = useCallback(async () => {
     analytics.logEvent("registration_attempted", { method: "google" });
     try {
-      console.log("[Register] Starting Google Sign-In…");
+      console.info("[Register] Starting Google Sign-In…");
       // On web this redirects the page to Google (never returns).
       // On native this returns a result with the token.
       const result = await googlePrompt();
 
       // ─ Native path (web never reaches here — page navigates away) ─
       if (result.success) {
-        if (__DEV__) console.log("[Register] Got token, sending to backend…");
+        if (__DEV__) console.info("[Register] Got token, sending to backend…");
         const ok = await googleSignIn(result.token);
         if (ok) {
           analytics.logEvent("registration_completed", { method: "google" });

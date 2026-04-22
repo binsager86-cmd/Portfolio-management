@@ -22,6 +22,7 @@ import {
     StyleSheet,
     Text,
     View,
+  ViewStyle,
 } from "react-native";
 import Animated, {
     useAnimatedStyle,
@@ -321,7 +322,12 @@ export default React.memo(function SnapshotLineChart({
     () =>
       Platform.OS === "web"
         ? {
-            onMouseMove: (e: any) => findNearest(e.nativeEvent.offsetX),
+            onMouseMove: (e: unknown) => {
+              const nativeEvent = (e as { nativeEvent?: { offsetX?: number } })?.nativeEvent;
+              if (typeof nativeEvent?.offsetX === "number") {
+                findNearest(nativeEvent.offsetX);
+              }
+            },
             onMouseLeave: clearActive,
           }
         : {},
@@ -549,14 +555,14 @@ export default React.memo(function SnapshotLineChart({
                     borderColor: pal.tooltipBorder,
                     ...(Platform.OS === "web"
                       ? ({
+                          pointerEvents: "none",
                           boxShadow: `0 8px 32px ${pal.tooltipShadow}`,
-                        } as any)
+                        } as ViewStyle)
                       : {
                           shadowColor: pal.primary,
                         }),
                   },
                 ]}
-                pointerEvents="none"
               >
                 <Text style={[tooltipS.value, { color: pal.tooltipValue }]}>
                   {fmt(tip.value)}
@@ -598,7 +604,7 @@ const chartS = StyleSheet.create({
   touchLayer: {
     flex: 1,
     position: "relative",
-    ...(Platform.OS === "web" ? ({ cursor: "crosshair" } as any) : {}),
+    ...(Platform.OS === "web" ? ({ cursor: "crosshair" } as unknown as ViewStyle) : {}),
   },
 });
 
@@ -614,7 +620,7 @@ const tooltipS = StyleSheet.create({
       ? ({
           backdropFilter: "blur(16px)",
           WebkitBackdropFilter: "blur(16px)",
-        } as any)
+        } as unknown as ViewStyle)
       : {
           shadowOffset: { width: 0, height: 6 },
           shadowOpacity: 0.35,

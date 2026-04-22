@@ -321,8 +321,8 @@ export async function mergeStocks(
 }
 
 /** Trigger price update for all stocks. */
-export async function updatePrices(): Promise<{ message: string }> {
-  const { data } = await api.post<{ status: string; data: { message: string } }>(
+export async function updatePrices(): Promise<{ message: string; updated_count?: number; updatedCount?: number }> {
+  const { data } = await api.post<{ status: string; data: { message: string; updated_count?: number; updatedCount?: number } }>(
     "/api/v1/stocks/update-prices"
   );
   return data.data;

@@ -66,9 +66,12 @@ export default function LoginScreen() {
     formState: { errors },
   } = useForm<LoginFormData>({
     resolver: zodResolver(loginSchema),
+    // Dev-only auto-fill credentials may be supplied via Expo public env vars
+    // (EXPO_PUBLIC_DEV_LOGIN_EMAIL / EXPO_PUBLIC_DEV_LOGIN_PASSWORD). Never
+    // commit real credentials to source — they ship in the JS bundle.
     defaultValues: {
-      email: __DEV__ ? "sager alsager" : "",
-      password: __DEV__ ? "Admin123!" : "",
+      email: __DEV__ ? (process.env.EXPO_PUBLIC_DEV_LOGIN_EMAIL ?? "") : "",
+      password: __DEV__ ? (process.env.EXPO_PUBLIC_DEV_LOGIN_PASSWORD ?? "") : "",
     },
     mode: "onBlur",
   });
@@ -120,23 +123,23 @@ export default function LoginScreen() {
 
   // Wrap react-hook-form submit to prevent native <form> reload on web
   const safeSubmit = useCallback(
-    (e?: any) => {
+    (e?: { preventDefault?: () => void }) => {
       if (e?.preventDefault) e.preventDefault();
-      handleSubmit(onSubmit)(e);
+      handleSubmit(onSubmit)(e as Parameters<ReturnType<typeof handleSubmit>>[0]);
     },
     [handleSubmit, onSubmit],
   );
 
   const handleGoogleSignIn = async () => {
     try {
-      console.log("[Login] Starting Google Sign-In…");
+      console.info("[Login] Starting Google Sign-In…");
       // On web this redirects the page to Google (never returns).
       // On native this returns a result with the token.
       const result = await googlePrompt();
 
       // ─ Native path (web never reaches here — page navigates away) ─
       if (result.success) {
-        if (__DEV__) console.log("[Login] Got token, sending to backend…");
+        if (__DEV__) console.info("[Login] Got token, sending to backend…");
         const ok = await googleSignIn(result.token);
         if (ok) {
           trackLogin("google");

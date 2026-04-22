@@ -18,6 +18,7 @@ import {
     Text,
     TextInput,
     View,
+    type TextStyle,
 } from "react-native";
 import { ts } from "./TradingTable";
 
@@ -198,13 +199,13 @@ function StockPickerDropdown({
             type="text"
             placeholder="Type to search…"
             value={filter}
-            onChange={(e: any) => setFilter(e.target.value)}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFilter(e.target.value)}
             autoFocus
             style={{
               flex: 1, fontSize: 12, color: colors.textPrimary,
               background: "transparent", border: "none", outline: "none",
               fontFamily: "inherit", padding: 0, width: "100%",
-            } as any}
+            } as React.CSSProperties}
           />
         ) : (
           <TextInput
@@ -235,7 +236,7 @@ function StockPickerDropdown({
               <Pressable
                 key={s.symbol}
                 onPress={() => { onChange(s.symbol); close(); }}
-                style={({ pressed, hovered }: any) => [
+                style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [
                   spk.item,
                   selected && { backgroundColor: colors.accentPrimary + "14" },
                   (hovered && !selected) && { backgroundColor: colors.bgCardHover },
@@ -268,7 +269,7 @@ function StockPickerDropdown({
       <Pressable
         ref={triggerRef}
         onPress={handleOpen}
-        style={({ hovered }: any) => [
+        style={({ hovered }: { hovered?: boolean }) => [
           spk.trigger,
           {
             borderColor: open ? colors.accentPrimary : colors.borderColor,
@@ -379,13 +380,13 @@ function PortfolioDropdown({
       <View style={[editStyles.editCell, { width }]}>
         <select
           value={value}
-          onChange={(e: any) => onChange(e.target.value)}
+          onChange={(e: React.ChangeEvent<HTMLSelectElement>) => onChange(e.target.value)}
           title="Portfolio"
           style={{
             flex: 1, fontSize: 12, color: colors.textPrimary,
             background: colors.bgInput, border: `1px solid ${colors.borderColor}`,
             borderRadius: 4, padding: "2px 4px", fontFamily: "inherit", cursor: "pointer",
-          } as any}
+          } as React.CSSProperties}
         >
           {PORTFOLIO_OPTIONS.map((opt) => (
             <option key={opt} value={opt}>{opt}</option>
@@ -467,13 +468,13 @@ export const EditableTableRow = React.memo(function EditableTableRow({
           <input
             type="date"
             value={row.date}
-            onChange={(e: any) => onUpdateField(row.id, "date", e.target.value)}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => onUpdateField(row.id, "date", e.target.value)}
             title="Transaction date"
             style={{
               fontSize: 12, color: colors.textPrimary, background: colors.bgInput,
               border: `1px solid ${colors.borderColor}`, borderRadius: 4,
               padding: "2px 4px", fontFamily: "inherit", width: 118,
-            } as any}
+            } as React.CSSProperties}
           />
         ) : (
           <TextInput
@@ -517,7 +518,7 @@ export const editStyles = StyleSheet.create({
   inputField: {
     fontSize: 12, borderWidth: 1, borderRadius: 4,
     paddingHorizontal: 6, paddingVertical: Platform.OS === "ios" ? 6 : 3,
-    ...(Platform.OS === "web" ? { outlineStyle: "none" as any } : {}),
+    ...(Platform.OS === "web" ? ({ outlineStyle: "none" } as unknown as TextStyle) : {}),
   },
   checkbox: {
     width: 20, height: 20, borderWidth: 2, borderRadius: 4,

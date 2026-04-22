@@ -36,6 +36,21 @@ import { useThemeStore } from "@/services/themeStore";
 import { EXPERTISE_LEVELS, ExpertiseLevel, useUserPrefsStore } from "@/src/store/userPrefsStore";
 import { useTranslation } from "react-i18next";
 
+type IconName = React.ComponentProps<typeof FontAwesome>["name"];
+type ApiMessageResult = {
+  message?: string;
+  updated_count?: number;
+  updatedCount?: number;
+};
+type ApiError = {
+  message?: string;
+  response?: {
+    data?: {
+      detail?: string;
+    };
+  };
+};
+
 export default function SettingsScreen() {
   const { colors, toggle, mode } = useThemeStore();
   const ss = useScreenStyles();
@@ -70,7 +85,6 @@ export default function SettingsScreen() {
   const confirmLevelChange = () => {
     if (!pendingLevel) return;
     setExpertiseLevel(pendingLevel);
-    const config = EXPERTISE_LEVELS.find((l) => l.key === pendingLevel);
     toast.success(t('settingsScreen.switchedToMode', { mode: t(`settings.${pendingLevel}`) }));
     setPendingLevel(null);
   };
@@ -128,11 +142,11 @@ export default function SettingsScreen() {
       if (Platform.OS === "web") window.alert(msg);
       else Alert.alert(t('settingsScreen.priceUpdates'), msg);
       sendPriceUpdateNotification({
-        updatedCount: result.updated_count ?? result.updatedCount ?? 0,
+        updatedCount: ('updated_count' in result ? result.updated_count : result.updatedCount) ?? 0,
         message: result.message,
       }).catch(() => {});
     },
-    onError: (err: any) => {
+    onError: (err: ApiError) => {
       const msg = err?.response?.data?.detail ?? err?.message ?? t('settingsScreen.failedToUpdatePrices');
       if (Platform.OS === "web") window.alert(msg);
       else Alert.alert(t('app.error'), msg);
@@ -147,15 +161,23 @@ export default function SettingsScreen() {
 
   const apiKeyMutation = useMutation({
     mutationFn: () => saveApiKey(apiKeyInput),
-    onSuccess: (result: any) => {
+    onSuccess: (result: ApiMessageResult) => {
       setApiKeyInput("");
       refetchApiKey();
       const msg = result.message ?? t('settingsScreen.apiKeySaved');
-      Platform.OS === "web" ? window.alert(msg) : Alert.alert(t('app.success'), msg);
+      if (Platform.OS === "web") {
+        window.alert(msg);
+      } else {
+        Alert.alert(t('app.success'), msg);
+      }
     },
-    onError: (err: any) => {
+    onError: (err: ApiError) => {
       const msg = err?.response?.data?.detail ?? err?.message ?? t('settingsScreen.failedToSaveApiKey');
-      Platform.OS === "web" ? window.alert(msg) : Alert.alert(t('app.error'), msg);
+      if (Platform.OS === "web") {
+        window.alert(msg);
+      } else {
+        Alert.alert(t('app.error'), msg);
+      }
     },
   });
 
@@ -187,11 +209,19 @@ export default function SettingsScreen() {
     onSuccess: () => {
       queryClient.invalidateQueries();
       const msg = t('settingsScreen.resetSuccess');
-      Platform.OS === "web" ? window.alert(msg) : Alert.alert(t('app.success'), msg);
+      if (Platform.OS === "web") {
+        window.alert(msg);
+      } else {
+        Alert.alert(t('app.success'), msg);
+      }
     },
-    onError: (err: any) => {
+    onError: (err: ApiError) => {
       const msg = err?.response?.data?.detail ?? err?.message ?? t('settingsScreen.resetFailed');
-      Platform.OS === "web" ? window.alert(msg) : Alert.alert(t('app.error'), msg);
+      if (Platform.OS === "web") {
+        window.alert(msg);
+      } else {
+        Alert.alert(t('app.error'), msg);
+      }
     },
   });
 
@@ -254,12 +284,12 @@ export default function SettingsScreen() {
                   <FontAwesome name="check" size={16} color={colors.accentPrimary} />
                 )}
               </Pressable>
-              <Pressable onPress={() => setIsEditingName(false)}>
+              <Pressable onPress={() => setIsEditingName(false)} hitSlop={12} accessibilityRole="button" accessibilityLabel="Cancel editing name">
                 <FontAwesome name="times" size={16} color={colors.textSecondary} />
               </Pressable>
             </View>
           ) : (
-            <Pressable onPress={handleEditName} style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+            <Pressable onPress={handleEditName} hitSlop={8} accessibilityRole="button" accessibilityLabel="Edit display name" style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
               <Text style={[s.infoValue, { color: colors.textPrimary }]}>{user?.name || authName || "—"}</Text>
               <FontAwesome name="pencil" size={13} color={colors.textSecondary} />
             </Pressable>
@@ -310,7 +340,7 @@ export default function SettingsScreen() {
             >
               <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
                 <FontAwesome
-                  name={level.icon as any}
+                  name={level.icon as IconName}
                   size={16}
                   color={
                     preferences.expertiseLevel === level.key ? colors.accentPrimary : colors.textSecondary
@@ -760,13 +790,12 @@ export default function SettingsScreen() {
         <View style={[s.modalCard, { backgroundColor: colors.bgCard, borderColor: colors.borderColor }]}>
           {pendingLevel && (() => {
             const config = EXPERTISE_LEVELS.find((l) => l.key === pendingLevel);
-            const current = EXPERTISE_LEVELS.find((l) => l.key === preferences.expertiseLevel);
             if (!config) return null;
             return (
               <>
                 <View style={{ alignItems: "center", marginBottom: 16 }}>
                   <View style={[s.modalIconCircle, { backgroundColor: colors.accentPrimary + "15" }]}>
-                    <FontAwesome name={config.icon as any} size={28} color={colors.accentPrimary} />
+                    <FontAwesome name={config.icon as IconName} size={28} color={colors.accentPrimary} />
                   </View>
                   <Text style={[s.modalTitle, { color: colors.textPrimary }]}>
                     {t('settingsScreen.changeTo', { level: t(`settings.${pendingLevel}`) })}

@@ -140,7 +140,7 @@ async function tablesToXlsx(tables: TableData[]): Promise<Uint8Array> {
     });
 
     // First column (line item names) wider
-    ws["!cols"][0] = { wch: Math.max(ws["!cols"][0].wch, 30) };
+    ws["!cols"][0] = { wch: Math.max(ws["!cols"][0]?.wch ?? 0, 30) };
 
     // Row heights: title=28, header=22
     ws["!rows"] = [{ hpt: 28 }, { hpt: 22 }];

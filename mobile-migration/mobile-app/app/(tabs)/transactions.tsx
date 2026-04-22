@@ -33,6 +33,8 @@ import FontAwesome from "@expo/vector-icons/FontAwesome";
 import { FlashList } from "@shopify/flash-list";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
+import type { Href } from "expo-router";
+import type { ViewStyle } from "react-native";
 import React, { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -281,7 +283,7 @@ function TransactionsScreen() {
   const deleteMutation = useDeleteTransaction();
 
   const handleEdit = useCallback((txn: TransactionRecord) => {
-    router.push({ pathname: "/(tabs)/add-transaction" as any, params: { editId: String(txn.id) } });
+    router.push({ pathname: "/(tabs)/add-transaction", params: { editId: String(txn.id) } } as Href);
   }, [router]);
 
   const handleDelete = (txn: TransactionRecord) => {
@@ -326,7 +328,7 @@ function TransactionsScreen() {
       const manualDeposits = cashBal?.manual_override ? cashBal.balance : 0;
       const computedCash = cashBal?.balance ?? 0;
       const summary = buildReconciliationSummary(txns, deposits, manualDeposits, computedCash, undefined, holdings);
-      console.log("[Reconciliation]", {
+      console.info("[Reconciliation]", {
         txns: txns.length,
         deposits: deposits.length,
         holdings: holdings.length,
@@ -491,7 +493,6 @@ function TransactionsScreen() {
       <FlashList
         data={transactions}
         keyExtractor={(item) => String(item.id)}
-        estimatedItemSize={80}
         drawDistance={200}
         renderItem={({ item }) => <TxnRow txn={item} colors={colors} onEdit={handleEdit} onDelete={handleDelete} />}
         contentContainerStyle={[
@@ -518,8 +519,8 @@ function TransactionsScreen() {
               {t("transactionsScreen.noTransactionsYet")}
             </Text>
             <Pressable
-              onPress={() => router.push("/(tabs)/add-transaction" as any)}
-              style={[{ backgroundColor: colors.accentPrimary, paddingHorizontal: 18, paddingVertical: 8, borderRadius: 8, marginTop: 12 }, Platform.OS === "web" ? ({ cursor: "pointer" } as any) : undefined]}
+              onPress={() => router.push("/(tabs)/add-transaction" as Href)}
+              style={[{ backgroundColor: colors.accentPrimary, paddingHorizontal: 18, paddingVertical: 8, borderRadius: 8, marginTop: 12 }, Platform.OS === "web" ? ({ cursor: "pointer" } as unknown as ViewStyle) : undefined]}
             >
               <Text style={{ color: "#fff", fontWeight: "600", fontSize: 13 }}>{t("transactionsScreen.addTransaction")}</Text>
             </Pressable>
@@ -574,7 +575,7 @@ function TransactionsScreen() {
 
       {/* FAB */}
       <Pressable
-        onPress={() => router.push("/(tabs)/add-transaction" as any)}
+        onPress={() => router.push("/(tabs)/add-transaction" as Href)}
         style={({ pressed }) => [
           styles.fab,
           {

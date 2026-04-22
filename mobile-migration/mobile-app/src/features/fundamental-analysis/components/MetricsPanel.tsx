@@ -62,7 +62,6 @@ export function MetricsPanel({ stockId, stockSymbol, colors, isDesktop }: PanelW
     setCalcAllRunning(false);
   };
 
-  const serverGrouped = data?.grouped ?? {};
   const rawMetrics = data?.metrics ?? [];
   const statements = stmtQ.data?.statements ?? [];
 
@@ -72,17 +71,17 @@ export function MetricsPanel({ stockId, stockSymbol, colors, isDesktop }: PanelW
     [rawMetrics, statements],
   );
 
-  // Rebuild grouped map to include computed fallback metrics
+  // Rebuild grouped map from the *normalized* metrics so renames
+  // (e.g. "Debt-to-Equity" → "Debt/Equity Ratio") and computed
+  // fallback metrics both flow through.
   const grouped = useMemo(() => {
-    const g: Record<string, StockMetric[]> = { ...serverGrouped };
+    const g: Record<string, StockMetric[]> = {};
     for (const m of allMetrics) {
-      if (m.id < 0) { // synthetic / computed
-        if (!g[m.metric_type]) g[m.metric_type] = [];
-        g[m.metric_type] = [...(g[m.metric_type] ?? []), m];
-      }
+      if (!g[m.metric_type]) g[m.metric_type] = [];
+      g[m.metric_type].push(m);
     }
     return g;
-  }, [serverGrouped, allMetrics]);
+  }, [allMetrics]);
 
   const categories = Object.keys(grouped);
   const historicalCategories = useMemo(() => buildHistoricalMetrics(allMetrics), [allMetrics]);

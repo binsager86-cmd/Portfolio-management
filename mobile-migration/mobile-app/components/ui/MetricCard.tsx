@@ -8,6 +8,7 @@
 
 import React from "react";
 import { View, Text, StyleSheet } from "react-native";
+import type { DimensionValue } from "react-native";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import { UITokens } from "@/constants/uiTokens";
 import { useThemeStore } from "@/services/themeStore";
@@ -68,7 +69,7 @@ export const MetricCard = React.memo(function MetricCard({
         {
           backgroundColor: colors.bgCard,
           borderColor: colors.borderColor,
-          width: width as any,
+          width: width as DimensionValue,
           padding: spacing.cardPadding,
         },
       ]}

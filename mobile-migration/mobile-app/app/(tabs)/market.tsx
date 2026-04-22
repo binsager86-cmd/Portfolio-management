@@ -13,6 +13,7 @@ import { withErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { ErrorScreen } from "@/components/ui/ErrorScreen";
 import { LastUpdated } from "@/components/ui/LastUpdated";
 import { MarketSkeleton } from "@/components/ui/PageSkeletons";
+import type { ThemePalette } from "@/constants/theme";
 import { useMarketRefresh, useMarketSummary } from "@/hooks/queries/useMarketQueries";
 import { useResponsive } from "@/hooks/useResponsive";
 import type { MarketIndex, MarketMover, PerMarketSummary, SectorIndex } from "@/services/market/marketApi";
@@ -28,6 +29,14 @@ import {
     View,
 } from "react-native";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
+
+type AppColors = ThemePalette;
+type SummaryTotals = {
+  volume?: number | null;
+  value_traded?: number | null;
+  trades?: number | null;
+};
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
@@ -52,7 +61,7 @@ function fmtInt(n: number | null | undefined): string {
   return Math.round(n).toLocaleString("en-US");
 }
 
-function changeColor(val: number | null | undefined, colors: any): string {
+function changeColor(val: number | null | undefined, colors: AppColors): string {
   if (val == null || val === 0) return colors.textMuted;
   return val > 0 ? colors.success : colors.danger;
 }
@@ -70,7 +79,7 @@ function IndexCard({
   isCompact,
 }: {
   index: MarketIndex;
-  colors: any;
+  colors: AppColors;
   isCompact?: boolean;
 }) {
   const chgColor = changeColor(index.changePercent, colors);
@@ -81,7 +90,7 @@ function IndexCard({
       style={[
         s.indexCard,
         {
-          backgroundColor: colors.cardBg,
+          backgroundColor: colors.bgCard,
           borderColor: colors.borderColor,
           borderLeftColor: chgColor,
           borderLeftWidth: 3,
@@ -122,12 +131,12 @@ function SummaryCard({
   colors,
   t,
 }: {
-  summary: Record<string, any>;
-  colors: any;
+  summary: SummaryTotals;
+  colors: AppColors;
   t: (key: string) => string;
 }) {
   return (
-    <View style={[s.summaryCard, { backgroundColor: colors.cardBg, borderColor: colors.borderColor }]}>
+    <View style={[s.summaryCard, { backgroundColor: colors.bgCard, borderColor: colors.borderColor }]}> 
       <Text style={[s.sectionLabel, { color: colors.textSecondary }]}>{t("market.todaysActivity")}</Text>
       <View style={s.summaryRow}>
         <View style={s.summaryItem}>
@@ -176,8 +185,8 @@ function MarketDetailCard({
   icon: React.ComponentProps<typeof FontAwesome>["name"];
   index: MarketIndex | undefined;
   perMarket: PerMarketSummary;
-  totalSummary: Record<string, any>;
-  colors: any;
+  totalSummary: SummaryTotals;
+  colors: AppColors;
   t: (key: string) => string;
 }) {
   const chgColor = index ? changeColor(index.changePercent, colors) : colors.textMuted;
@@ -185,7 +194,7 @@ function MarketDetailCard({
   const valPct = pct(perMarket.value_traded, totalSummary.value_traded);
   const tradePct = pct(perMarket.trades, totalSummary.trades);
   return (
-    <View style={[s.detailCard, { backgroundColor: colors.cardBg, borderColor: colors.borderColor }]}>
+    <View style={[s.detailCard, { backgroundColor: colors.bgCard, borderColor: colors.borderColor }]}> 
       <View style={s.detailHeader}>
         <View style={[s.detailIconBg, { backgroundColor: chgColor + "15" }]}>
           <FontAwesome name={icon} size={16} color={chgColor} />
@@ -256,15 +265,15 @@ function GainersLosersBar({
   gainers: number;
   neutral: number;
   losers: number;
-  colors: any;
-  t: (key: string, opts?: any) => string;
+  colors: AppColors;
+  t: TFunction;
 }) {
   const total = gainers + neutral + losers || 1;
   const gPct = Math.round((gainers / total) * 100);
   const lPct = Math.round((losers / total) * 100);
   const nPct = 100 - gPct - lPct;
   return (
-    <View style={[s.glCard, { backgroundColor: colors.cardBg, borderColor: colors.borderColor }]}>
+    <View style={[s.glCard, { backgroundColor: colors.bgCard, borderColor: colors.borderColor }]}> 
       <Text style={[s.sectionLabel, { color: colors.textSecondary }]}>{t("market.marketMood")}</Text>
       <Text style={[s.glSubtitle, { color: colors.textMuted }]}>
         {t("market.howSectorsDoingToday")}
@@ -318,12 +327,12 @@ function MoverTable({
   movers: MarketMover[];
   icon: React.ComponentProps<typeof FontAwesome>["name"];
   accentColor: string;
-  colors: any;
+  colors: AppColors;
   t: (key: string) => string;
 }) {
   if (!movers.length) return null;
   return (
-    <View style={[s.moverCard, { backgroundColor: colors.cardBg, borderColor: colors.borderColor }]}>
+    <View style={[s.moverCard, { backgroundColor: colors.bgCard, borderColor: colors.borderColor }]}> 
       <View style={s.moverHeader}>
         <View style={[s.moverIconBg, { backgroundColor: accentColor + "15" }]}>
           <FontAwesome name={icon} size={13} color={accentColor} />
@@ -398,14 +407,14 @@ function SectorTable({
   t,
 }: {
   sectors: SectorIndex[];
-  colors: any;
+  colors: AppColors;
   t: (key: string) => string;
 }) {
   if (!sectors.length) return null;
   // Sort: biggest gainers first, then losers
   const sorted = [...sectors].sort((a, b) => (b.changePercent ?? 0) - (a.changePercent ?? 0));
   return (
-    <View style={[s.moverCard, { backgroundColor: colors.cardBg, borderColor: colors.borderColor }]}>
+    <View style={[s.moverCard, { backgroundColor: colors.bgCard, borderColor: colors.borderColor }]}> 
       <View style={s.moverHeader}>
         <View style={[s.moverIconBg, { backgroundColor: colors.accentPrimary + "15" }]}>
           <FontAwesome name="th-large" size={13} color={colors.accentPrimary} />

@@ -20,6 +20,8 @@ import {
     View,
 } from "react-native";
 
+type IconName = React.ComponentProps<typeof FontAwesome>["name"];
+
 export default function SelectExpertiseScreen() {
   const router = useRouter();
   const { colors } = useThemeStore();
@@ -78,10 +80,10 @@ export default function SelectExpertiseScreen() {
             style={[styles.title, { color: colors.textPrimary }]}
             accessibilityRole="header"
           >
-            {t('onboarding.chooseExperience')}
+            {t("onboarding.expertiseTitle")}
           </Text>
           <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
-            {t('onboarding.expertiseSubtitle')}
+            {t("onboarding.expertiseSubtitle")}
           </Text>
 
           {/* Level Cards */}
@@ -117,7 +119,7 @@ export default function SelectExpertiseScreen() {
                     ]}
                   >
                     <FontAwesome
-                      name={level.icon as any}
+                      name={level.icon as IconName}
                       size={20}
                       color={
                         isSelected

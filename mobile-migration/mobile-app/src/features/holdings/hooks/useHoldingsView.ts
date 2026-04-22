@@ -71,7 +71,7 @@ export const SUMMARY_TABLE_WIDTH = SUMMARY_COLUMNS.reduce((s, c) => s + c.width,
 // ── Cell formatter ──────────────────────────────────────────────────
 
 export function fmtCell(
-  val: any,
+  val: unknown,
   fmt: HoldingFmt,
   colors: ThemePalette,
 ): { text: string; color: string; bold: boolean } {
@@ -80,7 +80,7 @@ export function fmtCell(
   const pos = colors.success;
   const neg = colors.danger;
 
-  if (val == null || val === "" || Number.isNaN(val)) {
+  if (val == null || val === "" || (typeof val === "number" && Number.isNaN(val))) {
     return { text: "—", color: muted, bold: false };
   }
 
@@ -136,7 +136,7 @@ const MONEY_TOTAL_KEYS = new Set([
   "yield_amount", "current_pnl",
 ]);
 
-export function getCellValue(holding: Holding, key: string): any {
+export function getCellValue(holding: Holding, key: string): unknown {
   const isUsd = (holding.currency ?? "KWD").toUpperCase() === "USD";
 
   if (key === "yield_amount") {
@@ -169,11 +169,11 @@ export function getCellValue(holding: Holding, key: string): any {
     if (key === "unrealized_pnl") return holding.unrealized_pnl_kwd ?? 0;
     if (holding.total_cost && holding.total_cost_kwd) {
       const rate = holding.total_cost_kwd / holding.total_cost;
-      return ((holding as any)[key] ?? 0) * rate;
+      return ((holding as unknown as Record<string, number | undefined>)[key] ?? 0) * rate;
     }
   }
 
-  return (holding as any)[key];
+  return (holding as unknown as Record<string, unknown>)[key];
 }
 
 export function getUsdOriginal(holding: Holding, key: string): number | null {
@@ -186,7 +186,8 @@ export function getUsdOriginal(holding: Holding, key: string): number | null {
     return (holding.market_value ?? 0) - (holding.total_cost ?? 0) + (holding.bonus_share_value ?? 0);
   }
   if (key === "yield_amount") return holding.cash_dividends ?? 0;
-  return (holding as any)[key] ?? null;
+  const v = (holding as unknown as Record<string, unknown>)[key];
+  return typeof v === "number" ? v : null;
 }
 
 // ── Sorting ─────────────────────────────────────────────────────────

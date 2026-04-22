@@ -17,6 +17,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
     ActivityIndicator,
     Linking,
+  Modal,
     Pressable,
     RefreshControl,
     ScrollView,
@@ -26,6 +27,7 @@ import {
 } from "react-native";
 
 import { useHoldings } from "@/hooks/queries";
+import { useNewsDetail } from "@/hooks/queries/useNewsQueries";
 import { useNewsFeed, useNewsHistoryInfinite } from "@/hooks/queries/useNewsQueries";
 import i18n from "@/lib/i18n/config";
 import type { NewsCategory, NewsItem } from "@/services/news/types";
@@ -83,6 +85,7 @@ export function NewsFeed({
   const expertiseLevel = useUserPrefsStore((s) => s.preferences.expertiseLevel);
   const [activeCategory, setActiveCategory] = useState<NewsCategory | "all">("all");
   const [lang, setLang] = useState(i18n.language);
+  const [selectedItem, setSelectedItem] = useState<NewsItem | null>(null);
 
   useEffect(() => {
     const onLangChanged = (lng: string) => setLang(lng);
@@ -94,17 +97,10 @@ export function NewsFeed({
   const { data: holdingsResp } = useHoldings();
   const userSymbols = useMemo(() => {
     if (symbol) return [symbol];
-    return (holdingsResp?.holdings?.map((h: any) => h.symbol).filter(Boolean) as string[]) ?? [];
+    return (holdingsResp?.holdings?.map((h: { symbol?: string }) => h.symbol).filter(Boolean) as string[]) ?? [];
   }, [holdingsResp?.holdings, symbol]);
 
   const categoryFilter = activeCategory === "all" ? undefined : [activeCategory] as NewsCategory[];
-
-  // One year ago for history range
-  const oneYearAgo = useMemo(() => {
-    const d = new Date();
-    d.setFullYear(d.getFullYear() - 1);
-    return d.toISOString().slice(0, 10);
-  }, []);
 
   // ── Live feed query (cursor-based infinite scroll) ──
   const {
@@ -131,8 +127,9 @@ export function NewsFeed({
   } = useNewsHistoryInfinite({
     categories: categoryFilter,
     lang,
-    dateFrom: oneYearAgo,
   });
+
+  const { data: selectedDetail } = useNewsDetail(selectedItem?.id ?? "", !!selectedItem?.id);
 
   // Merge live feed + history, deduplicate by id, sort by date descending
   const newsItems = useMemo(() => {
@@ -177,6 +174,17 @@ export function NewsFeed({
   const onRefresh = useCallback(async () => {
     await refetch();
   }, [refetch]);
+
+  const openExternal = useCallback(async (item: NewsItem) => {
+    const external = item.attachments?.[0]?.url || item.url;
+    if (!external) return;
+    const normalized = /^https?:\/\//i.test(external) ? external : `https://${external}`;
+    try {
+      await Linking.openURL(normalized);
+    } catch {
+      // Keep silent; user can still read in-app detail.
+    }
+  }, []);
 
   const onEndReached = useCallback(() => {
     if (hasNextPage && !isFetchingNextPage && !maxItems) {
@@ -280,10 +288,7 @@ export function NewsFeed({
             colors={colors}
             expertiseLevel={expertiseLevel}
             compact={compact}
-            onPress={() => {
-              const pdfUrl = item.attachments?.[0]?.url || item.url;
-              if (pdfUrl) Linking.openURL(pdfUrl);
-            }}
+            onPress={() => setSelectedItem(item)}
           />
         )}
         contentContainerStyle={{ padding: compact ? 0 : 14 }}
@@ -339,6 +344,52 @@ export function NewsFeed({
         }
         scrollEnabled={!compact}
       />
+
+      {/* In-app detail viewer ensures old/cached articles remain openable */}
+      <Modal
+        visible={!!selectedItem}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setSelectedItem(null)}
+      >
+        <View style={[s.modalBackdrop, { backgroundColor: "rgba(0,0,0,0.45)" }]}>
+          <View style={[s.modalCard, { backgroundColor: colors.bgCard, borderColor: colors.borderColor }]}>
+            <View style={s.modalHeader}>
+              <Text style={[s.modalTitle, { color: colors.textPrimary }]} numberOfLines={2}>
+                {selectedDetail?.title ?? selectedItem?.title}
+              </Text>
+              <Pressable onPress={() => setSelectedItem(null)} hitSlop={8}>
+                <FontAwesome name="times" size={18} color={colors.textMuted} />
+              </Pressable>
+            </View>
+
+            <Text style={[s.modalMeta, { color: colors.textMuted }]}>
+              {selectedDetail?.publishedAt ?? selectedItem?.publishedAt}
+            </Text>
+
+            <ScrollView style={{ maxHeight: 360 }}>
+              <Text style={[s.modalBody, { color: colors.textSecondary }]}>
+                {selectedDetail?.fullContent || selectedDetail?.summary || selectedItem?.fullContent || selectedItem?.summary || i18n.t('news.noDetailsAvailable')}
+              </Text>
+            </ScrollView>
+
+            <View style={s.modalActions}>
+              <Pressable
+                onPress={() => setSelectedItem(null)}
+                style={[s.modalBtn, { borderColor: colors.borderColor }]}
+              >
+                <Text style={{ color: colors.textSecondary, fontWeight: "600" }}>{i18n.t('app.close', 'Close')}</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => selectedItem && openExternal(selectedItem)}
+                style={[s.modalBtn, { borderColor: colors.accentPrimary, backgroundColor: colors.accentPrimary + "15" }]}
+              >
+                <Text style={{ color: colors.accentPrimary, fontWeight: "700" }}>{i18n.t('news.openSource', 'Open Source')}</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -408,5 +459,50 @@ const s = StyleSheet.create({
     borderRadius: 8,
     borderWidth: 1,
     marginBottom: 10,
+  },
+  modalBackdrop: {
+    flex: 1,
+    justifyContent: "center",
+    padding: 16,
+  },
+  modalCard: {
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 14,
+  },
+  modalHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 8,
+    marginBottom: 6,
+  },
+  modalTitle: {
+    flex: 1,
+    fontSize: 16,
+    fontWeight: "700",
+    lineHeight: 22,
+  },
+  modalMeta: {
+    fontSize: 12,
+    marginBottom: 10,
+  },
+  modalBody: {
+    fontSize: 14,
+    lineHeight: 21,
+  },
+  modalActions: {
+    marginTop: 12,
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    gap: 8,
+  },
+  modalBtn: {
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    minHeight: 40,
+    justifyContent: "center",
   },
 });

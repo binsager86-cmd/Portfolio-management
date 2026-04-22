@@ -17,7 +17,7 @@
 import type { ThemePalette } from "@/constants/theme";
 import { useA11yChart } from "@/hooks/useA11yChart";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Platform, Pressable, ScrollView, StyleSheet, Text, View, ViewStyle } from "react-native";
 import Animated, {
     useAnimatedStyle,
     useSharedValue,
@@ -300,7 +300,7 @@ export const AllocationDonut = React.memo(function AllocationDonut({
 
             {/* Tooltip overlay */}
             {activeSlice != null && arcs[activeSlice] && (
-              <View style={styles.tooltip} pointerEvents="none">
+              <View style={[styles.tooltip, Platform.OS === "web" ? ({ pointerEvents: "none" } as ViewStyle) : null]}>
                 <Text style={styles.tooltipCompany}>{arcs[activeSlice].company}</Text>
                 <Text style={styles.tooltipPct}>{arcs[activeSlice].pct}%</Text>
               </View>

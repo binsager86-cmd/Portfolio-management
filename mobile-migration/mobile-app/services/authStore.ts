@@ -121,7 +121,7 @@ async function authRequest(
     throw new Error(message);
   }
 
-  const data = (json as any)?.data ?? json;
+  const data = (json as { data?: unknown })?.data ?? json;
   return data as LoginResponse;
 }
 
@@ -156,27 +156,27 @@ export const useAuthStore = create<AuthState>((set) => ({
         getToken(),
         getRefreshToken(),
       ]);
-      if (__DEV__) console.log("[hydrate] stored token:", stored ? `${stored.substring(0, 20)}...` : "null");
+      if (__DEV__) console.info("[hydrate] stored token:", stored ? `${stored.substring(0, 20)}...` : "null");
       if (stored) {
         // If the access token is expired, skip /me and go straight to refresh
         const tokenExpired = isTokenExpired(stored, 0);
         if (tokenExpired && storedRefresh) {
-          if (__DEV__) console.log("[hydrate] Access token expired, skipping /me — refreshing directly");
+          if (__DEV__) console.info("[hydrate] Access token expired, skipping /me — refreshing directly");
         }
 
         if (!tokenExpired) {
         // Validate the stored token with a direct fetch to /me
         // (avoids circular dependency with api.ts)
         try {
-          if (__DEV__) console.log("[hydrate] Validating token via", `${API_BASE_URL}/api/v1/auth/me`);
+          if (__DEV__) console.info("[hydrate] Validating token via", `${API_BASE_URL}/api/v1/auth/me`);
           const resp = await fetch(`${API_BASE_URL}/api/v1/auth/me`, {
             headers: { Authorization: `Bearer ${stored}` },
           });
-          if (__DEV__) console.log("[hydrate] /me response status:", resp.status);
+          if (__DEV__) console.info("[hydrate] /me response status:", resp.status);
           if (!resp.ok) throw new Error(`Token invalid (${resp.status})`);
           const json = await resp.json();
           const me = json.data ?? json;
-          if (__DEV__) console.log("[hydrate] Token valid, user:", me.username);
+          if (__DEV__) console.info("[hydrate] Token valid, user:", me.username);
           set({
             token: stored,
             refreshToken: storedRefresh,
@@ -187,7 +187,7 @@ export const useAuthStore = create<AuthState>((set) => ({
             isLoading: false,
           });
         } catch (err) {
-          if (__DEV__) console.log("[hydrate] Access token invalid, attempting refresh:", err);
+          if (__DEV__) console.info("[hydrate] Access token invalid, attempting refresh:", err);
 
           // Access token expired — try silent refresh before logging out
           if (storedRefresh) {
@@ -197,7 +197,7 @@ export const useAuthStore = create<AuthState>((set) => ({
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ refresh_token: storedRefresh }),
               });
-              if (!refreshResp.ok) throw new Error(`Refresh failed (${refreshResp.status})`);
+              if (!refreshResp.ok) throw new Error(`Refresh failed (${refreshResp.status})`, { cause: err });
               const refreshJson = await refreshResp.json();
               const newAccess: string = refreshJson.access_token;
               const newRefresh: string | undefined = refreshJson.refresh_token;
@@ -210,10 +210,10 @@ export const useAuthStore = create<AuthState>((set) => ({
               const meResp = await fetch(`${API_BASE_URL}/api/v1/auth/me`, {
                 headers: { Authorization: `Bearer ${newAccess}` },
               });
-              if (!meResp.ok) throw new Error(`New token invalid (${meResp.status})`);
+              if (!meResp.ok) throw new Error(`New token invalid (${meResp.status})`, { cause: err });
               const meJson = await meResp.json();
               const me = meJson.data ?? meJson;
-              if (__DEV__) console.log("[hydrate] Refresh succeeded, user:", me.username);
+              if (__DEV__) console.info("[hydrate] Refresh succeeded, user:", me.username);
               set({
                 token: newAccess,
                 refreshToken: newRefresh ?? storedRefresh,
@@ -225,7 +225,7 @@ export const useAuthStore = create<AuthState>((set) => ({
               });
               return; // Success — don't fall through to logout
             } catch (refreshErr) {
-              if (__DEV__) console.log("[hydrate] Refresh also failed:", refreshErr);
+              if (__DEV__) console.info("[hydrate] Refresh also failed:", refreshErr);
             }
           }
 
@@ -263,7 +263,7 @@ export const useAuthStore = create<AuthState>((set) => ({
               if (!meResp.ok) throw new Error(`New token invalid (${meResp.status})`);
               const meJson = await meResp.json();
               const me = meJson.data ?? meJson;
-              if (__DEV__) console.log("[hydrate] Refresh succeeded (expired token path), user:", me.username);
+              if (__DEV__) console.info("[hydrate] Refresh succeeded (expired token path), user:", me.username);
               set({
                 token: newAccess,
                 refreshToken: newRefresh ?? storedRefresh,
@@ -275,7 +275,7 @@ export const useAuthStore = create<AuthState>((set) => ({
               });
               return;
             } catch (refreshErr) {
-              if (__DEV__) console.log("[hydrate] Refresh failed (expired token path):", refreshErr);
+              if (__DEV__) console.info("[hydrate] Refresh failed (expired token path):", refreshErr);
             }
           }
           // Expired token + no refresh or refresh failed — force login
@@ -290,7 +290,7 @@ export const useAuthStore = create<AuthState>((set) => ({
           });
         }
       } else {
-        if (__DEV__) console.log("[hydrate] No stored token, showing login");
+        if (__DEV__) console.info("[hydrate] No stored token, showing login");
         set({ isLoading: false });
       }
     } catch {
@@ -350,10 +350,10 @@ export const useAuthStore = create<AuthState>((set) => ({
   // ── Google Sign-In ─────────────────────────────────────────────
 
   googleSignIn: async (idToken: string) => {
-    if (__DEV__) console.log("[AuthStore] 🔵 googleSignIn called");
+    if (__DEV__) console.info("[AuthStore] 🔵 googleSignIn called");
     set({ isLoading: true, error: null, lastAuthError: null });
     try {
-      if (__DEV__) console.log("[AuthStore] 🔵 Calling POST /api/v1/auth/google…");
+      if (__DEV__) console.info("[AuthStore] 🔵 Calling POST /api/v1/auth/google…");
       const googleResp = await fetch(`${API_BASE_URL}/api/v1/auth/google`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -367,10 +367,10 @@ export const useAuthStore = create<AuthState>((set) => ({
           `Google sign-in failed (${googleResp.status})`;
         throw new Error(message);
       }
-      const normalized = ((googleJson as any)?.data ?? googleJson) as LoginResponse;
-      if (__DEV__) console.log("[AuthStore] ✅ Backend returned tokens");
+      const normalized = ((googleJson as { data?: unknown })?.data ?? googleJson) as LoginResponse;
+      if (__DEV__) console.info("[AuthStore] ✅ Backend returned tokens");
       await persistAndSetSession(normalized, set);
-      if (__DEV__) console.log("[AuthStore] ✅ Session persisted, user is now authenticated");
+      if (__DEV__) console.info("[AuthStore] ✅ Session persisted, user is now authenticated");
       return true;
     } catch (err: unknown) {
       if (__DEV__) console.error("[AuthStore] ❌ googleSignIn error:", err);

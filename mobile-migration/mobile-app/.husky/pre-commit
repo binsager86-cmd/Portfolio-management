@@ -1,4 +1,5 @@
 #!/usr/bin/env sh
 . "$(dirname -- "$0")/_/husky.sh"
 
-cd mobile-app && npx lint-staged
+npm run secrets:scan
+npx lint-staged

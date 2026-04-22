@@ -6,6 +6,7 @@
 import type { ThemePalette } from "@/constants/theme";
 import type { InsightPriority, PortfolioInsight } from "@/lib/insightEngine";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
+import type { Href } from "expo-router";
 import { useRouter } from "expo-router";
 import React from "react";
 import { useTranslation } from "react-i18next";
@@ -57,7 +58,7 @@ export function ActionInsightCard({ insight, colors, onDismiss }: Props) {
           {/* Action button */}
           {insight.action && (
             <Pressable
-              onPress={() => router.push(insight.action!.screen as any)}
+              onPress={() => router.push(insight.action!.screen as Href)}
               style={[s.actionBtn, { backgroundColor: leftColor + "18" }]}
             >
               <Text style={[s.actionLabel, { color: leftColor }]}>

@@ -18,6 +18,7 @@ import {
   StyleSheet,
   ViewStyle,
 } from "react-native";
+import type { DimensionValue } from "react-native";
 import { useResponsive } from "@/hooks/useResponsive";
 import { useThemeStore } from "@/services/themeStore";
 
@@ -56,7 +57,7 @@ export function ResponsiveContainer({
       ? {}
       : {
           maxWidth: maxContentWidth,
-          width: "100%" as any,
+          width: "100%" as DimensionValue,
           alignSelf: "center" as const,
         }),
     ...contentStyle,

@@ -33,7 +33,7 @@ export function formatNumber(n: number): string {
 export function formatMetricValue(name: string, value: number): string {
   const lc = name.toLowerCase();
   // True percentage metrics (stored as decimals, display ×100 as %)
-  const isPct = ["margin", "roe", "roa", "growth", "payout", "retention", "cagr"].some((k) => lc.includes(k))
+  const isPct = ["margin", "roe", "roa", "roic", "growth", "payout", "retention", "cagr"].some((k) => lc.includes(k))
     || lc.includes("dupont") || lc.includes("sustainable");
   if (isPct) return (value * 100).toFixed(1) + "%";
   // Days metrics
@@ -111,11 +111,35 @@ export function enrichMetricsWithFallbacks(
   allMetrics: StockMetric[],
   statements: FinancialStatement[],
 ): StockMetric[] {
+  // Normalize backend metric names: server stores "Debt-to-Equity" but the
+  // UI/Capital Structure section should display it as "Debt/Equity Ratio".
+  const normalized: StockMetric[] = allMetrics.map((m) =>
+    m.metric_type === "leverage" && m.metric_name === "Debt-to-Equity"
+      ? { ...m, metric_name: "Debt/Equity Ratio" }
+      : m,
+  );
+
   // Index existing valuation metrics by fiscal_year → metric_name
   const existing = new Map<string, number>();
-  for (const m of allMetrics) {
+  for (const m of normalized) {
     if (m.metric_type === "valuation") {
       existing.set(`${m.fiscal_year}::${m.metric_name}`, m.metric_value);
+    }
+  }
+
+  // Index existing leverage metrics so we don't double-add
+  const existingLeverage = new Set<string>();
+  for (const m of normalized) {
+    if (m.metric_type === "leverage") {
+      existingLeverage.add(`${m.fiscal_year}::${m.metric_name}`);
+    }
+  }
+
+  // Index existing profitability metrics so we don't double-add
+  const existingProfitability = new Set<string>();
+  for (const m of normalized) {
+    if (m.metric_type === "profitability") {
+      existingProfitability.add(`${m.fiscal_year}::${m.metric_name}`);
     }
   }
 
@@ -264,8 +288,126 @@ export function enrichMetricsWithFallbacks(
     }
   }
 
-  if (computed.length === 0) return allMetrics;
-  return [...allMetrics, ...computed];
+  // ── Leverage fallbacks (Capital Structure) ──────────────────────
+  // Compute Debt-to-Equity and Interest Coverage directly from the
+  // uploaded statements when the backend hasn't produced them. Matches
+  // the CFA-level formulas used server-side in fundamental_legacy.py.
+  for (const [fiscalYear, typeMap] of stmtByYear) {
+    const income = typeMap.get("income");
+    const balance = typeMap.get("balance");
+    const periodEndDate = (income ?? balance)?.period_end_date ?? `${fiscalYear}-12-31`;
+
+    // Debt/Equity Ratio = (ST debt + LT debt) / Total Equity
+    if (!existingLeverage.has(`${fiscalYear}::Debt/Equity Ratio`)) {
+      const stDebt = balance
+        ? extractLineItem(balance, "SHORT_TERM_DEBT", "SHORT_TERM_BORROWINGS",
+            "CURRENT_PORTION_OF_LONG_TERM_DEBT", "NOTES_PAYABLE")
+        : null;
+      const ltDebt = balance
+        ? extractLineItem(balance, "LONG_TERM_DEBT", "LONG_TERM_BORROWINGS",
+            "BONDS_PAYABLE")
+        : null;
+      const equity = balance
+        ? extractLineItem(balance, "TOTAL_EQUITY", "SHAREHOLDERS_EQUITY",
+            "TOTAL_SHAREHOLDERS_EQUITY", "STOCKHOLDERS_EQUITY")
+        : null;
+      const totalDebt = (stDebt ?? 0) + (ltDebt ?? 0);
+      const hasDebt = stDebt != null || ltDebt != null;
+      if (hasDebt && equity != null && equity !== 0) {
+        computed.push({
+          id: syntheticId--, stock_id: 0, fiscal_year: fiscalYear,
+          fiscal_quarter: null, period_end_date: periodEndDate,
+          metric_type: "leverage", metric_name: "Debt/Equity Ratio",
+          metric_value: totalDebt / equity, created_at: 0,
+        });
+        existingLeverage.add(`${fiscalYear}::Debt/Equity Ratio`);
+      }
+    }
+
+    // Interest Coverage = Operating Income (EBIT) / |Interest Expense|
+    if (!existingLeverage.has(`${fiscalYear}::Interest Coverage`)) {
+      const operatingIncome = income
+        ? extractLineItem(income, "OPERATING_INCOME", "OPERATING_PROFIT",
+            "EBIT", "INCOME_FROM_OPERATIONS")
+        : null;
+      const interestExpense = income
+        ? extractLineItem(income, "INTEREST_EXPENSE", "FINANCE_COSTS",
+            "FINANCE_EXPENSE", "INTEREST_AND_FINANCE_COSTS")
+        : null;
+      if (operatingIncome != null && interestExpense != null && interestExpense !== 0) {
+        computed.push({
+          id: syntheticId--, stock_id: 0, fiscal_year: fiscalYear,
+          fiscal_quarter: null, period_end_date: periodEndDate,
+          metric_type: "leverage", metric_name: "Interest Coverage",
+          metric_value: operatingIncome / Math.abs(interestExpense), created_at: 0,
+        });
+        existingLeverage.add(`${fiscalYear}::Interest Coverage`);
+      }
+    }
+
+    // ── ROIC (Profitability) ─────────────────────────────────────
+    // CFA: ROIC = NOPAT / Invested Capital
+    //   NOPAT            = Operating Income × (1 − Effective Tax Rate)
+    //   Invested Capital = Total Equity + Total Debt − Cash − ST Investments
+    if (!existingProfitability.has(`${fiscalYear}::ROIC`)) {
+      const operatingIncomeP = income
+        ? extractLineItem(income, "OPERATING_INCOME", "OPERATING_PROFIT",
+            "EBIT", "INCOME_FROM_OPERATIONS")
+        : null;
+      const stDebtP = balance
+        ? extractLineItem(balance, "SHORT_TERM_DEBT", "SHORT_TERM_BORROWINGS",
+            "CURRENT_PORTION_OF_LONG_TERM_DEBT", "NOTES_PAYABLE")
+        : null;
+      const ltDebtP = balance
+        ? extractLineItem(balance, "LONG_TERM_DEBT", "LONG_TERM_BORROWINGS",
+            "BONDS_PAYABLE")
+        : null;
+      const equityP = balance
+        ? extractLineItem(balance, "TOTAL_EQUITY", "SHAREHOLDERS_EQUITY",
+            "TOTAL_SHAREHOLDERS_EQUITY", "STOCKHOLDERS_EQUITY")
+        : null;
+      const cash = balance
+        ? extractLineItem(balance, "CASH_AND_EQUIVALENTS", "CASH_AND_CASH_EQUIVALENTS",
+            "CASH")
+        : null;
+      const shortTermInv = balance
+        ? extractLineItem(balance, "SHORT_TERM_INVESTMENTS", "MARKETABLE_SECURITIES")
+        : null;
+
+      // Effective tax rate: prefer line item, else compute from tax / pretax
+      let taxRate = income
+        ? extractLineItem(income, "EFFECTIVE_TAX_RATE")
+        : null;
+      if (taxRate == null && income) {
+        const incomeTax = extractLineItem(income, "INCOME_TAX_EXPENSE",
+          "PROVISION_FOR_INCOME_TAXES", "TAX_EXPENSE");
+        const pretax = extractLineItem(income, "PRETAX_INCOME",
+          "INCOME_BEFORE_TAX", "PROFIT_BEFORE_TAX");
+        if (incomeTax != null && pretax != null && pretax !== 0) {
+          taxRate = incomeTax / pretax;
+        }
+      }
+      // Fall back to a reasonable default of 0 if unknown (no tax data ⇒ NOPAT = EBIT)
+      const safeTaxRate = taxRate != null ? Math.min(Math.max(taxRate, 0), 1) : 0;
+
+      const totalDebtP = (stDebtP ?? 0) + (ltDebtP ?? 0);
+      const investedCapital = (equityP ?? 0) + totalDebtP - (cash ?? 0) - (shortTermInv ?? 0);
+
+      if (operatingIncomeP != null && equityP != null && investedCapital > 0) {
+        const nopat = operatingIncomeP * (1 - safeTaxRate);
+        computed.push({
+          id: syntheticId--, stock_id: 0, fiscal_year: fiscalYear,
+          fiscal_quarter: null, period_end_date: periodEndDate,
+          metric_type: "profitability", metric_name: "ROIC",
+          metric_value: nopat / investedCapital, created_at: 0,
+        });
+        existingProfitability.add(`${fiscalYear}::ROIC`);
+      }
+    }
+  }
+
+  if (computed.length === 0) return normalized;
+  return [...normalized, ...computed];
 }
 
 export const INTERPRETATION_SCALE = [

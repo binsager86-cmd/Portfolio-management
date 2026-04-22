@@ -66,7 +66,7 @@ export function Step2Details({
         <FormField label={t("addTransaction.purchaseCost")} required error={errors.purchase_cost?.message}>
           <Controller control={control} name="purchase_cost" render={({ field: { value, onChange } }) => (
             <NumberInput
-              value={value != null && value !== ("" as any) ? String(value) : ""}
+              value={value != null && value !== "" ? String(value) : ""}
               onChangeText={(tx) => onChange(tx)}
               placeholder={t("addTransaction.totalCost")}
               suffix="KWD"
@@ -81,7 +81,7 @@ export function Step2Details({
         <FormField label={t("addTransaction.sellValue")} required error={errors.sell_value?.message}>
           <Controller control={control} name="sell_value" render={({ field: { value, onChange } }) => (
             <NumberInput
-              value={value != null && value !== ("" as any) ? String(value) : ""}
+              value={value != null && value !== "" ? String(value) : ""}
               onChangeText={(tx) => onChange(tx)}
               placeholder={t("addTransaction.totalProceeds")}
               suffix="KWD"
@@ -106,7 +106,7 @@ export function Step2Details({
       >
         <Controller control={control} name="cash_dividend" render={({ field: { value, onChange } }) => (
           <NumberInput
-            value={value != null && value !== ("" as any) ? String(value) : ""}
+            value={value != null && value !== "" ? String(value) : ""}
             onChangeText={(tx) => onChange(tx)}
             placeholder="0.000" suffix="KWD" hasError={!!errors.cash_dividend}
           />
@@ -116,7 +116,7 @@ export function Step2Details({
       <FormField label={t("addTransaction.reinvestedDividend")} error={errors.reinvested_dividend?.message}>
         <Controller control={control} name="reinvested_dividend" render={({ field: { value, onChange } }) => (
           <NumberInput
-            value={value != null && value !== ("" as any) ? String(value) : ""}
+            value={value != null && value !== "" ? String(value) : ""}
             onChangeText={(tx) => onChange(tx)}
             placeholder="0.000" suffix="KWD"
           />
@@ -126,7 +126,7 @@ export function Step2Details({
       <FormField label={t("addTransaction.bonusShares")} error={errors.bonus_shares?.message}>
         <Controller control={control} name="bonus_shares" render={({ field: { value, onChange } }) => (
           <NumberInput
-            value={value != null && value !== ("" as any) ? String(value) : ""}
+            value={value != null && value !== "" ? String(value) : ""}
             onChangeText={(tx) => onChange(tx)}
             placeholder="0"
           />
@@ -154,7 +154,7 @@ export function Step2Details({
               <FormField label={t("addTransaction.fees")} error={errors.fees?.message}>
                 <Controller control={control} name="fees" render={({ field: { value, onChange } }) => (
                   <NumberInput
-                    value={value != null && value !== ("" as any) ? String(value) : ""}
+                    value={value != null && value !== "" ? String(value) : ""}
                     onChangeText={(tx) => onChange(tx)} placeholder="0.000" suffix="KWD"
                   />
                 )} />
@@ -163,7 +163,7 @@ export function Step2Details({
               <FormField label={t("addTransaction.priceOverride")} error={errors.price_override?.message}>
                 <Controller control={control} name="price_override" render={({ field: { value, onChange } }) => (
                   <NumberInput
-                    value={value != null && value !== ("" as any) ? String(value) : ""}
+                    value={value != null && value !== "" ? String(value) : ""}
                     onChangeText={(tx) => onChange(tx)} placeholder="0.000000"
                   />
                 )} />
@@ -172,7 +172,7 @@ export function Step2Details({
               <FormField label={t("addTransaction.plannedCumShares")} error={errors.planned_cum_shares?.message}>
                 <Controller control={control} name="planned_cum_shares" render={({ field: { value, onChange } }) => (
                   <NumberInput
-                    value={value != null && value !== ("" as any) ? String(value) : ""}
+                    value={value != null && value !== "" ? String(value) : ""}
                     onChangeText={(tx) => onChange(tx)} placeholder="0"
                   />
                 )} />

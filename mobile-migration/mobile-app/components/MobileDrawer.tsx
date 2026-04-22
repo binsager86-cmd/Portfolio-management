@@ -7,6 +7,7 @@
  */
 
 import { NAV_ITEMS } from "@/components/WebSidebar";
+import type { ThemePalette } from "@/constants/theme";
 import { useAuthStore } from "@/services/authStore";
 import { useThemeStore } from "@/services/themeStore";
 import { ExpertiseLevel, useUserPrefsStore } from "@/src/store/userPrefsStore";
@@ -21,6 +22,7 @@ import {
     StyleSheet,
     Text,
     View,
+  ViewStyle,
 } from "react-native";
 import Animated, {
     useAnimatedStyle,
@@ -53,7 +55,7 @@ function DrawerNavItem({
   item: (typeof NAV_ITEMS)[number];
   index: number;
   active: boolean;
-  colors: any;
+  colors: ThemePalette;
   onPress: () => void;
   t: (key: string) => string;
   visible: boolean;
@@ -184,7 +186,7 @@ export function MobileDrawer({ visible, onClose }: MobileDrawerProps) {
   };
 
   const handleNav = (path: string) => {
-    router.push(path as any);
+    router.push(path as never);
     onClose();
   };
 
@@ -197,7 +199,10 @@ export function MobileDrawer({ visible, onClose }: MobileDrawerProps) {
   if (!visible) return null;
 
   return (
-    <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
+    <View
+      style={[StyleSheet.absoluteFill, Platform.OS === "web" ? ({ pointerEvents: "none" } as ViewStyle) : null]}
+      pointerEvents={Platform.OS === "web" ? undefined : "box-none"}
+    >
       {/* Backdrop */}
       <Animated.View style={[s.backdrop, backdropStyle]}>
         <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityRole="button" accessibilityLabel="Close menu" />

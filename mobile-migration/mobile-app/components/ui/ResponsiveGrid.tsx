@@ -11,6 +11,7 @@
 
 import React from "react";
 import { View, StyleSheet, ViewStyle } from "react-native";
+import type { DimensionValue } from "react-native";
 import { useResponsive, Breakpoint } from "@/hooks/useResponsive";
 
 interface Props {
@@ -38,7 +39,7 @@ export function ResponsiveGrid({ children, columns, style }: Props) {
         if (!React.isValidElement(child)) return child;
         // Calculate width: subtract gaps, divide by cols
         // Use flexBasis with percentage for simplicity
-        const pct = `${(100 / cols).toFixed(4)}%` as any;
+        const pct = `${(100 / cols).toFixed(4)}%` as DimensionValue;
         return (
           <View style={{ flexBasis: pct, maxWidth: pct }}>
             {child}

@@ -21,6 +21,7 @@ import {
     StyleSheet,
     View,
 } from "react-native";
+import type { DimensionValue } from "react-native";
 
 /* ── Core shimmer bar ──────────────────────────────────────────────── */
 
@@ -67,7 +68,7 @@ export function Shimmer({
   return (
     <Animated.View
       style={[
-        { width: width as any, height, borderRadius, backgroundColor: bg },
+        { width: width as DimensionValue, height, borderRadius, backgroundColor: bg },
         style,
       ]}
     />
@@ -85,7 +86,7 @@ export function CardSkeleton({ width: cardWidth }: { width: string }) {
       style={[
         s.card,
         {
-          width: cardWidth as any,
+          width: cardWidth as DimensionValue,
           backgroundColor: colors.bgCard,
           borderColor: colors.borderColor,
           padding: spacing.cardPadding,

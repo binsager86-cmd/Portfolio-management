@@ -40,7 +40,9 @@ async function setFlag(key: string): Promise<void> {
       const SecureStore = await import("expo-secure-store");
       await SecureStore.setItemAsync(key, "1");
     }
-  } catch {}
+  } catch {
+    return;
+  }
 }
 
 export async function markOnboardingSeen(): Promise<void> {

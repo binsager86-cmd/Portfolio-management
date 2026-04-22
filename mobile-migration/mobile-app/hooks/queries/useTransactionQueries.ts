@@ -34,7 +34,7 @@ export function useTransactions(params: {
     queryFn: () =>
       getTransactions({
         page: params.page,
-        page_size: params.perPage ?? 50,
+        per_page: params.perPage ?? 50,
         portfolio: params.portfolio,
         symbol: params.symbol,
       }),
@@ -46,30 +46,32 @@ export function useTransactions(params: {
 export function useAllTransactions() {
   return useQuery<TransactionListResponse>({
     queryKey: transactionKeys.all(),
-    queryFn: () => getTransactions({ page: 1, page_size: 10000 }),
+    queryFn: () => getTransactions({ page: 1, per_page: 10000 }),
     staleTime: 5 * 60 * 1000,
   });
 }
 
-/** Lightweight transaction count — stable cache for UI visibility decisions. */
+/** Lightweight transaction count — cached briefly so UI visibility decisions stay
+ *  in sync when transactions are added/removed elsewhere (other tab, mutation). */
 export function useTransactionCount() {
   return useQuery({
     queryKey: ["transactions", "count"],
     queryFn: async () => {
-      const data = await getTransactions({ page: 1, page_size: 1 });
+      const data = await getTransactions({ page: 1, per_page: 1 });
       return data.count;
     },
-    staleTime: Infinity,
-    refetchOnWindowFocus: false,
+    staleTime: 60_000,
   });
 }
 
-/** Single transaction for edit mode. */
+/** Single transaction for edit mode — cache for the duration of an edit
+ *  session to avoid refetching on every modal open/remount. */
 export function useTransaction(editId?: string) {
   return useQuery<TransactionRecord>({
     queryKey: transactionKeys.detail(editId),
     queryFn: () => getTransaction(Number(editId)),
     enabled: !!editId,
-    staleTime: 0,
+    staleTime: 30_000,
+    refetchOnMount: false,
   });
 }

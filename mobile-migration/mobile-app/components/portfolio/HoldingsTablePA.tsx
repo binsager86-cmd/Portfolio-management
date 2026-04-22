@@ -65,7 +65,7 @@ export const TOTAL_TABLE_WIDTH = TABLE_COLUMNS.reduce((sum, c) => sum + c.width,
 
 /** Format a raw holding field value into display text, colour, and weight. */
 export function fmtCell(
-  val: any,
+  val: unknown,
   fmt: HoldingFmt,
   colors: ThemePalette,
 ): { text: string; color: string; bold: boolean } {
@@ -74,7 +74,7 @@ export function fmtCell(
   const pos = colors.success;
   const neg = colors.danger;
 
-  if (val == null || val === "" || Number.isNaN(val)) {
+  if (val == null || val === "" || (typeof val === "number" && Number.isNaN(val))) {
     return { text: "\u2014", color: muted, bold: false };
   }
 
@@ -148,7 +148,7 @@ export function setHoldingsContext(_allHoldings: Holding[], totalValueKwd: numbe
  * Handles USD → KWD conversion, allocation %, weighted yield,
  * and combined P&L for cross-currency holdings.
  */
-export function getCellValue(holding: Holding, key: string): any {
+export function getCellValue(holding: Holding, key: string): unknown {
   const isUSD = (holding.currency ?? "KWD").toUpperCase() === "USD";
 
   if (key === "yield_amount") return holding.cash_dividends ?? 0;
@@ -191,7 +191,7 @@ export function getCellValue(holding: Holding, key: string): any {
     }
   }
 
-  return (holding as any)[key];
+  return (holding as unknown as Record<string, unknown>)[key];
 }
 
 function getUsdBracketText(holding: Holding, key: string): string | null {
@@ -271,7 +271,7 @@ export const HeaderCell = React.memo(function HeaderCell({ col, colors, sortCol,
   );
 });
 
-function DataCell({ col, holding, colors }: { col: ColDef; holding: Holding; colors: ThemePalette }) {
+const DataCell = React.memo(function DataCell({ col, holding, colors }: { col: ColDef; holding: Holding; colors: ThemePalette }) {
   const val = getCellValue(holding, col.key);
   const { text, color, bold } = fmtCell(val, col.fmt, colors);
   const usdText = getUsdBracketText(holding, col.key);
@@ -287,7 +287,7 @@ function DataCell({ col, holding, colors }: { col: ColDef; holding: Holding; col
       ) : null}
     </View>
   );
-}
+});
 
 /** Footer total cell — renders aggregate value for summable columns. */
 export const TotalCell = React.memo(function TotalCell({ col, totals, colors }: { col: ColDef; totals: Record<string, number>; colors: ThemePalette }) {

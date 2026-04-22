@@ -3,6 +3,7 @@
  */
 
 import { extractErrorMessage } from "@/lib/errorHandling";
+import type { ThemePalette } from "@/constants/theme";
 import type { KfhImportPreview, KfhImportResult } from "@/lib/kfh/kfhTradeTypes";
 import { useThemeStore } from "@/services/themeStore";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
@@ -273,7 +274,7 @@ function StatRow({
   label: string;
   value: number;
   color: string;
-  colors: any;
+  colors: ThemePalette;
   bold?: boolean;
 }) {
   return (
@@ -295,7 +296,7 @@ function BreakdownRow({
   label: string;
   count: number;
   color: string;
-  colors: any;
+  colors: ThemePalette;
 }) {
   if (count === 0) return null;
   return (

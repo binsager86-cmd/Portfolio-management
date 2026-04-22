@@ -34,7 +34,7 @@ import {
     logStatementChange,
 } from "@/services/api/analytics";
 import { STMNT_META } from "../types";
-import type { PeriodInfo } from "./StatementTableRows";
+import type { PeriodInfo } from "../components/StatementTableRows";
 
 const RECONCILE_OPTS = [
   { key: "all", label: "All Types" },

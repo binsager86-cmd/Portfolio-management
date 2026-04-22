@@ -194,7 +194,7 @@ export default function PortfolioTrackerScreen() {
       if (Platform.OS === "web") window.alert(msg);
       else Alert.alert(t('tracker.snapshotSaved'), msg);
     },
-    onError: (err: any) => {
+    onError: (err: unknown) => {
       logError("SaveSnapshot", err);
       showErrorAlert(t('tracker.error'), err, t('tracker.failedToSaveSnapshot'));
     },
@@ -218,22 +218,23 @@ export default function PortfolioTrackerScreen() {
 
   const recalcMutation = useMutation({
     mutationFn: () => {
-      console.log("[Recalculate] Starting recalculation request...");
+      console.info("[Recalculate] Starting recalculation request...");
       return recalculateSnapshots();
     },
     onSuccess: (result) => {
-      console.log("[Recalculate] Success:", result);
+      console.info("[Recalculate] Success:", result);
       queryClient.invalidateQueries({ queryKey: ["snapshots"] });
       const msg = t('tracker.recalculatedCount', { count: result.updated });
       if (Platform.OS === "web") window.alert(msg);
       else Alert.alert(t('tracker.recalculated'), msg);
     },
-    onError: (err: any) => {
+    onError: (err: unknown) => {
       console.error("[Recalculate] Error:", err);
-      console.error("[Recalculate] Response status:", err?.response?.status);
-      console.error("[Recalculate] Response data:", err?.response?.data);
-      const detail = err?.response?.data?.detail;
-      const msg = detail ?? err?.message ?? t('tracker.recalculationFailed');
+      const e = err as { response?: { status?: number; data?: { detail?: string } }; message?: string };
+      console.error("[Recalculate] Response status:", e?.response?.status);
+      console.error("[Recalculate] Response data:", e?.response?.data);
+      const detail = e?.response?.data?.detail;
+      const msg = detail ?? e?.message ?? t('tracker.recalculationFailed');
       if (Platform.OS === "web") window.alert(t('tracker.recalculationError', { message: msg }));
       else Alert.alert(t('tracker.error'), msg);
     },
@@ -249,10 +250,11 @@ export default function PortfolioTrackerScreen() {
       if (Platform.OS === "web") window.alert(msg);
       else Alert.alert(t('tracker.pricesRefreshed'), msg);
     },
-    onError: (err: any) => {
+    onError: (err: unknown) => {
       console.error("[RefreshPrices] Error:", err);
-      const detail = err?.response?.data?.detail;
-      const msg = detail ?? err?.message ?? t('tracker.priceRefreshFailed');
+      const e = err as { response?: { data?: { detail?: string } }; message?: string };
+      const detail = e?.response?.data?.detail;
+      const msg = detail ?? e?.message ?? t('tracker.priceRefreshFailed');
       if (Platform.OS === "web") window.alert(msg);
       else Alert.alert(t('tracker.error'), msg);
     },

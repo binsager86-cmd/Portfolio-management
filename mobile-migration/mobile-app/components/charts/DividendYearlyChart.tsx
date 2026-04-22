@@ -21,6 +21,7 @@ import {
     Text,
     View,
 } from "react-native";
+import type { ViewStyle } from "react-native";
 import Animated, {
     useAnimatedStyle,
     useSharedValue,
@@ -202,7 +203,7 @@ export default React.memo(function DividendYearlyChart({
   );
 
   const handleMouseMove = useCallback(
-    (evt: any) => {
+    (evt: { currentTarget: HTMLElement; clientX: number }) => {
       if (Platform.OS !== "web") return;
       const rect = evt.currentTarget.getBoundingClientRect();
       const x = evt.clientX - rect.left;
@@ -247,7 +248,7 @@ export default React.memo(function DividendYearlyChart({
       <View
         style={[
           { height: chartHeight },
-          Platform.OS === "web" ? ({ cursor: "crosshair" } as any) : {},
+          Platform.OS === "web" ? ({ cursor: "crosshair" } as unknown as ViewStyle) : {},
         ]}
         {...(Platform.OS === "web"
           ? { onMouseMove: handleMouseMove, onMouseLeave: () => setActiveIdx(null) }

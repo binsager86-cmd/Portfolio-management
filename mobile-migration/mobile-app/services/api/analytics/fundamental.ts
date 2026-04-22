@@ -52,6 +52,7 @@ export async function updateAnalysisStock(
     sector: string;
     industry: string;
     outstanding_shares: number;
+    summary_margin_of_safety: number;
   }>,
 ): Promise<{ message: string }> {
   const { data } = await api.put<{ status: string; data: { message: string } }>(

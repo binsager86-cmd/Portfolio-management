@@ -35,7 +35,7 @@ export function NumberInput({
 
   const handleChange = (text: string) => {
     // Strip formatting chars, keep digits, single decimal, leading minus
-    const cleaned = text.replace(/[^0-9.\-]/g, "");
+    const cleaned = text.replace(/[^0-9.-]/g, "");
     onChangeText(cleaned);
   };
 

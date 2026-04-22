@@ -22,6 +22,7 @@ import {
 } from "@/services/alerts/alertRules";
 import { requestNotificationPermissions } from "@/services/alerts/notificationService";
 import { useThemeStore } from "@/services/themeStore";
+import type { ThemePalette } from "@/constants/theme";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import { zodResolver } from "@hookform/resolvers/zod";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
@@ -264,7 +265,7 @@ function AddAlertModal({
   onClose: () => void;
   onSave: (rule: AlertRule) => void;
   prefillSymbol?: string;
-  colors: any;
+  colors: ThemePalette;
 }) {
   const { t } = useTranslation();
   const alertFormSchema = useMemo(() => createAlertFormSchema(t), [t]);

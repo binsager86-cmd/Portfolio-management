@@ -209,11 +209,13 @@ export default function PlannerScreen() {
     };
   }, [mode, pvNum, rateNum, yearsNum, pmtNum, targetFvNum, contribFreq, inflNum, t]);
 
-  const projectionRows = (result as any).rows as ProjectionRow[] | undefined;
-  const goalMeta = (result as any).goalMeta as {
+  type GoalMeta = {
     wealthMultiple: number; realRate: number; realFV: number; pvGrowth: number;
     hasInflation: boolean; sensitivity: SensitivityRow[]; milestones: MilestoneRow[]; alreadyMet: boolean;
-  } | undefined;
+  };
+  const resultExt = result as typeof result & { rows?: ProjectionRow[]; goalMeta?: GoalMeta };
+  const projectionRows = resultExt.rows;
+  const goalMeta = resultExt.goalMeta;
 
   return (
     <ScrollView
@@ -459,7 +461,7 @@ export default function PlannerScreen() {
                   </View>
                   <View style={{ flex: 1, marginHorizontal: 10 }}>
                     <View style={[s.milestoneBar, { backgroundColor: colors.bgPrimary }]}>
-                      <View style={[s.milestoneBarFill, { width: `${Math.min(barPct, 100)}%` as any, backgroundColor: m.year ? colors.accentPrimary : colors.textMuted }]} />
+                      <View style={[s.milestoneBarFill, { width: (`${Math.min(barPct, 100)}%` as `${number}%`), backgroundColor: m.year ? colors.accentPrimary : colors.textMuted }]} />
                     </View>
                   </View>
                   <Text style={{ color: m.year ? colors.textPrimary : colors.textMuted, fontSize: 13, fontWeight: "600", minWidth: 52, textAlign: "right" }}>
@@ -515,14 +517,14 @@ export default function PlannerScreen() {
               {/* Stacked horizontal bar */}
               <View style={s.stackedBar}>
                 {principalPct > 0 && (
-                  <View style={[s.barSegment, { width: `${principalPct}%` as any, backgroundColor: principalColor, borderTopLeftRadius: 8, borderBottomLeftRadius: 8, borderTopRightRadius: interestPct > 0 ? 0 : 8, borderBottomRightRadius: interestPct > 0 ? 0 : 8 }]}>
+                  <View style={[s.barSegment, { width: (`${principalPct}%` as `${number}%`), backgroundColor: principalColor, borderTopLeftRadius: 8, borderBottomLeftRadius: 8, borderTopRightRadius: interestPct > 0 ? 0 : 8, borderBottomRightRadius: interestPct > 0 ? 0 : 8 }]}>
                     {principalPct > 15 && (
                       <Text style={s.barLabel}>{principalPct.toFixed(1)}%</Text>
                     )}
                   </View>
                 )}
                 {interestPct > 0 && (
-                  <View style={[s.barSegment, { width: `${interestPct}%` as any, backgroundColor: interestColor, borderTopRightRadius: 8, borderBottomRightRadius: 8, borderTopLeftRadius: principalPct > 0 ? 0 : 8, borderBottomLeftRadius: principalPct > 0 ? 0 : 8 }]}>
+                  <View style={[s.barSegment, { width: (`${interestPct}%` as `${number}%`), backgroundColor: interestColor, borderTopRightRadius: 8, borderBottomRightRadius: 8, borderTopLeftRadius: principalPct > 0 ? 0 : 8, borderBottomLeftRadius: principalPct > 0 ? 0 : 8 }]}>
                     {interestPct > 15 && (
                       <Text style={s.barLabel}>{interestPct.toFixed(1)}%</Text>
                     )}

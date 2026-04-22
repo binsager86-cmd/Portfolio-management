@@ -143,11 +143,11 @@ describe("API Service", () => {
 
     it("has request interceptor", () => {
       // Axios stores interceptors in handlers array
-      expect(api.interceptors.request.handlers.length).toBeGreaterThan(0);
+      expect(api.interceptors.request.handlers?.length ?? 0).toBeGreaterThan(0);
     });
 
     it("has response interceptor", () => {
-      expect(api.interceptors.response.handlers.length).toBeGreaterThan(0);
+      expect(api.interceptors.response.handlers?.length ?? 0).toBeGreaterThan(0);
     });
   });
 
