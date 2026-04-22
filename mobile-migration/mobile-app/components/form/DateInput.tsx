@@ -78,7 +78,7 @@ function NativeDateInput({ value, onChangeText, hasError }: DateInputProps) {
   const [selDay, setSelDay] = useState(() => (value ? new Date(value) : new Date()).getDate());
 
   const handleChange = (text: string) => {
-    const cleaned = text.replace(/[^0-9\-]/g, "");
+    const cleaned = text.replace(/[^0-9-]/g, "");
     onChangeText(cleaned);
   };
 

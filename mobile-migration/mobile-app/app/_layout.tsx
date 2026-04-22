@@ -75,6 +75,7 @@ function buildNavTheme(mode: "light" | "dark") {
 
 export default function RootLayout() {
   const [loaded, error] = useFonts({
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     SpaceMono: require("../assets/fonts/SpaceMono-Regular.ttf"),
     ...FontAwesome.font,
   });
@@ -127,7 +128,6 @@ function RootLayoutNav() {
           const params = new URLSearchParams(hash.substring(1));
           const accessToken = params.get("access_token");
           if (accessToken) {
-            if (__DEV__) console.log("[Layout] Found OAuth access_token in URL hash");
             // Clean the URL so the token isn't visible
             window.history.replaceState(
               null,
@@ -205,7 +205,9 @@ function RootLayoutNav() {
 
     // Register push token for real-time news notifications
     registerPushToken().catch((err) => {
-      if (__DEV__) console.warn("[Push] Registration failed:", err);
+      analytics.logEvent("push_registration_failed", {
+        message: err instanceof Error ? err.message : String(err),
+      });
     });
   }, [token]);
 

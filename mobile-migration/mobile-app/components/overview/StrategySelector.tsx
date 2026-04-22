@@ -67,7 +67,7 @@ export function StrategySelector({ onSelect }: Props) {
   const strategies = getStrategies();
 
   const scores = useMemo(() => {
-    const map: Record<StrategyId, ReturnType<typeof scoreAlignment>> = {} as any;
+    const map = {} as Record<StrategyId, ReturnType<typeof scoreAlignment>>;
     for (const s of strategies) {
       map[s.id] = scoreAlignment(s, holdings, cashPct);
     }

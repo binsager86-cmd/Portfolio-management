@@ -29,7 +29,7 @@ import { checkCashIntegrity, getCashBalances, getDeposits, getTransactions, inte
 import { useApplyReconciliation } from "@/services/api/reconciliation";
 import { useThemeStore } from "@/services/themeStore";
 
-function StatusBadge({ status, colors }: { status: boolean | null; colors: ThemePalette }) {
+function StatusBadge({ status, colors }: { status: boolean | null | undefined; colors: ThemePalette }) {
   const { t } = useTranslation();
   if (status === true)
     return (
@@ -84,7 +84,54 @@ function DetailLine({
 
 // ── Cash Result Card ────────────────────────────────────────────────
 
-function CashResultCard({ portfolio, data, colors }: { portfolio: string; data: any; colors: ThemePalette }) {
+// Generic shape for integrity check sub-result objects (server payloads).
+type IntegrityData = {
+  is_valid?: boolean | null;
+  components?: Record<string, string | number | null | undefined>;
+  expected_balance?: string | number | null;
+  stored_balance?: string | number | null;
+  discrepancy?: string | number | null;
+  tolerance?: string | number | null;
+  mismatches?: Array<Record<string, unknown>>;
+  total_symbols?: string | number | null;
+  matched?: string | number | null;
+  has_snapshots?: boolean | null;
+  latest_date?: string | number | null;
+  days_since_snapshot?: string | number | null;
+  is_fresh?: boolean | null;
+  snapshot_value?: number;
+  live_value?: number;
+  drift_pct?: number;
+  anomalies?: Array<Record<string, unknown>>;
+  count?: string | number | null;
+  errors?: number;
+  warnings?: number;
+  issues?: Array<Record<string, unknown>>;
+  portfolios_found?: string | number | null;
+  orphan_symbols?: number;
+  zero_price_symbols?: number;
+};
+
+type IntegritySummary = {
+  cash_checks?: number;
+  position_checks?: number;
+  snapshot_checks?: number;
+  anomaly_errors?: number;
+  anomaly_warnings?: number;
+};
+
+type IntegrityResults = {
+  error?: string;
+  overall_valid?: boolean | null;
+  summary?: IntegritySummary;
+  cash?: Record<string, IntegrityData>;
+  positions?: Record<string, IntegrityData>;
+  snapshots?: Record<string, IntegrityData>;
+  anomalies?: IntegrityData;
+  completeness?: IntegrityData;
+};
+
+function CashResultCard({ portfolio, data, colors }: { portfolio: string; data: IntegrityData | null | undefined; colors: ThemePalette }) {
   const { t } = useTranslation();
   if (!data) return null;
   const comp = data.components ?? {};
@@ -100,7 +147,7 @@ function CashResultCard({ portfolio, data, colors }: { portfolio: string; data: 
         <DetailLine
           label={t('integrity.discrepancy')}
           value={data.discrepancy ?? "0.000"}
-          valueColor={parseFloat(data.discrepancy ?? "0") > 0.01 ? colors.danger : colors.success}
+          valueColor={parseFloat(String(data.discrepancy ?? "0")) > 0.01 ? colors.danger : colors.success}
           colors={colors}
         />
         <DetailLine label={t('integrity.tolerance')} value={data.tolerance ?? "0.01"} colors={colors} muted />
@@ -121,7 +168,7 @@ function CashResultCard({ portfolio, data, colors }: { portfolio: string; data: 
 
 // ── Position Result Section ─────────────────────────────────────────
 
-function PositionSection({ portfolio, data, colors }: { portfolio: string; data: any; colors: ThemePalette }) {
+function PositionSection({ portfolio, data, colors }: { portfolio: string; data: IntegrityData | null | undefined; colors: ThemePalette }) {
   const { t } = useTranslation();
   if (!data) return null;
   const mismatches = data.mismatches ?? [];
@@ -131,14 +178,14 @@ function PositionSection({ portfolio, data, colors }: { portfolio: string; data:
         <Text style={[s.cardTitle, { color: colors.textPrimary }]}>{t('integrity.positionsTitle', { pf: portfolio })}</Text>
         <StatusBadge status={data.is_valid} colors={colors} />
       </View>
-      <DetailLine label={t('integrity.totalSymbols')} value={data.total_symbols ?? 0} colors={colors} />
-      <DetailLine label={t('integrity.matched')} value={data.matched ?? 0} colors={colors} />
+      <DetailLine label={t('integrity.totalSymbols')} value={String(data.total_symbols ?? 0)} colors={colors} />
+      <DetailLine label={t('integrity.matched')} value={String(data.matched ?? 0)} colors={colors} />
       <DetailLine label={t('integrity.mismatches')} value={mismatches.length} valueColor={mismatches.length > 0 ? colors.danger : colors.success} colors={colors} />
-      {mismatches.map((m: any, i: number) => (
+      {mismatches.map((m: Record<string, unknown>, i: number) => (
         <View key={i} style={[s.issueRow, { borderTopColor: colors.borderColor }]}>
           <SeverityIcon severity="error" colors={colors} />
           <Text style={[s.issueText, { color: colors.textPrimary }]}>
-            {m.symbol}: Agg={m.agg_shares} vs WAC={m.wac_shares} (diff={m.share_diff})
+            {String(m.symbol)}: Agg={String(m.agg_shares)} vs WAC={String(m.wac_shares)} (diff={String(m.share_diff)})
           </Text>
         </View>
       ))}
@@ -148,7 +195,7 @@ function PositionSection({ portfolio, data, colors }: { portfolio: string; data:
 
 // ── Snapshot Result Section ─────────────────────────────────────────
 
-function SnapshotSection({ portfolio, data, colors }: { portfolio: string; data: any; colors: ThemePalette }) {
+function SnapshotSection({ portfolio, data, colors }: { portfolio: string; data: IntegrityData | null | undefined; colors: ThemePalette }) {
   const { t } = useTranslation();
   if (!data) return null;
   return (
@@ -175,7 +222,7 @@ function SnapshotSection({ portfolio, data, colors }: { portfolio: string; data:
 
 // ── Anomalies Section ───────────────────────────────────────────────
 
-function AnomaliesSection({ data, colors }: { data: any; colors: ThemePalette }) {
+function AnomaliesSection({ data, colors }: { data: IntegrityData | null | undefined; colors: ThemePalette }) {
   const { t } = useTranslation();
   if (!data) return null;
   const anomalies = data.anomalies ?? [];
@@ -188,12 +235,12 @@ function AnomaliesSection({ data, colors }: { data: any; colors: ThemePalette })
       <DetailLine label={t('integrity.total')} value={data.count ?? 0} colors={colors} />
       <DetailLine label={t('integrity.errors')} value={data.errors ?? 0} valueColor={(data.errors ?? 0) > 0 ? colors.danger : colors.success} colors={colors} />
       <DetailLine label={t('integrity.warnings')} value={data.warnings ?? 0} valueColor={(data.warnings ?? 0) > 0 ? "#f59e0b" : colors.success} colors={colors} />
-      {anomalies.slice(0, 20).map((a: any, i: number) => (
+      {anomalies.slice(0, 20).map((a: Record<string, unknown>, i: number) => (
         <View key={i} style={[s.issueRow, { borderTopColor: colors.borderColor }]}>
-          <SeverityIcon severity={a.severity} colors={colors} />
+          <SeverityIcon severity={typeof a.severity === "string" ? a.severity : "info"} colors={colors} />
           <View style={{ flex: 1 }}>
-            <Text style={[s.issueText, { color: colors.textPrimary }]}>{a.detail}</Text>
-            <Text style={{ color: colors.textMuted, fontSize: 11 }}>ID: {a.txn_id} · {a.type}</Text>
+            <Text style={[s.issueText, { color: colors.textPrimary }]}>{String(a.detail ?? "")}</Text>
+            <Text style={{ color: colors.textMuted, fontSize: 11 }}>ID: {String(a.txn_id ?? "")} · {String(a.type ?? "")}</Text>
           </View>
         </View>
       ))}
@@ -208,7 +255,7 @@ function AnomaliesSection({ data, colors }: { data: any; colors: ThemePalette })
 
 // ── Completeness Section ────────────────────────────────────────────
 
-function CompletenessSection({ data, colors }: { data: any; colors: ThemePalette }) {
+function CompletenessSection({ data, colors }: { data: IntegrityData | null | undefined; colors: ThemePalette }) {
   const { t } = useTranslation();
   if (!data) return null;
   const issues = data.issues ?? [];
@@ -221,10 +268,10 @@ function CompletenessSection({ data, colors }: { data: any; colors: ThemePalette
       <DetailLine label={t('integrity.portfoliosFound')} value={data.portfolios_found ?? 0} colors={colors} />
       <DetailLine label={t('integrity.orphanSymbols')} value={data.orphan_symbols ?? 0} valueColor={(data.orphan_symbols ?? 0) > 0 ? "#f59e0b" : colors.success} colors={colors} />
       <DetailLine label={t('integrity.zeroPriceSymbols')} value={data.zero_price_symbols ?? 0} valueColor={(data.zero_price_symbols ?? 0) > 0 ? "#f59e0b" : colors.success} colors={colors} />
-      {issues.map((issue: any, i: number) => (
+      {issues.map((issue: Record<string, unknown>, i: number) => (
         <View key={i} style={[s.issueRow, { borderTopColor: colors.borderColor }]}>
-          <SeverityIcon severity={issue.severity} colors={colors} />
-          <Text style={[s.issueText, { color: colors.textPrimary }]}>{issue.detail}</Text>
+          <SeverityIcon severity={typeof issue.severity === "string" ? issue.severity : "info"} colors={colors} />
+          <Text style={[s.issueText, { color: colors.textPrimary }]}>{String(issue.detail ?? "")}</Text>
         </View>
       ))}
     </View>
@@ -240,8 +287,9 @@ export default function IntegrityScreen() {
   const { colors } = useThemeStore();
   const ss = useScreenStyles();
   const { isDesktop } = useResponsive();
-  const [results, setResults] = useState<any>(null);
-  const [cashResults, setCashResults] = useState<Record<string, any>>({});
+  const [results, setResults] = useState<IntegrityResults | null>(null);
+  const [cashResults, setCashResults] = useState<Record<string, IntegrityData>>({});
+  // Note: cashCheckMutation may return CashIntegrityResult; cast at assignment site.
   const [tab, setTab] = useState<IntegrityTab>("overview");
 
   // ── Reconciliation state ──────────────────────────────────────────
@@ -249,19 +297,19 @@ export default function IntegrityScreen() {
   const [reconPortfolio, setReconPortfolio] = useState("KFH");
   const [reconSummary, setReconSummary] = useState<ReconciliationSummary | null>(null);
   const [reconLoading, setReconLoading] = useState(false);
-  const queryClient = useQueryClient();
+  const _queryClient = useQueryClient();
   const reconMutation = useApplyReconciliation(reconPortfolio);
 
   const checkMutation = useMutation({
     mutationFn: integrityCheck,
-    onSuccess: (data) => setResults(data),
-    onError: (err: any) => setResults({ error: err?.message ?? t('app.error') }),
+    onSuccess: (data) => setResults(data as IntegrityResults),
+    onError: (err: unknown) => setResults({ error: (err instanceof Error ? err.message : null) ?? t('app.error') }),
   });
 
   const cashCheckMutation = useMutation({
     mutationFn: checkCashIntegrity,
     onSuccess: (data, portfolio) => {
-      setCashResults((prev) => ({ ...prev, [portfolio]: data }));
+      setCashResults((prev) => ({ ...prev, [portfolio]: data as unknown as IntegrityData }));
     },
   });
 

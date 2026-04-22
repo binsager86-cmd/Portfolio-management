@@ -197,6 +197,10 @@ function PortfolioAnalysisScreen() {
   if (holdingsError) return <ErrorScreen message={(holdingsErr as Error)?.message ?? t('portfolioAnalysis.failedToLoad')} onRetry={() => refetchHoldings()} />;
 
   const resp = holdingsResp;
+  const totalsData = resp?.totals;
+  const totalMarketValue = totalsData?.total_market_value_kwd ?? 0;
+  const totalCost = totalsData?.total_cost_kwd ?? 0;
+  const totalUnrealized = totalsData?.total_unrealized_pnl_kwd ?? 0;
 
   // ── Render ──────────────────────────────────────────────────────
 
@@ -232,9 +236,9 @@ function PortfolioAnalysisScreen() {
           </Text>
           <View style={s.kpiGrid}>
             <KpiCard label={t('portfolioAnalysis.totalPortfolioValue')} value={formatCurrency(_totalPortfolioValueKwd, "KWD")} colors={colors} />
-            <KpiCard label={t('portfolioAnalysis.totalMarketValue')} value={formatCurrency(resp.totals.total_market_value_kwd, "KWD")} colors={colors} />
-            <KpiCard label={t('portfolioAnalysis.totalCost')} value={formatCurrency(resp.totals.total_cost_kwd, "KWD")} colors={colors} />
-            <KpiCard label={t('portfolioAnalysis.unrealizedGainLoss')} value={formatCurrency(resp.totals.total_unrealized_pnl_kwd, "KWD")} color={resp.totals.total_unrealized_pnl_kwd >= 0 ? colors.success : colors.danger} colors={colors} />
+            <KpiCard label={t('portfolioAnalysis.totalMarketValue')} value={formatCurrency(totalMarketValue, "KWD")} colors={colors} />
+            <KpiCard label={t('portfolioAnalysis.totalCost')} value={formatCurrency(totalCost, "KWD")} colors={colors} />
+            <KpiCard label={t('portfolioAnalysis.unrealizedGainLoss')} value={formatCurrency(totalUnrealized, "KWD")} color={totalUnrealized >= 0 ? colors.success : colors.danger} colors={colors} />
             <KpiCard label={t('portfolioAnalysis.stocksHeld')} value={sortedHoldings.length} colors={colors} />
           </View>
         </View>
@@ -271,8 +275,9 @@ function PortfolioAnalysisScreen() {
                 a.click();
                 document.body.removeChild(a);
                 URL.revokeObjectURL(url);
-              } catch (e: any) {
-                Alert.alert(t('portfolioAnalysis.exportFailed'), e?.message ?? t('app.error'));
+              } catch (e: unknown) {
+                const message = e instanceof Error ? e.message : t('app.error');
+                Alert.alert(t('portfolioAnalysis.exportFailed'), message);
               }
             }}
             style={{ flexDirection: "row", alignItems: "center", backgroundColor: "#065f46", borderColor: "#10b981", borderWidth: 1.5, paddingHorizontal: 14, paddingVertical: 7, borderRadius: 8 }}

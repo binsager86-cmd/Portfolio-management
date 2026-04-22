@@ -115,7 +115,11 @@ export default function DividendsScreen() {
       queryClient.invalidateQueries({ queryKey: ["dividends-by-stock"] });
       queryClient.invalidateQueries({ queryKey: ["bonus-shares"] });
       const msg = t("dividends.recordDeleted");
-      Platform.OS === "web" ? window.alert(msg) : Alert.alert(t("dividends.success"), msg);
+      if (Platform.OS === "web") {
+        window.alert(msg);
+      } else {
+        Alert.alert(t("dividends.success"), msg);
+      }
     },
     onError: (err) => showErrorAlert(t("dividends.error"), err, t("dividends.deleteFailed")),
   });

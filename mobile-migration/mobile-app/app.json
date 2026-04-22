@@ -34,8 +34,22 @@
     "plugins": [
       "expo-router",
       "expo-secure-store",
-      "expo-localization"
+      "expo-localization",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/icon.png",
+          "color": "#8a2be2",
+          "defaultChannel": "default"
+        }
+      ]
     ],
+    "notification": {
+      "icon": "./assets/images/icon.png",
+      "color": "#8a2be2",
+      "androidMode": "default",
+      "androidCollapsedTitle": "Portfolio Tracker"
+    },
     "experiments": {
       "typedRoutes": true
     },

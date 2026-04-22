@@ -57,12 +57,11 @@ export async function uploadFinancialStatement(
 
   if (typeof file === "string") {
     // Native: pass URI object
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     formData.append("file", {
       uri: file,
       name: fileName,
       type: mimeType,
-    } as any);
+    } as unknown as Blob);
   } else {
     // Web: File or Blob already created by caller
     formData.append("file", file, fileName);
@@ -127,12 +126,11 @@ export async function validateFinancialStatement(
   const formData = new FormData();
 
   if (typeof file === "string") {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     formData.append("file", {
       uri: file,
       name: fileName,
       type: mimeType,
-    } as any);
+    } as unknown as Blob);
   } else {
     formData.append("file", file, fileName);
   }
@@ -160,12 +158,11 @@ export async function verifyStatementPlacement(
   const formData = new FormData();
 
   if (typeof file === "string") {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     formData.append("file", {
       uri: file,
       name: fileName,
       type: mimeType,
-    } as any);
+    } as unknown as Blob);
   } else {
     formData.append("file", file, fileName);
   }

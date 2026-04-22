@@ -7,7 +7,7 @@
  *   Desktop : > 1024 px
  *
  * Also exposes helpers for responsive padding, font sizes, grid columns,
- * max-content width, sidebar visibility, and touch-target sizing.
+ * max-content width, navigation mode, and touch-target sizing.
  */
 
 import { Platform, useWindowDimensions } from "react-native";
@@ -74,10 +74,10 @@ export interface ResponsiveInfo {
   /** Max content width (for centered layouts on desktop) */
   maxContentWidth: number;
 
-  /** Whether to show the persistent sidebar (tablet/desktop on all platforms) */
+  /** Whether to show the persistent sidebar (web tablet/desktop only) */
   showSidebar: boolean;
 
-  /** Whether to show a hamburger button (mobile + tablet web) */
+  /** Whether to show a hamburger button (all native + web phone) */
   showHamburger: boolean;
 
   /** Minimum touch target in px (44 on phone/tablet) */
@@ -105,10 +105,10 @@ export function useResponsive(): ResponsiveInfo {
   const isTablet = bp === "tablet";
   const isDesktop = bp === "desktop";
 
-  // Sidebar: tablet/desktop on all platforms
-  const showSidebar = isDesktop || isTablet;
+  // Keep native platforms in drawer mode for consistent mobile app navigation.
+  const showSidebar = Platform.OS === "web" && (isDesktop || isTablet);
 
-  // Hamburger: shown whenever there's no sidebar (native phone/tablet, or narrow web)
+  // Hamburger: shown whenever there's no persistent sidebar.
   const showHamburger = !showSidebar;
 
   return {

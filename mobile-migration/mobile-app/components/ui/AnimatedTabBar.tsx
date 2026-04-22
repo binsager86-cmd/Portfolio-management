@@ -9,6 +9,7 @@
  */
 
 import FontAwesome from "@expo/vector-icons/FontAwesome";
+import type { ThemePalette } from "@/constants/theme";
 import type { BottomTabBarProps } from "@react-navigation/bottom-tabs";
 import React, { useCallback, useEffect } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
@@ -154,7 +155,7 @@ export function AnimatedTabBar({
   navigation,
   colors,
   insetBottom,
-}: BottomTabBarProps & { colors: any; insetBottom: number }) {
+}: BottomTabBarProps & { colors: ThemePalette; insetBottom: number }) {
   return (
     <View
       style={[
@@ -170,7 +171,7 @@ export function AnimatedTabBar({
       {state.routes.map((route, index) => {
         const { options } = descriptors[route.key];
         // Skip hidden tabs
-        if ((options as any).href === null) return null;
+        if ((options as { href?: string | null }).href === null) return null;
 
         const label =
           typeof options.tabBarLabel === "string"

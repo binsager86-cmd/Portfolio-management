@@ -16,6 +16,7 @@ import {
     StyleSheet,
     Text,
     View,
+    type ViewStyle,
 } from "react-native";
 
 import type { ThemePalette } from "@/constants/theme";
@@ -28,13 +29,26 @@ import { useThemeStore } from "@/services/themeStore";
 
 const IMPORT_MODES = ["merge", "replace"] as const;
 
+type SheetCounts = { new?: number; updated?: number; imported?: number; skipped?: number };
+type ImportResultData = {
+  imported?: number;
+  skipped?: number;
+  errors?: { sheet?: string; row?: number | string; error?: string }[];
+  sheets?: {
+    stocks?: SheetCounts;
+    transactions?: SheetCounts;
+    cash_deposits?: SheetCounts;
+    portfolio_snapshots?: SheetCounts;
+  };
+};
+
 export default function BackupRestoreScreen() {
   const { colors } = useThemeStore();
   const ss = useScreenStyles();
   const { isDesktop } = useResponsive();
   const { t } = useTranslation();
   const isDark = colors.mode === "dark";
-  const [importResult, setImportResult] = useState<any | null>(null);
+  const [importResult, setImportResult] = useState<ImportResultData | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
   const [importMode, setImportMode] = useState<"merge" | "replace">("merge");
   const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
@@ -67,10 +81,11 @@ export default function BackupRestoreScreen() {
       setPendingFile(null);
       setSelectedFileName(null);
     },
-    onError: (err: any) => {
+    onError: (err: unknown) => {
       setImportResult(null);
       let msg: string;
-      if (!err?.response) {
+      const hasResponse = !!(err && typeof err === "object" && "response" in err && (err as { response?: unknown }).response);
+      if (!hasResponse) {
         msg = t('backup.cannotReachServer');
       } else {
         msg = extractErrorMessage(err, "Import failed.");
@@ -84,8 +99,9 @@ export default function BackupRestoreScreen() {
       const input = document.createElement("input");
       input.type = "file";
       input.accept = ".xlsx,.xls";
-      input.onchange = (e: any) => {
-        const file = e.target.files?.[0];
+      input.onchange = (e: Event) => {
+        const target = e.target as HTMLInputElement | null;
+        const file = target?.files?.[0];
         if (file) {
           const formData = new FormData();
           formData.append("file", file);
@@ -195,7 +211,7 @@ export default function BackupRestoreScreen() {
               backgroundColor: colors.bgPrimary,
               borderWidth: 1,
               borderColor: colors.borderColor,
-              borderStyle: "dashed" as any,
+              borderStyle: "dashed" as ViewStyle["borderStyle"],
               opacity: pressed ? 0.6 : 1,
               marginBottom: 8,
             },
@@ -261,7 +277,7 @@ function ImportSuccessCard({
   colors,
   onDismiss,
 }: {
-  result: any;
+  result: ImportResultData;
   colors: ThemePalette;
   onDismiss: () => void;
 }) {
@@ -358,7 +374,7 @@ function ImportSuccessCard({
                 borderRadius: 8,
               }}
             >
-              <FontAwesome name={row.icon as any} size={14} color={colors.textMuted} />
+              <FontAwesome name={row.icon as React.ComponentProps<typeof FontAwesome>["name"]} size={14} color={colors.textMuted} />
               <Text style={{ fontSize: 14, fontWeight: "600", color: colors.textPrimary, minWidth: 110 }}>
                 {row.label}
               </Text>
@@ -374,7 +390,7 @@ function ImportSuccessCard({
           <Text style={{ fontSize: 13, fontWeight: "600", color: colors.danger, marginBottom: 6 }}>
             Row Errors ({errorCount})
           </Text>
-          {result.errors.slice(0, 10).map((e: any, i: number) => (
+          {result.errors!.slice(0, 10).map((e, i: number) => (
             <Text key={i} style={{ fontSize: 12, color: colors.textSecondary, marginBottom: 2, lineHeight: 18 }}>
               {e.sheet ? `${e.sheet} · ` : ""}Row {e.row ?? "?"}: {e.error ?? JSON.stringify(e)}
             </Text>

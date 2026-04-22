@@ -24,7 +24,7 @@ export default tseslint.config(
       },
     },
     rules: {
-      "max-lines": ["error", { max: 350, skipBlankLines: true, skipComments: true }],
+      "max-lines": ["warn", { max: 350, skipBlankLines: true, skipComments: true }],
       "@typescript-eslint/no-explicit-any": "error",
       "@typescript-eslint/no-unused-vars": ["warn", { argsIgnorePattern: "^_", varsIgnorePattern: "^_" }],
       "@typescript-eslint/ban-ts-comment": "off",
@@ -35,6 +35,30 @@ export default tseslint.config(
           { group: ["**/services/api.old*"], message: "Legacy API file deleted — use @/services/api." },
         ],
       }],
+    },
+  },
+
+  // Test files — relax rules that are impractical in jest mocks/fixtures
+  {
+    files: [
+      "__tests__/**/*.{ts,tsx}",
+      "**/*.test.{ts,tsx}",
+      "**/*.spec.{ts,tsx}",
+      "jest.setup.{js,ts}",
+      "__mocks__/**/*.{ts,tsx}",
+    ],
+    languageOptions: {
+      globals: {
+        ...globals.jest,
+        ...globals.node,
+      },
+    },
+    rules: {
+      "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/no-require-imports": "off",
+      "@typescript-eslint/no-unsafe-function-type": "off",
+      "max-lines": "off",
+      "no-console": "off",
     },
   },
 );

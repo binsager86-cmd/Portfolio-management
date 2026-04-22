@@ -555,7 +555,7 @@ export function GrowthPanel({ stockId, stockSymbol, colors, isDesktop }: PanelWi
                   return (
                     <Pressable
                       key={label}
-                      onPress={() => { setSelectedLabel(label); if (viewMode === "list") setViewMode("bar"); }}
+                      onPress={() => { setSelectedLabel(label); if (viewMode === "line") setViewMode("bar"); }}
                       style={({ pressed }) => ({
                         flexDirection: "row", alignItems: "center",
                         paddingVertical: 8, paddingHorizontal: 2,

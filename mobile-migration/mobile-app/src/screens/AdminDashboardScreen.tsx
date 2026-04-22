@@ -13,12 +13,15 @@
  */
 
 import { useAdminActivities, useAdminCreateUser, useAdminDeleteUser, useAdminUpdatePassword, useAdminUpdateUsername, useAdminUsers } from "@/hooks/queries";
+import type { FontPreset } from "@/hooks/useResponsive";
 import { useResponsive } from "@/hooks/useResponsive";
 import { formatCurrency } from "@/lib/currency";
 import type { AdminActivity, AdminUser } from "@/services/api";
 import { useAuthStore } from "@/services/authStore";
 import { useThemeStore } from "@/services/themeStore";
+import type { ThemePalette } from "@/constants/theme";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
+import type { TFunction } from "i18next";
 import React, { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -31,8 +34,23 @@ import {
     StyleSheet,
     Text,
     TextInput,
-    View
+    View,
+    type ViewStyle
 } from "react-native";
+
+type AppColors = ThemePalette;
+type AppFonts = FontPreset;
+type TFn = TFunction;
+type IconName = React.ComponentProps<typeof FontAwesome>["name"];
+function errMsg(e: unknown, fallback: string): string {
+  if (e && typeof e === "object") {
+    const anyErr = e as { response?: { data?: { detail?: unknown } }; message?: unknown };
+    const detail = anyErr.response?.data?.detail;
+    if (typeof detail === "string") return detail;
+    if (typeof anyErr.message === "string") return anyErr.message;
+  }
+  return fallback;
+}
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
@@ -56,7 +74,7 @@ function formatDateTime(epoch: number | null): string {
   });
 }
 
-function timeAgo(epoch: number | null, t: (key: string, opts?: any) => string): string {
+function timeAgo(epoch: number | null, t: TFn): string {
   if (!epoch) return t("adminPanel.never");
   const now = Date.now() / 1000;
   const diff = now - epoch;
@@ -101,7 +119,7 @@ function SummaryCard({
   icon, iconColor, title, value, subtitle, onPress, active, colors, fonts,
 }: {
   icon: string; iconColor: string; title: string; value: string | number;
-  subtitle?: string; onPress?: () => void; active?: boolean; colors: any; fonts: any;
+  subtitle?: string; onPress?: () => void; active?: boolean; colors: AppColors; fonts: AppFonts;
 }) {
   return (
     <Pressable
@@ -117,7 +135,7 @@ function SummaryCard({
       ]}
     >
       <View style={[st.summaryIconWrap, { backgroundColor: iconColor + "18" }]}>
-        <FontAwesome name={icon as any} size={22} color={iconColor} />
+        <FontAwesome name={icon as IconName} size={22} color={iconColor} />
       </View>
       <Text style={[st.summaryLabel, { color: colors.textMuted, fontSize: fonts.caption }]}>
         {title}
@@ -140,7 +158,7 @@ function TableHeader({
   columns, colors, fonts,
 }: {
   columns: { label: string; flex: number; align?: "left" | "center" | "right" }[];
-  colors: any; fonts: any;
+  colors: AppColors; fonts: AppFonts;
 }) {
   return (
     <View style={[st.tableHeaderRow, { borderBottomColor: colors.borderColor }]}>
@@ -165,8 +183,8 @@ function TableHeader({
 function UserTableRow({
   user, colors, fonts, isPhone, selected, onPress, t,
 }: {
-  user: AdminUser; colors: any; fonts: any; isPhone: boolean;
-  selected: boolean; onPress: () => void; t: (key: string, opts?: any) => string;
+  user: AdminUser; colors: AppColors; fonts: AppFonts; isPhone: boolean;
+  selected: boolean; onPress: () => void; t: TFn;
 }) {
   const growthColor = user.growth_value >= 0 ? "#27ae60" : "#e74c3c";
   const growthSign = user.growth_value >= 0 ? "+" : "";
@@ -263,8 +281,8 @@ function UserTableRow({
 function ActivityTableRow({
   activity, colors, fonts, isPhone, t,
 }: {
-  activity: AdminActivity; colors: any; fonts: any; isPhone: boolean;
-  t: (key: string, opts?: any) => string;
+  activity: AdminActivity; colors: AppColors; fonts: AppFonts; isPhone: boolean;
+  t: TFn;
 }) {
   const cfg = getTxnConfig(activity.txn_type, t);
 
@@ -274,7 +292,7 @@ function ActivityTableRow({
         <View style={st.actCardRow}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flex: 1 }}>
             <View style={[st.txnIconBg, { backgroundColor: cfg.color + "18" }]}>
-              <FontAwesome name={cfg.icon as any} size={12} color={cfg.color} />
+              <FontAwesome name={cfg.icon as IconName} size={12} color={cfg.color} />
             </View>
             <View style={{ flex: 1 }}>
               <Text style={[st.actStock, { color: colors.textPrimary, fontSize: fonts.body }]}>
@@ -313,7 +331,7 @@ function ActivityTableRow({
       </Text>
       <View style={[st.tableCell, { flex: 0.8, flexDirection: "row", alignItems: "center", gap: 6 }]}>
         <View style={[st.txnBadge, { backgroundColor: cfg.color + "18" }]}>
-          <FontAwesome name={cfg.icon as any} size={10} color={cfg.color} />
+          <FontAwesome name={cfg.icon as IconName} size={10} color={cfg.color} />
           <Text style={[st.txnBadgeText, { color: cfg.color }]}>{cfg.label}</Text>
         </View>
       </View>
@@ -983,8 +1001,8 @@ function AdminDashboardScreen() {
                       name: newName || undefined,
                     });
                     setShowAddModal(false);
-                  } catch (e: any) {
-                    setActionError(e?.response?.data?.detail || e.message || t("adminPanel.failedToCreateUser"));
+                  } catch (e: unknown) {
+                    setActionError(errMsg(e, t("adminPanel.failedToCreateUser")));
                   }
                 }}
                 disabled={createUser.isPending}
@@ -1047,8 +1065,8 @@ function AdminDashboardScreen() {
                     }
                     setEditField(null);
                     setEditUser(null);
-                  } catch (e: any) {
-                    setActionError(e?.response?.data?.detail || e.message || t("adminPanel.operationFailed"));
+                  } catch (e: unknown) {
+                    setActionError(errMsg(e, t("adminPanel.operationFailed")));
                   }
                 }}
                 disabled={updateUsername.isPending || updatePassword.isPending}
@@ -1098,8 +1116,8 @@ function AdminDashboardScreen() {
                   try {
                     await deleteUser.mutateAsync(deleteTarget!.id);
                     setDeleteTarget(null);
-                  } catch (e: any) {
-                    setActionError(e?.response?.data?.detail || e.message || t("adminPanel.failedToDeleteUser"));
+                  } catch (e: unknown) {
+                    setActionError(errMsg(e, t("adminPanel.failedToDeleteUser")));
                   }
                 }}
                 disabled={deleteUser.isPending}
@@ -1146,7 +1164,7 @@ const st = StyleSheet.create({
     padding: 18,
     gap: 6,
     ...Platform.select({
-      web: { cursor: "pointer", transition: "transform 0.15s ease, border-color 0.15s ease" } as any,
+      web: ({ cursor: "pointer", transition: "transform 0.15s ease, border-color 0.15s ease" } as unknown as ViewStyle),
     }),
   },
   summaryIconWrap: {
@@ -1170,7 +1188,7 @@ const st = StyleSheet.create({
   badgeText: { color: "#fff", fontWeight: "700", fontSize: 12 },
   filterChip: {
     borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5,
-    ...Platform.select({ web: { cursor: "pointer" } as any }),
+    ...Platform.select({ web: ({ cursor: "pointer" } as unknown as ViewStyle) }),
   },
 
   filterBar: {
@@ -1193,7 +1211,7 @@ const st = StyleSheet.create({
   typeChip: {
     borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6,
     borderWidth: 1,
-    ...Platform.select({ web: { cursor: "pointer" } as any }),
+    ...Platform.select({ web: ({ cursor: "pointer" } as unknown as ViewStyle) }),
   },
 
   dailyBar: { paddingHorizontal: 16, paddingBottom: 12, borderBottomWidth: StyleSheet.hairlineWidth },
@@ -1208,7 +1226,7 @@ const st = StyleSheet.create({
     flexDirection: "row", alignItems: "center",
     paddingHorizontal: 16, paddingVertical: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    ...Platform.select({ web: { cursor: "pointer" } as any }),
+    ...Platform.select({ web: ({ cursor: "pointer" } as unknown as ViewStyle) }),
   },
   tableCell: { paddingRight: 8 },
 
@@ -1258,7 +1276,7 @@ const st = StyleSheet.create({
   actionBtn: {
     width: 34, height: 34, borderRadius: 8,
     justifyContent: "center", alignItems: "center",
-    ...Platform.select({ web: { cursor: "pointer" } as any }),
+    ...Platform.select({ web: ({ cursor: "pointer" } as unknown as ViewStyle) }),
   },
 
   // Modals
@@ -1269,7 +1287,7 @@ const st = StyleSheet.create({
   modalCard: {
     borderRadius: 16, padding: 24,
     width: "90%", maxWidth: 420,
-    ...Platform.select({ web: { boxShadow: "0 8px 32px rgba(0,0,0,0.3)" } as any }),
+    ...Platform.select({ web: ({ boxShadow: "0 8px 32px rgba(0,0,0,0.3)" } as unknown as ViewStyle) }),
   },
   modalTitle: { fontWeight: "700", marginBottom: 12 },
   modalInput: {
@@ -1282,6 +1300,6 @@ const st = StyleSheet.create({
   modalBtn: {
     borderRadius: 10, paddingVertical: 10, paddingHorizontal: 20,
     alignItems: "center", justifyContent: "center",
-    ...Platform.select({ web: { cursor: "pointer" } as any }),
+    ...Platform.select({ web: ({ cursor: "pointer" } as unknown as ViewStyle) }),
   },
 });

@@ -13,7 +13,7 @@ type WebHoverProps = Platform["OS"] extends "web"
   ? { onMouseEnter: () => void; onMouseLeave: () => void }
   : Record<string, never>;
 
-export function useWebHover(): [boolean, Record<string, any>] {
+export function useWebHover(): [boolean, Record<string, unknown>] {
   const [hovered, setHovered] = useState(false);
 
   const onMouseEnter = useCallback(() => setHovered(true), []);

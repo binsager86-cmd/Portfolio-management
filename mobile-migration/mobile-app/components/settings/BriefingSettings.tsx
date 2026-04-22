@@ -18,6 +18,7 @@ import {
     type BriefingPrefs,
 } from "@/services/briefings";
 import { useThemeStore } from "@/services/themeStore";
+import type { ThemePalette } from "@/constants/theme";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import React, { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -298,7 +299,7 @@ function SettingsRow({
   label,
   right,
 }: {
-  colors: any;
+  colors: ThemePalette;
   isRTL: boolean;
   label: string;
   right: React.ReactNode;

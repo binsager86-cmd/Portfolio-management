@@ -36,6 +36,9 @@ export const portfolioKeys = {
   riskMetrics: (rfRate?: number | null) => ["risk-metrics", rfRate] as const,
 } as const;
 
+const DASHBOARD_STALE_TIME_MS = 45_000;
+const DASHBOARD_GC_TIME_MS = 5 * 60_000;
+
 // ── Hooks ───────────────────────────────────────────────────────────
 
 /** Portfolio overview — cached 30 s, refetches on mount & focus. */
@@ -43,7 +46,8 @@ export function usePortfolioOverview(userId?: number) {
   return useQuery<OverviewData>({
     queryKey: portfolioKeys.overview(userId),
     queryFn: getOverview,
-    staleTime: 30_000,
+    staleTime: DASHBOARD_STALE_TIME_MS,
+    gcTime: DASHBOARD_GC_TIME_MS,
     refetchOnMount: true,
     refetchOnWindowFocus: true,
     retry: 2,
@@ -56,7 +60,8 @@ export function useHoldings(portfolio?: string) {
   return useQuery<HoldingsResponse>({
     queryKey: portfolioKeys.holdings(portfolio),
     queryFn: () => getHoldings(portfolio),
-    staleTime: 30_000,
+    staleTime: DASHBOARD_STALE_TIME_MS,
+    gcTime: DASHBOARD_GC_TIME_MS,
     refetchOnMount: true,
     refetchOnWindowFocus: true,
     retry: 2,
@@ -106,16 +111,22 @@ export function useOverviewDependentQueries(overviewLoaded: boolean) {
         queryKey: portfolioKeys.performance(undefined, "all"),
         queryFn: () => getPerformance({ period: "all" }),
         enabled: overviewLoaded,
+        staleTime: DASHBOARD_STALE_TIME_MS,
+        gcTime: DASHBOARD_GC_TIME_MS,
       },
       {
         queryKey: portfolioKeys.snapshotsChart(),
         queryFn: () => getSnapshots(),
         enabled: overviewLoaded,
+        staleTime: DASHBOARD_STALE_TIME_MS,
+        gcTime: DASHBOARD_GC_TIME_MS,
       },
       {
         queryKey: portfolioKeys.realizedProfit(),
         queryFn: () => getRealizedProfit(),
         enabled: overviewLoaded,
+        staleTime: DASHBOARD_STALE_TIME_MS,
+        gcTime: DASHBOARD_GC_TIME_MS,
       },
     ],
   });

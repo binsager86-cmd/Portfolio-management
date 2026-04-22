@@ -121,7 +121,7 @@ async function authRequest(
     throw new Error(message);
   }
 
-  const data = (json as any)?.data ?? json;
+  const data = (json as { data?: unknown })?.data ?? json;
   return data as LoginResponse;
 }
 
@@ -197,7 +197,7 @@ export const useAuthStore = create<AuthState>((set) => ({
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ refresh_token: storedRefresh }),
               });
-              if (!refreshResp.ok) throw new Error(`Refresh failed (${refreshResp.status})`);
+              if (!refreshResp.ok) throw new Error(`Refresh failed (${refreshResp.status})`, { cause: err });
               const refreshJson = await refreshResp.json();
               const newAccess: string = refreshJson.access_token;
               const newRefresh: string | undefined = refreshJson.refresh_token;
@@ -210,7 +210,7 @@ export const useAuthStore = create<AuthState>((set) => ({
               const meResp = await fetch(`${API_BASE_URL}/api/v1/auth/me`, {
                 headers: { Authorization: `Bearer ${newAccess}` },
               });
-              if (!meResp.ok) throw new Error(`New token invalid (${meResp.status})`);
+              if (!meResp.ok) throw new Error(`New token invalid (${meResp.status})`, { cause: err });
               const meJson = await meResp.json();
               const me = meJson.data ?? meJson;
               if (__DEV__) console.log("[hydrate] Refresh succeeded, user:", me.username);
@@ -367,7 +367,7 @@ export const useAuthStore = create<AuthState>((set) => ({
           `Google sign-in failed (${googleResp.status})`;
         throw new Error(message);
       }
-      const normalized = ((googleJson as any)?.data ?? googleJson) as LoginResponse;
+      const normalized = ((googleJson as { data?: unknown })?.data ?? googleJson) as LoginResponse;
       if (__DEV__) console.log("[AuthStore] ✅ Backend returned tokens");
       await persistAndSetSession(normalized, set);
       if (__DEV__) console.log("[AuthStore] ✅ Session persisted, user is now authenticated");

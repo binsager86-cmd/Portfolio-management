@@ -20,6 +20,7 @@ import {
     TextInput,
     View,
 } from "react-native";
+import type { TextStyle } from "react-native";
 
 // ── Column types ────────────────────────────────────────────────────
 
@@ -314,7 +315,7 @@ function EditableCompanyCell({
               flex: 1, color: colors.textPrimary, fontWeight: "700",
               borderBottomWidth: 1, borderBottomColor: colors.accentPrimary,
               paddingVertical: 2, fontSize: 12,
-              ...(Platform.OS === "web" ? { outlineStyle: "none" as any } : {}),
+              ...(Platform.OS === "web" ? ({ outlineStyle: "none" } as unknown as TextStyle) : {}),
             },
           ]}
           returnKeyType="done"
@@ -331,7 +332,7 @@ function EditableCompanyCell({
   }
 
   const webProps = Platform.OS === "web"
-    ? { onDoubleClick: handleDoubleClick } as any
+    ? ({ onDoubleClick: handleDoubleClick } as Record<string, unknown>)
     : {};
 
   return (

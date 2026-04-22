@@ -83,11 +83,11 @@ export function useDeleteTransaction() {
       });
 
       for (const [key, data] of lists) {
-        if (!data?.results) continue;
+        if (!data?.transactions) continue;
         qc.setQueryData<TransactionListResponse>(key, {
           ...data,
           count: data.count - 1,
-          results: data.results.filter((t) => t.id !== id),
+          transactions: data.transactions.filter((t) => t.id !== id),
         });
       }
 

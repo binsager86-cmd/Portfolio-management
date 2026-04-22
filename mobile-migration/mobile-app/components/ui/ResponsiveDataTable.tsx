@@ -7,14 +7,14 @@ import { useResponsive } from "@/hooks/useResponsive";
 import { useThemeStore } from "@/services/themeStore";
 import { PressableCard } from "./PressableCard";
 
-export interface DataColumn<T = any> {
+export interface DataColumn<T = unknown> {
   key: string;
   label: string;
   render: (item: T) => React.ReactNode;
   priority?: "high" | "medium" | "low";
 }
 
-interface Props<T = any> {
+interface Props<T = unknown> {
   data: T[];
   columns: DataColumn<T>[];
   /** Custom key extractor — defaults to item.id or index. */
@@ -27,7 +27,7 @@ interface Props<T = any> {
   itemA11yLabel?: (item: T) => string;
 }
 
-export function ResponsiveDataTable<T extends Record<string, any>>({
+export function ResponsiveDataTable<T>({
   data,
   columns,
   keyExtractor,
@@ -50,12 +50,11 @@ export function ResponsiveDataTable<T extends Record<string, any>>({
   return (
     <FlashList
       data={data}
-      estimatedItemSize={isPhone ? 100 : 88}
-      keyExtractor={keyExtractor ?? ((item, i) => String((item as any).id ?? i))}
+      keyExtractor={keyExtractor ?? ((item, i) => String((item as { id?: string | number }).id ?? i))}
       renderItem={({ item }) => (
         <PressableCard
           onPress={onPressItem ? () => onPressItem(item) : undefined}
-          style={[styles.mobileCard, isPhone && styles.mobileCardPhone]}
+          style={StyleSheet.flatten([styles.mobileCard, isPhone ? styles.mobileCardPhone : null])}
           accessibilityLabel={itemA11yLabel?.(item)}
         >
           {visibleCols.map((col) => (

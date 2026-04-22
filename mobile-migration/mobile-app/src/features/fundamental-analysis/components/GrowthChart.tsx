@@ -17,6 +17,7 @@ import {
     Platform,
     Text,
     View,
+  ViewStyle,
 } from "react-native";
 import Animated, {
     Easing,
@@ -250,7 +251,15 @@ export const GrowthChart = React.memo(function GrowthChart({
 
   const webMouse = useMemo(() =>
     Platform.OS === "web"
-      ? { onMouseMove: (e: any) => findNearest(e.nativeEvent.offsetX), onMouseLeave: clearActive }
+      ? {
+          onMouseMove: (e: unknown) => {
+            const nativeEvent = (e as { nativeEvent?: { offsetX?: number } })?.nativeEvent;
+            if (typeof nativeEvent?.offsetX === "number") {
+              findNearest(nativeEvent.offsetX);
+            }
+          },
+          onMouseLeave: clearActive,
+        }
       : {},
     [findNearest, clearActive],
   );
@@ -474,8 +483,8 @@ export const GrowthChart = React.memo(function GrowthChart({
                   shadowOpacity: 0.2,
                   shadowRadius: 12,
                   elevation: 8,
+                  ...(Platform.OS === "web" ? ({ pointerEvents: "none" } as ViewStyle) : null),
                 }}
-                pointerEvents="none"
               >
                 <Text style={{ color: colors.textMuted, fontSize: 10, fontWeight: "500", marginBottom: 2 }}>
                   {tip.subLabel ? `${tip.subLabel} → ` : ""}{tip.label}

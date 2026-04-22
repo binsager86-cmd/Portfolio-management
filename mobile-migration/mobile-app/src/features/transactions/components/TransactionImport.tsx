@@ -21,7 +21,8 @@ export function TransactionImport() {
   const [uploadPortfolio, setUploadPortfolio] = useState<"KFH" | "BBYN" | "USA">("KFH");
   const [uploadMode, setUploadMode] = useState<"merge" | "replace">("merge");
   const [selectedFile, setSelectedFile] = useState<{ name: string; file: File } | null>(null);
-  const [uploadResult, setUploadResult] = useState<any>(null);
+  type UploadResultShape = { imported?: number; skipped?: number; errors?: number; mode?: string };
+  const [uploadResult, setUploadResult] = useState<UploadResultShape | null>(null);
 
   const uploadMutation = useMutation({
     mutationFn: () => {

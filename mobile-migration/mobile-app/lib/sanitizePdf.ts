@@ -9,6 +9,7 @@
  *   • Null/undefined values leaking as literal "null"/"undefined"
  */
 
+// eslint-disable-next-line no-control-regex -- intentional: strips PDF-corrupting control characters
 const CONTROL_CHAR_RE = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g;
 
 /**

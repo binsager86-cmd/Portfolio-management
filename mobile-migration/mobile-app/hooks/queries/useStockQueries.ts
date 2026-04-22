@@ -14,7 +14,7 @@ import { useMemo } from "react";
 /** Strip non-alphanumeric chars (except spaces, hyphens, dots) and cap length. */
 function sanitizeSearch(raw?: string): string | undefined {
   if (!raw) return undefined;
-  return raw.replace(/[^a-zA-Z0-9\s.\-]/g, "").slice(0, 100).trim() || undefined;
+  return raw.replace(/[^a-zA-Z0-9\s.-]/g, "").slice(0, 100).trim() || undefined;
 }
 
 // ── Query key constants ─────────────────────────────────────────────

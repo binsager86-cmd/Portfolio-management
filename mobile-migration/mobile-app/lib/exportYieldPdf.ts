@@ -150,6 +150,7 @@ export async function exportYieldCalcPdf(
     console.error("Failed to load jsPDF:", err);
     throw new Error(
       "PDF generation is not available. Please ensure jspdf is installed.",
+      { cause: err },
     );
   }
   const doc = new jsPDFConstructor({ unit: "mm", format: "a4" });
@@ -346,7 +347,7 @@ export async function exportYieldCalcPdf(
     //   totalReturn(sep), yield = 2 (1 sep)
     //   totalSharesAfterEx(sep), adjustedAvgCost = 2 (1 sep)
     let afterRows = 3;
-    let afterSeps = 2; // totalReturn sep + totalSharesAfterEx sep
+    const afterSeps = 2; // totalReturn sep + totalSharesAfterEx sep
     if (result.hasBonus) afterRows += 2;
     afterRows += 4; // totalReturn, yield, totalShares, adjAvgCost
     const afterH = cardHeight(afterRows, afterSeps);
@@ -458,13 +459,11 @@ export async function exportYieldCalcPdf(
       const FileSystem = await import("expo-file-system");
       const Sharing = await import("expo-sharing");
 
-      const fileUri = FileSystem.documentDirectory + filename;
-      await FileSystem.writeAsStringAsync(fileUri, pdfBase64, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
+      const file = new FileSystem.File(FileSystem.Paths.document, filename);
+      file.write(pdfBase64, { encoding: "base64" });
 
       if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(fileUri, {
+        await Sharing.shareAsync(file.uri, {
           mimeType: "application/pdf",
           dialogTitle: "Save Yield Report",
           UTI: "com.adobe.pdf",
@@ -474,7 +473,7 @@ export async function exportYieldCalcPdf(
       }
     } catch (err) {
       console.error("Failed to save PDF on mobile:", err);
-      throw new Error("Could not save PDF. Please try again.");
+      throw new Error("Could not save PDF. Please try again.", { cause: err });
     }
   }
 }

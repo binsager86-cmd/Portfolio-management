@@ -4,12 +4,12 @@
  * Uploads PDF → Gemini extracts financial data with self-audit.
  */
 
-import { uploadFinancialStatement } from "./analytics";
+import { uploadFinancialStatement, type UploadJobResponse } from "./analytics";
 import type { AIUploadResult } from "./types";
 
 export interface ExtractionProgress {
   isProcessing: boolean;
-  result?: AIUploadResult;
+  result?: UploadJobResponse;
   /** Elapsed time in milliseconds */
   elapsedMs?: number;
 }
@@ -33,5 +33,5 @@ export async function runExtraction(
   const elapsedMs = Date.now() - t0;
 
   onProgress?.({ isProcessing: false, result, elapsedMs });
-  return { result, elapsedMs };
+  return { result: result as unknown as AIUploadResult, elapsedMs };
 }

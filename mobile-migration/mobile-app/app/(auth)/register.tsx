@@ -71,8 +71,11 @@ export default function RegisterScreen() {
   const { signIn: googlePrompt, isLoading: googleLoading } = useGoogleSignIn();
 
   // Field refs for keyboard navigation
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Paper TextInput ref intersects internal handles type
   const displayNameRef = useRef<any>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Paper TextInput ref intersects internal handles type
   const passwordRef = useRef<any>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Paper TextInput ref intersects internal handles type
   const confirmPasswordRef = useRef<any>(null);
 
   // react-hook-form + Zod

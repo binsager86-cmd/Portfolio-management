@@ -48,7 +48,7 @@ export const PressableCard: React.FC<{
       testID={testID}
       accessibilityLabel={accessibilityLabel}
       accessibilityRole="button"
-      style={({ hovered }: any) => [
+      style={({ hovered }: { pressed: boolean; hovered?: boolean }) => [
         styles.base,
         UITokens.shadows.card,
         { backgroundColor: hovered && !disabled ? colors.bgCardHover : colors.bgCard },
@@ -56,7 +56,7 @@ export const PressableCard: React.FC<{
         Platform.OS === "web" && ({
           cursor: onPress && !disabled ? "pointer" : "default",
           transition: "background-color 0.15s, transform 0.15s",
-        } as any),
+        } as unknown as ViewStyle),
         style,
       ]}
     >

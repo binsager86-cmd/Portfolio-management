@@ -254,7 +254,7 @@ function StockFormModal({ stock, colors, onClose }: { stock?: AnalysisStock; col
             company_name: companyName.trim(), exchange, currency,
             sector: sector || undefined,
           }),
-    onSuccess: (result: any) => {
+    onSuccess: (_result) => {
       queryClient.invalidateQueries({ queryKey: ["analysis-stocks"] });
       onClose();
     },

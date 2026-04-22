@@ -1,4 +1,5 @@
 import { useThemeStore } from "@/services/themeStore";
+import type { ThemePalette } from "@/constants/theme";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import * as DocumentPicker from "expo-document-picker";
 import { useRouter } from "expo-router";
@@ -189,7 +190,7 @@ export function FirstTimeSetup({ visible, onComplete }: FirstTimeSetupProps) {
   );
 }
 
-function NextStepItem({ icon, title, desc, colors }: any) {
+function NextStepItem({ icon, title, desc, colors }: { icon: React.ComponentProps<typeof FontAwesome>["name"]; title: string; desc: string; colors: ThemePalette }) {
   return (
     <View style={[styles.nextStepItem, { backgroundColor: colors.bgPrimary, borderColor: colors.borderColor }]}>
       <FontAwesome name={icon} size={18} color={colors.accentPrimary} />
@@ -202,7 +203,7 @@ function NextStepItem({ icon, title, desc, colors }: any) {
   );
 }
 
-function FeatureCard({ icon, title, desc, color, colors }: any) {
+function FeatureCard({ icon, title, desc, color, colors }: { icon: React.ComponentProps<typeof FontAwesome>["name"]; title: string; desc: string; color: string; colors: ThemePalette }) {
   return (
     <View style={[styles.featureCard, { backgroundColor: colors.bgPrimary, borderColor: colors.borderColor }]}>
       <View style={[styles.featureIcon, { backgroundColor: color + "15" }]}>

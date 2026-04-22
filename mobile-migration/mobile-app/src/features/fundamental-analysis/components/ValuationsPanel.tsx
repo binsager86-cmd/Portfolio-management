@@ -242,7 +242,7 @@ function DCFResultCard({ r, colors, mos, onChangeMos, currentPrice }: { r: Valua
       )}
 
       {/* ── Summary section ──────────────────────────── */}
-      <View style={{ backgroundColor: colors.cardBg, borderRadius: 8, borderWidth: 1, borderColor: colors.borderColor, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 10 }}>
+      <View style={{ backgroundColor: colors.bgCard, borderRadius: 8, borderWidth: 1, borderColor: colors.borderColor, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 10 }}>
         <KVRow label="Sum of PV (UFCF)" value={fmt(r.pv_fcfs)} colors={colors} />
         <KVRow label="Cash & Cash Equivalents" value={fmt(r.cash)} colors={colors} />
         <KVRow label="Total Debt" value={fmt(r.debt)} colors={colors} />
@@ -253,27 +253,31 @@ function DCFResultCard({ r, colors, mos, onChangeMos, currentPrice }: { r: Valua
 
       {/* ── Assumptions ─────────────────────────────── */}
       {r.parameters && (
-        <View style={{ backgroundColor: colors.cardBg, borderRadius: 8, borderWidth: 1, borderColor: colors.borderColor, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 10 }}>
+        <View style={{ backgroundColor: colors.bgCard, borderRadius: 8, borderWidth: 1, borderColor: colors.borderColor, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 10 }}>
           <Text style={{ color: colors.textMuted, fontSize: 11, fontWeight: "700", marginBottom: 4 }}>Assumptions</Text>
           <KVRow label="Base UFCF" value={typeof r.parameters.fcf === "number" ? fmtN(r.parameters.fcf) : "—"} colors={colors} />
           <KVRow label="Stage 1 Growth" value={typeof r.parameters.growth_stage1 === "number" ? (r.parameters.growth_stage1 * 100).toFixed(2) + "%" : "—"} colors={colors} />
           <KVRow label="Stage 2 Growth" value={typeof r.parameters.growth_stage2 === "number" ? (r.parameters.growth_stage2 * 100).toFixed(2) + "%" : "—"} colors={colors} />
           <KVRow label="Discount Rate" value={typeof r.parameters.discount_rate === "number" ? (r.parameters.discount_rate * 100).toFixed(2) + "%" : "—"} colors={colors} />
-          {r.parameters.wacc && (
+          {(() => {
+            const wacc = r.parameters.wacc as unknown as Record<string, number> | undefined;
+            if (!wacc) return null;
+            return (
             <>
               <View style={{ height: 1, backgroundColor: colors.borderColor, marginVertical: 4 }} />
               <Text style={{ color: colors.textMuted, fontSize: 10, fontWeight: "700", marginBottom: 2 }}>WACC Components</Text>
-              {typeof (r.parameters.wacc as Record<string, unknown>).risk_free_rate === "number" && <KVRow label="Risk-Free Rate" value={((r.parameters.wacc as Record<string, number>).risk_free_rate * 100).toFixed(2) + "%"} colors={colors} />}
-              {typeof (r.parameters.wacc as Record<string, unknown>).beta === "number" && <KVRow label="Beta" value={(r.parameters.wacc as Record<string, number>).beta.toFixed(2)} colors={colors} />}
-              {typeof (r.parameters.wacc as Record<string, unknown>).equity_risk_premium === "number" && <KVRow label="Equity Risk Premium" value={((r.parameters.wacc as Record<string, number>).equity_risk_premium * 100).toFixed(2) + "%"} colors={colors} />}
-              {typeof (r.parameters.wacc as Record<string, unknown>).cost_of_equity === "number" && <KVRow label="Cost of Equity (Ke)" value={((r.parameters.wacc as Record<string, number>).cost_of_equity * 100).toFixed(2) + "%"} colors={colors} />}
-              {typeof (r.parameters.wacc as Record<string, unknown>).cost_of_debt === "number" && <KVRow label="Cost of Debt (Kd)" value={((r.parameters.wacc as Record<string, number>).cost_of_debt * 100).toFixed(2) + "%"} colors={colors} />}
-              {typeof (r.parameters.wacc as Record<string, unknown>).tax_rate === "number" && <KVRow label="Tax Rate" value={((r.parameters.wacc as Record<string, number>).tax_rate * 100).toFixed(2) + "%"} colors={colors} />}
-              {typeof (r.parameters.wacc as Record<string, unknown>).weight_equity === "number" && <KVRow label="Equity Weight" value={((r.parameters.wacc as Record<string, number>).weight_equity * 100).toFixed(2) + "%"} colors={colors} />}
-              {typeof (r.parameters.wacc as Record<string, unknown>).weight_debt === "number" && <KVRow label="Debt Weight" value={((r.parameters.wacc as Record<string, number>).weight_debt * 100).toFixed(2) + "%"} colors={colors} />}
+              {typeof wacc.risk_free_rate === "number" && <KVRow label="Risk-Free Rate" value={(wacc.risk_free_rate * 100).toFixed(2) + "%"} colors={colors} />}
+              {typeof wacc.beta === "number" && <KVRow label="Beta" value={wacc.beta.toFixed(2)} colors={colors} />}
+              {typeof wacc.equity_risk_premium === "number" && <KVRow label="Equity Risk Premium" value={(wacc.equity_risk_premium * 100).toFixed(2) + "%"} colors={colors} />}
+              {typeof wacc.cost_of_equity === "number" && <KVRow label="Cost of Equity (Ke)" value={(wacc.cost_of_equity * 100).toFixed(2) + "%"} colors={colors} />}
+              {typeof wacc.cost_of_debt === "number" && <KVRow label="Cost of Debt (Kd)" value={(wacc.cost_of_debt * 100).toFixed(2) + "%"} colors={colors} />}
+              {typeof wacc.tax_rate === "number" && <KVRow label="Tax Rate" value={(wacc.tax_rate * 100).toFixed(2) + "%"} colors={colors} />}
+              {typeof wacc.weight_equity === "number" && <KVRow label="Equity Weight" value={(wacc.weight_equity * 100).toFixed(2) + "%"} colors={colors} />}
+              {typeof wacc.weight_debt === "number" && <KVRow label="Debt Weight" value={(wacc.weight_debt * 100).toFixed(2) + "%"} colors={colors} />}
               <View style={{ height: 1, backgroundColor: colors.borderColor, marginVertical: 4 }} />
             </>
-          )}
+            );
+          })()}
           <KVRow label="Perpetual Growth" value={typeof r.parameters.terminal_growth === "number" ? (r.parameters.terminal_growth * 100).toFixed(2) + "%" : "—"} colors={colors} />
           <KVRow label="Stage 1 Years" value={typeof r.parameters.stage1_years === "number" ? String(r.parameters.stage1_years) : "5"} colors={colors} />
           <KVRow label="Stage 2 Years" value={typeof r.parameters.stage2_years === "number" ? String(r.parameters.stage2_years) : "5"} colors={colors} />
@@ -292,7 +296,7 @@ function DCFResultCard({ r, colors, mos, onChangeMos, currentPrice }: { r: Valua
 
       {/* ── Current Price & Difference ────────────────── */}
       {currentPrice != null && currentPrice > 0 && (
-        <View style={{ backgroundColor: colors.cardBg, borderRadius: 8, borderWidth: 1, borderColor: colors.borderColor, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 10 }}>
+        <View style={{ backgroundColor: colors.bgCard, borderRadius: 8, borderWidth: 1, borderColor: colors.borderColor, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 10 }}>
           <KVRow label="Current Price" value={fmt(currentPrice)} colors={colors} />
           {diff != null && (
             <View style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 3 }}>
@@ -785,7 +789,7 @@ export function ValuationsPanel({ stockId, stockSymbol, colors, isDesktop }: Pan
                   <Text style={{ color: colors.textPrimary, fontSize: 12, fontWeight: "700", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.5 }}>
                     Free Cash Flow History
                   </Text>
-                  <View style={{ backgroundColor: colors.cardBg, borderRadius: 8, borderWidth: 1, borderColor: colors.borderColor, overflow: "hidden" }}>
+                  <View style={{ backgroundColor: colors.bgCard, borderRadius: 8, borderWidth: 1, borderColor: colors.borderColor, overflow: "hidden" }}>
                     {/* Table header */}
                     <View style={{ flexDirection: "row", backgroundColor: colors.accentPrimary + "10", paddingHorizontal: 10, paddingVertical: 6 }}>
                       <Text style={{ flex: 1, color: colors.textMuted, fontSize: 10, fontWeight: "700", textTransform: "uppercase" }}>Year</Text>
@@ -1392,7 +1396,7 @@ export function ValuationsPanel({ stockId, stockSymbol, colors, isDesktop }: Pan
                       )}
 
                       {/* ── Summary section ──────────────────────── */}
-                      <View style={{ backgroundColor: colors.cardBg, borderRadius: 8, borderWidth: 1, borderColor: colors.borderColor, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 10 }}>
+                      <View style={{ backgroundColor: colors.bgCard, borderRadius: 8, borderWidth: 1, borderColor: colors.borderColor, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 10 }}>
                         <KVRow label="Sum of PV (UFCF)" value={fmt(a?.pv_fcfs)} colors={colors} />
                         <KVRow label="Cash & Cash Equivalents" value={fmt(a?.cash)} colors={colors} />
                         <KVRow label="Total Debt" value={fmt(a?.debt)} colors={colors} />
@@ -1403,7 +1407,7 @@ export function ValuationsPanel({ stockId, stockSymbol, colors, isDesktop }: Pan
 
                       {/* ── Assumptions ──────────────────────────── */}
                       {params && (
-                        <View style={{ backgroundColor: colors.cardBg, borderRadius: 8, borderWidth: 1, borderColor: colors.borderColor, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 10 }}>
+                        <View style={{ backgroundColor: colors.bgCard, borderRadius: 8, borderWidth: 1, borderColor: colors.borderColor, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 10 }}>
                           <Text style={{ color: colors.textMuted, fontSize: 11, fontWeight: "700", marginBottom: 4 }}>Assumptions</Text>
                           <KVRow label="Base UFCF" value={typeof params.fcf === "number" ? fmtN(params.fcf as number) : "—"} colors={colors} />
                           <KVRow label="Stage 1 Growth" value={typeof params.growth_stage1 === "number" ? ((params.growth_stage1 as number) * 100).toFixed(2) + "%" : "—"} colors={colors} />

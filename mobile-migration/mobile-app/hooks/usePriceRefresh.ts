@@ -44,7 +44,7 @@ export function usePriceRefresh() {
    */
   const refresh = useCallback(async () => {
     setIsRefreshing(true);
-    let result: any;
+    let result: Awaited<ReturnType<typeof updatePrices>> | undefined;
     try {
       result = await updatePrices();
     } catch (e) {

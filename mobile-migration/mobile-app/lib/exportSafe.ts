@@ -12,7 +12,36 @@ import * as FileSystem from "expo-file-system";
 import * as Sharing from "expo-sharing";
 import { Platform } from "react-native";
 
+import type { MetricsCategoryData } from "@/lib/exportMetricsPdf";
+import type { AISummary } from "@/lib/aiSummaryGenerator";
+import type { GrowthEntry } from "@/lib/exportGrowthPdf";
+import type { ValuationEntry, ValuationSummaryData } from "@/lib/exportValuationPdf";
+import type { YieldCalcInput, YieldCalcResult } from "@/lib/exportYieldPdf";
+
 export type ExportType = "growth" | "metrics" | "valuation" | "yield";
+
+type GrowthExportPayload = {
+  growth: Record<string, GrowthEntry[]>;
+  labels: string[];
+  stockSymbol: string;
+};
+
+type MetricsExportPayload = {
+  categories: Record<string, MetricsCategoryData>;
+  stockSymbol: string;
+  totalMetrics: number;
+  aiSummary?: AISummary | null;
+};
+
+type ValuationExportPayload = {
+  summary: ValuationSummaryData;
+  valuations: ValuationEntry[];
+};
+
+type YieldExportPayload = {
+  input: YieldCalcInput;
+  result: YieldCalcResult;
+};
 
 /**
  * Generate and present a PDF report for the given analysis type.
@@ -29,25 +58,25 @@ export const exportToPdf = async (
     switch (type) {
       case "growth": {
         const { exportGrowthPdf } = await import("@/lib/exportGrowthPdf");
-        return exportGrowthPdf(data as Parameters<typeof exportGrowthPdf>[0]);
+        const payload = data as GrowthExportPayload;
+        return exportGrowthPdf(payload.growth, payload.labels, payload.stockSymbol);
       }
       case "metrics": {
         const { exportMetricsPdf } = await import("@/lib/exportMetricsPdf");
-        return exportMetricsPdf(data as Parameters<typeof exportMetricsPdf>[0]);
+        const payload = data as MetricsExportPayload;
+        return exportMetricsPdf(payload.categories, payload.stockSymbol, payload.totalMetrics, payload.aiSummary);
       }
       case "valuation": {
         const { exportValuationPdf } = await import(
           "@/lib/exportValuationPdf"
         );
-        return exportValuationPdf(
-          data as Parameters<typeof exportValuationPdf>[0],
-        );
+        const payload = data as ValuationExportPayload;
+        return exportValuationPdf(payload.summary, payload.valuations);
       }
       case "yield": {
         const { exportYieldCalcPdf } = await import("@/lib/exportYieldPdf");
-        return exportYieldCalcPdf(
-          data as Parameters<typeof exportYieldCalcPdf>[0],
-        );
+        const payload = data as YieldExportPayload;
+        return exportYieldCalcPdf(payload.input, payload.result);
       }
     }
   }
@@ -56,7 +85,7 @@ export const exportToPdf = async (
   const apiUrl = process.env.EXPO_PUBLIC_API_URL ?? "";
   const { uri } = await FileSystem.downloadAsync(
     `${apiUrl}/api/v1/export/${type}`,
-    FileSystem.cacheDirectory + `report_${type}.pdf`,
+    FileSystem.Paths.cache.uri + `report_${type}.pdf`,
   );
   if (uri) await Sharing.shareAsync(uri);
   return uri;

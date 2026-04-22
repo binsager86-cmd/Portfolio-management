@@ -169,10 +169,10 @@ export default function HoldingsScreen() {
   const sortedHoldings = React.useMemo(() => {
     const list = [...(resp?.holdings ?? [])];
     list.sort((a, b) => {
-      let va: any = a[sortKey], vb: any = b[sortKey];
-      if (typeof va === "string") { va = va.toLowerCase(); vb = (vb as string).toLowerCase(); }
-      if (va < vb) return sortAsc ? -1 : 1;
-      if (va > vb) return sortAsc ? 1 : -1;
+      let va: unknown = (a as unknown as Record<string, unknown>)[sortKey], vb: unknown = (b as unknown as Record<string, unknown>)[sortKey];
+      if (typeof va === "string") { va = va.toLowerCase(); vb = String(vb).toLowerCase(); }
+      if ((va as number | string) < (vb as number | string)) return sortAsc ? -1 : 1;
+      if ((va as number | string) > (vb as number | string)) return sortAsc ? 1 : -1;
       return 0;
     });
     return list;
@@ -312,7 +312,7 @@ export default function HoldingsScreen() {
               {fmt(accountsData.total_cash_kwd)} KWD
             </Text>
           </View>
-          {accountsData.accounts?.map((acc: any, idx: number) => (
+          {accountsData.accounts?.map((acc: { portfolio?: string; name?: string; balance_kwd?: number; balance?: number; amount?: number }, idx: number) => (
             <View key={idx} style={st.cashRow}>
               <Text style={[st.cashAccLabel, { color: colors.textSecondary }]}>
                 {acc.portfolio ?? acc.name ?? `Account ${idx + 1}`}

@@ -37,10 +37,25 @@ interface Column {
   label: string;
   width: number;
   align?: "left" | "right" | "center";
-  format?: (v: any, item: Holding) => string;
+  format?: (v: unknown, item: Holding) => string;
   colorFn?: (item: Holding) => string | undefined;
   /** If true, column renders a custom component instead of text. */
   custom?: boolean;
+}
+
+type HoldingWithSharia = Holding & { sharia_status?: string | null };
+
+function isHoldingKey(key: Column["key"]): key is keyof Holding {
+  return key !== "pnl_pct_display" && key !== "sharia_status" && key !== "actions";
+}
+
+function toNum(v: unknown): number | null {
+  if (typeof v === "number") return Number.isFinite(v) ? v : null;
+  if (typeof v === "string" && v.trim() !== "") {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
 }
 
 function pnlColor(n: number, c: ThemePalette): string | undefined {
@@ -57,42 +72,42 @@ const COLUMNS: (colors: ThemePalette) => Column[] = (colors) => [
     label: "holdings.shares",
     width: 80,
     align: "right",
-    format: (v) => fmt(v, 0),
+    format: (v) => fmt(toNum(v), 0),
   },
   {
     key: "avg_cost",
     label: "holdings.avgCost",
     width: 90,
     align: "right",
-    format: (v) => fmt(v, 3),
+    format: (v) => fmt(toNum(v), 3),
   },
   {
     key: "market_price",
     label: "holdings.price",
     width: 90,
     align: "right",
-    format: (v) => fmt(v, 3),
+    format: (v) => fmt(toNum(v), 3),
   },
   {
     key: "total_cost",
     label: "holdings.cost",
     width: 100,
     align: "right",
-    format: (v) => fmt(v, 2),
+    format: (v) => fmt(toNum(v), 2),
   },
   {
     key: "market_value",
     label: "holdings.mktValue",
     width: 110,
     align: "right",
-    format: (v) => fmt(v, 2),
+    format: (v) => fmt(toNum(v), 2),
   },
   {
     key: "unrealized_pnl",
     label: "holdings.unrealPL",
     width: 110,
     align: "right",
-    format: (v) => fmt(v, 2),
+    format: (v) => fmt(toNum(v), 2),
     colorFn: (item) => pnlColor(item.unrealized_pnl, colors),
   },
   {
@@ -100,7 +115,7 @@ const COLUMNS: (colors: ThemePalette) => Column[] = (colors) => [
     label: "holdings.realPL",
     width: 100,
     align: "right",
-    format: (v) => fmt(v, 2),
+    format: (v) => fmt(toNum(v), 2),
     colorFn: (item) => pnlColor(item.realized_pnl, colors),
   },
   {
@@ -108,7 +123,7 @@ const COLUMNS: (colors: ThemePalette) => Column[] = (colors) => [
     label: "holdings.totalPL",
     width: 110,
     align: "right",
-    format: (v) => fmt(v, 2),
+    format: (v) => fmt(toNum(v), 2),
     colorFn: (item) => pnlColor(item.total_pnl, colors),
   },
   {
@@ -124,14 +139,14 @@ const COLUMNS: (colors: ThemePalette) => Column[] = (colors) => [
     label: "holdings.dividends",
     width: 100,
     align: "right",
-    format: (v) => fmt(v, 2),
+    format: (v) => fmt(toNum(v), 2),
   },
   {
     key: "market_value_kwd",
     label: "holdings.mktValueKWD",
     width: 120,
     align: "right",
-    format: (v) => fmt(v, 2),
+    format: (v) => fmt(toNum(v), 2),
   },
   {
     key: "currency",
@@ -151,7 +166,9 @@ function generateCSV(holdings: Holding[], columns: Column[], t: (key: string) =>
         const raw =
           col.key === "pnl_pct_display"
             ? `${(item.pnl_pct * 100).toFixed(1)}%`
-            : (item as any)[col.key];
+            : isHoldingKey(col.key)
+              ? item[col.key]
+              : "";
         // Wrap strings with commas in quotes
         const str = String(raw ?? "");
         return str.includes(",") ? `"${str}"` : str;
@@ -239,7 +256,7 @@ export default function HoldingsTable({
     let result = enableShariaFilter
       ? holdings.filter((h) => {
           // Musaffa override takes priority over backend status
-          const status = getMusaffaStatus(h.symbol) ?? (h as any).sharia_status;
+          const status = getMusaffaStatus(h.symbol) ?? (h as HoldingWithSharia).sharia_status;
           return status !== "non-compliant";
         })
       : holdings;
@@ -340,7 +357,7 @@ export default function HoldingsTable({
                   return (
                     <View key={col.key} style={{ width: col.width, justifyContent: "center", paddingHorizontal: 4 }}>
                       <ShariaBadge
-                        status={(item as any).sharia_status}
+                        status={(item as HoldingWithSharia).sharia_status}
                         symbol={item.symbol}
                         compact
                         colors={colors}
@@ -403,7 +420,11 @@ export default function HoldingsTable({
                 }
 
                 const raw =
-                  col.key === "pnl_pct_display" ? null : (item as any)[col.key];
+                  col.key === "pnl_pct_display"
+                    ? null
+                    : isHoldingKey(col.key)
+                      ? item[col.key]
+                      : null;
                 const display = col.format
                   ? col.format(raw, item)
                   : String(raw ?? "—");
@@ -596,9 +617,11 @@ export default function HoldingsTable({
                   onAlertCreated?.(alertModalSymbol);
                   setAlertModalSymbol(null);
                   const msg = `Alert set: ${alertModalSymbol} ${alertCondition === "price-below" ? "below" : "above"} ${num.toFixed(3)}`;
-                  Platform.OS === "web"
-                    ? window.alert(msg)
-                    : Alert.alert("Alert Created", msg);
+                  if (Platform.OS === "web") {
+                    window.alert(msg);
+                  } else {
+                    Alert.alert("Alert Created", msg);
+                  }
                 }}
                 style={[ts.alertBtn, { backgroundColor: colors.accentPrimary }]}
               >

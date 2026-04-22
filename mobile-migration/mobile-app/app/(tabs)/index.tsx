@@ -22,6 +22,7 @@ import { PortfolioHealthCard } from "@/components/overview/PortfolioHealthCard";
 import { RealizedTradesSection } from "@/components/overview/RealizedTradesSection";
 import { PortfolioCard } from "@/components/portfolio/PortfolioCard";
 import { TradeSimulatorModal } from "@/components/trading/TradeSimulatorModal";
+import { ResponsiveDataTable, type DataColumn } from "@/components/ui/ResponsiveDataTable";
 import { withErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { ErrorScreen } from "@/components/ui/ErrorScreen";
 import { LastUpdated } from "@/components/ui/LastUpdated";
@@ -29,6 +30,7 @@ import { MetricCard } from "@/components/ui/MetricCard";
 import { OverviewSkeleton } from "@/components/ui/OverviewSkeleton";
 import {
     useHoldings,
+    useMarketSummary,
     useOverviewDependentQueries,
     usePortfolioOverview,
     useRfRateSetting,
@@ -47,7 +49,6 @@ import { pnlColor } from "@/lib/formatting";
 import {
     analyzePortfolio,
     saveSnapshot,
-    setRfRate,
     SnapshotRecord
 } from "@/services/api";
 import { useAuthStore } from "@/services/authStore";
@@ -68,7 +69,6 @@ import {
     ScrollView,
     StyleSheet,
     Text,
-    TextInput,
     View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -76,6 +76,18 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 // ── Sub-tab type ─────────────────────────────────────────────────────
 
 type OverviewTab = "dashboard" | "historical";
+
+interface OverviewHoldingRow {
+  symbol: string;
+  company: string;
+  quantity: number;
+  costPerPrice: number;
+  prevClose: number | null;
+  lastPrice: number;
+  changePct: number | null;
+  totalValueChange: number | null;
+  priceBasis: "persisted" | "estimated" | "unavailable";
+}
 
 // ── Main Screen ─────────────────────────────────────────────────────
 
@@ -152,7 +164,7 @@ function OverviewScreen() {
 
         setShowSetup(true);
       } catch {
-        // ignore — don't block the overview
+        setShowSetup(true);
       }
     }
     checkSetup();
@@ -166,14 +178,14 @@ function OverviewScreen() {
         const SecureStore = await import("expo-secure-store");
         await SecureStore.setItemAsync("onboarding_complete", "1");
       }
-    } catch {}
+    } catch {
+      return;
+    }
     setShowSetup(false);
   }, []);
 
   // CBK rate (rf_rate) — manual only, persisted to backend
   const [customRfRate, setCustomRfRate] = useState<number | null>(null);
-  const [editingRfRate, setEditingRfRate] = useState(false);
-  const [rfRateInput, setRfRateInput] = useState("");
 
   // Fetch stored rf_rate from backend on mount
   const { data: storedRfRate } = useRfRateSetting();
@@ -206,6 +218,110 @@ function OverviewScreen() {
   const { data: riskData } = useRiskMetrics(customRfRate, !!data && customRfRate != null);
 
   const { data: holdingsResp } = useHoldings();
+  const { data: marketSummary } = useMarketSummary();
+
+  const holdingsRows = useMemo<OverviewHoldingRow[]>(() => {
+    const items = holdingsResp?.holdings ?? [];
+
+    const moverMap = new Map<string, number>();
+    const movers = [
+      ...(marketSummary?.top_gainers ?? []),
+      ...(marketSummary?.top_losers ?? []),
+      ...(marketSummary?.top_value ?? []),
+    ];
+    for (const m of movers) {
+      const sym = (m.symbol ?? "").trim().toUpperCase();
+      if (!sym) continue;
+      if (typeof m.changePercent === "number" && Number.isFinite(m.changePercent)) {
+        moverMap.set(sym, m.changePercent);
+      }
+    }
+
+    return items
+      .map((h) => {
+        const symbol = (h.symbol ?? "").trim().toUpperCase();
+        const last = Number(h.market_price ?? 0);
+        const qty = Number(h.shares_qty ?? 0);
+        const costPerPrice = Number(h.avg_cost ?? 0);
+        const persistedPrevClose = Number(h.previous_close ?? 0);
+        const hasPersistedPrevClose = Number.isFinite(persistedPrevClose) && persistedPrevClose > 0;
+        const fallbackChangePct = moverMap.get(symbol) ?? null;
+
+        let prevClose: number | null = null;
+        let changePct: number | null = null;
+        let totalValueChange: number | null = null;
+        let priceBasis: OverviewHoldingRow["priceBasis"] = "unavailable";
+
+        if (hasPersistedPrevClose) {
+          prevClose = persistedPrevClose;
+          priceBasis = "persisted";
+          if (prevClose > 0 && Number.isFinite(last) && last > 0) {
+            changePct = ((last - prevClose) / prevClose) * 100;
+            totalValueChange = qty * (last - prevClose);
+          }
+        } else if (fallbackChangePct != null && Number.isFinite(last) && last > 0) {
+          const denom = 1 + fallbackChangePct / 100;
+          if (denom !== 0) {
+            prevClose = last / denom;
+            changePct = fallbackChangePct;
+            totalValueChange = qty * (last - prevClose);
+            priceBasis = "estimated";
+          }
+        }
+
+        return {
+          symbol,
+          company: h.company,
+          quantity: qty,
+          costPerPrice,
+          prevClose,
+          lastPrice: last,
+          changePct,
+          totalValueChange,
+          priceBasis,
+        };
+      })
+      .sort((a, b) => b.quantity * b.lastPrice - a.quantity * a.lastPrice);
+  }, [holdingsResp?.holdings, marketSummary?.top_gainers, marketSummary?.top_losers, marketSummary?.top_value]);
+
+  const holdingsMobileColumns = useMemo<DataColumn<OverviewHoldingRow>[]>(() => [
+    {
+      key: "company",
+      label: t("holdings.company", "Company"),
+      priority: "high",
+      render: (r) => `${r.company} (${r.priceBasis === "persisted" ? "live" : r.priceBasis === "estimated" ? "est." : "n/a"})`,
+    },
+    {
+      key: "quantity",
+      label: t("holdings.quantity", "Quantity"),
+      priority: "high",
+      render: (r) => r.quantity.toLocaleString(),
+    },
+    {
+      key: "cost",
+      label: t("overview.costPerPrice", "Cost / Price"),
+      priority: "medium",
+      render: (r) => formatCurrency(r.costPerPrice),
+    },
+    {
+      key: "last",
+      label: t("overview.lastPrice", "Last Price"),
+      priority: "high",
+      render: (r) => formatCurrency(r.lastPrice),
+    },
+    {
+      key: "change",
+      label: t("overview.changePct", "Change %"),
+      priority: "high",
+      render: (r) => (r.changePct == null ? "—" : `${r.changePct >= 0 ? "+" : ""}${r.changePct.toFixed(2)}%`),
+    },
+    {
+      key: "valueChange",
+      label: t("overview.totalValueChange", "Total Value Change"),
+      priority: "medium",
+      render: (r) => (r.totalValueChange == null ? "—" : formatSignedCurrency(r.totalValueChange)),
+    },
+  ], [t]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -222,9 +338,10 @@ function OverviewScreen() {
       const msg = t('dashboard.snapshotMsg', { action: result.action, message: result.message, value: formatCurrency(result.portfolio_value) });
       if (Platform.OS === "web") window.alert(msg);
       else Alert.alert(t('dashboard.snapshotSaved'), msg);
-    } catch (e: any) {
-      console.warn("Save snapshot failed:", e);
-      const detail = e?.response?.data?.detail ?? t('dashboard.snapshotFailed');
+    } catch (e: unknown) {
+      const detail = isAxiosError(e)
+        ? (e.response?.data as Record<string, string> | undefined)?.detail ?? e.message
+        : t('dashboard.snapshotFailed');
       if (Platform.OS === "web") window.alert(`Error: ${detail}`);
       else Alert.alert(t('app.error'), detail);
     }
@@ -271,7 +388,7 @@ function OverviewScreen() {
           0
         )
       : 0;
-    // Use realized-profit endpoint data (matches Streamlit's calculate_realized_profit_details)
+
     const realizedPnl = realizedData?.total_realized_kwd ?? (data.by_portfolio
       ? Object.values(data.by_portfolio).reduce(
           (a: number, p) => a + (p.realized_pnl_kwd ?? 0),
@@ -600,6 +717,83 @@ function OverviewScreen() {
         />
       </View>
 
+      {/* ── Holdings Snapshot Table ── */}
+      <Text style={[styles.sectionTitle, { color: colors.textSecondary, fontSize: Math.max(fonts.caption, 13) }]}>
+        {t("overview.holdingsSnapshot", "Holdings Snapshot")}
+      </Text>
+      <View
+        style={[
+          styles.holdingsTableOuter,
+          {
+            borderColor: colors.borderColor,
+            backgroundColor: colors.bgCard,
+            marginBottom: spacing.sectionGap,
+          },
+        ]}
+      >
+        <ResponsiveDataTable<OverviewHoldingRow>
+          data={holdingsRows}
+          columns={holdingsMobileColumns}
+          keyExtractor={(r) => r.symbol}
+          desktopTable={
+            <ScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={{ minWidth: 980 }}>
+              <View style={{ minWidth: 980 }}>
+                <View style={[styles.holdingsHeadRow, { borderBottomColor: colors.borderColor, backgroundColor: colors.bgSecondary }]}>
+                  <Text style={[styles.holdingsHeadCell, styles.companyCol, { color: colors.textSecondary }]}>Company Name</Text>
+                  <Text style={[styles.holdingsHeadCell, styles.numCol, { color: colors.textSecondary }]}>Quantity</Text>
+                  <Text style={[styles.holdingsHeadCell, styles.numCol, { color: colors.textSecondary }]}>Cost / Price</Text>
+                  <Text style={[styles.holdingsHeadCell, styles.numCol, { color: colors.textSecondary }]}>Prev. Close</Text>
+                  <Text style={[styles.holdingsHeadCell, styles.numCol, { color: colors.textSecondary }]}>Last Price</Text>
+                  <Text style={[styles.holdingsHeadCell, styles.numCol, { color: colors.textSecondary }]}>Change %</Text>
+                  <Text style={[styles.holdingsHeadCell, styles.numColWide, { color: colors.textSecondary }]}>Total Value Change</Text>
+                </View>
+
+                {holdingsRows.map((row, idx) => {
+                  const changeColor = row.changePct == null ? colors.textMuted : pnlColor(row.changePct, colors);
+                  const valueColor = row.totalValueChange == null ? colors.textMuted : pnlColor(row.totalValueChange, colors);
+
+                  return (
+                    <View
+                      key={row.symbol}
+                      style={[
+                        styles.holdingsDataRow,
+                        {
+                          borderBottomColor: colors.borderColor,
+                          backgroundColor: idx % 2 === 0 ? "transparent" : colors.bgCardHover + "22",
+                        },
+                      ]}
+                    >
+                      <View style={[styles.companyCol, { paddingRight: 10 }]}> 
+                        <Text style={[styles.companyText, { color: colors.textPrimary }]} numberOfLines={1}>{row.company}</Text>
+                        <Text style={[styles.symbolText, { color: colors.textMuted }]}>
+                          {row.symbol} • {row.priceBasis === "persisted" ? "live" : row.priceBasis === "estimated" ? "estimated" : "no baseline"}
+                        </Text>
+                      </View>
+                      <Text style={[styles.holdingsDataCell, styles.numCol, { color: colors.textPrimary }]}>{row.quantity.toLocaleString()}</Text>
+                      <Text style={[styles.holdingsDataCell, styles.numCol, { color: colors.textPrimary }]}>{formatCurrency(row.costPerPrice)}</Text>
+                      <Text style={[styles.holdingsDataCell, styles.numCol, { color: colors.textPrimary }]}>{row.prevClose == null ? "—" : formatCurrency(row.prevClose)}</Text>
+                      <Text style={[styles.holdingsDataCell, styles.numCol, { color: colors.textPrimary }]}>{formatCurrency(row.lastPrice)}</Text>
+                      <Text style={[styles.holdingsDataCell, styles.numCol, { color: changeColor, fontWeight: "700" }]}>
+                        {row.changePct == null ? "—" : `${row.changePct >= 0 ? "+" : ""}${row.changePct.toFixed(2)}%`}
+                      </Text>
+                      <Text style={[styles.holdingsDataCell, styles.numColWide, { color: valueColor, fontWeight: "700" }]}>
+                        {row.totalValueChange == null ? "—" : formatSignedCurrency(row.totalValueChange)}
+                      </Text>
+                    </View>
+                  );
+                })}
+
+                {holdingsRows.length === 0 && (
+                  <View style={styles.holdingsEmptyRow}>
+                    <Text style={{ color: colors.textMuted }}>No holdings to display.</Text>
+                  </View>
+                )}
+              </View>
+            </ScrollView>
+          }
+        />
+      </View>
+
       {/* ── Row 2: Profit Breakdown ── */}
       <Pressable
         onPress={() => expertiseLevel === "normal" && setProfitOpen((v) => !v)}
@@ -675,81 +869,7 @@ function OverviewScreen() {
         />
       </View>
 
-      {/* ── CBK Rate (Rf) Manual Override ── */}
-      <View style={[styles.rfRateRow, { backgroundColor: colors.bgCard, borderColor: colors.borderColor }]}>        
-        <View style={styles.rfLabelRow}>
-          <FontAwesome name="bank" size={14} color="#06b6d4" />
-          <Text style={[styles.rfLabel, { color: colors.textPrimary }]}>
-            {t('dashboard.riskFreeRate')}
-          </Text>
-          <Text style={[styles.rfValue, { color: colors.textMuted }]}>
-            {customRfRate != null ? `${customRfRate.toFixed(2)}%` : t('dashboard.notSet')}
-          </Text>
-        </View>
-        {editingRfRate ? (
-          <View style={styles.rfEditRow}>
-            <TextInput
-              style={[styles.rfInput, {
-                borderColor: colors.borderColor,
-                backgroundColor: colors.bgInput ?? colors.bgSecondary,
-                color: colors.textPrimary,
-              }]}
-              value={rfRateInput}
-              onChangeText={setRfRateInput}
-              keyboardType="decimal-pad"
-              placeholder="%"
-              placeholderTextColor={colors.textMuted}
-              autoFocus
-            />
-            <Pressable
-              onPress={async () => {
-                const num = parseFloat(rfRateInput);
-                if (!isNaN(num) && num >= 0 && num <= 100) {
-                  setCustomRfRate(num);
-                  setEditingRfRate(false);
-                  // Persist to backend
-                  try {
-                    await setRfRate(num);
-                  } catch (err: unknown) {
-                    if (__DEV__) console.warn("Failed to persist rf_rate", err);
-                  }
-                }
-              }}
-              style={[styles.iconBtn, { backgroundColor: colors.success + "22" }]}
-            >
-              <FontAwesome name="check" size={12} color={colors.success} />
-            </Pressable>
-            <Pressable
-              onPress={() => { setEditingRfRate(false); setRfRateInput(""); }}
-              style={[styles.iconBtn, { backgroundColor: colors.danger + "22" }]}
-            >
-              <FontAwesome name="times" size={12} color={colors.danger} />
-            </Pressable>
-          </View>
-        ) : (
-          <View style={styles.rfEditRow}>
-            <Pressable
-              onPress={() => {
-                setRfRateInput(customRfRate != null ? customRfRate.toString() : "");
-                setEditingRfRate(true);
-              }}
-              style={[styles.iconBtn, { backgroundColor: colors.accentPrimary + "20" }]}
-            >
-              <FontAwesome name="pencil" size={13} color={colors.accentPrimary} />
-            </Pressable>
-          </View>
-        )}
-      </View>
-
       <View style={[styles.grid, { gap: spacing.gridGap, marginBottom: spacing.sectionGap }]}>
-        <MetricCard
-          label={t('dashboard.sortinoRatio')}
-          value={riskData?.sortino_ratio != null ? riskData.sortino_ratio.toFixed(2) : "—"}
-          subline={t('dashboard.downsideRiskAdjusted')}
-          icon="shield"
-          accentColor="#14b8a6"
-          width={isPhone ? "48%" : "24%"}
-        />
         <MetricCard
           label={t('dashboard.cagr')}
           value={formatPercent(metrics.cagr)}
@@ -1076,6 +1196,60 @@ const styles = StyleSheet.create({
   },
   tabBtnActive: {
     borderRadius: 8,
+  },
+
+  // Holdings table
+  holdingsTableOuter: {
+    borderRadius: 12,
+    borderWidth: 1,
+    overflow: "hidden",
+  },
+  holdingsHeadRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderBottomWidth: 1,
+    minHeight: 44,
+    paddingHorizontal: 12,
+  },
+  holdingsDataRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    minHeight: 54,
+    paddingHorizontal: 12,
+  },
+  holdingsHeadCell: {
+    fontSize: 11,
+    fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: 0.3,
+  },
+  holdingsDataCell: {
+    fontSize: 13,
+  },
+  companyCol: {
+    width: 280,
+  },
+  numCol: {
+    width: 110,
+    textAlign: "right",
+  },
+  numColWide: {
+    width: 150,
+    textAlign: "right",
+  },
+  companyText: {
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  symbolText: {
+    fontSize: 11,
+    marginTop: 2,
+  },
+  holdingsEmptyRow: {
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 92,
   },
 });
 

@@ -57,7 +57,7 @@ async function performWebGoogleSignIn(): Promise<GoogleAuthResult> {
     const AuthSession = await import("expo-auth-session");
 
     // Google OAuth 2.0 endpoints
-    const discovery: AuthSession.DiscoveryDocument = {
+    const discovery: import("expo-auth-session").DiscoveryDocument = {
       authorizationEndpoint: "https://accounts.google.com/o/oauth2/v2/auth",
       tokenEndpoint: "https://oauth2.googleapis.com/token",
     };
@@ -146,7 +146,7 @@ export async function performNativeGoogleSignIn(): Promise<GoogleAuthResult> {
 
     WebBrowser.maybeCompleteAuthSession();
 
-    const discovery: AuthSession.DiscoveryDocument = {
+    const discovery: import("expo-auth-session").DiscoveryDocument = {
       authorizationEndpoint: "https://accounts.google.com/o/oauth2/v2/auth",
       tokenEndpoint: "https://oauth2.googleapis.com/token",
     };

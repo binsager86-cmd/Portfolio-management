@@ -10,6 +10,7 @@
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import { FlashList } from "@shopify/flash-list";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import type { Href } from "expo-router";
 import { useRouter } from "expo-router";
 import React, { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -22,6 +23,7 @@ import {
     StyleSheet,
     Text,
     View,
+    type ViewStyle,
 } from "react-native";
 import { FAB } from "react-native-paper";
 
@@ -173,7 +175,7 @@ export default function DepositsScreen() {
 
   const handleEdit = useCallback((item: CashDepositRecord) => {
     router.push({
-      pathname: "/(tabs)/add-deposit" as any,
+      pathname: "/(tabs)/add-deposit",
       params: {
         editId: String(item.id),
         editPortfolio: item.portfolio,
@@ -184,7 +186,7 @@ export default function DepositsScreen() {
         editSource: item.source ?? "deposit",
         editNotes: item.notes ?? "",
       },
-    });
+    } as Href);
   }, [router]);
 
   const handleDelete = useCallback((item: CashDepositRecord) => {
@@ -218,8 +220,8 @@ export default function DepositsScreen() {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-    } catch (e: any) {
-      toast.error(e?.message ?? t('depositsScreen.exportFailed'));
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : t('depositsScreen.exportFailed'));
     } finally {
       setExporting(false);
     }
@@ -251,8 +253,8 @@ export default function DepositsScreen() {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-    } catch (e: any) {
-      toast.error(e?.message ?? t('depositsScreen.templateFailed'));
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : t('depositsScreen.templateFailed'));
     }
   }, []);
 
@@ -266,8 +268,9 @@ export default function DepositsScreen() {
     const input = document.createElement("input");
     input.type = "file";
     input.accept = ".xlsx,.xls";
-    input.onchange = async (e: any) => {
-      const file = e.target?.files?.[0];
+    input.onchange = async (e: Event) => {
+      const target = e.target as HTMLInputElement | null;
+      const file = target?.files?.[0];
       if (!file) return;
 
       // Confirm replace mode
@@ -573,7 +576,7 @@ export default function DepositsScreen() {
                 </View>
               </View>
               <Pressable
-                onPress={() => router.push("/(tabs)/holdings" as any)}
+                onPress={() => router.push("/(tabs)/holdings")}
                 style={{
                   flexDirection: "row",
                   alignItems: "center",
@@ -665,11 +668,11 @@ export default function DepositsScreen() {
       {/* FAB → Add Deposit */}
       <FAB
         icon="plus"
-        onPress={() => router.push("/(tabs)/add-deposit" as any)}
+        onPress={() => router.push("/(tabs)/add-deposit")}
         style={[
           s.fab,
           { backgroundColor: colors.accentPrimary },
-          Platform.OS === "web" && { position: "fixed" as any },
+          Platform.OS === "web" ? ({ position: "fixed" } as unknown as ViewStyle) : null,
         ]}
         color="#fff"
       />

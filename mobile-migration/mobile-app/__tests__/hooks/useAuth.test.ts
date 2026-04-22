@@ -19,12 +19,12 @@ const mockState = {
   username: "testuser",
   name: "Test User",
   isLoading: false,
-  error: null,
+  error: null as string | null,
   login: jest.fn(),
   logout: jest.fn(),
 };
 
-let selectorCallbacks: Map<string, Function> = new Map();
+const selectorCallbacks: Map<string, Function> = new Map();
 
 jest.mock("@/services/authStore", () => ({
   useAuthStore: (selector: (state: any) => any) => {

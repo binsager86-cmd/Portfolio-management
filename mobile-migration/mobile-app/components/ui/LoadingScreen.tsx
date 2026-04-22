@@ -6,6 +6,7 @@
 import { useThemeStore } from "@/services/themeStore";
 import React, { useEffect, useRef } from "react";
 import { ActivityIndicator, Animated, Easing, StyleSheet, Text, View } from "react-native";
+import type { DimensionValue } from "react-native";
 
 type LoadingType = "spinner" | "skeleton" | "shimmer";
 
@@ -50,7 +51,7 @@ function ShimmerBar({ width, height, colors, animate }: {
   return (
     <Animated.View
       style={{
-        width: width as any,
+        width: width as DimensionValue,
         height,
         borderRadius: 6,
         backgroundColor: bg,

@@ -29,6 +29,7 @@ async function init(): Promise<void> {
 
   try {
     // Dynamic require so Metro doesn't fail when the package isn't installed
+    // eslint-disable-next-line @typescript-eslint/no-require-imports -- intentional dynamic require: optional Sentry package
     Sentry = require("@sentry/react-native");
     Sentry.init({
       dsn,

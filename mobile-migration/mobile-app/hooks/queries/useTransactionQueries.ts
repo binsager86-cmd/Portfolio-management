@@ -34,7 +34,7 @@ export function useTransactions(params: {
     queryFn: () =>
       getTransactions({
         page: params.page,
-        page_size: params.perPage ?? 50,
+        per_page: params.perPage ?? 50,
         portfolio: params.portfolio,
         symbol: params.symbol,
       }),
@@ -46,7 +46,7 @@ export function useTransactions(params: {
 export function useAllTransactions() {
   return useQuery<TransactionListResponse>({
     queryKey: transactionKeys.all(),
-    queryFn: () => getTransactions({ page: 1, page_size: 10000 }),
+    queryFn: () => getTransactions({ page: 1, per_page: 10000 }),
     staleTime: 5 * 60 * 1000,
   });
 }
@@ -56,7 +56,7 @@ export function useTransactionCount() {
   return useQuery({
     queryKey: ["transactions", "count"],
     queryFn: async () => {
-      const data = await getTransactions({ page: 1, page_size: 1 });
+      const data = await getTransactions({ page: 1, per_page: 1 });
       return data.count;
     },
     staleTime: Infinity,

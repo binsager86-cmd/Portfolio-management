@@ -5,15 +5,17 @@
 
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import { FlashList } from "@shopify/flash-list";
+import { useQueryClient } from "@tanstack/react-query";
 import React, { useCallback, useMemo, useState } from "react";
-import { Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
 
 import { FAPanelSkeleton } from "@/components/ui/PageSkeletons";
 import type { ThemePalette } from "@/constants/theme";
-import { useScoreHistory, useStockScore, useValuations } from "@/hooks/queries";
+import { analysisKeys, useScoreHistory, useStatements, useStockScore, useValuations } from "@/hooks/queries";
 import { generateStockSummary, type AISummary } from "@/lib/aiSummaryGenerator";
 import type { TableData } from "@/lib/exportAnalysis";
-import type { CategoryBreakdown } from "@/services/api";
+import { showErrorAlert } from "@/lib/errorHandling";
+import { calculateMetrics, type CategoryBreakdown } from "@/services/api";
 import { useUserPrefsStore } from "@/src/store/userPrefsStore";
 import { st } from "../styles";
 import { SCORE_WEIGHTS, type PanelWithSymbolProps } from "../types";
@@ -29,12 +31,54 @@ function beginnerScoreLabel(score: number): string {
 }
 
 export const ScorePanel = React.memo(function ScorePanel({ stockId, stockSymbol, colors, isDesktop }: PanelWithSymbolProps) {
+  const queryClient = useQueryClient();
   const { data, isLoading, isError, error, refetch, isFetching } = useStockScore(stockId);
   const historyQ = useScoreHistory(stockId);
   const valuationsQ = useValuations(stockId);
+  const stmtQ = useStatements(stockId);
   const preferences = useUserPrefsStore((s) => s.preferences);
   const isBeginner = preferences.expertiseLevel === "normal";
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+
+  // Recalculate metrics for every period in the uploaded statements,
+  // then refetch the score / history so any new statement is reflected.
+  const handleRefresh = useCallback(async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      const seen = new Set<string>();
+      const periods = (stmtQ.data?.statements ?? [])
+        .filter((s) => { if (seen.has(s.period_end_date)) return false; seen.add(s.period_end_date); return true; })
+        .map((s) => ({
+          period_end_date: s.period_end_date,
+          fiscal_year: s.fiscal_year,
+          fiscal_quarter: s.fiscal_quarter ?? undefined,
+        }));
+
+      if (periods.length > 0) {
+        const results = await Promise.allSettled(
+          periods.map((p) => calculateMetrics(stockId, p)),
+        );
+        const failed = results.filter((r) => r.status === "rejected").length;
+        if (failed > 0) {
+          showErrorAlert("Partial Refresh", new Error(`${failed}/${periods.length} period calculations failed.`));
+        }
+      }
+
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: analysisKeys.metrics(stockId) }),
+        queryClient.invalidateQueries({ queryKey: analysisKeys.growth(stockId) }),
+        queryClient.invalidateQueries({ queryKey: analysisKeys.score(stockId) }),
+        queryClient.invalidateQueries({ queryKey: analysisKeys.scoreHistory(stockId) }),
+        queryClient.invalidateQueries({ queryKey: analysisKeys.valuations(stockId) }),
+      ]);
+    } catch (err) {
+      showErrorAlert("Refresh Failed", err instanceof Error ? err : new Error(String(err)));
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refreshing, stmtQ.data, stockId, queryClient]);
 
   const score = data;
   const scoreHistory = historyQ.data?.scores ?? [];
@@ -153,7 +197,29 @@ export const ScorePanel = React.memo(function ScorePanel({ stockId, stockSymbol,
         </View>
       ) : (
         <>
-          <View style={{ alignItems: "flex-end", marginBottom: 2 }}>
+          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 8, marginBottom: 2 }}>
+            <Pressable
+              onPress={handleRefresh}
+              disabled={refreshing || isFetching}
+              accessibilityRole="button"
+              accessibilityLabel="Refresh score"
+              style={({ pressed }) => ({
+                flexDirection: "row", alignItems: "center", gap: 6,
+                paddingHorizontal: 12, paddingVertical: 7, borderRadius: 8,
+                borderWidth: 1, borderColor: colors.accentPrimary,
+                backgroundColor: colors.accentPrimary + (pressed ? "22" : "10"),
+                opacity: refreshing || isFetching ? 0.6 : 1,
+              })}
+            >
+              {refreshing ? (
+                <ActivityIndicator size="small" color={colors.accentPrimary} />
+              ) : (
+                <FontAwesome name="refresh" size={12} color={colors.accentPrimary} />
+              )}
+              <Text style={{ color: colors.accentPrimary, fontSize: 12, fontWeight: "700" }}>
+                {refreshing ? "Refreshing..." : "Refresh"}
+              </Text>
+            </Pressable>
             <ExportBar
               onExport={async (fmt) => {
                 const { exportExcel, exportCSV, exportPDF } = await import("@/lib/exportAnalysis");
@@ -376,7 +442,6 @@ export const ScorePanel = React.memo(function ScorePanel({ stockId, stockSymbol,
                     <FlashList
                       data={scoreHistory}
                       renderItem={renderHistoryRow}
-                      estimatedItemSize={36}
                       drawDistance={200}
                       keyExtractor={(sh) => String(sh.id)}
                     />

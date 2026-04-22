@@ -12,6 +12,7 @@ export interface LoginResponse {
   user_id: number;
   username: string;
   name?: string;
+  is_admin?: boolean;
 }
 
 export interface RefreshResponse {
@@ -88,6 +89,7 @@ export interface Holding {
   shares_qty: number;
   avg_cost: number;
   total_cost: number;
+  previous_close?: number | null;
   market_price: number;
   market_value: number;
   unrealized_pnl: number;
@@ -682,6 +684,8 @@ export interface StockScore {
   valuation_score: number | null;
   growth_score: number | null;
   quality_score: number | null;
+  risk_score?: number | null;
+  risk_penalty_pct?: number | null;
   details: Record<string, number>;
   analyst_notes: string | null;
   created_at: number;

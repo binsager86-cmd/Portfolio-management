@@ -226,7 +226,7 @@ function extractDetail(data: unknown): string | null {
   // Pydantic validation errors: { detail: [{ msg: "..." }, ...] }
   if (Array.isArray(d.detail)) {
     return d.detail
-      .map((e: any) => e.msg || e.message || JSON.stringify(e))
+      .map((e: { msg?: string; message?: string }) => e.msg || e.message || JSON.stringify(e))
       .join(". ");
   }
 

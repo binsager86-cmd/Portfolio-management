@@ -73,7 +73,7 @@ export function StockMergeModal({ holding, colors, onClose, onMerged }: StockMer
       onMerged();
       onClose();
     },
-    onError: (err: any) => {
+    onError: (err: unknown) => {
       showErrorAlert(t("holdingsScreen.mergeFailed"), err);
     },
   });

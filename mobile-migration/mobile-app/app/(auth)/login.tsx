@@ -120,9 +120,9 @@ export default function LoginScreen() {
 
   // Wrap react-hook-form submit to prevent native <form> reload on web
   const safeSubmit = useCallback(
-    (e?: any) => {
+    (e?: { preventDefault?: () => void }) => {
       if (e?.preventDefault) e.preventDefault();
-      handleSubmit(onSubmit)(e);
+      handleSubmit(onSubmit)(e as Parameters<ReturnType<typeof handleSubmit>>[0]);
     },
     [handleSubmit, onSubmit],
   );
