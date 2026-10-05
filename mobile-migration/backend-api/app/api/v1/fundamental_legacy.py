@@ -6078,10 +6078,42 @@ def _persist_score(stock_id: int, user_id: int, result: Dict[str, Any], latest: 
         logger.exception("Failed to persist stock score for stock %s", stock_id)
 
 
-def _compute_stock_score(stock_id: int, user_id: int) -> Dict[str, Any]:
-    # ── Auto-recalculate all metrics from financial statements before scoring ──
-    # This ensures newly added formulas (ROIC, Accruals Ratio, Net Debt/EBITDA, etc.)
-    # are applied even if the user hasn't manually re-triggered metric calculation.
+_METRICS_FRESH: Dict[int, str] = {}  # stock_id -> input fingerprint at last full recalculation
+
+
+def _metrics_inputs_fingerprint(stock_id: int) -> str:
+    """Cheap checksum of everything the metric formulas read for a stock.
+
+    Covers statements and line items (row counts, max ids, amount sums, a
+    weighted amount sum so offsetting edits are still caught, and edit
+    timestamps). Any insert, delete or edit changes it.
+    """
+    row = query_one(
+        """SELECT COUNT(DISTINCT fs.id), COALESCE(MAX(fs.id), 0), COALESCE(MAX(fs.created_at), 0),
+                  COUNT(li.id), COALESCE(MAX(li.id), 0), COALESCE(SUM(li.amount), 0),
+                  COALESCE(SUM(li.amount * ((li.id % 1013) + 1)), 0), COALESCE(MAX(li.edited_at), 0)
+           FROM financial_statements fs
+           LEFT JOIN financial_line_items li ON li.statement_id = fs.id
+           WHERE fs.stock_id = ?""",
+        (stock_id,),
+    )
+    vals = list(row) if isinstance(row, (tuple, list)) else list((row or {}).values())
+    return "|".join(repr(v) for v in vals)
+
+
+def _ensure_metrics_fresh(stock_id: int) -> None:
+    """Recalculate metrics + growth only when the underlying statements changed.
+
+    Recalculating every period on every score request was the dominant cost of
+    opening the Score tab. The result is remembered per process, so a restart
+    (e.g. a deploy that ships new formulas) always triggers a fresh calculation.
+    A run in which any period failed is not remembered, so it is retried.
+    """
+    fingerprint = _metrics_inputs_fingerprint(stock_id)
+    if _METRICS_FRESH.get(stock_id) == fingerprint:
+        return
+
+    ok = True
     periods = query_all(
         """SELECT DISTINCT period_end_date, fiscal_year, fiscal_quarter
            FROM financial_statements
@@ -6098,13 +6130,24 @@ def _compute_stock_score(stock_id: int, user_id: int) -> Dict[str, Any]:
             try:
                 _calculate_all_metrics(stock_id, ped, fy, fq)
             except Exception:
-                pass  # non-fatal, keep going
+                ok = False
+                logger.exception("Metric calculation failed for stock %s period %s", stock_id, ped)
 
     # Recalculate growth (CAGRs, stability, trends, profit-aware growth)
     try:
         _calculate_growth(stock_id)
     except Exception:
-        pass
+        ok = False
+        logger.exception("Growth calculation failed for stock %s", stock_id)
+
+    if ok:
+        _METRICS_FRESH[stock_id] = fingerprint
+    else:
+        _METRICS_FRESH.pop(stock_id, None)
+
+
+def _compute_stock_score(stock_id: int, user_id: int) -> Dict[str, Any]:
+    _ensure_metrics_fresh(stock_id)
 
     rows = query_all(
         "SELECT metric_name, metric_value FROM stock_metrics WHERE stock_id = ? ORDER BY period_end_date DESC",
