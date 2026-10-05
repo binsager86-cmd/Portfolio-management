@@ -11,9 +11,10 @@ import { ActivityIndicator, Pressable, RefreshControl, ScrollView, Text, View } 
 
 import { FAPanelSkeleton } from "@/components/ui/PageSkeletons";
 import type { ThemePalette } from "@/constants/theme";
-import { analysisKeys, useScoreHistory, useStatements, useStockScore, useValuations } from "@/hooks/queries";
+import { analysisKeys, useAnalysisStocks, useScoreHistory, useStatements, useStockScore, useValuations } from "@/hooks/queries";
 import { generateStockSummary, type AISummary } from "@/lib/aiSummaryGenerator";
 import type { TableData } from "@/lib/exportAnalysis";
+import { formatCurrency } from "@/lib/currency";
 import { showErrorAlert } from "@/lib/errorHandling";
 import { calculateMetrics, type CategoryBreakdown } from "@/services/api";
 import { useUserPrefsStore } from "@/src/store/userPrefsStore";
@@ -36,6 +37,7 @@ export const ScorePanel = React.memo(function ScorePanel({ stockId, stockSymbol,
   const historyQ = useScoreHistory(stockId);
   const valuationsQ = useValuations(stockId);
   const stmtQ = useStatements(stockId);
+  const stocksQ = useAnalysisStocks();
   const preferences = useUserPrefsStore((s) => s.preferences);
   const isBeginner = preferences.expertiseLevel === "normal";
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -80,6 +82,8 @@ export const ScorePanel = React.memo(function ScorePanel({ stockId, stockSymbol,
     }
   }, [refreshing, stmtQ.data, stockId, queryClient]);
 
+  // Prices and intrinsic values are in the stock's own currency (KWD for Boursa Kuwait).
+  const currency = stocksQ.data?.stocks?.find((x) => x.id === stockId)?.currency || "KWD";
   const score = data;
   const scoreHistory = useMemo(() => historyQ.data?.scores ?? [], [historyQ.data]);
   const valuations = useMemo(() => valuationsQ.data?.valuations ?? [], [valuationsQ.data]);
@@ -344,7 +348,7 @@ export const ScorePanel = React.memo(function ScorePanel({ stockId, stockSymbol,
                     <View style={{ alignItems: "center", flex: 1 }}>
                       <Text style={{ color: colors.textMuted, fontSize: 12, marginBottom: 4 }}>Intrinsic Value</Text>
                       <Text style={{ color: colors.accentPrimary, fontSize: 20, fontWeight: "800", fontVariant: ["tabular-nums"] }}>
-                        ${iv.toFixed(2)}
+                        {formatCurrency(iv, currency)}
                       </Text>
                     </View>
                     <View style={{ alignItems: "center", justifyContent: "center", paddingHorizontal: 8 }}>
@@ -353,7 +357,7 @@ export const ScorePanel = React.memo(function ScorePanel({ stockId, stockSymbol,
                     <View style={{ alignItems: "center", flex: 1 }}>
                       <Text style={{ color: colors.textMuted, fontSize: 12, marginBottom: 4 }}>Current Price</Text>
                       <Text style={{ color: colors.textSecondary, fontSize: 20, fontWeight: "800", fontVariant: ["tabular-nums"] }}>
-                        ${cp.toFixed(2)}
+                        {formatCurrency(cp, currency)}
                       </Text>
                     </View>
                   </View>
