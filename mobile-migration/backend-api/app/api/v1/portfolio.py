@@ -78,7 +78,7 @@ _OVERVIEW_SUMMARY_KEYS = {
 
 
 @router.get("/overview")
-async def portfolio_overview(
+def portfolio_overview(
     fields: Optional[str] = Query(
         None,
         description="Comma-separated field names to include. Use 'summary' for "
@@ -107,7 +107,7 @@ async def portfolio_overview(
 # ── Holdings ──────────────────────────────────────────────────────────
 
 @router.get("/holdings")
-async def portfolio_holdings(
+def portfolio_holdings(
     portfolio: Optional[str] = Query(None, description="Filter by portfolio name (KFH, BBYN, USA)"),
     current_user: TokenData = Depends(get_current_user),
 ):
@@ -184,7 +184,7 @@ async def portfolio_holdings(
 # ── Per-portfolio table ──────────────────────────────────────────────
 
 @router.get("/table/{portfolio_name}")
-async def portfolio_table(
+def portfolio_table(
     portfolio_name: str,
     current_user: TokenData = Depends(get_current_user),
 ):
@@ -215,7 +215,7 @@ async def portfolio_table(
 # ── Account cash balances ────────────────────────────────────────────
 
 @router.get("/accounts")
-async def account_balances(current_user: TokenData = Depends(get_current_user)):
+def account_balances(current_user: TokenData = Depends(get_current_user)):
     """External account cash balances."""
     data = get_account_balances(current_user.user_id)
     return {"status": "ok", "data": data}
@@ -224,7 +224,7 @@ async def account_balances(current_user: TokenData = Depends(get_current_user)):
 # ── FX rate info ─────────────────────────────────────────────────────
 
 @router.get("/fx-rate")
-async def fx_rate(current_user: TokenData = Depends(get_current_user)):
+def fx_rate(current_user: TokenData = Depends(get_current_user)):
     """Current USD→KWD exchange rate (cached for 1 hour)."""
     rate = get_usd_kwd_rate()
     return {
@@ -236,7 +236,7 @@ async def fx_rate(current_user: TokenData = Depends(get_current_user)):
 # ── Transaction CRUD ─────────────────────────────────────────────────
 
 @router.get("/transactions")
-async def list_transactions(
+def list_transactions(
     portfolio: Optional[str] = Query(None),
     stock_symbol: Optional[str] = Query(None),
     txn_type: Optional[str] = Query(None),
@@ -299,7 +299,7 @@ async def list_transactions(
 
 
 @router.get("/transactions/{txn_id}")
-async def get_transaction(
+def get_transaction(
     txn_id: int,
     current_user: TokenData = Depends(get_current_user),
 ):
@@ -315,7 +315,7 @@ async def get_transaction(
 
 
 @router.post("/transactions", status_code=201)
-async def create_transaction(
+def create_transaction(
     request: Request,
     body: TransactionCreate,
     current_user: TokenData = Depends(get_current_user),
@@ -433,7 +433,7 @@ async def create_transaction(
 
 
 @router.put("/transactions/{txn_id}")
-async def update_transaction(
+def update_transaction(
     txn_id: int,
     request: Request,
     body: TransactionUpdate,
@@ -518,7 +518,7 @@ async def update_transaction(
 
 
 @router.delete("/transactions/{txn_id}")
-async def delete_transaction(
+def delete_transaction(
     txn_id: int,
     request: Request,
     current_user: TokenData = Depends(get_current_user),
@@ -577,7 +577,7 @@ async def delete_transaction(
 
 
 @router.post("/transactions/{txn_id}/restore")
-async def restore_transaction(
+def restore_transaction(
     txn_id: int,
     request: Request,
     current_user: TokenData = Depends(get_current_user),
@@ -635,7 +635,7 @@ async def restore_transaction(
 
 
 @router.delete("/transactions")
-async def delete_all_transactions(
+def delete_all_transactions(
     request: Request,
     portfolio: Optional[str] = Query(None, description="Filter by portfolio (optional)"),
     current_user: TokenData = Depends(get_current_user),
@@ -692,7 +692,7 @@ async def delete_all_transactions(
 # ── Holdings export ──────────────────────────────────────────────────
 
 @router.get("/holdings-export")
-async def holdings_export(
+def holdings_export(
     portfolio: Optional[str] = Query(None),
     current_user: TokenData = Depends(get_current_user),
 ):
@@ -751,7 +751,7 @@ async def holdings_export(
 # ── Reset Account (delete all data) ─────────────────────────────────
 
 @router.post("/reset-account")
-async def reset_account(
+def reset_account(
     request: Request,
     current_user: TokenData = Depends(get_current_user),
 ):

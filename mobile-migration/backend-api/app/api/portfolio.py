@@ -26,7 +26,7 @@ router = APIRouter(prefix="/api/portfolio", tags=["Portfolio"])
 # ── Overview ─────────────────────────────────────────────────────────
 
 @router.get("/overview")
-async def portfolio_overview(
+def portfolio_overview(
     current_user: TokenData = Depends(get_current_user),
 ):
     """
@@ -40,7 +40,7 @@ async def portfolio_overview(
 # ── Holdings ──────────────────────────────────────────────────────────
 
 @router.get("/holdings")
-async def portfolio_holdings(
+def portfolio_holdings(
     portfolio: Optional[str] = Query(None, description="Filter by portfolio name (KFH, BBYN, USA)"),
     current_user: TokenData = Depends(get_current_user),
 ):
@@ -189,7 +189,7 @@ async def portfolio_holdings(
 # ── Per-portfolio table ──────────────────────────────────────────────
 
 @router.get("/table/{portfolio_name}")
-async def portfolio_table(
+def portfolio_table(
     portfolio_name: str,
     current_user: TokenData = Depends(get_current_user),
 ):
@@ -218,7 +218,7 @@ async def portfolio_table(
 # ── Account cash balances ────────────────────────────────────────────
 
 @router.get("/accounts")
-async def account_balances(
+def account_balances(
     current_user: TokenData = Depends(get_current_user),
 ):
     """External account cash balances."""
@@ -229,7 +229,7 @@ async def account_balances(
 # ── FX rate info ─────────────────────────────────────────────────────
 
 @router.get("/fx-rate")
-async def fx_rate(
+def fx_rate(
     current_user: TokenData = Depends(get_current_user),
 ):
     """Current USD→KWD exchange rate (cached for 1 hour)."""
