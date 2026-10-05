@@ -4231,7 +4231,9 @@ async def get_score(
     _ensure_schema()
     _verify_stock_owner(stock_id, current_user.user_id)
 
-    score = _compute_stock_score(stock_id, current_user.user_id)
+    # Blocking work (DB recalculation + network): keep it off the event loop.
+    from starlette.concurrency import run_in_threadpool
+    score = await run_in_threadpool(_compute_stock_score, stock_id, current_user.user_id)
     return {"status": "ok", "data": score}
 
 
@@ -4248,7 +4250,8 @@ async def get_score_history(
         "SELECT * FROM stock_scores WHERE stock_id = ? ORDER BY scoring_date DESC",
         (stock_id,),
     )
-    scores = df.to_dict(orient="records") if not df.empty else []
+    # NaN (e.g. NULL risk_score on legacy rows) is not valid JSON -> use None.
+    scores = df.astype(object).where(df.notna(), None).to_dict(orient="records") if not df.empty else []
     # Parse JSON details
     for s in scores:
         if isinstance(s.get("details"), str):
@@ -6048,6 +6051,33 @@ def _calculate_growth(stock_id: int) -> Dict[str, List[Dict[str, Any]]]:
 
 # ── Score calculation (mirrors MetricsCalculator.compute_stock_score)
 
+def _persist_score(stock_id: int, user_id: int, result: Dict[str, Any], latest: Dict[str, float]) -> None:
+    """Store one score row per stock per day (replaces today's row).
+
+    The score endpoint is read on every Score-tab open; inserting a row per
+    request flooded the history with duplicates.
+    """
+    today = date.today().isoformat()
+    now = int(time.time())
+    try:
+        exec_sql("DELETE FROM stock_scores WHERE stock_id = ? AND scoring_date = ?", (stock_id, today))
+        exec_sql(
+            """INSERT INTO stock_scores
+               (stock_id, scoring_date, overall_score, fundamental_score,
+                valuation_score, growth_score, quality_score, risk_score, details,
+                created_by_user_id, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                stock_id, today, result["overall_score"],
+                result["fundamental_score"], result["valuation_score"],
+                result["growth_score"], result["quality_score"],
+                result["risk_score"], json.dumps(latest), user_id, now,
+            ),
+        )
+    except Exception:
+        logger.exception("Failed to persist stock score for stock %s", stock_id)
+
+
 def _compute_stock_score(stock_id: int, user_id: int) -> Dict[str, Any]:
     # ── Auto-recalculate all metrics from financial statements before scoring ──
     # This ensures newly added formulas (ROIC, Accruals Ratio, Net Debt/EBITDA, etc.)
@@ -6183,38 +6213,7 @@ def _compute_stock_score(stock_id: int, user_id: int) -> Dict[str, Any]:
         },
     }
 
-    # Persist (risk_score goes into details JSON since column may not exist yet)
-    now = int(time.time())
-    # Try inserting with risk_score column, fall back to without
-    try:
-        exec_sql(
-            """INSERT INTO stock_scores
-               (stock_id, scoring_date, overall_score, fundamental_score,
-                valuation_score, growth_score, quality_score, risk_score, details,
-                created_by_user_id, created_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-            (
-                stock_id, date.today().isoformat(), result["overall_score"],
-                result["fundamental_score"], result["valuation_score"],
-                result["growth_score"], result["quality_score"],
-                result["risk_score"],
-                json.dumps(latest), user_id, now,
-            ),
-        )
-    except Exception:
-        exec_sql(
-            """INSERT INTO stock_scores
-               (stock_id, scoring_date, overall_score, fundamental_score,
-                valuation_score, growth_score, quality_score, details,
-                created_by_user_id, created_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?)""",
-            (
-                stock_id, date.today().isoformat(), result["overall_score"],
-                result["fundamental_score"], result["valuation_score"],
-                result["growth_score"], result["quality_score"],
-                json.dumps(latest), user_id, now,
-            ),
-        )
+    _persist_score(stock_id, user_id, result, latest)
     return result
 
 
@@ -6619,7 +6618,23 @@ def _resolve_yf_ticker(symbol: str, user_id: int = None) -> str:
     return symbol
 
 
+_YF_RISK_CACHE: Dict[str, tuple] = {}
+_YF_RISK_TTL = 600  # seconds
+
+
 def _fetch_yfinance_risk_data(symbol: str) -> Dict[str, float]:
+    """Cached wrapper: the live fetch can take up to 15s, so reuse results for 10 min."""
+    key = symbol.upper()
+    hit = _YF_RISK_CACHE.get(key)
+    if hit and time.time() - hit[0] < _YF_RISK_TTL:
+        return dict(hit[1])
+    data = _fetch_yfinance_risk_data_live(symbol)
+    if data:  # never cache failures
+        _YF_RISK_CACHE[key] = (time.time(), dict(data))
+    return data
+
+
+def _fetch_yfinance_risk_data_live(symbol: str) -> Dict[str, float]:
     """Fetch current price, beta, volatility & drawdown from yfinance.
 
     All ratios (P/B, Earnings Yield, EV/EBIT, etc.) are computed from

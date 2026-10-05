@@ -5,6 +5,7 @@
 import api from "../client";
 import type {
   PeerMultiple,
+  ScoreBreakdown,
   StockMetric,
   StockScore,
   StockScoreSummary,
@@ -58,7 +59,7 @@ export async function getStockScore(stockId: number): Promise<StockScoreSummary 
   const { data } = await api.get<{ status: string; data: StockScoreSummary & { details?: Record<string, number>; error?: string } }>(
     `/api/v1/fundamental/stocks/${stockId}/score`,
   );
-  return data.data;
+  return normalizeScore(data?.data);
 }
 
 /** Get score history. */
@@ -66,7 +67,32 @@ export async function getScoreHistory(stockId: number): Promise<{ scores: StockS
   const { data } = await api.get<{ status: string; data: { scores: StockScore[]; count: number } }>(
     `/api/v1/fundamental/stocks/${stockId}/scores/history`,
   );
-  return data.data;
+  const scores = Array.isArray(data?.data?.scores) ? data.data.scores : [];
+  return { scores, count: scores.length };
+}
+
+const BREAKDOWN_KEYS = ["fundamental", "valuation", "growth", "quality", "risk"] as const;
+
+/**
+ * Normalise the score payload at the API boundary so the UI can rely on its
+ * shape: `details` is always an object and every breakdown category always has
+ * a `metrics` array (a partial/legacy payload used to crash the Score tab with
+ * "Cannot read properties of undefined (reading 'map')").
+ */
+function normalizeScore<T extends { details?: Record<string, number>; score_breakdown?: ScoreBreakdown }>(raw: T | null | undefined): T {
+  const score = { ...(raw ?? {}) } as T;
+  score.details = score.details && typeof score.details === "object" ? score.details : {};
+  if (score.score_breakdown && typeof score.score_breakdown === "object") {
+    const fixed: Partial<ScoreBreakdown> = {};
+    for (const key of BREAKDOWN_KEYS) {
+      const cat = score.score_breakdown[key];
+      if (cat && Array.isArray(cat.metrics)) fixed[key] = cat;
+    }
+    score.score_breakdown = fixed as ScoreBreakdown;
+  } else {
+    score.score_breakdown = undefined;
+  }
+  return score;
 }
 
 // ── Valuations ──────────────────────────────────────────────────────
