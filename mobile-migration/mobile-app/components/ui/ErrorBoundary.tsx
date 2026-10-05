@@ -20,6 +20,7 @@ interface Props {
 interface State {
   hasError: boolean;
   error: Error | null;
+  componentStack?: string;
 }
 
 export class AppErrorBoundary extends Component<Props, State> {
@@ -30,9 +31,10 @@ export class AppErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, info: React.ErrorInfo) {
-    if (__DEV__) {
-      console.error("[ErrorBoundary]", error, info.componentStack);
-    }
+    // Always log (not only in dev) so a crash can be diagnosed from the
+    // browser console / remote debugging of a production build.
+    console.error("[ErrorBoundary]", error, info.componentStack);
+    this.setState({ componentStack: info.componentStack ?? undefined });
     analytics.captureError(error, {
       componentStack: info.componentStack ?? "",
     });
@@ -50,9 +52,15 @@ export class AppErrorBoundary extends Component<Props, State> {
           <Text style={styles.emoji}>💥</Text>
           <Text style={styles.title}>Something went wrong</Text>
           <Text style={styles.message}>{errorMessage}</Text>
-          {__DEV__ && this.state.error?.stack ? (
-            <Text style={styles.stack} numberOfLines={8}>
+          {/* Short technical detail so a screenshot shows where it crashed. */}
+          {this.state.error?.stack ? (
+            <Text style={styles.stack} numberOfLines={6}>
               {this.state.error.stack}
+            </Text>
+          ) : null}
+          {this.state.componentStack ? (
+            <Text style={styles.stack} numberOfLines={6}>
+              {this.state.componentStack.trim()}
             </Text>
           ) : null}
           <Pressable

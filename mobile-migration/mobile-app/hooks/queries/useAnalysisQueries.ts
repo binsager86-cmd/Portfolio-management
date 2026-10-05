@@ -14,6 +14,7 @@ import {
     getValuationDefaults,
     getValuations,
 } from "@/services/api";
+import { normalizeScore, normalizeScoreHistory, normalizeValuations } from "@/services/api/analytics/metrics";
 import { useQuery } from "@tanstack/react-query";
 
 // ── Query key constants ─────────────────────────────────────────────
@@ -74,6 +75,9 @@ export function useStockScore(stockId: number) {
   return useQuery({
     queryKey: analysisKeys.score(stockId),
     queryFn: () => getStockScore(stockId),
+    // The query cache is persisted for 24h; re-normalize so a response cached
+    // by an older app version can never put the UI into an unexpected shape.
+    select: normalizeScore,
   });
 }
 
@@ -82,6 +86,7 @@ export function useScoreHistory(stockId: number) {
   return useQuery({
     queryKey: analysisKeys.scoreHistory(stockId),
     queryFn: () => getScoreHistory(stockId),
+    select: normalizeScoreHistory,
   });
 }
 
@@ -90,6 +95,7 @@ export function useValuations(stockId: number) {
   return useQuery({
     queryKey: analysisKeys.valuations(stockId),
     queryFn: () => getValuations(stockId),
+    select: normalizeValuations,
   });
 }
 

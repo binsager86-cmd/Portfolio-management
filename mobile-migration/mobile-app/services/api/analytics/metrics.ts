@@ -67,7 +67,12 @@ export async function getScoreHistory(stockId: number): Promise<{ scores: StockS
   const { data } = await api.get<{ status: string; data: { scores: StockScore[]; count: number } }>(
     `/api/v1/fundamental/stocks/${stockId}/scores/history`,
   );
-  const scores = Array.isArray(data?.data?.scores) ? data.data.scores : [];
+  return normalizeScoreHistory(data?.data);
+}
+
+/** Guarantee `scores` is an array (also applied to cached/persisted responses). */
+export function normalizeScoreHistory(raw: { scores?: StockScore[] | null } | null | undefined): { scores: StockScore[]; count: number } {
+  const scores = Array.isArray(raw?.scores) ? raw.scores.filter((s) => s != null && typeof s === "object") : [];
   return { scores, count: scores.length };
 }
 
@@ -79,7 +84,7 @@ const BREAKDOWN_KEYS = ["fundamental", "valuation", "growth", "quality", "risk"]
  * a `metrics` array (a partial/legacy payload used to crash the Score tab with
  * "Cannot read properties of undefined (reading 'map')").
  */
-function normalizeScore<T extends { details?: Record<string, number>; score_breakdown?: ScoreBreakdown }>(raw: T | null | undefined): T {
+export function normalizeScore<T extends { details?: Record<string, number>; score_breakdown?: ScoreBreakdown }>(raw: T | null | undefined): T {
   const score = { ...(raw ?? {}) } as T;
   score.details = score.details && typeof score.details === "object" ? score.details : {};
   if (score.score_breakdown && typeof score.score_breakdown === "object") {
@@ -102,7 +107,13 @@ export async function getValuations(stockId: number): Promise<{ valuations: Valu
   const { data } = await api.get<{ status: string; data: { valuations: ValuationResult[]; count: number } }>(
     `/api/v1/fundamental/stocks/${stockId}/valuations`,
   );
-  return data.data;
+  return normalizeValuations(data?.data);
+}
+
+/** Guarantee `valuations` is an array (also applied to cached/persisted responses). */
+export function normalizeValuations(raw: { valuations?: ValuationResult[] | null } | null | undefined): { valuations: ValuationResult[]; count: number } {
+  const valuations = Array.isArray(raw?.valuations) ? raw.valuations.filter((v) => v != null && typeof v === "object") : [];
+  return { valuations, count: valuations.length };
 }
 
 /** Normalize backend result: map `model` → `model_type`. */

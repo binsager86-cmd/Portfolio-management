@@ -40,6 +40,10 @@ export class ErrorBoundary extends React.Component<
     return { hasError: true, error };
   }
 
+  componentDidCatch(error: Error, info: React.ErrorInfo) {
+    console.error("[FA panel ErrorBoundary]", error, info.componentStack);
+  }
+
   render() {
     if (this.state.hasError) {
       return (
