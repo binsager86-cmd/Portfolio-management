@@ -10,6 +10,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import threading
 import time
 import logging
@@ -6275,21 +6276,22 @@ def _compute_stock_score(stock_id: int, user_id: int) -> Dict[str, Any]:
         if name not in latest:
             latest[name] = val
 
-    # Enrich with yfinance current price + volatility/beta
+    # Enrich with current price + beta from stockanalysis.com (the Fundamental
+    # module's data source). 1Y volatility / max drawdown have no source there and
+    # are scored as N/A.
     symbol_row = query_one(
-        "SELECT symbol FROM analysis_stocks WHERE id = ?", (stock_id,)
+        "SELECT symbol, currency FROM analysis_stocks WHERE id = ?", (stock_id,)
     )
-    symbol = None
+    symbol = currency = None
     if symbol_row:
         symbol = symbol_row[0] if isinstance(symbol_row, (tuple, list)) else symbol_row.get("symbol")
+        currency = symbol_row[1] if isinstance(symbol_row, (tuple, list)) else symbol_row.get("currency")
     if symbol:
-        yf_ticker = _resolve_yf_ticker(symbol, user_id)
-        yf_data = _fetch_yfinance_risk_data(yf_ticker)
-        for k, v in yf_data.items():
+        for k, v in _fetch_stockanalysis_market_data(symbol, currency or "KWD").items():
             if k not in latest:  # don't overwrite DB metrics
                 latest[k] = v
         if "Current Price" not in latest:
-            # Yahoo unreachable: fall back to the price the portfolio already tracks
+            # stockanalysis.com unreachable: fall back to the price the portfolio already tracks
             # (stored in the stock's own currency, e.g. KWD for Boursa Kuwait).
             px = query_val(
                 "SELECT current_price FROM stocks WHERE symbol = ? AND user_id = ? AND current_price > 0 LIMIT 1",
@@ -6298,7 +6300,7 @@ def _compute_stock_score(stock_id: int, user_id: int) -> Dict[str, Any]:
             if px:
                 latest["Current Price"] = round(float(px), 4)
 
-        # Derive ratios from DB metrics + yfinance price
+        # Derive ratios from DB metrics + the current price
         cp = latest.get("Current Price")
         if cp and cp > 0:
             bvps = latest.get("Book Value / Share")
@@ -6782,96 +6784,109 @@ def _resolve_yf_ticker(symbol: str, user_id: int = None) -> str:
     return symbol
 
 
-_YF_RISK_CACHE: Dict[str, tuple] = {}  # symbol -> (fetched_at, data); empty data = recent failure
-_YF_RISK_TTL = 600          # reuse a successful fetch for 10 min
-_YF_FAIL_TTL = 300          # after a failed fetch, don't retry for 5 min (Yahoo often blocks datacenter IPs)
-_YF_STALE_MAX = 86400       # on failure, still serve the last good data up to 24h old
-_YF_FETCH_TIMEOUT = 8       # seconds a request may wait for Yahoo
+_SA_MARKET_CACHE: Dict[str, tuple] = {}  # key -> (fetched_at, data); empty data = recent failure
+_SA_MARKET_TTL = 600        # reuse a successful fetch for 10 min
+_SA_FAIL_TTL = 300          # after a failed fetch, don't retry for 5 min
+_SA_STALE_MAX = 86400       # on failure, still serve the last good data up to 24h old
+_SA_FETCH_TIMEOUT = 8       # seconds a request may wait for stockanalysis.com
 
 
-def _fetch_yfinance_risk_data(symbol: str) -> Dict[str, float]:
-    """Cached wrapper around the live fetch.
+def _sa_stat(raw_js: str, field_id: str, title_prefix: str = "") -> Optional[float]:
+    """Read one statistic from stockanalysis.com's embedded SvelteKit data.
 
-    A failed or blocked Yahoo call used to cost the full timeout on *every*
-    score request. Failures are now remembered briefly, and the last good
-    result is served while Yahoo is unreachable.
+    Finds the object by `id:"<field_id>"` (same pattern the P/E and multiples
+    parsers use) or, failing that, by a `title:"<title_prefix>..."` object, and
+    returns its `hover` (full precision) or `value` text as a float.
     """
-    key = symbol.upper()
+    candidates = []
+    if field_id:
+        candidates.append(r'\{id:"' + re.escape(field_id) + r'"[^{}]*\}')
+    if title_prefix:
+        candidates.append(r'\{[^{}]*title:"' + re.escape(title_prefix) + r'[^"]*"[^{}]*\}')
+    for pat in candidates:
+        obj = re.search(pat, raw_js)
+        if not obj:
+            continue
+        for key in ("hover", "value"):
+            m = re.search(key + r':"([^"]*)"', obj.group(0))
+            if not m:
+                continue
+            txt = m.group(1).replace(",", "").replace("%", "").strip()
+            if txt and txt.lower() not in ("n/a", "na", "-", "\u2014", "—"):
+                try:
+                    return float(txt)
+                except ValueError:
+                    continue
+    return None
+
+
+def _fetch_stockanalysis_market_data_live(symbol: str, currency: str) -> Dict[str, float]:
+    """Current price and beta from stockanalysis.com (US and Kuwait stocks).
+
+    Same source and URL scheme the rest of the Fundamental module uses for
+    statements and multiples. Price is in the stock's own currency (KWD for
+    Boursa Kuwait). Returns only the fields it could read; {} on any failure.
+    """
+    import httpx
+
+    base = re.sub(r"\.KW$", "", (symbol or "").strip(), flags=re.IGNORECASE)
+    if not base:
+        return {}
+    if (currency or "").upper() == "USD":
+        url = f"https://stockanalysis.com/stocks/{base.lower()}/statistics/"
+    else:
+        url = f"https://stockanalysis.com/quote/kwse/{base.upper()}/statistics/"
+
+    data: Dict[str, float] = {}
+    try:
+        resp = httpx.get(url, timeout=_SA_FETCH_TIMEOUT, follow_redirects=True, headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        })
+        if resp.status_code != 200:
+            logger.warning("stockanalysis.com returned %s for %s", resp.status_code, url)
+            return {}
+        text = resp.text
+        m = re.search(r'data:\s*(\[\{type:"data".*?\}]),\s*form:\s*null', text, re.DOTALL)
+        raw_js = m.group(1) if m else text
+
+        price_m = re.search(r'quote:\{[^}]*\bp:([\d.]+)', raw_js)
+        if price_m:
+            price = float(price_m.group(1))
+            if price > 0:
+                data["Current Price"] = round(price, 4)
+        beta = _sa_stat(raw_js, "beta", "Beta")
+        if beta is not None:
+            data["Beta"] = round(beta, 4)
+        if not data:
+            logger.warning("stockanalysis.com: no price/beta found at %s", url)
+    except Exception as exc:
+        logger.warning("stockanalysis.com market data failed for %s: %s", symbol, exc)
+        return {}
+    return data
+
+
+def _fetch_stockanalysis_market_data(symbol: str, currency: str) -> Dict[str, float]:
+    """Cached wrapper: reuse results, remember failures briefly, serve the last
+    good data (up to 24h) while stockanalysis.com is unreachable."""
+    key = f"{(currency or '').upper()}:{symbol.upper()}"
     now = time.time()
-    hit = _YF_RISK_CACHE.get(key)
+    hit = _SA_MARKET_CACHE.get(key)
     if hit:
         age, cached = now - hit[0], hit[1]
-        if (cached and age < _YF_RISK_TTL) or (not cached and age < _YF_FAIL_TTL):
+        if (cached and age < _SA_MARKET_TTL) or (not cached and age < _SA_FAIL_TTL):
             return dict(cached)
 
-    data = _fetch_yfinance_risk_data_live(symbol)
+    data = _fetch_stockanalysis_market_data_live(symbol, currency)
     if data:
-        _YF_RISK_CACHE[key] = (now, dict(data))
+        _SA_MARKET_CACHE[key] = (now, dict(data))
         return data
 
-    if hit and hit[1] and now - hit[0] < _YF_STALE_MAX:
-        # keep the stale data, but wait _YF_FAIL_TTL before trying Yahoo again
-        _YF_RISK_CACHE[key] = (now - _YF_RISK_TTL + _YF_FAIL_TTL, hit[1])
+    if hit and hit[1] and now - hit[0] < _SA_STALE_MAX:
+        # keep the stale data, but wait _SA_FAIL_TTL before trying again
+        _SA_MARKET_CACHE[key] = (now - _SA_MARKET_TTL + _SA_FAIL_TTL, hit[1])
         return dict(hit[1])
-    _YF_RISK_CACHE[key] = (now, {})
+    _SA_MARKET_CACHE[key] = (now, {})
     return {}
-
-
-def _fetch_yfinance_risk_data_live(symbol: str) -> Dict[str, float]:
-    """Fetch current price, beta, volatility & drawdown from yfinance.
-
-    All ratios (P/B, Earnings Yield, EV/EBIT, etc.) are computed from
-    DB data in _compute_stock_score — yfinance only provides price +
-    price-history-derived metrics.
-    """
-    import math
-    import signal
-    import threading
-
-    _kw = symbol.upper().endswith(".KW")
-    data: Dict[str, float] = {}
-
-    def _fetch():
-        nonlocal data
-        try:
-            import yfinance as yf
-            ticker = yf.Ticker(symbol)
-            info = ticker.info or {}
-
-            # Current price (only price gets /1000 for .KW)
-            price = info.get("currentPrice") or info.get("regularMarketPrice")
-            if price and price > 0:
-                price = float(price)
-                if _kw:
-                    price = price / 1000.0
-                data["Current Price"] = round(price, 2)
-
-            # Beta
-            beta = info.get("beta")
-            if beta is not None:
-                data["Beta"] = float(beta)
-
-            # 1Y price history → volatility & max drawdown
-            hist = ticker.history(period="1y")
-            if hist is not None and not hist.empty and "Close" in hist.columns:
-                closes = hist["Close"].dropna()
-                if len(closes) > 20:
-                    returns = closes.pct_change().dropna()
-                    ann_vol = float(returns.std()) * math.sqrt(252)
-                    data["1Y Volatility"] = round(ann_vol, 4)
-
-                    # Max drawdown
-                    cummax = closes.cummax()
-                    drawdown = (closes - cummax) / cummax
-                    data["Max Drawdown 1Y"] = round(float(drawdown.min()), 4)
-        except Exception:
-            pass  # yfinance failures are non-fatal
-
-    # Bounded wait so a slow/blocked Yahoo cannot hang the request
-    t = threading.Thread(target=_fetch, daemon=True)
-    t.start()
-    t.join(timeout=_YF_FETCH_TIMEOUT)
-    return dict(data)  # copy: the worker thread may still be writing after a timeout
 
 
 def _score_risk_detailed(m: Dict[str, float]):

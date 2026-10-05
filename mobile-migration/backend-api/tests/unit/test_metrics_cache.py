@@ -198,54 +198,172 @@ class _Clock:
 
 
 @pytest.fixture()
-def yf(monkeypatch):
+def sa(monkeypatch):
+    """Cache tests: stockanalysis.com fetch replaced by a counter, clock controlled."""
     clock = _Clock()
     monkeypatch.setattr(fl.time, "time", clock)
-    fl._YF_RISK_CACHE.clear()
-    state = {"calls": 0, "result": {"Current Price": 10.0}}
+    fl._SA_MARKET_CACHE.clear()
+    state = {"calls": 0, "result": {"Current Price": 10.0, "Beta": 1.2}}
 
-    def live(_symbol):
+    def live(_symbol, _currency):
         state["calls"] += 1
         return dict(state["result"])
 
-    monkeypatch.setattr(fl, "_fetch_yfinance_risk_data_live", live)
+    monkeypatch.setattr(fl, "_fetch_stockanalysis_market_data_live", live)
     yield state, clock
-    fl._YF_RISK_CACHE.clear()
+    fl._SA_MARKET_CACHE.clear()
 
 
-def test_yahoo_success_is_cached(yf):
-    state, clock = yf
-    assert fl._fetch_yfinance_risk_data("AVGO") == {"Current Price": 10.0}
-    clock.now += fl._YF_RISK_TTL - 1
-    fl._fetch_yfinance_risk_data("AVGO")
+def test_market_data_success_is_cached(sa):
+    state, clock = sa
+    assert fl._fetch_stockanalysis_market_data("AVGO", "USD") == {"Current Price": 10.0, "Beta": 1.2}
+    clock.now += fl._SA_MARKET_TTL - 1
+    fl._fetch_stockanalysis_market_data("AVGO", "USD")
     assert state["calls"] == 1
     clock.now += 2
-    fl._fetch_yfinance_risk_data("AVGO")
+    fl._fetch_stockanalysis_market_data("AVGO", "USD")
     assert state["calls"] == 2
 
 
-def test_yahoo_failure_is_remembered_briefly(yf):
-    state, clock = yf
+def test_market_data_failure_is_remembered_briefly(sa):
+    state, clock = sa
     state["result"] = {}
-    assert fl._fetch_yfinance_risk_data("AVGO") == {}
-    fl._fetch_yfinance_risk_data("AVGO")
-    fl._fetch_yfinance_risk_data("AVGO")
+    assert fl._fetch_stockanalysis_market_data("AVGO", "USD") == {}
+    fl._fetch_stockanalysis_market_data("AVGO", "USD")
+    fl._fetch_stockanalysis_market_data("AVGO", "USD")
     assert state["calls"] == 1  # not retried on every request
-    clock.now += fl._YF_FAIL_TTL + 1
-    fl._fetch_yfinance_risk_data("AVGO")
+    clock.now += fl._SA_FAIL_TTL + 1
+    fl._fetch_stockanalysis_market_data("AVGO", "USD")
     assert state["calls"] == 2
 
 
-def test_last_good_data_is_served_while_yahoo_is_down(yf):
-    state, clock = yf
-    fl._fetch_yfinance_risk_data("AVGO")
+def test_last_good_market_data_is_served_while_the_site_is_down(sa):
+    state, clock = sa
+    fl._fetch_stockanalysis_market_data("AVGO", "USD")
     state["result"] = {}
-    clock.now += fl._YF_RISK_TTL + 1
-    assert fl._fetch_yfinance_risk_data("AVGO") == {"Current Price": 10.0}  # stale but better than nothing
-    fl._fetch_yfinance_risk_data("AVGO")
+    clock.now += fl._SA_MARKET_TTL + 1
+    assert fl._fetch_stockanalysis_market_data("AVGO", "USD") == {"Current Price": 10.0, "Beta": 1.2}
+    fl._fetch_stockanalysis_market_data("AVGO", "USD")
     assert state["calls"] == 2  # one failed retry, then backed off
-    clock.now += fl._YF_STALE_MAX + 1
-    assert fl._fetch_yfinance_risk_data("AVGO") == {}  # too old to trust
+    clock.now += fl._SA_STALE_MAX + 1
+    assert fl._fetch_stockanalysis_market_data("AVGO", "USD") == {}  # too old to trust
+
+
+def test_market_data_cache_is_per_symbol_and_currency(sa):
+    state, _ = sa
+    fl._fetch_stockanalysis_market_data("NBK", "KWD")
+    fl._fetch_stockanalysis_market_data("NBK", "USD")
+    fl._fetch_stockanalysis_market_data("AVGO", "USD")
+    assert state["calls"] == 3
+
+
+# ── parsing (synthetic payload modelled on the SvelteKit structure that the existing
+#    stockanalysis.com parsers in this module rely on - NOT captured live HTML) ──
+
+class _Resp:
+    def __init__(self, text, status=200):
+        self.text, self.status_code = text, status
+
+
+def _page(price="362.08", stats=None):
+    stats = stats if stats is not None else '{id:"pe",title:"PE Ratio",value:"45.33",hover:"45.33"},{id:"beta",title:"Beta (5Y)",value:"1.48",hover:"1.4821"}'
+    return ('<script>kit.start(app, element, {node_ids:[0], data: [{type:"data",data:{quote:{s:"AVGO",p:' + price
+            + ',c:6.94},stats:[' + stats + ']}}], form: null});</script>')
+
+
+@pytest.fixture()
+def http(monkeypatch):
+    import httpx
+    seen = {"urls": []}
+    state = {"resp": _Resp(_page())}
+
+    def fake_get(url, **_k):
+        seen["urls"].append(url)
+        if isinstance(state["resp"], Exception):
+            raise state["resp"]
+        return state["resp"]
+
+    monkeypatch.setattr(httpx, "get", fake_get)
+    return seen, state
+
+
+def test_parses_price_and_beta(http):
+    assert fl._fetch_stockanalysis_market_data_live("AVGO", "USD") == {"Current Price": 362.08, "Beta": 1.4821}
+
+
+def test_us_and_kuwait_urls(http):
+    seen, _ = http
+    fl._fetch_stockanalysis_market_data_live("AVGO", "USD")
+    fl._fetch_stockanalysis_market_data_live("nbk.kw", "KWD")
+    assert seen["urls"] == [
+        "https://stockanalysis.com/stocks/avgo/statistics/",
+        "https://stockanalysis.com/quote/kwse/NBK/statistics/",
+    ]
+
+
+def test_beta_found_by_title_when_id_differs(http):
+    _, state = http
+    state["resp"] = _Resp(_page(stats='{key:"x",title:"Beta (5Y)",value:"0.91"}'))
+    assert fl._fetch_stockanalysis_market_data_live("NBK", "KWD")["Beta"] == 0.91
+
+
+def test_missing_or_na_beta_is_omitted_not_zero(http):
+    _, state = http
+    state["resp"] = _Resp(_page(stats='{id:"beta",title:"Beta (5Y)",value:"n/a",hover:"n/a"}'))
+    assert fl._fetch_stockanalysis_market_data_live("AVGO", "USD") == {"Current Price": 362.08}
+
+
+@pytest.mark.parametrize("resp", [_Resp("", 404), _Resp("<html>no data</html>"), RuntimeError("network down")])
+def test_failures_return_empty(http, resp):
+    _, state = http
+    state["resp"] = resp
+    assert fl._fetch_stockanalysis_market_data_live("AVGO", "USD") == {}
+
+
+# ── the score itself ──────────────────────────────────────────────────────
+
+def _seed_metrics(stock_id):
+    with fl._batched_metric_writes():
+        for name, val in (("Book Value / Share", 4.0), ("EPS", 0.5), ("ROE", 0.15), ("Net Margin", 0.12)):
+            fl._upsert_metric(stock_id, 2024, "2024-12-31", "x", name, val)
+
+
+def test_score_uses_stockanalysis_and_never_imports_yahoo(stock, calls, monkeypatch):
+    import sys
+    stock_id, _ = stock
+    _seed_metrics(stock_id)
+    monkeypatch.setitem(sys.modules, "yfinance", None)  # `import yfinance` would raise
+    seen = {}
+
+    def market(symbol, currency):
+        seen["args"] = (symbol, currency)
+        return {"Current Price": 8.0, "Beta": 1.3}
+
+    monkeypatch.setattr(fl, "_fetch_stockanalysis_market_data", market)
+    res = fl._compute_stock_score(stock_id, 1)
+    assert seen["args"][1] == "KWD"  # the stock's own currency drives the URL
+    assert res["details"]["Current Price"] == 8.0
+    assert res["details"]["Beta"] == 1.3
+    assert res["details"]["P/B"] == 2.0  # 8.0 / book value per share 4.0
+    assert res["details"]["Earnings Yield"] == round(0.5 / 8.0, 6)
+    beta_row = next(m for m in res["score_breakdown"]["risk"]["metrics"] if m["metric"] == "Beta")
+    assert beta_row["value"] == 1.3 and beta_row["points"] != 0
+    vol_row = next(m for m in res["score_breakdown"]["risk"]["metrics"] if m["metric"] == "1Y Volatility")
+    assert vol_row["value"] is None and vol_row["points"] == 0  # no source -> N/A, neutral
+
+
+def test_score_falls_back_to_the_portfolio_price(stock, calls, monkeypatch):
+    stock_id, _ = stock
+    _seed_metrics(stock_id)
+    symbol = fl.query_val("SELECT symbol FROM analysis_stocks WHERE id = ?", (stock_id,))
+    fl.exec_sql(
+        "INSERT INTO stocks (user_id, symbol, name, currency, current_price, created_at) VALUES (1, ?, 'x', 'KWD', 0.75, 1)",
+        (symbol,),
+    )
+    monkeypatch.setattr(fl, "_fetch_stockanalysis_market_data", lambda *_a: {})
+    res = fl._compute_stock_score(stock_id, 1)
+    assert res["details"]["Current Price"] == 0.75
+    assert "Beta" not in res["details"]
 
 
 def test_concurrent_first_opens_recalculate_once(stock, calls, monkeypatch):
