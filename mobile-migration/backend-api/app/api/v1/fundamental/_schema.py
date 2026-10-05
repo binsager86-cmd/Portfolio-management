@@ -79,6 +79,11 @@ def _ensure_schema() -> None:
                 edited_at INTEGER,
                 FOREIGN KEY (statement_id) REFERENCES financial_statements(id)
             )""",
+        """CREATE TABLE IF NOT EXISTS analysis_metric_state (
+                stock_id INTEGER PRIMARY KEY,
+                fingerprint TEXT NOT NULL,
+                calculated_at INTEGER NOT NULL
+            )""",
         f"""CREATE TABLE IF NOT EXISTS stock_metrics (
                 id {_PK},
                 stock_id INTEGER NOT NULL,

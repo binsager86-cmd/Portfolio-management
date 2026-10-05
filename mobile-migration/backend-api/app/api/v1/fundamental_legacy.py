@@ -10,8 +10,10 @@ import hashlib
 import json
 import math
 import os
+import threading
 import time
 import logging
+from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -23,7 +25,7 @@ from pydantic import BaseModel, Field
 from app.api.deps import get_current_user
 from app.core.security import TokenData
 from app.core.exceptions import NotFoundError, BadRequestError, ConflictError
-from app.core.database import query_all, query_one, query_val, query_df, exec_sql, get_connection
+from app.core.database import query_all, query_one, query_val, query_df, exec_sql, exec_sql_batch, get_connection
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +98,11 @@ def _ensure_schema() -> None:
                 edited_by_user_id INTEGER,
                 edited_at INTEGER,
                 FOREIGN KEY (statement_id) REFERENCES financial_statements(id)
+            )""",
+        """CREATE TABLE IF NOT EXISTS analysis_metric_state (
+                stock_id INTEGER PRIMARY KEY,
+                fingerprint TEXT NOT NULL,
+                calculated_at INTEGER NOT NULL
             )""",
         f"""CREATE TABLE IF NOT EXISTS stock_metrics (
                 id {_PK},
@@ -5480,35 +5487,90 @@ def _load_items_for_period(stock_id: int, period_end_date: str) -> Dict[str, flo
     return items
 
 
+_METRIC_UPSERT_COLS = (
+    "stock_id, fiscal_year, fiscal_quarter, period_end_date, "
+    "metric_type, metric_name, metric_value, created_at"
+)
+_METRIC_UPSERT_CONFLICT = (
+    " ON CONFLICT (stock_id, metric_name, period_end_date) DO UPDATE SET"
+    " fiscal_year = excluded.fiscal_year, fiscal_quarter = excluded.fiscal_quarter,"
+    " metric_type = excluded.metric_type, metric_value = excluded.metric_value,"
+    " created_at = excluded.created_at"
+)
+_METRIC_BATCH_CHUNK = 100  # rows per statement (8 params each; stays under SQLite's variable limit)
+
+_metric_buf = threading.local()
+
+
+def _flush_metric_writes() -> None:
+    """Write buffered metric rows now (one transaction), keeping the batch open."""
+    rows = getattr(_metric_buf, "rows", None)
+    if not rows:
+        return
+    items = list(rows.values())
+    rows.clear()
+    statements = []
+    for i in range(0, len(items), _METRIC_BATCH_CHUNK):
+        chunk = items[i:i + _METRIC_BATCH_CHUNK]
+        placeholders = ",".join(["(?,?,?,?,?,?,?,?)"] * len(chunk))
+        params = tuple(v for row in chunk for v in row)
+        statements.append((
+            f"INSERT INTO stock_metrics ({_METRIC_UPSERT_COLS}) VALUES {placeholders}{_METRIC_UPSERT_CONFLICT}",
+            params,
+        ))
+    exec_sql_batch(statements)
+
+
+@contextmanager
+def _batched_metric_writes():
+    """Collect `_upsert_metric` writes and flush them in a single transaction.
+
+    Metric recalculation used to issue a lookup plus a separately committed
+    write per metric (thousands of round trips for a stock with many periods
+    against a remote Postgres). Nested use joins the outer batch. Writes are
+    de-duplicated per (stock, metric, period) with last-write-wins, which an
+    ON CONFLICT multi-row upsert requires. Flushes even if the body raises, so
+    metrics computed before a failure are kept.
+    """
+    if getattr(_metric_buf, "rows", None) is not None:
+        yield
+        return
+    _metric_buf.rows = {}
+    try:
+        yield
+    finally:
+        try:
+            _flush_metric_writes()
+        finally:
+            _metric_buf.rows = None
+
+
 def _upsert_metric(
     stock_id: int, fiscal_year: int, period_end_date: str,
     metric_type: str, metric_name: str, metric_value: float,
     fiscal_quarter: Optional[int] = None,
 ) -> None:
-    now = int(time.time())
-    existing = query_val(
-        "SELECT id FROM stock_metrics WHERE stock_id = ? AND metric_name = ? AND period_end_date = ?",
-        (stock_id, metric_name, period_end_date),
+    row = (stock_id, fiscal_year, fiscal_quarter, period_end_date,
+           metric_type, metric_name, metric_value, int(time.time()))
+    buffered = getattr(_metric_buf, "rows", None)
+    if buffered is not None:
+        buffered[(stock_id, metric_name, period_end_date)] = row
+        return
+    exec_sql(
+        f"INSERT INTO stock_metrics ({_METRIC_UPSERT_COLS}) VALUES (?,?,?,?,?,?,?,?){_METRIC_UPSERT_CONFLICT}",
+        row,
     )
-    if existing:
-        exec_sql(
-            """UPDATE stock_metrics
-               SET fiscal_year=?, fiscal_quarter=?, metric_type=?, metric_value=?, created_at=?
-               WHERE id=?""",
-            (fiscal_year, fiscal_quarter, metric_type, metric_value, now, existing),
-        )
-    else:
-        exec_sql(
-            """INSERT INTO stock_metrics
-               (stock_id, fiscal_year, fiscal_quarter, period_end_date,
-                metric_type, metric_name, metric_value, created_at)
-               VALUES (?,?,?,?,?,?,?,?)""",
-            (stock_id, fiscal_year, fiscal_quarter, period_end_date,
-             metric_type, metric_name, metric_value, now),
-        )
 
 
 def _calculate_all_metrics(
+    stock_id: int, period_end_date: str, fiscal_year: int,
+    fiscal_quarter: Optional[int] = None,
+) -> Dict[str, Dict[str, Optional[float]]]:
+    with _batched_metric_writes():
+        return _calculate_all_metrics_impl(stock_id, period_end_date, fiscal_year, fiscal_quarter)
+
+
+def _calculate_all_metrics_impl(
     stock_id: int, period_end_date: str, fiscal_year: int,
     fiscal_quarter: Optional[int] = None,
 ) -> Dict[str, Dict[str, Optional[float]]]:
@@ -5831,6 +5893,11 @@ def _calculate_all_metrics(
 # ── Growth calculation ───────────────────────────────────────────────
 
 def _calculate_growth(stock_id: int) -> Dict[str, List[Dict[str, Any]]]:
+    with _batched_metric_writes():
+        return _calculate_growth_impl(stock_id)
+
+
+def _calculate_growth_impl(stock_id: int) -> Dict[str, List[Dict[str, Any]]]:
     import statistics
     growth: Dict[str, List[Dict[str, Any]]] = {}
     growth_items = [
@@ -6032,6 +6099,7 @@ def _calculate_growth(stock_id: int) -> Dict[str, List[Dict[str, Any]]]:
         latest_rev_g = rev_rates[-1]["growth"]
         # Check if revenue grew but net margin declined
         nm_trend = None
+        _flush_metric_writes()  # make the trend metrics written above visible to this read
         nm_trend_rows = query_all(
             "SELECT metric_value FROM stock_metrics WHERE stock_id = ? AND metric_name = ? ORDER BY period_end_date DESC LIMIT 1",
             (stock_id, "Net Margin Trend 3Y"),
@@ -6078,7 +6146,29 @@ def _persist_score(stock_id: int, user_id: int, result: Dict[str, Any], latest: 
         logger.exception("Failed to persist stock score for stock %s", stock_id)
 
 
-_METRICS_FRESH: Dict[int, str] = {}  # stock_id -> input fingerprint at last full recalculation
+# Bump when metric / growth formulas change so every stock is recalculated once
+# on the next score request after deploy.
+_METRICS_CALC_VERSION = 1
+
+
+def _stored_metrics_fingerprint(stock_id: int) -> Optional[str]:
+    try:
+        return query_val("SELECT fingerprint FROM analysis_metric_state WHERE stock_id = ?", (stock_id,))
+    except Exception:
+        logger.exception("Could not read analysis_metric_state for stock %s", stock_id)
+        return None
+
+
+def _store_metrics_fingerprint(stock_id: int, fingerprint: str) -> None:
+    try:
+        exec_sql(
+            "INSERT INTO analysis_metric_state (stock_id, fingerprint, calculated_at) VALUES (?,?,?) "
+            "ON CONFLICT (stock_id) DO UPDATE SET fingerprint = excluded.fingerprint, "
+            "calculated_at = excluded.calculated_at",
+            (stock_id, fingerprint, int(time.time())),
+        )
+    except Exception:
+        logger.exception("Could not store analysis_metric_state for stock %s", stock_id)
 
 
 def _metrics_inputs_fingerprint(stock_id: int) -> str:
@@ -6101,18 +6191,37 @@ def _metrics_inputs_fingerprint(stock_id: int) -> str:
     return "|".join(repr(v) for v in vals)
 
 
+_METRICS_LOCKS: Dict[int, threading.Lock] = {}
+_METRICS_LOCKS_GUARD = threading.Lock()
+
+
+def _metrics_lock(stock_id: int) -> threading.Lock:
+    with _METRICS_LOCKS_GUARD:
+        return _METRICS_LOCKS.setdefault(stock_id, threading.Lock())
+
+
 def _ensure_metrics_fresh(stock_id: int) -> None:
     """Recalculate metrics + growth only when the underlying statements changed.
 
-    Recalculating every period on every score request was the dominant cost of
-    opening the Score tab. The result is remembered per process, so a restart
-    (e.g. a deploy that ships new formulas) always triggers a fresh calculation.
-    A run in which any period failed is not remembered, so it is retried.
+    Recalculating every period on every score request made opening the Score
+    tab hang. A fingerprint of the inputs (plus `_METRICS_CALC_VERSION`) is
+    stored in the database, so it is shared by all server workers and survives
+    restarts. All writes of a recalculation go out in one transaction. A run in
+    which any period failed is not remembered and is retried.
     """
-    fingerprint = _metrics_inputs_fingerprint(stock_id)
-    if _METRICS_FRESH.get(stock_id) == fingerprint:
+    fingerprint = f"v{_METRICS_CALC_VERSION}|{_metrics_inputs_fingerprint(stock_id)}"
+    if _stored_metrics_fingerprint(stock_id) == fingerprint:
         return
 
+    # One recalculation per stock at a time: a concurrent request (another tab,
+    # a retry) waits here, then finds the work already done and returns.
+    with _metrics_lock(stock_id):
+        if _stored_metrics_fingerprint(stock_id) == fingerprint:
+            return
+        _recalculate_metrics(stock_id, fingerprint)
+
+
+def _recalculate_metrics(stock_id: int, fingerprint: str) -> None:
     ok = True
     periods = query_all(
         """SELECT DISTINCT period_end_date, fiscal_year, fiscal_quarter
@@ -6121,29 +6230,32 @@ def _ensure_metrics_fresh(stock_id: int) -> None:
            ORDER BY period_end_date""",
         (stock_id,),
     )
-    for p in periods:
-        if isinstance(p, (tuple, list)):
-            ped, fy, fq = p[0], p[1], p[2]
-        else:
-            ped, fy, fq = p["period_end_date"], p["fiscal_year"], p.get("fiscal_quarter")
-        if ped and fy:
+    try:
+        with _batched_metric_writes():
+            for p in periods:
+                if isinstance(p, (tuple, list)):
+                    ped, fy, fq = p[0], p[1], p[2]
+                else:
+                    ped, fy, fq = p["period_end_date"], p["fiscal_year"], p.get("fiscal_quarter")
+                if ped and fy:
+                    try:
+                        _calculate_all_metrics(stock_id, ped, fy, fq)
+                    except Exception:
+                        ok = False
+                        logger.exception("Metric calculation failed for stock %s period %s", stock_id, ped)
+
+            # Recalculate growth (CAGRs, stability, trends, profit-aware growth)
             try:
-                _calculate_all_metrics(stock_id, ped, fy, fq)
+                _calculate_growth(stock_id)
             except Exception:
                 ok = False
-                logger.exception("Metric calculation failed for stock %s period %s", stock_id, ped)
-
-    # Recalculate growth (CAGRs, stability, trends, profit-aware growth)
-    try:
-        _calculate_growth(stock_id)
+                logger.exception("Growth calculation failed for stock %s", stock_id)
     except Exception:
         ok = False
-        logger.exception("Growth calculation failed for stock %s", stock_id)
+        logger.exception("Writing recalculated metrics failed for stock %s", stock_id)
 
     if ok:
-        _METRICS_FRESH[stock_id] = fingerprint
-    else:
-        _METRICS_FRESH.pop(stock_id, None)
+        _store_metrics_fingerprint(stock_id, fingerprint)
 
 
 def _compute_stock_score(stock_id: int, user_id: int) -> Dict[str, Any]:
@@ -6176,6 +6288,15 @@ def _compute_stock_score(stock_id: int, user_id: int) -> Dict[str, Any]:
         for k, v in yf_data.items():
             if k not in latest:  # don't overwrite DB metrics
                 latest[k] = v
+        if "Current Price" not in latest:
+            # Yahoo unreachable: fall back to the price the portfolio already tracks
+            # (stored in the stock's own currency, e.g. KWD for Boursa Kuwait).
+            px = query_val(
+                "SELECT current_price FROM stocks WHERE symbol = ? AND user_id = ? AND current_price > 0 LIMIT 1",
+                (symbol, user_id),
+            )
+            if px:
+                latest["Current Price"] = round(float(px), 4)
 
         # Derive ratios from DB metrics + yfinance price
         cp = latest.get("Current Price")
@@ -6661,20 +6782,39 @@ def _resolve_yf_ticker(symbol: str, user_id: int = None) -> str:
     return symbol
 
 
-_YF_RISK_CACHE: Dict[str, tuple] = {}
-_YF_RISK_TTL = 600  # seconds
+_YF_RISK_CACHE: Dict[str, tuple] = {}  # symbol -> (fetched_at, data); empty data = recent failure
+_YF_RISK_TTL = 600          # reuse a successful fetch for 10 min
+_YF_FAIL_TTL = 300          # after a failed fetch, don't retry for 5 min (Yahoo often blocks datacenter IPs)
+_YF_STALE_MAX = 86400       # on failure, still serve the last good data up to 24h old
+_YF_FETCH_TIMEOUT = 8       # seconds a request may wait for Yahoo
 
 
 def _fetch_yfinance_risk_data(symbol: str) -> Dict[str, float]:
-    """Cached wrapper: the live fetch can take up to 15s, so reuse results for 10 min."""
+    """Cached wrapper around the live fetch.
+
+    A failed or blocked Yahoo call used to cost the full timeout on *every*
+    score request. Failures are now remembered briefly, and the last good
+    result is served while Yahoo is unreachable.
+    """
     key = symbol.upper()
+    now = time.time()
     hit = _YF_RISK_CACHE.get(key)
-    if hit and time.time() - hit[0] < _YF_RISK_TTL:
-        return dict(hit[1])
+    if hit:
+        age, cached = now - hit[0], hit[1]
+        if (cached and age < _YF_RISK_TTL) or (not cached and age < _YF_FAIL_TTL):
+            return dict(cached)
+
     data = _fetch_yfinance_risk_data_live(symbol)
-    if data:  # never cache failures
-        _YF_RISK_CACHE[key] = (time.time(), dict(data))
-    return data
+    if data:
+        _YF_RISK_CACHE[key] = (now, dict(data))
+        return data
+
+    if hit and hit[1] and now - hit[0] < _YF_STALE_MAX:
+        # keep the stale data, but wait _YF_FAIL_TTL before trying Yahoo again
+        _YF_RISK_CACHE[key] = (now - _YF_RISK_TTL + _YF_FAIL_TTL, hit[1])
+        return dict(hit[1])
+    _YF_RISK_CACHE[key] = (now, {})
+    return {}
 
 
 def _fetch_yfinance_risk_data_live(symbol: str) -> Dict[str, float]:
@@ -6727,11 +6867,11 @@ def _fetch_yfinance_risk_data_live(symbol: str) -> Dict[str, float]:
         except Exception:
             pass  # yfinance failures are non-fatal
 
-    # Run with a 15-second timeout to avoid hanging the request
+    # Bounded wait so a slow/blocked Yahoo cannot hang the request
     t = threading.Thread(target=_fetch, daemon=True)
     t.start()
-    t.join(timeout=15)
-    return data
+    t.join(timeout=_YF_FETCH_TIMEOUT)
+    return dict(data)  # copy: the worker thread may still be writing after a timeout
 
 
 def _score_risk_detailed(m: Dict[str, float]):
