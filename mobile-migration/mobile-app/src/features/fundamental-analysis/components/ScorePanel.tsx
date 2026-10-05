@@ -81,8 +81,8 @@ export const ScorePanel = React.memo(function ScorePanel({ stockId, stockSymbol,
   }, [refreshing, stmtQ.data, stockId, queryClient]);
 
   const score = data;
-  const scoreHistory = historyQ.data?.scores ?? [];
-  const valuations = valuationsQ.data?.valuations ?? [];
+  const scoreHistory = useMemo(() => historyQ.data?.scores ?? [], [historyQ.data]);
+  const valuations = useMemo(() => valuationsQ.data?.valuations ?? [], [valuationsQ.data]);
 
   // Average IV across latest per-model valuations (same logic as Valuation Summary)
   const avgIV = useMemo(() => {
@@ -109,7 +109,8 @@ export const ScorePanel = React.memo(function ScorePanel({ stockId, stockSymbol,
         valuation: score.valuation_score,
         growth: score.growth_score,
         quality: score.quality_score,
-        risk: score.risk_score,
+        // Backend risk_score: higher = safer. Generator expects higher = riskier.
+        risk: score.risk_score != null ? 100 - score.risk_score : null,
       },
       preferences,
     );
@@ -179,7 +180,7 @@ export const ScorePanel = React.memo(function ScorePanel({ stockId, stockSymbol,
     <ScrollView
       style={{ flex: 1 }}
       contentContainerStyle={[st.listContent, isDesktop && { maxWidth: 700, alignSelf: "center", width: "100%" }]}
-      refreshControl={<RefreshControl refreshing={isFetching && !isLoading} onRefresh={refetch} tintColor={colors.accentPrimary} />}
+      refreshControl={<RefreshControl refreshing={isFetching && !isLoading} onRefresh={() => { void refetch(); void historyQ.refetch(); }} tintColor={colors.accentPrimary} />}
     >
       {isLoading ? (
         <FAPanelSkeleton />
@@ -242,7 +243,7 @@ export const ScorePanel = React.memo(function ScorePanel({ stockId, stockSymbol,
                     {aiSummary.headline}
                   </Text>
                 </View>
-                {aiSummary.bullets.map((b, i) => (
+                {(aiSummary.bullets ?? []).map((b, i) => (
                   <View key={i} style={{ flexDirection: "row", alignItems: "flex-start", marginBottom: 4, paddingLeft: 4 }}>
                     <Text style={{ color: colors.textMuted, fontSize: 13, marginRight: 6 }}>{"\u2022"}</Text>
                     <Text style={{ color: colors.textSecondary, fontSize: 13, lineHeight: 19, flex: 1 }}>{b}</Text>
@@ -316,7 +317,7 @@ export const ScorePanel = React.memo(function ScorePanel({ stockId, stockSymbol,
               {/* Risk disclaimer */}
               {!isBeginner && (
                 <Text style={{ color: colors.textMuted, fontSize: 11, marginTop: 10, textAlign: "center", lineHeight: 16 }}>
-                  * Fundamental score only. Not risk-adjusted.{"\n"}
+                  * Composite of fundamentals, quality, growth and valuation, reduced by a risk penalty.{"\n"}
                   Past performance ≠ future results.
                 </Text>
               )}
@@ -555,7 +556,7 @@ const ScoreBarPremium = React.memo(function ScoreBarPremium({
       {expanded && breakdown && (
         <View style={{ marginTop: 8, marginLeft: 30, paddingLeft: 10, borderLeftWidth: 2, borderLeftColor: iconColor + "40" }}>
           <Text style={{ color: colors.textMuted, fontSize: 12, marginBottom: 6 }}>Base: {breakdown.base} pts</Text>
-          {breakdown.metrics.map((m) => {
+          {(breakdown.metrics ?? []).map((m) => {
             const ptsColor = m.points > 0 ? colors.success : m.points < 0 ? colors.danger : colors.textMuted;
             const ptsLabel = m.points > 0 ? `+${m.points}` : String(m.points);
             return (
