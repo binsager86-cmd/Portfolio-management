@@ -11,12 +11,12 @@ import { ActivityIndicator, Pressable, RefreshControl, ScrollView, Text, View } 
 
 import { FAPanelSkeleton } from "@/components/ui/PageSkeletons";
 import type { ThemePalette } from "@/constants/theme";
-import { analysisKeys, useAnalysisStocks, useScoreHistory, useStatements, useStockScore, useValuations } from "@/hooks/queries";
+import { analysisKeys, useAnalysisStocks, useScoreHistory, useStockScore, useValuations } from "@/hooks/queries";
 import { generateStockSummary, type AISummary } from "@/lib/aiSummaryGenerator";
 import type { TableData } from "@/lib/exportAnalysis";
 import { formatCurrency } from "@/lib/currency";
 import { showErrorAlert } from "@/lib/errorHandling";
-import { calculateMetrics, type CategoryBreakdown } from "@/services/api";
+import { calculateMetrics, getStatements, type CategoryBreakdown } from "@/services/api";
 import { useUserPrefsStore } from "@/src/store/userPrefsStore";
 import { st } from "../styles";
 import { SCORE_WEIGHTS, type PanelWithSymbolProps } from "../types";
@@ -36,7 +36,6 @@ export const ScorePanel = React.memo(function ScorePanel({ stockId, stockSymbol,
   const { data, isLoading, isError, error, refetch, isFetching } = useStockScore(stockId);
   const historyQ = useScoreHistory(stockId);
   const valuationsQ = useValuations(stockId);
-  const stmtQ = useStatements(stockId);
   const stocksQ = useAnalysisStocks();
   const preferences = useUserPrefsStore((s) => s.preferences);
   const isBeginner = preferences.expertiseLevel === "normal";
@@ -49,8 +48,15 @@ export const ScorePanel = React.memo(function ScorePanel({ stockId, stockSymbol,
     if (refreshing) return;
     setRefreshing(true);
     try {
+      // The statement list (hundreds of KB) is only needed here, so it is fetched on demand
+      // rather than every time the Score tab opens.
+      const { statements } = await queryClient.fetchQuery({
+        queryKey: analysisKeys.statements(stockId),
+        queryFn: () => getStatements(stockId),
+        staleTime: 0,
+      });
       const seen = new Set<string>();
-      const periods = (stmtQ.data?.statements ?? [])
+      const periods = (statements ?? [])
         .filter((s) => { if (seen.has(s.period_end_date)) return false; seen.add(s.period_end_date); return true; })
         .map((s) => ({
           period_end_date: s.period_end_date,
@@ -80,7 +86,7 @@ export const ScorePanel = React.memo(function ScorePanel({ stockId, stockSymbol,
     } finally {
       setRefreshing(false);
     }
-  }, [refreshing, stmtQ.data, stockId, queryClient]);
+  }, [refreshing, stockId, queryClient]);
 
   // Prices and intrinsic values are in the stock's own currency (KWD for Boursa Kuwait).
   const currency = stocksQ.data?.stocks?.find((x) => x.id === stockId)?.currency || "KWD";
